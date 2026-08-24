@@ -3,6 +3,11 @@
   "schema_version": "1.0.0",
   "entries": [
     {
+      "path": "comsol_mcp/evidence/reference_power_acceptance.py",
+      "match_count": 31,
+      "match_sha256": "600a10e91a61906fa634ffd73829ec79c07a382cfdbebfe3a17b37b1cd09e4b0"
+    },
+    {
       "path": "development_kit/docs/legacy_phase_compatibility.md",
       "match_count": 10,
       "match_sha256": "369c15ea237cbc3b6a027669513db3549872397e24db60bdb3f51d7bcb5665fc"
@@ -30,7 +35,7 @@
     {
       "path": "development_kit/tests/test_reference_power_runner.py",
       "match_count": 1,
-      "match_sha256": "c2a059a61d78c10183bf272c537b05eee94352b5da622889d7f0f52d08314bb2"
+      "match_sha256": "48d668521b628b20621d6fcb4ffffc6d53395e5eaf949aaa06f247fd25988a0b"
     },
     {
       "path": "development_kit/tests/test_schema_registry.py",
@@ -38,9 +43,9 @@
       "match_sha256": "1b334b532e3c1c72c26c219582be2cf4c096572257528f9b8cb14c9a6cc38b09"
     },
     {
-      "path": "comsol_mcp/evidence/reference_power_acceptance.py",
-      "match_count": 31,
-      "match_sha256": "363bdc5c164253c874f7ef7f973669a450e4bf8f76366b51e310278daa304ff8"
+      "path": "pyproject.toml",
+      "match_count": 3,
+      "match_sha256": "84b587acb020a9f4e872fd37ade9b2ef6536e75db05d131800fc964dcfe87886"
     }
   ]
 }

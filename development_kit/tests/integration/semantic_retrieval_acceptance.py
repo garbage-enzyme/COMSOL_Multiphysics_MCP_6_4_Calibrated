@@ -29,7 +29,8 @@ QUERIES = (
     ),
     (
         "paraphrase",
-        "Make the opposite periodic surface reuse exactly the same triangular elements before filling tetrahedra",
+        "Make the opposite periodic surface reuse exactly the same triangular "
+        "elements before filling tetrahedra",
         "hybrid",
         ("COMSOL_Multiphysics/COMSOL_ProgrammingReferenceManual.pdf", 469),
     ),

@@ -178,9 +178,7 @@ def test_get_mesh_info_distinguishes_label_lookup_failure_from_absence():
         def label(self):
             raise RuntimeError("backend label failure")
 
-    result = get_mesh_info(
-        FakeModel({"mesh1": FailingLabelMesh()}), mesh_name="named mesh"
-    )
+    result = get_mesh_info(FakeModel({"mesh1": FailingLabelMesh()}), mesh_name="named mesh")
 
     assert result["success"] is False
     assert result["error"] == "Mesh label lookup failed."
@@ -248,9 +246,7 @@ class MutableMeshSequence:
 
 
 class MutableMeshList:
-    def __init__(
-        self, existing=(), *, fail_feature=False, fail_run=False, fail_statistics=False
-    ):
+    def __init__(self, existing=(), *, fail_feature=False, fail_run=False, fail_statistics=False):
         self.meshes = {tag: object() for tag in existing}
         self.fail_feature = fail_feature
         self.fail_run = fail_run

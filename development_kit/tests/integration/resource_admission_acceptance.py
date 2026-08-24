@@ -24,6 +24,7 @@ from src.jobs.resource_admission import (
 )
 from src.jobs.store import TERMINAL_STATES
 from src.tools.ownership import SolverOwnership
+
 from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 
 

@@ -99,9 +99,7 @@ def test_size_limit_bounds_the_final_serialized_manifest(monkeypatch):
     final_length = len(_canonical_bytes(reference))
     assert final_length < field_manifest_module.MAX_FIELD_MANIFEST_BYTES
 
-    monkeypatch.setattr(
-        field_manifest_module, "MAX_FIELD_MANIFEST_BYTES", final_length - 1
-    )
+    monkeypatch.setattr(field_manifest_module, "MAX_FIELD_MANIFEST_BYTES", final_length - 1)
 
     with pytest.raises(ValueError, match="exceeds"):
         build_field_evidence_manifest(**kwargs)

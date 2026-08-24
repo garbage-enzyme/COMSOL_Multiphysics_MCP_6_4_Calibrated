@@ -324,8 +324,7 @@ def test_post_solve_skip_completed_is_a_normal_durable_replay_state(tmp_path):
     rows = read_validation_rows(directory / "matrix_rows.jsonl", spec)
     assert [row["status"] for row in rows] == ["ok", "ok"]
     assert [
-        [summary["audit_status"] for summary in row["collector_summaries"]]
-        for row in rows
+        [summary["audit_status"] for summary in row["collector_summaries"]] for row in rows
     ] == [["measurement_complete"], ["measurement_complete"]]
 
 

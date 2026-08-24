@@ -54,7 +54,7 @@ def register_evidence_integrity_tools(mcp: MCPServer) -> None:
                     "discarded_root_count": len(artifact_roots),
                 }
                 return result
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 logger.exception("Evidence integrity request was rejected")
                 result = {
                     **public_error(
@@ -71,7 +71,7 @@ def register_evidence_integrity_tools(mcp: MCPServer) -> None:
                 }
                 result.update(warning_fields(status))
                 return result
-            except (OSError, RuntimeError):
+            except OSError, RuntimeError:
                 logger.exception("Evidence integrity verification failed")
                 result = {
                     **public_error(
@@ -121,7 +121,7 @@ def register_evidence_integrity_tools(mcp: MCPServer) -> None:
                 decision = policy.validate_artifact_read_root(value)
                 normalized_roots[case_id] = str(decision.normalized_path)
                 root_ids.add(decision.root_id)
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except OSError, RuntimeError, TypeError, ValueError:
             logger.exception("Evidence artifact-root validation failed")
             result = {
                 **public_error(
@@ -154,11 +154,11 @@ def register_evidence_integrity_tools(mcp: MCPServer) -> None:
                 "paths_included": False,
             }
             return result
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             logger.exception("Evidence integrity request was rejected")
             reason_code = "integrity_verification_rejected"
             message = "Evidence integrity request was rejected."
-        except (OSError, RuntimeError):
+        except OSError, RuntimeError:
             logger.exception("Evidence integrity verification failed")
             reason_code = "integrity_verification_failed"
             message = "Evidence integrity verification failed safely."

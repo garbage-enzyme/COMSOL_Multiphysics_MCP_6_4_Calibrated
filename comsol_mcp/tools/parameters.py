@@ -44,7 +44,7 @@ def _raw_parameter_description(model: Any, name: str) -> Any:
     """Read the clientapi value without turning Java null into the text ``None``."""
     try:
         return model.java.param().descr(name)
-    except (AttributeError, TypeError):
+    except AttributeError, TypeError:
         return model.description(name)
 
 
@@ -59,7 +59,7 @@ def _restore_parameter(
         try:
             model.java.param().set(name, value, None)
             return
-        except (AttributeError, TypeError):
+        except AttributeError, TypeError:
             pass
     model.parameter(name, value)
     if description is not None:
@@ -138,11 +138,7 @@ def setup_parametric_sweep(
     study_tags = list(jm.study().tags())
     if not study_tags:
         return {"success": False, "error": "No studies found in model."}
-    study_tag = (
-        _resolve_study_tag(model, study_name)
-        if study_name
-        else str(study_tags[0])
-    )
+    study_tag = _resolve_study_tag(model, study_name) if study_name else str(study_tags[0])
     study = jm.study(study_tag)
 
     feature_list = study.feature()
@@ -223,21 +219,17 @@ def setup_parametric_sweep(
 
 def register_parameter_tools(mcp: MCPServer) -> None:
     """Register parameter management tools with the MCP server."""
-    
+
     @mcp.tool()
-    def param_get(
-        name: str,
-        model_name: Optional[str] = None,
-        evaluate: bool = False
-    ) -> dict:
+    def param_get(name: str, model_name: Optional[str] = None, evaluate: bool = False) -> dict:
         """
         Get the value of a model parameter.
-        
+
         Args:
             name: Parameter name
             model_name: Model name (default: current model)
             evaluate: If True, return evaluated numerical value; if False, return expression string
-        
+
         Returns:
             Parameter value and description, or error message
         """
@@ -245,13 +237,13 @@ def register_parameter_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             value = model.parameter(name, evaluate=evaluate)
             description = model.description(name)
-            
+
             return {
                 "success": True,
                 "parameter": name,
@@ -261,23 +253,20 @@ def register_parameter_tools(mcp: MCPServer) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to get parameter: {str(e)}"}
-    
+
     @mcp.tool()
     def param_set(
-        name: str,
-        value: str,
-        model_name: Optional[str] = None,
-        description: Optional[str] = None
+        name: str, value: str, model_name: Optional[str] = None, description: Optional[str] = None
     ) -> dict:
         """
         Set the value of a model parameter.
-        
+
         Args:
             name: Parameter name
             value: Parameter value (can include units, e.g., "5[V]", "1.5[mm]")
             model_name: Model name (default: current model)
             description: Optional description for the parameter
-        
+
         Returns:
             Confirmation with new value, or error message
         """
@@ -285,9 +274,9 @@ def register_parameter_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return set_parameter(
                 model,
@@ -297,19 +286,16 @@ def register_parameter_tools(mcp: MCPServer) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to set parameter: {str(e)}"}
-    
+
     @mcp.tool()
-    def param_list(
-        model_name: Optional[str] = None,
-        evaluate: bool = False
-    ) -> dict:
+    def param_list(model_name: Optional[str] = None, evaluate: bool = False) -> dict:
         """
         List all parameters in a model.
-        
+
         Args:
             model_name: Model name (default: current model)
             evaluate: If True, return numerical values; if False, return expressions
-        
+
         Returns:
             Dictionary of all parameters with values and descriptions
         """
@@ -317,21 +303,23 @@ def register_parameter_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             params = model.parameters(evaluate=evaluate)
             descriptions = model.descriptions()
-            
+
             param_list = []
             for name, value in params.items():
-                param_list.append({
-                    "name": name,
-                    "value": value,
-                    "description": descriptions.get(name, ""),
-                })
-            
+                param_list.append(
+                    {
+                        "name": name,
+                        "value": value,
+                        "description": descriptions.get(name, ""),
+                    }
+                )
+
             return {
                 "success": True,
                 "parameters": param_list,
@@ -339,7 +327,7 @@ def register_parameter_tools(mcp: MCPServer) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to list parameters: {str(e)}"}
-    
+
     @mcp.tool()
     def param_sweep_setup(
         parameter_name: str,
@@ -350,14 +338,14 @@ def register_parameter_tools(mcp: MCPServer) -> None:
     ) -> dict:
         """
         Set up a parametric sweep for a parameter.
-        
+
         Args:
             parameter_name: Name of the parameter to sweep
             values: List of parameter values to sweep through
             model_name: Model name (default: current model)
             study_name: Study to attach sweep to (default: first study)
             parameter_unit: Optional COMSOL unit for the sweep values.
-        
+
         Returns:
             Sweep configuration confirmation, or error message
         """
@@ -365,9 +353,9 @@ def register_parameter_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return setup_parametric_sweep(
                 model,
@@ -378,21 +366,19 @@ def register_parameter_tools(mcp: MCPServer) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to set up parametric sweep: {str(e)}"}
-    
+
     @mcp.tool()
     def param_description(
-        name: str,
-        text: Optional[str] = None,
-        model_name: Optional[str] = None
+        name: str, text: Optional[str] = None, model_name: Optional[str] = None
     ) -> dict:
         """
         Get or set the description of a parameter.
-        
+
         Args:
             name: Parameter name
             text: New description text (if None, returns current description)
             model_name: Model name (default: current model)
-        
+
         Returns:
             Parameter description, or confirmation of update
         """
@@ -400,9 +386,9 @@ def register_parameter_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             if text is not None:
                 model.description(name, text)

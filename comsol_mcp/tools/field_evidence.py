@@ -88,8 +88,7 @@ def register_field_evidence_tools(mcp: MCPServer) -> None:
                 return {
                     "success": False,
                     "error": (
-                        "Complete owned-session preflight is required for field "
-                        "dataset discovery"
+                        "Complete owned-session preflight is required for field dataset discovery"
                     ),
                     "blockers": ownership.get("blockers", []),
                 }
@@ -184,9 +183,7 @@ def register_field_evidence_tools(mcp: MCPServer) -> None:
                 )
                 source_after = _sha256_file(source_path)
                 if source_after != source_before:
-                    raise RuntimeError(
-                        "loaded source changed during read-only field extraction"
-                    )
+                    raise RuntimeError("loaded source changed during read-only field extraction")
                 os.rename(staging_root, artifact_root)
             finally:
                 source_hash_error = None

@@ -1,7 +1,7 @@
 """Standalone Unicode-path model-save integration probe for COMSOL 6.4."""
 
-from pathlib import Path
 import sys
+from pathlib import Path
 from tempfile import mkdtemp
 
 import mph

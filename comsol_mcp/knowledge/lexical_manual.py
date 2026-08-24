@@ -526,16 +526,23 @@ def search_index(
     if page_end is not None:
         clauses.append("CAST(page AS INTEGER) <= ?")
         filter_parameters.append(int(page_end))
-    sql = f"""
+    # Every clause is a compile-time template ending in a "?" placeholder and
+    # every value is bound through the parameter list below, so the composed
+    # WHERE text introduces no injected values.
+    sql = (
+        """
         SELECT source, module, CAST(page AS INTEGER) AS page, heading,
                snippet(pages_fts, 4, '[', ']', ' ... ', 36) AS snippet,
                bm25(pages_fts, 0.0, 0.0, 0.0, 2.0, 1.0) AS rank,
                heading || '\n' || text AS match_text
         FROM pages_fts
-        WHERE {" AND ".join(clauses)}
+        WHERE """  # noqa: S608 - fixed clause templates only; values bind via ?
+        + " AND ".join(clauses)
+        + """
         ORDER BY rank, source, page
         LIMIT ?
     """
+    )
     with closing(_open_index(path, readonly=True)) as connection:
         metadata = _validated_index_metadata(connection)
         rows = [
@@ -606,7 +613,9 @@ def read_index_pages(
         raise ValueError("pages must contain between 1 and 20 positive page numbers")
     placeholders = ",".join("?" for _ in requested)
     sql = (
-        "SELECT source, module, page, heading, text FROM pages "
+        # S608: the only interpolated text is "?" placeholders; page values
+        # bind through the parameter list in connection.execute below.
+        "SELECT source, module, page, heading, text FROM pages "  # noqa: S608
         f"WHERE source = ? AND page IN ({placeholders}) ORDER BY page"
     )
     with closing(_open_index(path, readonly=True)) as connection:
@@ -630,7 +639,7 @@ def run_bounded(operation: str, arguments: dict, timeout: float) -> dict:
     """
     command = [sys.executable, "-m", "comsol_mcp.knowledge.lexical_worker"]
     try:
-        completed = subprocess.run(
+        completed = subprocess.run(  # noqa: S603 - fixed argv worker, no shell
             command,
             input=json.dumps(
                 {"operation": operation, "arguments": arguments}, ensure_ascii=False

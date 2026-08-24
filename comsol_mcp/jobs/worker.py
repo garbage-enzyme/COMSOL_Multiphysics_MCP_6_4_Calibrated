@@ -498,7 +498,7 @@ def _run(root: str, job_id: str) -> int:
                     mesh_result = get_mesh_info(model)
                     if mesh_result.get("success"):
                         mesh_elements = mesh_result.get("mesh", {}).get("num_elements")
-                except Exception:
+                except Exception:  # noqa: S110 - admission preserves unavailable mesh evidence
                     # The collector and admission result preserve unavailable
                     # mesh evidence; never invent a count or weaken a policy.
                     pass

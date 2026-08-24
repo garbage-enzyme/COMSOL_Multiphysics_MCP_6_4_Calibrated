@@ -47,7 +47,10 @@ def register_model_resources(mcp: MCPServer) -> None:
         status = session_manager.get_status()
 
         if not status.get("connected"):
-            return "# COMSOL Session Status\n\nNo active COMSOL session.\n\nUse `comsol_start` to start a new session."
+            return (
+                "# COMSOL Session Status\n\nNo active COMSOL session.\n\n"
+                "Use `comsol_start` to start a new session."
+            )
 
         lines = [
             "# COMSOL Session Status",

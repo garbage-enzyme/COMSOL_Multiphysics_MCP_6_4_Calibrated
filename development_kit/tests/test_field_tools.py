@@ -338,9 +338,7 @@ def test_public_field_extract_never_publishes_artifacts_after_source_drift(
     )
     monkeypatch.setattr(field_evidence.ownership_manager, "runtime_dir", runtime)
 
-    result = _tool("wave_optics_field_extract")(
-        model_name="fixture", request=request, view_id="on"
-    )
+    result = _tool("wave_optics_field_extract")(model_name="fixture", request=request, view_id="on")
 
     final_root = runtime / "field_evidence" / request["request_fingerprint"]
     assert result["success"] is False

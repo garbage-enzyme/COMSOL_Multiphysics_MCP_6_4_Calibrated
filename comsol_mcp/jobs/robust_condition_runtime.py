@@ -206,13 +206,15 @@ def execute_robust_conditions(
                 "observable_id": condition["observable_id"],
             }
             receipt_wavelength = receipt.get("requested_wavelength_m")
-            wavelength_matches = isinstance(receipt_wavelength, (int, float)) and not isinstance(
-                receipt_wavelength, bool
-            ) and math.isclose(
-                float(receipt_wavelength),
-                float(condition["wavelength_m"]),
-                rel_tol=1e-12,
-                abs_tol=1e-18,
+            wavelength_matches = (
+                isinstance(receipt_wavelength, (int, float))
+                and not isinstance(receipt_wavelength, bool)
+                and math.isclose(
+                    float(receipt_wavelength),
+                    float(condition["wavelength_m"]),
+                    rel_tol=1e-12,
+                    abs_tol=1e-18,
+                )
             )
             if (
                 receipt.get("schema_name") != CONDITION_RECEIPT_SCHEMA_NAME

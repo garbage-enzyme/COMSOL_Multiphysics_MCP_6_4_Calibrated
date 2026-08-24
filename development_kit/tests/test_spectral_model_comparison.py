@@ -127,9 +127,7 @@ def test_analytic_lorentzian_prefers_lorentzian_on_identical_support():
 def test_comparison_retains_canonicalized_measurement_configuration():
     center = 5.0e-6
     wavelengths = [4.6e-6 + index * 0.025e-6 for index in range(33)]
-    absorption = [
-        0.1 + 0.8 / (1.0 + ((value - center) / 0.08e-6) ** 2) for value in wavelengths
-    ]
+    absorption = [0.1 + 0.8 / (1.0 + ((value - center) / 0.08e-6) ** 2) for value in wavelengths]
     bundle = _bundle(wavelengths, absorption)
     decision = build_spectral_analysis_decision(bundle, _policy())
     configuration = _configuration()

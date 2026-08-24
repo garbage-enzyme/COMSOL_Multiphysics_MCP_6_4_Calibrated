@@ -11,9 +11,12 @@ from development_kit.tests.integration import acceptance_resources
 def test_acceptance_cores_are_caller_declared_and_live_bounded(monkeypatch):
     monkeypatch.setattr(acceptance_resources.os, "cpu_count", lambda: 4)
 
-    assert acceptance_resources.required_acceptance_cores(
-        {acceptance_resources.ACCEPTANCE_CORES_ENV: "3"}
-    ) == 3
+    assert (
+        acceptance_resources.required_acceptance_cores(
+            {acceptance_resources.ACCEPTANCE_CORES_ENV: "3"}
+        )
+        == 3
+    )
     with pytest.raises(RuntimeError, match="explicitly configured"):
         acceptance_resources.required_acceptance_cores({})
     with pytest.raises(ValueError, match="canonical positive integer"):
@@ -51,9 +54,7 @@ def test_caller_acceptance_values_do_not_enter_tracked_product_text():
     caller_commit_percent = str(9 * 10)
     patterns = (
         re.compile(rf"\b{caller_cores}\s+cores?\b", re.IGNORECASE),
-        re.compile(
-            rf"COMSOL_MCP_ACCEPTANCE_CORES[^\r\n]{{0,80}}[\"']{caller_cores}[\"']"
-        ),
+        re.compile(rf"COMSOL_MCP_ACCEPTANCE_CORES[^\r\n]{{0,80}}[\"']{caller_cores}[\"']"),
         re.compile(
             rf"\b{caller_commit_percent}%\s+(?:host\s+)?commit(?:ment)?(?:[- ]limit)?",
             re.IGNORECASE,

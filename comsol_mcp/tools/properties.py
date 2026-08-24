@@ -107,14 +107,9 @@ def _read_property(target, property_name: str) -> tuple[JSONValue, str]:
 
     if "matrix" in normalized_type:
         if "double" in normalized_type or "float" in normalized_type:
-            value = [
-                [float(item) for item in row]
-                for row in target.getDoubleMatrix(property_name)
-            ]
+            value = [[float(item) for item in row] for row in target.getDoubleMatrix(property_name)]
         elif "int" in normalized_type:
-            value = [
-                [int(item) for item in row] for row in target.getIntMatrix(property_name)
-            ]
+            value = [[int(item) for item in row] for row in target.getIntMatrix(property_name)]
         else:
             getter = target.getStringMatrix
             value = [[str(item) for item in row] for row in getter(property_name)]

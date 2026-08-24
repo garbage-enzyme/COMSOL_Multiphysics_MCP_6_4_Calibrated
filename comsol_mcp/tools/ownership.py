@@ -127,7 +127,7 @@ def _discover_comsol_backends_without_mph() -> tuple[
         if not (root / "plugins").is_dir() or not (root / "apiplugins").is_dir():
             continue
         try:
-            completed = subprocess.run(
+            completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
                 [str(server), "--version"],
                 capture_output=True,
                 text=True,
@@ -992,7 +992,9 @@ class SolverOwnership:
             else:
                 lease_status = {
                     "state": "uncertain",
-                    "reason": "process inventory is incomplete and targeted lease identity is unavailable",
+                    "reason": (
+                        "process inventory is incomplete and targeted lease identity is unavailable"
+                    ),
                     "identity_source": "targeted_process_probe_unavailable",
                     "lease": lease,
                 }
@@ -1097,7 +1099,8 @@ class SolverOwnership:
         if requested_version:
             if not str(requested_version).startswith("6.4"):
                 warnings.append(
-                    f"requested COMSOL version {requested_version!r} is outside the verified 6.4 target"
+                    f"requested COMSOL version {requested_version!r} "
+                    "is outside the verified 6.4 target"
                 )
             if detected_backends and not any(
                 item["name"].startswith(str(requested_version)) for item in detected_backends
@@ -1568,7 +1571,9 @@ def register_ownership_tools(mcp: MCPServer) -> None:
 
     @mcp.tool()
     def solver_status() -> dict:
-        """Report MCP session, solver lease, process collisions, and job availability without starting COMSOL."""
+        """Report MCP session, solver lease, process collisions, and job
+        availability without starting COMSOL.
+        """
         from .session import session_manager
 
         return measured_call(
@@ -1603,7 +1608,9 @@ def register_ownership_tools(mcp: MCPServer) -> None:
 
     @mcp.tool()
     def solver_recover_stale_lease() -> dict:
-        """Remove only a lease proven stale by PID and process-creation evidence; never kill a process."""
+        """Remove only a lease proven stale by PID and process-creation
+        evidence; never kill a process.
+        """
         return measured_call(
             "solver_recover_stale_lease",
             ownership_manager.recover_stale,

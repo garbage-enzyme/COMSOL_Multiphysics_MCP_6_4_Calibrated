@@ -459,9 +459,7 @@ def _action_after_completed_stage(
         return _completion(
             reason_code=reason,
             disposition=(
-                "unresolved_at_declared_cap"
-                if reason in _DECLARED_CAP_REASONS
-                else "residual"
+                "unresolved_at_declared_cap" if reason in _DECLARED_CAP_REASONS else "residual"
             ),
             declared_cap_reached=reason in _DECLARED_CAP_REASONS,
         )

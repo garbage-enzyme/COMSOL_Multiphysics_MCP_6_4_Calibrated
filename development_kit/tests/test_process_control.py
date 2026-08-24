@@ -298,9 +298,7 @@ def test_descendant_exit_during_capture_preserves_other_exact_identities(monkeyp
     assert [item["pid"] for item in captured["descendants"]] == [44001, 44003]
     for item in captured["descendants"]:
         assert item["process_create_time"] == float(item["pid"])
-        expected_signature = hashlib.sha256(
-            f"child-{item['pid']}".encode("utf-8")
-        ).hexdigest()
+        expected_signature = hashlib.sha256(f"child-{item['pid']}".encode("utf-8")).hexdigest()
         assert item["command_signature"] == expected_signature
 
 

@@ -271,9 +271,7 @@ def test_patch_topology_uses_bottom_top_intersection_when_face_counts_tie():
         },
     ]
 
-    domain, footprint = _identify_patch_topology(
-        boundaries, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0]
-    )
+    domain, footprint = _identify_patch_topology(boundaries, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0])
 
     assert domain == 3
     assert footprint == [1]
@@ -424,15 +422,9 @@ def test_spectral_emissivity_preserves_transmission_and_prefers_absorptivity(mon
     )
 
     assert evaluated["spectral_data"][0]["emissivity"] == 0.5
-    assert (
-        evaluated["spectral_data"][0]["emissivity_basis"]
-        == "evaluated_absorptivity"
-    )
+    assert evaluated["spectral_data"][0]["emissivity_basis"] == "evaluated_absorptivity"
     assert derived["spectral_data"][0]["emissivity"] == pytest.approx(0.5)
-    assert (
-        derived["spectral_data"][0]["emissivity_basis"]
-        == "one_minus_reflectance_transmittance"
-    )
+    assert derived["spectral_data"][0]["emissivity_basis"] == "one_minus_reflectance_transmittance"
 
 
 class MeshFeatures:
@@ -631,14 +623,10 @@ def test_failed_build_rolls_back_created_geometry_features(monkeypatch):
     class Model:
         java = Java()
 
-    monkeypatch.setattr(
-        mim_patch_module.session_manager, "get_model", lambda _name=None: Model()
-    )
+    monkeypatch.setattr(mim_patch_module.session_manager, "get_model", lambda _name=None: Model())
     # The boundary probe needs a live JVM; the rollback contract under test
     # begins once probing reports no readable patch topology.
-    monkeypatch.setattr(
-        mim_patch_module, "_probe_boundaries", lambda _geom: ([], 2, 0, 3)
-    )
+    monkeypatch.setattr(mim_patch_module, "_probe_boundaries", lambda _geom: ([], 2, 0, 3))
     server = MCPServer("mim-build-rollback-test")
     register_mim_patch_tools(server)
     build = server._tool_manager._tools["mim_patch_build"].fn
@@ -672,9 +660,7 @@ def test_build_failure_before_feature_creation_reports_no_rollback_claims(monkey
     class Model:
         java = Java()
 
-    monkeypatch.setattr(
-        mim_patch_module.session_manager, "get_model", lambda _name=None: Model()
-    )
+    monkeypatch.setattr(mim_patch_module.session_manager, "get_model", lambda _name=None: Model())
     server = MCPServer("mim-build-nofeature-test")
     register_mim_patch_tools(server)
     build = server._tool_manager._tools["mim_patch_build"].fn

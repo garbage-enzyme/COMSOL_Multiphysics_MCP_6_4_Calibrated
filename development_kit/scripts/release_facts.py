@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).parents[2]
@@ -18,7 +18,6 @@ from comsol_mcp.compatibility import load_runtime_compatibility
 from comsol_mcp.schema_registry import get_schema_registry
 from comsol_mcp.tools.catalog import FEATURE_NAMES, PROFILE_NAMES, TOOL_METADATA
 from comsol_mcp.tools.profiles import tool_names_for_profile
-
 
 FACTS_PATH = ROOT / "development_kit" / "release" / "release_facts.json"
 

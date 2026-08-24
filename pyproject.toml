@@ -79,5 +79,15 @@ line-length = 100
 select = ["E", "F", "I", "S"]
 
 [tool.ruff.lint.per-file-ignores]
-"development_kit/tests/*.py" = ["S101", "S603"]
+# Tests intentionally exercise security-sensitive shapes: wildcard listener
+# fixtures (S104), password-like fixture labels (S105/S106), partial-path
+# executables in release tooling assertions (S607), bare asserts (S101), and
+# list-argv subprocess calls (S603).
+"development_kit/tests/*.py" = ["S101", "S104", "S105", "S106", "S603", "S607"]
 "settings_gui/tests/*.py" = ["S101", "S603"]
+# Repository-only scripts and licensed acceptance probes bootstrap sys.path
+# before imports and drive subprocess gates directly; they never ship in a
+# wheel, and their best-effort cleanup swallows are deliberate.
+"development_kit/scripts/*.py" = ["E402", "S603", "S607"]
+"development_kit/tests/integration/*.py" = ["E402", "S110", "S112"]
+"development_kit/tests/integration/probes/*.py" = ["E402"]

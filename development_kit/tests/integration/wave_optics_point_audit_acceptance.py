@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 from src.evidence.real_fixture import controlled_fixture_from_environment
 from src.tools.ownership import SolverOwnership
 from src.tools.wave_optics_audit import run_wave_optics_point_audit
+
 from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 
 
@@ -126,7 +127,10 @@ def main() -> None:
             r_expression = t_expression = a_expression = None
             loss_map = None
             power_provenance = {
-                "normalization": "COMSOL PeriodicStructure total port powers normalized to the excited periodic port.",
+                "normalization": (
+                    "COMSOL PeriodicStructure total port powers normalized "
+                    "to the excited periodic port."
+                ),
                 "R_direction": "Outgoing power through the excited periodic port.",
                 "T_direction": "Outgoing power through the opposite periodic port.",
                 "A_definition": "COMSOL ewfd.Atotal for the PeriodicStructure solution.",

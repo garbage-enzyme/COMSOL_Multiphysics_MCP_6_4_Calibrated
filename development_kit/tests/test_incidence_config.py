@@ -323,9 +323,7 @@ def test_angle_evaluation_requires_one_finite_real_scalar(value, match):
 def test_angle_evaluation_accepts_mph_zero_dimensional_numpy_scalar():
     import numpy as np
 
-    model, record = fixture(
-        values={"theta": np.asarray(20.0), "phi": np.asarray(0.0)}
-    )
+    model, record = fixture(values={"theta": np.asarray(20.0), "phi": np.asarray(0.0)})
 
     result = preview(model, record)
 
@@ -336,9 +334,7 @@ def test_angle_evaluation_accepts_mph_zero_dimensional_numpy_scalar():
 def test_angle_evaluation_accepts_nested_zero_dimensional_numpy_scalar():
     import numpy as np
 
-    model, record = fixture(
-        values={"theta": [np.asarray(20.0)], "phi": (np.asarray(0.0),)}
-    )
+    model, record = fixture(values={"theta": [np.asarray(20.0)], "phi": (np.asarray(0.0),)})
 
     result = preview(model, record)
 

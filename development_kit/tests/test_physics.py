@@ -148,9 +148,7 @@ def test_add_physics_interface_preserves_unknown_full_type():
     result = add_physics_interface(FakeModel(component), "CustomPhysics")
 
     assert result["physics"]["type"] == "CustomPhysics"
-    assert component.physics_list.created == [
-        ("customphysics", "CustomPhysics", "3")
-    ]
+    assert component.physics_list.created == [("customphysics", "CustomPhysics", "3")]
 
 
 def test_add_physics_interface_validates_type():
@@ -348,9 +346,7 @@ class ListingModel:
 class JavaTagListingModel(ListingModel):
     def __init__(self, physics):
         self.java = ListingJava(physics)
-        self.java.component_list = JavaTagListingComponentList(
-            JavaTagListingComponent(physics)
-        )
+        self.java.component_list = JavaTagListingComponentList(JavaTagListingComponent(physics))
 
 
 def test_list_physics_features_uses_tags_labels_and_selections():
@@ -629,9 +625,7 @@ def test_boundary_failure_removes_current_feature():
     physics = BoundaryPhysics()
     physics.features = FailingBoundaryFeatureList(1)
 
-    result = add_boundary_condition(
-        FakeModel(BoundaryComponent(physics)), "ht", "Temperature", [1]
-    )
+    result = add_boundary_condition(FakeModel(BoundaryComponent(physics)), "ht", "Temperature", [1])
 
     assert result["success"] is False
     assert result["rolled_back"] is True
@@ -842,9 +836,7 @@ def test_assign_material_reuses_existing_material_in_physics_component():
     materials = MaterialList({"mat1": existing})
     target = MaterialComponent(2, "ht", BoundaryPhysics(), materials)
     model = FakeModel(FakeComponent())
-    model.java = MultiComponentJava(
-        {"comp1": DimensionComponent(3), "comp2": target}
-    )
+    model.java = MultiComponentJava({"comp1": DimensionComponent(3), "comp2": target})
 
     result = assign_material(
         model,
@@ -896,9 +888,7 @@ def test_assign_material_creates_collision_free_explicit_common_material():
     created = materials.nodes["Copper_Alloy2"]
     assert created.label() == "Copper Alloy"
     assert created.selection_node.domains == [2]
-    assert created.group.properties == {
-        "electricconductivity": ["5.8e7[S/m]"]
-    }
+    assert created.group.properties == {"electricconductivity": ["5.8e7[S/m]"]}
 
 
 class CouplingList:
@@ -1066,9 +1056,7 @@ def test_setup_flow_boundaries_rolls_back_earlier_features():
     physics = BoundaryPhysics()
     physics.features = FailingBoundaryFeatureList(2)
 
-    result = setup_flow_boundaries(
-        FakeModel(BoundaryComponent(physics)), "ht", [1], [2]
-    )
+    result = setup_flow_boundaries(FakeModel(BoundaryComponent(physics)), "ht", [1], [2])
 
     assert result["success"] is False
     assert result["composite_rolled_back"] is True
@@ -1079,9 +1067,7 @@ def test_setup_flow_boundaries_rolls_back_partial_property_failure():
     physics = BoundaryPhysics()
     physics.features = FailingPropertyBoundaryFeatureList(2)
 
-    result = setup_flow_boundaries(
-        FakeModel(BoundaryComponent(physics)), "ht", [1], [2]
-    )
+    result = setup_flow_boundaries(FakeModel(BoundaryComponent(physics)), "ht", [1], [2])
 
     assert result["success"] is False
     assert result["composite_rolled_back"] is True

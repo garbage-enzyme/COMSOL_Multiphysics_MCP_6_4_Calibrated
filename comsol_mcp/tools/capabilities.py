@@ -330,11 +330,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             ],
         },
         "disabled_by_default": [
-            *(
-                []
-                if manuals_feature_enabled
-                else ["manual_search", "manual_read_pages"]
-            ),
+            *([] if manuals_feature_enabled else ["manual_search", "manual_read_pages"]),
             *(
                 []
                 if semantic_feature_enabled

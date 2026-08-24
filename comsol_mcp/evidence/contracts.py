@@ -36,9 +36,10 @@ VALIDATION_POLICY_SCHEMA_VERSION = "1.0.0"
 def _finite_float(value: Any) -> float | None:
     try:
         result = float(value)
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         return None
     return result if math.isfinite(result) else None
+
 
 EVIDENCE_STATES = frozenset(
     {

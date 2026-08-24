@@ -238,18 +238,14 @@ def add_primitive_feature(
             normalized_dimensions = _finite_vector(dimensions, "size", 2, positive=True)
             properties = {"pos": normalized_position, "size": normalized_dimensions}
         elif feature_type == "Cylinder":
-            normalized_dimensions = _finite_vector(
-                dimensions, "size", 2, positive=True
-            )
+            normalized_dimensions = _finite_vector(dimensions, "size", 2, positive=True)
             properties = {
                 "pos": normalized_position,
                 "r": normalized_dimensions[0],
                 "h": normalized_dimensions[1],
             }
         elif feature_type == "Sphere":
-            normalized_dimensions = _finite_vector(
-                dimensions, "size", 1, positive=True
-            )
+            normalized_dimensions = _finite_vector(dimensions, "size", 1, positive=True)
             properties = {"pos": normalized_position, "r": normalized_dimensions[0]}
         else:
             raise ValueError("unsupported primitive feature type")

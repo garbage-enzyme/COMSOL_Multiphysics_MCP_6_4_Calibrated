@@ -263,7 +263,8 @@ def _agent_reasoning(case: dict[str, Any], audit: dict[str, Any]) -> dict[str, A
     return {
         "raw_power_interpretation": (
             f"R={power.get('R')}, T={power.get('T')}, A={power.get('A')}, "
-            f"closure_residual={power.get('closure_residual')}; raw evidence is retained without clamping."
+            f"closure_residual={power.get('closure_residual')}; "
+            "raw evidence is retained without clamping."
         ),
         "policy_interpretation": (
             f"The caller-declared policy result is {assessment.get('project_verdict')}; "

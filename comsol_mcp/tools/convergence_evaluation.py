@@ -30,9 +30,7 @@ def register_convergence_evaluation_tools(mcp: MCPServer) -> None:
             )
 
             if (ladder_spec is None) == (convergence_ladder is None):
-                raise ValueError(
-                    "provide exactly one of ladder_spec or convergence_ladder"
-                )
+                raise ValueError("provide exactly one of ladder_spec or convergence_ladder")
             if ladder_spec is not None:
                 ladder = build_convergence_ladder(**ladder_spec)
             else:

@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import traceback
+from pathlib import Path
 
 import jpype
 import mph
@@ -16,7 +16,6 @@ ROOT = Path(__file__).parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 from src.tools.derived_geometry import (
     _snapshot,
     _state_hash,
@@ -27,7 +26,9 @@ from src.tools.derived_geometry import (
     preview_fin,
 )
 from src.tools.ownership import SolverOwnership
+
 from development_kit.scripts.acceptance_cleanup import CleanupRecorder, lease_released
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 
 
 def _sha256(path: Path) -> str:

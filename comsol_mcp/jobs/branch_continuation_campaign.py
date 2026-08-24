@@ -14,7 +14,6 @@ from comsol_mcp.compatibility import module_identity_matches
 from .spectral_characterization import normalize_spectral_characterization_job_spec
 from .store import JOB_SCHEMA_VERSION
 
-
 MIN_BRANCH_CONTINUATION_STATES = 2
 MAX_BRANCH_CONTINUATION_STATES = 16
 MAX_BRANCH_CONTINUATION_POINTS = 512

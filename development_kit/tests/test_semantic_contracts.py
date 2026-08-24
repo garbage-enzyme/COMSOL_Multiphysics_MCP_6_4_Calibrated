@@ -529,7 +529,10 @@ import json, subprocess, sys
 events = []
 sys.addaudithook(
     lambda event, args: events.append(event)
-    if event in {'os.system', 'os.startfile', 'os.spawn', 'os.posix_spawn', 'subprocess.Popen'} else None
+    if event in {
+        'os.system', 'os.startfile', 'os.spawn',
+        'os.posix_spawn', 'subprocess.Popen',
+    } else None
 )
 process = subprocess.Popen(
     [sys.executable, '-c', 'pass'],
@@ -556,7 +559,10 @@ import json, sys
 process_launch_events = []
 sys.addaudithook(
     lambda event, args: process_launch_events.append(event)
-    if event in {'os.system', 'os.startfile', 'os.spawn', 'os.posix_spawn', 'subprocess.Popen'} else None
+    if event in {
+        'os.system', 'os.startfile', 'os.spawn',
+        'os.posix_spawn', 'subprocess.Popen',
+    } else None
 )
 import src.knowledge.semantic_contracts
 import development_kit.benchmarks.semantic_benchmark

@@ -48,9 +48,7 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     assert execution["accepted_objective"]["expression"] == "comp1.ewfd.Torder_0_0"
     assert execution["generated_identity"]["derivative_dataset"] == "dset2"
     assert execution["generated_identity"]["derivative_dataset_solution"] == "sol2"
-    assert execution["derivative"]["accepted_expression"] == (
-        "real(fsens(patch_length_x))"
-    )
+    assert execution["derivative"]["accepted_expression"] == ("real(fsens(patch_length_x))")
     assert execution["derivative"]["relative_error"] < 0.01
     assert execution["source_unchanged"] is True
     assert execution["cleanup_verified"] is True
@@ -95,9 +93,7 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
     assert physical["wavelength_m"] == 1.717657785e-6
     assert physical["branch_disposition"] == "single_fixed_state_no_continuation_claim"
     assert physical["robustness_disposition"] == "multi_state_deferred_to_alpha7_2"
-    assert optimizer["same_budget_mma_comparison"]["status"] == (
-        "rejected_fresh_forward_mismatch"
-    )
+    assert optimizer["same_budget_mma_comparison"]["status"] == ("rejected_fresh_forward_mismatch")
     assert optimizer["same_budget_mma_comparison"]["fresh_forward_delta"] < 0.0
     assert matrix["method_policy"]["accepted_lane"] == "adjoint"
     assert matrix["method_policy"]["optimizer_choice"] == (
@@ -111,6 +107,7 @@ def test_native_gradient_matrix_is_redacted_and_binds_the_live_probe_boundary():
 
 def test_matrix_receipt_hashes_are_valid_sha256_and_no_private_path_is_embedded():
     matrix = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))
+
     def assert_hashes(value):
         if isinstance(value, dict):
             for key, nested in value.items():

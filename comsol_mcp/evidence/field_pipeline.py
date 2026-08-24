@@ -35,9 +35,7 @@ def build_field_evidence_from_samples(
         raw_point_count=selection["raw_point_count"],
         selected_point_count=selection["selected_point_count"],
         unique_point_count=interpolation["unique_point_count"],
-        collapsed_duplicate_point_count=interpolation[
-            "collapsed_duplicate_point_count"
-        ],
+        collapsed_duplicate_point_count=interpolation["collapsed_duplicate_point_count"],
         png_path=png_path,
     )
     return {

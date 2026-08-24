@@ -11,11 +11,6 @@ from typing import Any, Mapping
 
 from comsol_mcp.build_identity import get_build_identity
 from comsol_mcp.compatibility import module_identity_matches
-from comsol_mcp.evidence.spectral_characterization import (
-    MAX_SPECTRAL_POINTS,
-    normalize_spectral_analysis_policy,
-    normalize_spectral_measurement_configuration,
-)
 
 from .resource_admission import normalize_resource_policy
 from .store import JOB_SCHEMA_VERSION
@@ -130,11 +125,7 @@ def _finite(
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be numeric")
     number = float(value)
-    if (
-        not math.isfinite(number)
-        or (positive and number <= 0.0)
-        or (nonnegative and number < 0.0)
-    ):
+    if not math.isfinite(number) or (positive and number <= 0.0) or (nonnegative and number < 0.0):
         qualifier = (
             "positive and finite"
             if positive
@@ -153,11 +144,7 @@ def _integer(
     minimum: int,
     maximum: int,
 ) -> int:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int)
-        or not minimum <= value <= maximum
-    ):
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
         raise ValueError(f"{name} must be an integer from {minimum} to {maximum}")
     return value
 
@@ -359,9 +346,7 @@ def _normalize_collector(value: object) -> dict[str, Any]:
             or not domains
             or len(domains) > MAX_TOP_AIR_DOMAIN_IDS
             or any(
-                isinstance(domain, bool)
-                or not isinstance(domain, int)
-                or domain <= 0
+                isinstance(domain, bool) or not isinstance(domain, int) or domain <= 0
                 for domain in domains
             )
         ):
@@ -408,10 +393,7 @@ def validate_spectral_driver_identity(spec: Mapping[str, Any]) -> dict[str, str]
     if (
         not isinstance(observed, Mapping)
         or set(observed) != set(expected)
-        or any(
-            key != "implementation" and observed[key] != expected[key]
-            for key in expected
-        )
+        or any(key != "implementation" and observed[key] != expected[key] for key in expected)
         or not module_identity_matches(
             expected.get("implementation"), observed.get("implementation")
         )
@@ -474,6 +456,15 @@ def normalize_spectral_characterization_job_spec(raw_spec: object) -> dict[str, 
     initial = _normalize_initial_grid(raw["initial_grid"])
     refinement = _normalize_refinement_policy(raw["refinement_policy"])
     expansion = _normalize_expansion_policy(raw["expansion_policy"], initial_grid=initial)
+    # Imported lazily: the evidence layer pulls numpy and scipy, which must
+    # never load during core-profile control-plane startup. Job submission
+    # is the only path that reaches this code.
+    from comsol_mcp.evidence.spectral_characterization import (
+        MAX_SPECTRAL_POINTS,
+        normalize_spectral_analysis_policy,
+        normalize_spectral_measurement_configuration,
+    )
+
     maximum_points = _integer(
         raw["maximum_points"],
         "maximum_points",
@@ -482,15 +473,9 @@ def normalize_spectral_characterization_job_spec(raw_spec: object) -> dict[str, 
     )
     if initial["point_count"] > maximum_points:
         raise ValueError("initial grid exceeds maximum_points")
-    if (
-        refinement["maximum_stages"] > 1
-        and refinement["points_per_stage"] > maximum_points
-    ):
+    if refinement["maximum_stages"] > 1 and refinement["points_per_stage"] > maximum_points:
         raise ValueError("refinement stage exceeds maximum_points")
-    if (
-        expansion["maximum_expansions"] > 0
-        and expansion["points_per_expansion"] > maximum_points
-    ):
+    if expansion["maximum_expansions"] > 0 and expansion["points_per_expansion"] > maximum_points:
         raise ValueError("expansion stage exceeds maximum_points")
     analysis_policy = normalize_spectral_analysis_policy(raw["analysis_policy"])
     if analysis_policy["minimum_point_count"] > initial["point_count"]:

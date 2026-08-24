@@ -418,13 +418,11 @@ def test_version_bundle_backup_cleanup_failure_does_not_mask_the_publish(tmp_pat
 
     monkeypatch.setattr(pathlib.Path, "unlink", selective_unlink)
 
-    result = _save_model_version_bundle(
-        model, str(version), str(latest), description=None
-    )
+    result = _save_model_version_bundle(model, str(version), str(latest), description=None)
 
     assert version.read_bytes() == latest.read_bytes() == b"saved-model"
     assert len(result["cleanup_errors"]) == 1
-    prefix = f"remove {stuck_backup.name[:-len('token.backup')]}"
+    prefix = f"remove {stuck_backup.name[: -len('token.backup')]}"
     assert result["cleanup_errors"][0].startswith(prefix)
     assert "locked:" in result["cleanup_errors"][0]
     backups_left = list(tmp_path.glob(".*.backup"))

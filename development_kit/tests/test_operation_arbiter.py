@@ -71,9 +71,7 @@ def test_concurrent_comsol_bound_calls_fail_fast_with_retry_evidence(tmp_path, m
     assert not arbiter.lock_path.exists()
 
 
-def test_control_plane_call_remains_responsive_while_solver_call_blocks(
-    tmp_path, monkeypatch
-):
+def test_control_plane_call_remains_responsive_while_solver_call_blocks(tmp_path, monkeypatch):
     arbiter = OperationArbiter(
         tmp_path,
         pid=100,
@@ -81,9 +79,7 @@ def test_control_plane_call_remains_responsive_while_solver_call_blocks(
         process_probe=lambda pid: 10.0,
     )
     monkeypatch.setattr("src.operation_arbiter.get_operation_arbiter", lambda: arbiter)
-    claim, _ = arbiter.try_acquire(
-        tool_name="study_solve", side_effect_class="solver_execution"
-    )
+    claim, _ = arbiter.try_acquire(tool_name="study_solve", side_effect_class="solver_execution")
     assert claim is not None
     called = []
     status = guard_tool_call(
@@ -259,9 +255,7 @@ def test_lock_close_failure_returns_uncertain_and_removes_owned_partial(tmp_path
     assert not arbiter.lock_path.exists()
 
 
-def test_operation_lock_retries_short_writes_until_publication_is_exact(
-    tmp_path, monkeypatch
-):
+def test_operation_lock_retries_short_writes_until_publication_is_exact(tmp_path, monkeypatch):
     arbiter = OperationArbiter(
         tmp_path,
         pid=201,
@@ -288,9 +282,7 @@ def test_operation_lock_retries_short_writes_until_publication_is_exact(
     assert arbiter.release(claim)["verified"] is True
 
 
-def test_non_mapping_result_becomes_failure_when_release_is_unverified(
-    tmp_path, monkeypatch
-):
+def test_non_mapping_result_becomes_failure_when_release_is_unverified(tmp_path, monkeypatch):
     arbiter = OperationArbiter(
         tmp_path,
         pid=202,
@@ -349,18 +341,22 @@ def test_cached_arbiter_is_rebound_after_process_identity_change(tmp_path, monke
 
 def test_metadata_keeps_required_tools_outside_comsol_mutex():
     for name in (
-        "capabilities", "solver_status", "job_status", "job_cancel",
-        "manual_search", "manual_read_pages", "spectral_characterize",
-        "convergence_evaluate", "branch_continuation_plan",
+        "capabilities",
+        "solver_status",
+        "job_status",
+        "job_cancel",
+        "manual_search",
+        "manual_read_pages",
+        "spectral_characterize",
+        "convergence_evaluate",
+        "branch_continuation_plan",
     ):
         assert TOOL_METADATA[name].concurrency_class != "comsol_bound"
     assert TOOL_METADATA["study_solve"].concurrency_class == "comsol_bound"
     assert TOOL_METADATA["param_set"].concurrency_class == "comsol_bound"
 
 
-def test_expected_model_revision_is_checked_after_lock_and_advances(
-    tmp_path, monkeypatch
-):
+def test_expected_model_revision_is_checked_after_lock_and_advances(tmp_path, monkeypatch):
     from src.tools.session import session_manager
 
     class FakeModel:
@@ -391,9 +387,7 @@ def test_expected_model_revision_is_checked_after_lock_and_advances(
         revision_checks.append(model_name)
         return original_get_model_revision(model_name)
 
-    monkeypatch.setattr(
-        session_manager, "get_model_revision", get_model_revision_after_lock
-    )
+    monkeypatch.setattr(session_manager, "get_model_revision", get_model_revision_after_lock)
 
     def param_set(name: str, value: str, model_name: str | None = None):
         calls.append((name, value, model_name))
@@ -416,18 +410,14 @@ def test_expected_model_revision_is_checked_after_lock_and_advances(
     assert accepted["success"] is True
     assert calls == [("p", "1", None)]
     assert accepted["model_revision"]["sequence"] == 1
-    assert accepted["model_revision"]["revision_sha256"] != initial[
-        "revision_sha256"
-    ]
+    assert accepted["model_revision"]["revision_sha256"] != initial["revision_sha256"]
     replay = guarded("p", "2", expected_model_revision=initial["revision_sha256"])
     assert replay["success"] is False
     assert calls == [("p", "1", None)]
     assert revision_checks == ["model"] * 4
 
 
-def test_full_profile_tracks_revision_without_enforcing_expected_token(
-    tmp_path, monkeypatch
-):
+def test_full_profile_tracks_revision_without_enforcing_expected_token(tmp_path, monkeypatch):
     from src.tools.session import session_manager
 
     class FakeModel:

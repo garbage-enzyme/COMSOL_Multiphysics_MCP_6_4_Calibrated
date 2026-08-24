@@ -1,4 +1,7 @@
-"""Deterministic cancellation determinism cancellation state-machine tests without wall-clock sleeps."""
+"""Deterministic cancellation state-machine tests without wall-clock sleeps.
+
+The module name keeps the historical cancellation-determinism scope.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,6 @@ import os
 from typing import Any
 
 import pytest
-
 from src.jobs import cancel_worker
 from src.jobs.store import JobStore, atomic_write_json, process_identity, read_json
 

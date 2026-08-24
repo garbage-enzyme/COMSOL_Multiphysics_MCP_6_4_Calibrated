@@ -266,8 +266,11 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             try:
                 released = ownership.release()
             except Exception as exc:
-                released = {"success": False, "released": False,
-                            "error": f"{type(exc).__name__}: {exc}"}
+                released = {
+                    "success": False,
+                    "released": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
             cleanup["lease_released"] = bool(released.get("success") and released.get("released"))
             if not cleanup["lease_released"]:
                 private["lease_cleanup_error"] = released

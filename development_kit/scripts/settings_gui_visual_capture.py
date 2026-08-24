@@ -6,8 +6,8 @@ import argparse
 import ctypes
 import hashlib
 import json
-import subprocess
 import shutil
+import subprocess
 import sys
 import time
 import tkinter as tk

@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 import sys
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from mcp.server.mcpserver import MCPServer
-
 from src.evidence.branch_continuation import (
     BRANCH_CONTINUATION_SCHEMA_VERSION,
     BRANCH_CONTINUATION_STATES_SCHEMA,
@@ -28,8 +27,8 @@ from src.evidence.spectral_characterization import (
     build_spectral_point_bundle,
 )
 from src.tools.branch_continuation import register_branch_continuation_tools
-from development_kit.tests.mcp_test_support import decode_tool_result
 
+from development_kit.tests.mcp_test_support import decode_tool_result
 
 MATERIAL_SHA256 = "a" * 64
 COORDINATE_IDENTITY = "b" * 64

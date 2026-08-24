@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import traceback
+from pathlib import Path
 
 import mph
 
@@ -15,9 +15,10 @@ ROOT = Path(__file__).parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.evidence.real_fixture import controlled_fixture_from_environment
 from src.tools.ownership import SolverOwnership
 from src.tools.wave_optics_preflight import collect_wave_optics_preflight
-from src.evidence.real_fixture import controlled_fixture_from_environment
+
 from development_kit.scripts.acceptance_cleanup import CleanupRecorder, lease_released
 from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 
@@ -47,7 +48,9 @@ def _model_state(model) -> dict:
         "mesh_counts": mesh_counts,
         "solutions": [str(value) for value in model.solutions()],
         "datasets": [str(value) for value in model.datasets()],
-        "parameters": {str(key): str(value) for key, value in model.parameters(evaluate=False).items()},
+        "parameters": {
+            str(key): str(value) for key, value in model.parameters(evaluate=False).items()
+        },
     }
 
 
@@ -67,7 +70,10 @@ def _select_preflight_tags(
 
 
 def main() -> None:
-    artifact_dir = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")) / "wave_optics_preflight"
+    artifact_dir = (
+        Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
+        / "wave_optics_preflight"
+    )
     artifact_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = artifact_dir / "preflight_gate_result.json"
     owner = SolverOwnership(owner="wave-optics-preflight")
@@ -122,27 +128,33 @@ def main() -> None:
             assert final_stat.st_size == source_stat.st_size
             assert audit["assessment"]["mode"] == "evidence_only"
             assert audit["assessment"]["project_verdict"] is None
-            result["models"].append({
-                "source": str(source),
-                "source_sha256": source_hash,
-                "source_mtime_ns": source_stat.st_mtime_ns,
-                "inspection_status": audit["inspection_status"],
-                "evidence_codes": {
-                    level: [item["code"] for item in audit["evidence"][level]]
-                    for level in ("observations", "warnings", "unknowns", "integrity_errors")
-                },
-                "topology": {
-                    "domains": audit["topology"].get("domain_count"),
-                    "boundaries": audit["topology"].get("boundary_count"),
-                    "pairs": len(audit["topology"].get("pairs", [])),
-                },
-                "periodic_structure_tag": audit["periodicity"].get("periodic_structure_tag"),
-                "floquet_tags": [item["tag"] for item in audit["periodicity"].get("floquet_features", [])],
-                "port_tags": [item["tag"] for item in audit["ports"].get("periodic_port_features", [])],
-                "incidence": audit["incidence"].get("raw_properties"),
-                "wavelength": audit["wavelength"],
-                "meshes": audit["mesh_study_results"].get("meshes"),
-            })
+            result["models"].append(
+                {
+                    "source": str(source),
+                    "source_sha256": source_hash,
+                    "source_mtime_ns": source_stat.st_mtime_ns,
+                    "inspection_status": audit["inspection_status"],
+                    "evidence_codes": {
+                        level: [item["code"] for item in audit["evidence"][level]]
+                        for level in ("observations", "warnings", "unknowns", "integrity_errors")
+                    },
+                    "topology": {
+                        "domains": audit["topology"].get("domain_count"),
+                        "boundaries": audit["topology"].get("boundary_count"),
+                        "pairs": len(audit["topology"].get("pairs", [])),
+                    },
+                    "periodic_structure_tag": audit["periodicity"].get("periodic_structure_tag"),
+                    "floquet_tags": [
+                        item["tag"] for item in audit["periodicity"].get("floquet_features", [])
+                    ],
+                    "port_tags": [
+                        item["tag"] for item in audit["ports"].get("periodic_port_features", [])
+                    ],
+                    "incidence": audit["incidence"].get("raw_properties"),
+                    "wavelength": audit["wavelength"],
+                    "meshes": audit["mesh_study_results"].get("meshes"),
+                }
+            )
             client.remove(model)
         result.update(success=True, client={"standalone": client.port is None, "cores": 1})
     except Exception as exc:
@@ -154,7 +166,9 @@ def main() -> None:
             cleanup.run("client_clear", client.clear, expose_result=False)
         cleanup.run("lease_release", owner.release, passed=lease_released)
         exit_code = cleanup.finalize()
-        manifest_path.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        manifest_path.write_text(
+            json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
         print(json.dumps(result, ensure_ascii=False), flush=True)
         os._exit(exit_code)
 

@@ -205,8 +205,7 @@ def test_mesh_feature_truncation_requires_an_observed_extra_item():
 
     component = FakeComponent()
     exactly = {
-        f"size{index}": FakeFeature(f"size{index}", "Size")
-        for index in range(MAX_MESH_FEATURES)
+        f"size{index}": FakeFeature(f"size{index}", "Size") for index in range(MAX_MESH_FEATURES)
     }
     component._mesh.items["mesh1"] = FakeMesh(1, exactly)
     complete, _mesh = _mesh_sequence(component, "mesh1")
@@ -246,9 +245,7 @@ def test_mesh_feature_truncation_requires_an_observed_extra_item():
                         "tag": "fpc1",
                         "type": "PeriodicCondition",
                         "selection": [1, 2],
-                        "opposing_face_groups": {
-                            "adjacent_domain_signatures_match": True
-                        },
+                        "opposing_face_groups": {"adjacent_domain_signatures_match": True},
                     }
                 ]
             },

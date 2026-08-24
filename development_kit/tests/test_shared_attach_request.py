@@ -27,14 +27,10 @@ def test_attach_request_requires_all_static_and_per_call_gates():
     )
     assert accepted.feature_gate["profile"] == "wave_optics"
     with pytest.raises(ValueError, match="static feature flag"):
-        normalize_shared_server_attach_request(
-            _request(), profile="core", environ={}
-        )
+        normalize_shared_server_attach_request(_request(), profile="core", environ={})
     unconfirmed = {**_request(), "user_confirmed": False}
     with pytest.raises(ValueError, match="user_confirmed=true"):
-        normalize_shared_server_attach_request(
-            unconfirmed, profile="core", environ=enabled
-        )
+        normalize_shared_server_attach_request(unconfirmed, profile="core", environ=enabled)
     for non_boolean in (1, 1.0):
         with pytest.raises(ValueError, match="user_confirmed=true"):
             normalize_shared_server_attach_request(

@@ -821,9 +821,7 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
                         entry["emissivity"] = entry["ewfd.Atotal"]
                         entry["emissivity_basis"] = "evaluated_absorptivity"
                     elif "ewfd.Ttotal" in entry:
-                        entry["emissivity"] = (
-                            1.0 - entry["ewfd.Rtotal"] - entry["ewfd.Ttotal"]
-                        )
+                        entry["emissivity"] = 1.0 - entry["ewfd.Rtotal"] - entry["ewfd.Ttotal"]
                         entry["emissivity_basis"] = "one_minus_reflectance_transmittance"
                     else:
                         entry["emissivity"] = 1.0 - entry["ewfd.Rtotal"]

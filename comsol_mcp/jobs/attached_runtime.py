@@ -14,8 +14,8 @@ from comsol_mcp.shared_session.locking import (
     build_shared_model_revision,
     normalize_shared_model_identity,
 )
-from comsol_mcp.utils.validation import strict_json_integer
 from comsol_mcp.utils.immutability import deep_freeze
+from comsol_mcp.utils.validation import strict_json_integer
 
 from .attached_backend import normalize_attached_execution_backend
 
@@ -31,9 +31,7 @@ class AttachedExecutionTarget:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "backend", deep_freeze(self.backend))
-        object.__setattr__(
-            self, "expected_revision", deep_freeze(self.expected_revision)
-        )
+        object.__setattr__(self, "expected_revision", deep_freeze(self.expected_revision))
 
 
 def normalize_attached_execution_target(value: Any) -> AttachedExecutionTarget:
@@ -84,13 +82,10 @@ def verify_attached_model_inventory(
     if len(tag_matches) != 1:
         state = "no_matching_server_model" if not tag_matches else "server_model_not_unique"
         description = (
-            "server model is unavailable"
-            if not tag_matches
-            else "server model is not unique"
+            "server model is unavailable" if not tag_matches else "server model is not unique"
         )
         raise ValueError(
-            f"{description} ({state}): expected tag={target.model.tag!r} "
-            "and exact model identity"
+            f"{description} ({state}): expected tag={target.model.tag!r} and exact model identity"
         )
     if tag_matches[0].identity_sha256 != target.model.identity_sha256:
         raise ValueError("server model identity changed for the expected tag")
@@ -121,9 +116,7 @@ def verify_attached_model_revision(
         if current.to_dict()[field] != expected[field]
     ]
     if changed:
-        raise ValueError(
-            "attached model revision changed: " + ", ".join(changed)
-        )
+        raise ValueError("attached model revision changed: " + ", ".join(changed))
     return current.to_dict()
 
 

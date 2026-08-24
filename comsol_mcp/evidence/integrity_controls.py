@@ -9,8 +9,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
-from comsol_mcp.settings import load_settings, settings_fingerprint, settings_status
 from comsol_mcp.durable import read_file_bytes_bounded
+from comsol_mcp.settings import load_settings, settings_fingerprint, settings_status
 
 EVIDENCE_SETTINGS_ENV = "COMSOL_MCP_EVIDENCE_SETTINGS_PATH"
 EVIDENCE_SETTINGS_SCHEMA = "comsol_mcp.evidence_integrity_settings"

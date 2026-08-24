@@ -115,16 +115,12 @@ def test_profile_name_and_schema_snapshots_are_exact():
 
 
 def test_feature_tool_name_snapshot_is_exact() -> None:
-    expected = json.loads(
-        (SNAPSHOT_DIR / "feature_tool_names.json").read_text(encoding="utf-8")
-    )
+    expected = json.loads((SNAPSHOT_DIR / "feature_tool_names.json").read_text(encoding="utf-8"))
 
     assert tuple(expected) == FEATURE_NAMES
     assert expected == {
         feature: sorted(
-            name
-            for name, metadata in TOOL_METADATA.items()
-            if metadata.feature_gate == feature
+            name for name, metadata in TOOL_METADATA.items() if metadata.feature_gate == feature
         )
         for feature in FEATURE_NAMES
     }
@@ -159,7 +155,7 @@ def test_independent_feature_overlays_compose_with_any_base_profile() -> None:
     selection = resolve_profile(
         "wave_optics",
         environ={
-                "COMSOL_MCP_ENABLE_LEXICAL_DOCS": "true",
+            "COMSOL_MCP_ENABLE_LEXICAL_DOCS": "true",
             "COMSOL_MCP_ENABLE_SEMANTIC_DOCS": "true",
             SHARED_SERVER_FEATURE_ENV: "true",
         },

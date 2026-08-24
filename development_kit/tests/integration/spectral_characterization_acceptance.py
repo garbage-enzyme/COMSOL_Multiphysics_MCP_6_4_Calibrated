@@ -115,8 +115,7 @@ def _scientific_acceptance(
         and all(float(row["closure_abs"]) <= closure_tolerance for row in row_receipts),
         "wavelength_synchronized": finite
         and all(
-            float(row["wavelength_sync_abs_m"]) <= wavelength_tolerance
-            for row in row_receipts
+            float(row["wavelength_sync_abs_m"]) <= wavelength_tolerance for row in row_receipts
         ),
         "mesh_positive": all(
             int(row["mesh_element_count"]) > 0 and int(row["mesh_vertex_count"]) > 0
@@ -193,9 +192,7 @@ def run_acceptance(
     try:
         exit_code = worker_runner(str(store.root), job_id, native_cancel_enabled=True)
         state = store.read_state(job_id)
-        rows = read_spectral_rows(
-            directory / "spectral_rows.jsonl", spec, artifact_root=directory
-        )
+        rows = read_spectral_rows(directory / "spectral_rows.jsonl", spec, artifact_root=directory)
         stages = read_spectral_stage_plans(directory, spec)
     except Exception as exc:
         error = {"type": type(exc).__name__, "message": str(exc)[-1000:]}

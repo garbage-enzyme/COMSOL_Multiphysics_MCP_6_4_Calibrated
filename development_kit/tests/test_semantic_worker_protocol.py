@@ -950,7 +950,10 @@ import json, sys
 process_launch_events = []
 sys.addaudithook(
     lambda event, args: process_launch_events.append(event)
-    if event in {'os.system', 'os.startfile', 'os.spawn', 'os.posix_spawn', 'subprocess.Popen'} else None
+    if event in {
+        'os.system', 'os.startfile', 'os.spawn',
+        'os.posix_spawn', 'subprocess.Popen',
+    } else None
 )
 import src.knowledge.semantic_process
 for name in ('chromadb', 'torch', 'sentence_transformers', 'mph', 'psutil'):

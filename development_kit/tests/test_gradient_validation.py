@@ -88,8 +88,7 @@ def test_gradient_check_require_sign_false_tolerates_reported_sign_mismatch():
     assert _gradient_check_passed(checks, require_sign=False) is True
     assert _gradient_check_passed(checks, require_sign=True) is False
     assert (
-        _gradient_check_passed({**checks, "cosine_above_floor": False}, require_sign=False)
-        is False
+        _gradient_check_passed({**checks, "cosine_above_floor": False}, require_sign=False) is False
     )
 
 

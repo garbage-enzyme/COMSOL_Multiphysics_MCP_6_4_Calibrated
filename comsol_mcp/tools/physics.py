@@ -61,7 +61,7 @@ def _component_sdim(comp):
         geom_tags = list(comp.geom().tags())
         if geom_tags:
             return str(comp.geom(geom_tags[0]).getSDim())
-    except Exception:
+    except Exception:  # noqa: S110 - spatial dimension falls back to the 3D default
         pass
     return "3"
 
@@ -169,11 +169,15 @@ def add_boundary_condition(
         try:
             feature_list.remove(tag)
         except Exception:
-            return {"success": False, "error": "Boundary setup failed and rollback was incomplete.", "rolled_back": False}
+            return {
+                "success": False,
+                "error": "Boundary setup failed and rollback was incomplete.",
+                "rolled_back": False,
+            }
         return {"success": False, "error": "Boundary setup failed.", "rolled_back": True}
     try:
         feature.label(f"{boundary_condition} (Boundaries {boundaries})")
-    except Exception:
+    except Exception:  # noqa: S110 - labeling is cosmetic and must not fail setup
         pass
 
     result = {
@@ -203,8 +207,7 @@ def add_domain_feature(
     """Create a domain feature using its owning component's dimension."""
     try:
         domains = [
-            strict_json_integer(value, "domain_selection", minimum=1)
-            for value in domain_selection
+            strict_json_integer(value, "domain_selection", minimum=1) for value in domain_selection
         ]
         if not domains:
             raise ValueError("domain_selection must not be empty")
@@ -438,14 +441,10 @@ def add_multiphysics_coupling(
     dimension = int(_component_sdim(owner))
     coupling = coupling_list.create(tag, coupling_type, dimension)
     try:
-        for property_name, physics_tag in zip(
-            reference_properties, resolved, strict=True
-        ):
+        for property_name, physics_tag in zip(reference_properties, resolved, strict=True):
             coupling.set(property_name, physics_tag)
             if str(coupling.getString(property_name)) != physics_tag:
-                raise ValueError(
-                    f"Multiphysics reference readback mismatch: {property_name}"
-                )
+                raise ValueError(f"Multiphysics reference readback mismatch: {property_name}")
     except Exception:
         try:
             coupling_list.remove(tag)
@@ -589,9 +588,7 @@ def setup_heat_boundaries(
                 feature_prefix=prefix,
             )
             if not result["success"]:
-                return _rollback_composite_features(
-                    model, physics_name, created_tags, result
-                )
+                return _rollback_composite_features(model, physics_name, created_tags, result)
             created_tags.append(result["boundary_condition"]["tag"])
             configured[key].append(
                 {
@@ -701,9 +698,7 @@ def add_physics_interface(
         "success": True,
         "physics": {
             "name": (
-                str(physics_java.label())
-                if hasattr(physics_java, "label")
-                else interface_type
+                str(physics_java.label()) if hasattr(physics_java, "label") else interface_type
             ),
             "type": interface_type,
             "requested_type": physics_type,
@@ -724,10 +719,7 @@ def add_electrostatics_interface(
     """Create Electrostatics and optional dielectric nodes as one transaction."""
     try:
         domains = (
-            [
-                strict_json_integer(value, "domain_numbers", minimum=1)
-                for value in domain_numbers
-            ]
+            [strict_json_integer(value, "domain_numbers", minimum=1) for value in domain_numbers]
             if domain_numbers is not None
             else []
         )
@@ -763,9 +755,7 @@ def add_electrostatics_interface(
     physics_created = False
     material_created = False
     try:
-        physics_java = comp.physics().create(
-            "es", "Electrostatics", _component_sdim(comp)
-        )
+        physics_java = comp.physics().create("es", "Electrostatics", _component_sdim(comp))
         physics_created = True
         if domain_selection:
             physics_java.selection().set(domain_selection)
@@ -930,15 +920,15 @@ PHYSICS_INTERFACES = {
 
 def register_physics_tools(mcp: MCPServer) -> None:
     """Register physics tools with the MCP server."""
-    
+
     @mcp.tool()
     def physics_list(model_name: Optional[str] = None) -> dict:
         """
         List all physics interfaces defined in a model.
-        
+
         Args:
             model_name: Model name (default: current model)
-        
+
         Returns:
             List of physics interface names
         """
@@ -946,13 +936,13 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             physics = model.physics()
             multiphysics = model.multiphysics()
-            
+
             return {
                 "success": True,
                 "physics": physics,
@@ -962,12 +952,12 @@ def register_physics_tools(mcp: MCPServer) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to list physics: {str(e)}"}
-    
+
     @mcp.tool()
     def physics_get_available() -> dict:
         """
         Get a list of available physics interfaces organized by category.
-        
+
         Returns:
             Dictionary of physics categories and their interfaces
         """
@@ -976,12 +966,10 @@ def register_physics_tools(mcp: MCPServer) -> None:
             "interfaces": PHYSICS_INTERFACES,
             "note": "Interface identifiers (in parentheses) are used when adding physics.",
         }
-    
+
     @mcp.tool()
     def physics_add(
-        physics_type: str,
-        component_name: Optional[str] = None,
-        model_name: Optional[str] = None
+        physics_type: str, component_name: Optional[str] = None, model_name: Optional[str] = None
     ) -> dict:
         """
         Add a physics interface to the model.
@@ -1005,7 +993,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
 
         try:
@@ -1016,13 +1004,13 @@ def register_physics_tools(mcp: MCPServer) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to add physics: {str(e)}"}
-    
+
     @mcp.tool()
     def physics_add_electrostatics(
         domain_selection: Optional[str] = None,
         relpermittivity: Optional[float] = None,
         domain_numbers: Optional[Sequence[int]] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Add Electrostatics physics interface for electric field analysis.
@@ -1047,7 +1035,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
 
         try:
@@ -1059,11 +1047,10 @@ def register_physics_tools(mcp: MCPServer) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to add Electrostatics: {str(e)}"}
-    
+
     @mcp.tool()
     def physics_add_solid_mechanics(
-        domain_selection: Optional[str] = None,
-        model_name: Optional[str] = None
+        domain_selection: Optional[str] = None, model_name: Optional[str] = None
     ) -> dict:
         """
         Add Solid Mechanics physics for structural analysis.
@@ -1079,7 +1066,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
 
         try:
@@ -1090,11 +1077,10 @@ def register_physics_tools(mcp: MCPServer) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to add Solid Mechanics: {str(e)}"}
-    
+
     @mcp.tool()
     def physics_add_heat_transfer(
-        domain_selection: Optional[str] = None,
-        model_name: Optional[str] = None
+        domain_selection: Optional[str] = None, model_name: Optional[str] = None
     ) -> dict:
         """
         Add Heat Transfer physics for thermal analysis.
@@ -1110,7 +1096,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
 
         try:
@@ -1121,11 +1107,10 @@ def register_physics_tools(mcp: MCPServer) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to add Heat Transfer: {str(e)}"}
-    
+
     @mcp.tool()
     def physics_add_laminar_flow(
-        domain_selection: Optional[str] = None,
-        model_name: Optional[str] = None
+        domain_selection: Optional[str] = None, model_name: Optional[str] = None
     ) -> dict:
         """
         Add Laminar Flow physics for fluid dynamics.
@@ -1141,7 +1126,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
 
         try:
@@ -1160,7 +1145,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
         domain_selection: Sequence[int],
         properties: Optional[dict] = None,
         feature_tag: Optional[str] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Add a domain feature (e.g. ChargeConservation) to a physics interface.
@@ -1191,7 +1176,10 @@ def register_physics_tools(mcp: MCPServer) -> None:
         """
         model = session_manager.get_model(model_name)
         if model is None:
-            return {"success": False, "error": f"Model not found: {model_name or 'no current model'}"}
+            return {
+                "success": False,
+                "error": f"Model not found: {model_name or 'no current model'}",
+            }
 
         try:
             return add_domain_feature(
@@ -1211,7 +1199,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
         boundary_condition: str,
         boundary_selection: Sequence[int],
         properties: Optional[dict] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Configure a boundary condition for a physics interface.
@@ -1248,14 +1236,12 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
 
         properties = properties or {}
 
         try:
-            jm = model.java
-
             return add_boundary_condition(
                 model,
                 physics_name,
@@ -1265,14 +1251,14 @@ def register_physics_tools(mcp: MCPServer) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to configure boundary: {str(e)}"}
-    
+
     @mcp.tool()
     def physics_set_material(
         physics_name: str,
         material_name: str,
         domain_selection: Optional[Sequence[int]] = None,
         properties: Optional[dict] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Assign a material to physics domains.
@@ -1303,7 +1289,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
 
         try:
@@ -1316,25 +1302,23 @@ def register_physics_tools(mcp: MCPServer) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to set material: {str(e)}"}
-    
+
     @mcp.tool()
     def multiphysics_add(
-        coupling_type: str,
-        physics_list: Sequence[str],
-        model_name: Optional[str] = None
+        coupling_type: str, physics_list: Sequence[str], model_name: Optional[str] = None
     ) -> dict:
         """
         Add a multiphysics coupling between physics interfaces.
-        
+
         Supported coupling types and required physics_list order:
         - "ThermalExpansion": Solid Mechanics, then Heat Transfer
         - "ElectromagneticHeatSource": electromagnetic heating, then Heat Transfer
-        
+
         Args:
             coupling_type: Type of multiphysics coupling
             physics_list: Names of physics interfaces to couple
             model_name: Model name (default: current model)
-        
+
         Returns:
             Created coupling info
         """
@@ -1342,9 +1326,9 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return add_multiphysics_coupling(
                 model,
@@ -1353,19 +1337,16 @@ def register_physics_tools(mcp: MCPServer) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to add multiphysics: {str(e)}"}
-    
+
     @mcp.tool()
-    def physics_list_features(
-        physics_name: str,
-        model_name: Optional[str] = None
-    ) -> dict:
+    def physics_list_features(physics_name: str, model_name: Optional[str] = None) -> dict:
         """
         List all features (boundary conditions, domain settings) in a physics interface.
-        
+
         Args:
             physics_name: Name of the physics interface
             model_name: Model name (default: current model)
-        
+
         Returns:
             List of physics features
         """
@@ -1373,26 +1354,23 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return list_physics_features(model, physics_name)
         except Exception as e:
             return {"success": False, "error": f"Failed to list features: {str(e)}"}
-    
+
     @mcp.tool()
-    def physics_remove(
-        physics_name: str,
-        model_name: Optional[str] = None
-    ) -> dict:
+    def physics_remove(physics_name: str, model_name: Optional[str] = None) -> dict:
         """
         Remove a physics interface from the model.
-        
+
         Args:
             physics_name: Name of the physics interface to remove
             model_name: Model name (default: current model)
-        
+
         Returns:
             Removal confirmation
         """
@@ -1400,19 +1378,19 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return remove_physics_interface(model, physics_name)
         except Exception as e:
             return {"success": False, "error": f"Failed to remove physics: {str(e)}"}
-    
+
     @mcp.tool()
     def geometry_get_boundaries(
         geometry_name: Optional[str] = None,
         component_name: str = "comp1",
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Get all boundaries from a geometry with their properties.
@@ -1432,11 +1410,12 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
 
         try:
             import jpype as _jpype
+
             jm = model.java
 
             comp = jm.component(component_name)
@@ -1504,31 +1483,31 @@ def register_physics_tools(mcp: MCPServer) -> None:
                 "total_domains": ndomain,
                 "boundaries": boundaries,
                 "hint": "Use 'normal' to identify faces (e.g. z=0 face has normal [0,0,-1]); "
-                        "use 'center' to confirm by coordinate. Then set BCs via physics_configure_boundary.",
+                "use 'center' to confirm by coordinate. Then set BCs via "
+                "physics_configure_boundary.",
             }
             if bbox is not None:
                 result["bounding_box"] = bbox
             return result
         except Exception as e:
             return {"success": False, "error": f"Failed to get boundaries: {str(e)}"}
-    
+
     @mcp.tool()
     def physics_interactive_setup_flow(
-        physics_name: str = "Laminar Flow",
-        model_name: Optional[str] = None
+        physics_name: str = "Laminar Flow", model_name: Optional[str] = None
     ) -> dict:
         """
         Interactive setup wizard for Laminar Flow boundary conditions.
-        
+
         This tool helps identify and configure flow boundary conditions:
         1. Lists all available boundaries
         2. Prompts user to select inlet, outlet, and wall boundaries
         3. Configures appropriate boundary conditions
-        
+
         Args:
             physics_name: Name of the Laminar Flow physics interface
             model_name: Model name (default: current model)
-        
+
         Returns:
             Boundary information and setup instructions
         """
@@ -1536,9 +1515,9 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             # Get geometry boundaries
             boundaries_info = geometry_get_boundaries(
@@ -1547,7 +1526,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
             )
             if not boundaries_info.get("success"):
                 return boundaries_info
-            
+
             return {
                 "success": True,
                 "message": "Interactive Flow Setup - Please specify boundaries",
@@ -1565,14 +1544,23 @@ def register_physics_tools(mcp: MCPServer) -> None:
                     "Symmetry": "Symmetry plane",
                 },
                 "example_usage": {
-                    "inlet": "physics_configure_boundary(physics_name='Laminar Flow', boundary_condition='InletBoundary', boundary_selection=[1, 2], properties={'U0': '1[mm/s]'})",
-                    "outlet": "physics_configure_boundary(physics_name='Laminar Flow', boundary_condition='OutletBoundary', boundary_selection=[3])",
+                    "inlet": (
+                        "physics_configure_boundary(physics_name='Laminar Flow', "
+                        "boundary_condition='InletBoundary', boundary_selection=[1, 2], "
+                        "properties={'U0': '1[mm/s]'})"
+                    ),
+                    "outlet": (
+                        "physics_configure_boundary(physics_name='Laminar Flow', "
+                        "boundary_condition='OutletBoundary', boundary_selection=[3])"
+                    ),
                 },
-                "next_step": "Please tell me which boundary numbers to use for inlet(s) and outlet(s)",
+                "next_step": (
+                    "Please tell me which boundary numbers to use for inlet(s) and outlet(s)"
+                ),
             }
         except Exception as e:
             return {"success": False, "error": f"Interactive setup failed: {str(e)}"}
-    
+
     @mcp.tool()
     def physics_setup_flow_boundaries(
         physics_name: str,
@@ -1580,14 +1568,14 @@ def register_physics_tools(mcp: MCPServer) -> None:
         outlet_boundaries: Sequence[int],
         inlet_velocity: str = "1[mm/s]",
         outlet_pressure: str = "0",
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Setup Laminar Flow boundary conditions with specified boundaries.
-        
+
         This tool configures inlet velocity and outlet pressure boundary conditions
         for a fluid flow simulation.
-        
+
         Args:
             physics_name: Name of the Laminar Flow physics interface
             inlet_boundaries: List of boundary numbers for inlets
@@ -1595,7 +1583,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
             inlet_velocity: Inlet velocity expression (default: "1[mm/s]")
             outlet_pressure: Outlet pressure expression (default: "0")
             model_name: Model name (default: current model)
-        
+
         Returns:
             Configuration confirmation
         """
@@ -1603,9 +1591,9 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return setup_flow_boundaries(
                 model,
@@ -1620,21 +1608,20 @@ def register_physics_tools(mcp: MCPServer) -> None:
 
     @mcp.tool()
     def physics_interactive_setup_heat(
-        physics_name: str = "Heat Transfer in Solids",
-        model_name: Optional[str] = None
+        physics_name: str = "Heat Transfer in Solids", model_name: Optional[str] = None
     ) -> dict:
         """
         Interactive setup wizard for Heat Transfer boundary conditions.
-        
+
         This tool helps identify and configure thermal boundary conditions:
         1. Lists all available boundaries
         2. Shows typical boundary condition types for thermal analysis
         3. Provides setup instructions
-        
+
         Args:
             physics_name: Name of the Heat Transfer physics interface
             model_name: Model name (default: current model)
-        
+
         Returns:
             Boundary information and setup instructions
         """
@@ -1642,9 +1629,9 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             boundaries_info = geometry_get_boundaries(
                 geometry_name=None,
@@ -1652,7 +1639,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
             )
             if not boundaries_info.get("success"):
                 return boundaries_info
-            
+
             return {
                 "success": True,
                 "message": "Interactive Heat Transfer Setup",
@@ -1663,16 +1650,22 @@ def register_physics_tools(mcp: MCPServer) -> None:
                     "HeatFluxBoundary": "Prescribed heat flux (heat source)",
                     "ConvectiveHeatFlux": "Convection cooling/heating",
                     "Symmetry": "Symmetry plane (adiabatic)",
-                    "ThermalInsulation": "Thermal insulation (default)"
+                    "ThermalInsulation": "Thermal insulation (default)",
                 },
                 "typical_setup": {
                     "heat_source": "Use HeatFluxBoundary with q0 parameter (W/m^2)",
                     "heat_sink": "Use TemperatureBoundary with T0 parameter (K or degC)",
-                    "convection": "Use ConvectiveHeatFlux with h and Text parameters"
+                    "convection": "Use ConvectiveHeatFlux with h and Text parameters",
                 },
                 "example_usage": {
-                    "heat_source": "physics_setup_heat_boundaries(physics_name='Heat Transfer in Solids', heat_flux_boundaries=[1, 2], heat_flux_value='1e6[W/m^2]')",
-                    "heat_sink": "physics_setup_heat_boundaries(physics_name='Heat Transfer in Solids', temperature_boundaries=[3], temperature_value='293.15[K]')"
+                    "heat_source": (
+                        "physics_setup_heat_boundaries(physics_name='Heat Transfer in Solids', "
+                        "heat_flux_boundaries=[1, 2], heat_flux_value='1e6[W/m^2]')"
+                    ),
+                    "heat_sink": (
+                        "physics_setup_heat_boundaries(physics_name='Heat Transfer in Solids', "
+                        "temperature_boundaries=[3], temperature_value='293.15[K]')"
+                    ),
                 },
                 "next_step": "Tell me which boundary numbers to use for heat source and heat sink",
             }
@@ -1689,16 +1682,16 @@ def register_physics_tools(mcp: MCPServer) -> None:
         temperature_value: str = "293.15[K]",
         convection_coeff: str = "10[W/(m^2*K)]",
         ambient_temp: str = "293.15[K]",
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Setup Heat Transfer boundary conditions with specified boundaries.
-        
+
         This tool configures thermal boundary conditions for heat transfer simulation:
         - Heat flux boundaries (heat sources)
         - Temperature boundaries (heat sinks)
         - Convective cooling/heating boundaries
-        
+
         Args:
             physics_name: Name of the Heat Transfer physics interface
             heat_flux_boundaries: List of boundary numbers for heat flux
@@ -1709,7 +1702,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
             convection_coeff: Convection coefficient (default: "10[W/(m^2*K)]")
             ambient_temp: Ambient temperature for convection (default: "293.15[K]")
             model_name: Model name (default: current model)
-        
+
         Returns:
             Configuration confirmation
         """
@@ -1717,7 +1710,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
 
         heat_flux_boundaries = heat_flux_boundaries or []
@@ -1745,7 +1738,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
         boundary_condition_type: str,
         boundary_numbers: Sequence[int],
         properties: Optional[dict] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Generic boundary condition setup with boundary selection.
@@ -1786,7 +1779,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
 
         properties = properties or {}
@@ -1801,5 +1794,3 @@ def register_physics_tools(mcp: MCPServer) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to create boundary condition: {str(e)}"}
-
-

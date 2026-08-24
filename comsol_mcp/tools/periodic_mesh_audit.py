@@ -399,9 +399,7 @@ def collect_periodic_mesh_audit(
                     _recipe_for_group(
                         group,
                         features,
-                        feature_count_truncated=bool(
-                            mesh_sequence.get("feature_count_truncated")
-                        ),
+                        feature_count_truncated=bool(mesh_sequence.get("feature_count_truncated")),
                     )
                     for group in groups
                 ]
@@ -437,7 +435,10 @@ def collect_periodic_mesh_audit(
         "actionable_mismatches": actionable,
         "limitations": [
             "Read-only inspection does not run geometry or mesh features.",
-            "A present recipe or previously built mesh does not prove current node-to-node equality.",
+            (
+                "A present recipe or previously built mesh does not prove current "
+                "node-to-node equality."
+            ),
             "Use the explicit clone-only native mesh smoke for native build evidence.",
         ],
         "preflight_evidence": preflight["evidence"],
@@ -553,7 +554,10 @@ def run_clone_mesh_smoke(
         "compatibility_assessment": (
             "native_mesh_smoke_passed" if success else "native_mesh_smoke_failed"
         ),
-        "limitation": "A native mesh build is stronger than recipe inspection but is not an explicit node-by-node equality export.",
+        "limitation": (
+            "A native mesh build is stronger than recipe inspection but is not "
+            "an explicit node-by-node equality export."
+        ),
     }
 
 

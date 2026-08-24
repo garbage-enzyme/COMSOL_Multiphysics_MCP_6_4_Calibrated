@@ -6,11 +6,11 @@ import hashlib
 import heapq
 import math
 import os
-from pathlib import Path
 import threading
 import time
-from typing import Any, Callable, Mapping
 import uuid
+from pathlib import Path
+from typing import Any, Callable, Mapping
 
 from comsol_mcp.durable import (
     atomic_write_json,
@@ -39,7 +39,6 @@ from .preflight import (
     normalize_shared_preflight_snapshot,
 )
 from .process_probe import collect_shared_preflight_snapshot
-
 
 MAX_SERVER_MODELS = 32
 MAX_UNLOCK_REASON_CHARACTERS = 512
@@ -96,18 +95,18 @@ def _default_model_inventory_reader(client: Any) -> list[dict[str, Any]]:
         label = str(java.label())
         raw_path = java.getFilePath()
         path = None if raw_path is None else str(raw_path) or None
-        inventory.append({
-            "tag": tag,
-            "label": label,
-            "file_path": path,
-            "unsaved": path is None,
-        })
+        inventory.append(
+            {
+                "tag": tag,
+                "label": label,
+                "file_path": path,
+                "unsaved": path is None,
+            }
+        )
     return inventory
 
 
-def _revision_json_value(
-    value: Any, remaining_items: list[int] | None = None
-) -> Any:
+def _revision_json_value(value: Any, remaining_items: list[int] | None = None) -> Any:
     if remaining_items is None:
         remaining_items = [MAX_REVISION_PROPERTY_ITEMS]
     remaining_items[0] -= 1
@@ -137,9 +136,7 @@ def _revision_json_value(
             raise ValueError("model-tree property contains an oversized collection")
         return [_revision_json_value(item, remaining_items) for item in value]
     if value.__class__.__module__.startswith("numpy") and hasattr(value, "tolist"):
-        if getattr(value, "size", MAX_REVISION_PROPERTY_ITEMS + 1) > (
-            MAX_REVISION_PROPERTY_ITEMS
-        ):
+        if getattr(value, "size", MAX_REVISION_PROPERTY_ITEMS + 1) > (MAX_REVISION_PROPERTY_ITEMS):
             raise ValueError("model-tree property contains an oversized array")
         return _revision_json_value(value.tolist(), remaining_items)
     if value.__class__.__module__.startswith("mph.") and hasattr(value, "tag"):
@@ -147,9 +144,7 @@ def _revision_json_value(
             "node_path": str(value),
             "node_tag": value.tag(),
         }
-    raise ValueError(
-        f"model-tree property type is unsupported: {type(value).__name__}"
-    )
+    raise ValueError(f"model-tree property type is unsupported: {type(value).__name__}")
 
 
 def _hash_revision_tree_group(
@@ -162,12 +157,9 @@ def _hash_revision_tree_group(
     state_digest = hashlib.sha256()
     root_children = root.children()
     if len(root_children) > remaining_nodes[0]:
-        raise ValueError(
-            f"model revision tree exceeds {MAX_REVISION_TREE_NODES} nodes"
-        )
+        raise ValueError(f"model revision tree exceeds {MAX_REVISION_TREE_NODES} nodes")
     nodes = [
-        ((str(node), node.tag() or ""), index, node)
-        for index, node in enumerate(root_children)
+        ((str(node), node.tag() or ""), index, node) for index, node in enumerate(root_children)
     ]
     heapq.heapify(nodes)
     sequence = len(nodes)
@@ -176,9 +168,7 @@ def _hash_revision_tree_group(
         _key, _sequence, node = heapq.heappop(nodes)
         remaining_nodes[0] -= 1
         if remaining_nodes[0] < 0:
-            raise ValueError(
-                f"model revision tree exceeds {MAX_REVISION_TREE_NODES} nodes"
-            )
+            raise ValueError(f"model revision tree exceeds {MAX_REVISION_TREE_NODES} nodes")
         path = str(node)
         structural = {
             "path": path,
@@ -196,19 +186,13 @@ def _hash_revision_tree_group(
             encoded = canonical_json_v1(record)
             remaining_bytes[0] -= len(encoded)
             if remaining_bytes[0] < 0:
-                raise ValueError(
-                    "model revision tree exceeds the bounded canonical byte budget"
-                )
+                raise ValueError("model revision tree exceeds the bounded canonical byte budget")
             digest.update(len(encoded).to_bytes(8, "big"))
             digest.update(encoded)
         count += 1
-        children = sorted(
-            node.children(), key=lambda child: (str(child), child.tag() or "")
-        )
+        children = sorted(node.children(), key=lambda child: (str(child), child.tag() or ""))
         if len(children) > remaining_nodes[0]:
-            raise ValueError(
-                f"model revision tree exceeds {MAX_REVISION_TREE_NODES} nodes"
-            )
+            raise ValueError(f"model revision tree exceeds {MAX_REVISION_TREE_NODES} nodes")
         for child in children:
             heapq.heappush(nodes, ((str(child), child.tag() or ""), sequence, child))
             sequence += 1
@@ -221,10 +205,7 @@ def _hash_revision_tree_group(
 def _default_model_revision_reader(
     client: Any, model_tag: str
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    matches = [
-        model for model in list(client.models())
-        if str(model.java.tag()) == model_tag
-    ]
+    matches = [model for model in list(client.models()) if str(model.java.tag()) == model_tag]
     if len(matches) != 1:
         raise ValueError("adopted server model is no longer uniquely available")
     model = matches[0]
@@ -234,20 +215,17 @@ def _default_model_revision_reader(
         remaining_nodes = [MAX_REVISION_TREE_NODES]
         remaining_bytes = [MAX_REVISION_TREE_BYTES]
         for group in REVISION_TREE_GROUPS:
-            structural_groups[group], state_groups[group] = (
-                _hash_revision_tree_group(
-                    model / group,
-                    remaining_nodes=remaining_nodes,
-                    remaining_bytes=remaining_bytes,
-                )
+            structural_groups[group], state_groups[group] = _hash_revision_tree_group(
+                model / group,
+                remaining_nodes=remaining_nodes,
+                remaining_bytes=remaining_bytes,
             )
         parameters = {
             str(name): str(value)
             for name, value in sorted(model.parameters(evaluate=False).items())
         }
         descriptions = {
-            str(name): str(value)
-            for name, value in sorted(model.descriptions().items())
+            str(name): str(value) for name, value in sorted(model.descriptions().items())
         }
         return (
             {"model_tree": structural_groups},
@@ -263,10 +241,7 @@ def _default_model_revision_reader(
         "datasets": sorted(str(value) for value in model.datasets()),
     }
     state = {
-        "parameters": {
-            str(name): str(value)
-            for name, value in sorted(model.parameters().items())
-        }
+        "parameters": {str(name): str(value) for name, value in sorted(model.parameters().items())}
     }
     return structural, state
 
@@ -277,12 +252,10 @@ def _default_mcp_process_identity() -> dict[str, Any]:
     process = psutil.Process(os.getpid())
     try:
         command = list(process.cmdline())
-    except (psutil.AccessDenied, psutil.ZombieProcess):
+    except psutil.AccessDenied, psutil.ZombieProcess:
         command = []
     signature = hashlib.sha256(
-        "\0".join(str(part) for part in command).encode(
-            "utf-8", errors="replace"
-        )
+        "\0".join(str(part) for part in command).encode("utf-8", errors="replace")
     ).hexdigest()
     return {
         "pid": process.pid,
@@ -331,10 +304,7 @@ def _default_snapshot_target_factory(model_tag: str) -> Path:
 
 
 def _default_save_copy_writer(client: Any, model_tag: str, target: Path) -> None:
-    matches = [
-        model for model in list(client.models())
-        if str(model.java.tag()) == model_tag
-    ]
+    matches = [model for model in list(client.models()) if str(model.java.tag()) == model_tag]
     if len(matches) != 1:
         raise ValueError("adopted server model is no longer uniquely available")
     matches[0].java.save(str(target), True)
@@ -354,7 +324,9 @@ class SharedSessionManager:
         ownership_factory: Callable[[], Any] = _default_ownership_factory,
         client_factory: Callable[[str, int], Any] = _default_client_factory,
         client_version_reader: Callable[[Any], str] = _default_client_version_reader,
-        model_inventory_reader: Callable[[Any], list[dict[str, Any]]] = _default_model_inventory_reader,
+        model_inventory_reader: Callable[
+            [Any], list[dict[str, Any]]
+        ] = _default_model_inventory_reader,
         model_revision_reader: Callable[
             [Any, str], tuple[dict[str, Any], dict[str, Any]]
         ] = _default_model_revision_reader,
@@ -362,13 +334,9 @@ class SharedSessionManager:
             [], Mapping[str, Any]
         ] = _default_mcp_process_identity,
         snapshot_target_factory: Callable[[str], Path] = _default_snapshot_target_factory,
-        save_copy_writer: Callable[
-            [Any, str, Path], None
-        ] = _default_save_copy_writer,
+        save_copy_writer: Callable[[Any, str, Path], None] = _default_save_copy_writer,
         save_copy_writer_is_bounded: bool = False,
-        manifest_writer: Callable[
-            [Path, dict[str, Any]], None
-        ] = _default_manifest_writer,
+        manifest_writer: Callable[[Path, dict[str, Any]], None] = _default_manifest_writer,
         clock: Callable[[], float] = time.time,
     ):
         self._snapshot_provider = snapshot_provider
@@ -442,46 +410,41 @@ class SharedSessionManager:
     def _matches(selector, model) -> bool:
         return (
             model.tag == selector.tag
-            and (
-                selector.expected_label is None
-                or model.label == selector.expected_label
-            )
+            and (selector.expected_label is None or model.label == selector.expected_label)
             and (
                 selector.expected_file_path is None
                 or model.file_path == selector.expected_file_path
             )
-            and (
-                selector.expected_unsaved is None
-                or model.unsaved is selector.expected_unsaved
-            )
+            and (selector.expected_unsaved is None or model.unsaved is selector.expected_unsaved)
         )
 
     @staticmethod
     def _server_identity_from_snapshot(endpoint, snapshot):
         normalized = normalize_shared_preflight_snapshot(snapshot)
-        listener = summarize_shared_listener_bindings(
-            normalized["listeners"], endpoint=endpoint
-        )
+        listener = summarize_shared_listener_bindings(normalized["listeners"], endpoint=endpoint)
         if not listener["stable"]:
             raise ValueError("declared listener is no longer unique")
         pid = listener["owner_pid"]
         server = next(
             (
-                item for item in normalized["processes"]
+                item
+                for item in normalized["processes"]
                 if item["pid"] == pid and item["kind"] == "comsol_server"
             ),
             None,
         )
         if server is None:
             raise ValueError("declared listener owner is not the exact COMSOL Server")
-        return normalize_attached_server_identity({
-            "endpoint": {"host": endpoint.host, "port": endpoint.port},
-            "server_pid": pid,
-            "server_process_create_time": server["create_time"],
-            "server_command_signature": server["command_signature"],
-            "listener_bind_scope": listener["bind_scope"],
-            "listener_observed_at_epoch": normalized["observed_at_epoch"],
-        })
+        return normalize_attached_server_identity(
+            {
+                "endpoint": {"host": endpoint.host, "port": endpoint.port},
+                "server_pid": pid,
+                "server_process_create_time": server["create_time"],
+                "server_command_signature": server["command_signature"],
+                "listener_bind_scope": listener["bind_scope"],
+                "listener_observed_at_epoch": normalized["observed_at_epoch"],
+            }
+        )
 
     def attach(
         self,
@@ -552,17 +515,12 @@ class SharedSessionManager:
                     if item["kind"] == "comsol_server"
                 }
                 if len(server_versions) != 1:
-                    raise RuntimeError(
-                        "post-connect Server file version is not unique"
-                    )
+                    raise RuntimeError("post-connect Server file version is not unique")
                 clientapi_version, version_parts = normalize_comsol_version_readback(
                     clientapi_raw_version,
                     expected_file_version=next(iter(server_versions)),
                 )
-                if (
-                    version_parts is None
-                    or version_parts[:3] != ACCEPTED_RELEASE_LINE
-                ):
+                if version_parts is None or version_parts[:3] != ACCEPTED_RELEASE_LINE:
                     raise RuntimeError(
                         "post-connect COMSOL version is outside the accepted 6.4.0.* line"
                     )
@@ -570,14 +528,10 @@ class SharedSessionManager:
                     normalized_request.endpoint, self._snapshot_provider()
                 )
                 if server_after.identity_sha256 != server_identity.identity_sha256:
-                    raise RuntimeError(
-                        "attached server identity changed after client connection"
-                    )
+                    raise RuntimeError("attached server identity changed after client connection")
                 version_warnings = []
                 if server_versions != {clientapi_version}:
-                    version_warnings.append(
-                        "same_accepted_release_line_build_difference"
-                    )
+                    version_warnings.append("same_accepted_release_line_build_difference")
                 post_connect = {
                     "clientapi_raw_version": clientapi_raw_version,
                     "clientapi_comsol_version": clientapi_version,
@@ -585,9 +539,7 @@ class SharedSessionManager:
                     "server_identity_verified": True,
                     "warnings": version_warnings,
                 }
-                models, inventory_sha256 = self._inventory(
-                    self._model_inventory_reader, client
-                )
+                models, inventory_sha256 = self._inventory(self._model_inventory_reader, client)
             except Exception as exc:
                 disconnected = client is None
                 if client is not None:
@@ -603,9 +555,7 @@ class SharedSessionManager:
                         release = {
                             "success": False,
                             "released": False,
-                            "error": (
-                                f"{type(cleanup_exc).__name__}: {cleanup_exc}"
-                            ),
+                            "error": (f"{type(cleanup_exc).__name__}: {cleanup_exc}"),
                         }
                 else:
                     release = {
@@ -613,9 +563,7 @@ class SharedSessionManager:
                         "released": False,
                         "error": "Client disconnect could not be verified.",
                     }
-                lease_released = bool(
-                    release.get("success") and not ownership.lease_path.exists()
-                )
+                lease_released = bool(release.get("success") and not ownership.lease_path.exists())
                 if not disconnected or not lease_released:
                     self._client = client
                     self._ownership = ownership
@@ -687,20 +635,18 @@ class SharedSessionManager:
                     )
                 ),
                 "server_identity_sha256": (
-                    None
-                    if self._server_identity is None
-                    else self._server_identity.identity_sha256
+                    None if self._server_identity is None else self._server_identity.identity_sha256
                 ),
                 "session_acquisition_id": self._session_acquisition_id,
                 "model_inventory_sha256": self._inventory_sha256,
                 "ownership": (
-                    "external_user_owned_server"
-                    if self._ownership is not None
-                    else None
+                    "external_user_owned_server" if self._ownership is not None else None
                 ),
                 "can_start_comsol": False,
                 "model_lock": (
-                    None if self._model_lock is None else {
+                    None
+                    if self._model_lock is None
+                    else {
                         "lock_id": self._model_lock.lock_id,
                         "lock_sha256": self._model_lock.lock_sha256,
                         "revision_sha256": self._model_lock.revision["revision_sha256"],
@@ -761,10 +707,7 @@ class SharedSessionManager:
                 models, inventory_sha256 = self._inventory(
                     self._model_inventory_reader, self._client
                 )
-                matches = [
-                    model for model in models
-                    if self._matches(normalized_selector, model)
-                ]
+                matches = [model for model in models if self._matches(normalized_selector, model)]
             except Exception as exc:
                 return {
                     "success": False,
@@ -774,10 +717,7 @@ class SharedSessionManager:
             if len(matches) != 1:
                 return {
                     "success": False,
-                    "state": (
-                        "no_server_models" if not models
-                        else "model_selector_not_unique"
-                    ),
+                    "state": ("no_server_models" if not models else "model_selector_not_unique"),
                     "model_count": len(models),
                     "match_count": len(matches),
                     "model_inventory_sha256": inventory_sha256,
@@ -817,18 +757,13 @@ class SharedSessionManager:
                 models, _inventory_sha256 = self._inventory(
                     self._model_inventory_reader, self._client
                 )
-                matches = [
-                    model for model in models
-                    if model.tag == self._selected_model.tag
-                ]
+                matches = [model for model in models if model.tag == self._selected_model.tag]
                 if len(matches) != 1:
                     raise RuntimeError("adopted model tag is no longer unique")
                 current_model = matches[0]
                 if current_model.identity_sha256 != self._selected_model.identity_sha256:
                     raise RuntimeError("adopted model identity changed before model lock")
-                structural, state = self._model_revision_reader(
-                    self._client, current_model.tag
-                )
+                structural, state = self._model_revision_reader(self._client, current_model.tag)
                 revision = build_shared_model_revision(
                     current_model,
                     sequence=0,
@@ -880,10 +815,7 @@ class SharedSessionManager:
                 models, _inventory_sha256 = self._inventory(
                     self._model_inventory_reader, self._client
                 )
-                matches = [
-                    model for model in models
-                    if model.tag == self._selected_model.tag
-                ]
+                matches = [model for model in models if model.tag == self._selected_model.tag]
                 if len(matches) != 1:
                     changed_fields.append("model_tag")
                 else:
@@ -900,9 +832,15 @@ class SharedSessionManager:
                             structural_readback=structural,
                             state_readback=state,
                         )
-                        if current_revision.structural_sha256 != self._model_lock.revision["structural_sha256"]:
+                        if (
+                            current_revision.structural_sha256
+                            != self._model_lock.revision["structural_sha256"]
+                        ):
                             changed_fields.append("structural_readback")
-                        if current_revision.readback_sha256 != self._model_lock.revision["readback_sha256"]:
+                        if (
+                            current_revision.readback_sha256
+                            != self._model_lock.revision["readback_sha256"]
+                        ):
                             changed_fields.append("state_readback")
             except Exception as exc:
                 return {
@@ -920,9 +858,7 @@ class SharedSessionManager:
                 "revision_sha256": locked_revision_sha256,
             }
 
-    def unlock_model(
-        self, *, expected_lock_sha256: str, reason: str
-    ) -> dict[str, Any]:
+    def unlock_model(self, *, expected_lock_sha256: str, reason: str) -> dict[str, Any]:
         """Release only the MCP guard and retain one bounded audit record."""
         with self._lock:
             if self._model_lock is None:
@@ -989,9 +925,7 @@ class SharedSessionManager:
                 if manifest_path.exists():
                     raise FileExistsError("shared snapshot manifest already exists")
                 target_owned = True
-                self._save_copy_writer(
-                    self._client, self._selected_model.tag, target
-                )
+                self._save_copy_writer(self._client, self._selected_model.tag, target)
                 if not target.is_file():
                     raise RuntimeError("Save Copy did not create a snapshot file")
                 snapshot_size = target.stat().st_size
@@ -1005,9 +939,7 @@ class SharedSessionManager:
                 )
                 if not verified_after.get("success"):
                     raise RuntimeError("model identity or revision changed during Save Copy")
-                source = _verify_immutable_source(
-                    self._model_lock.immutable_source
-                )
+                source = _verify_immutable_source(self._model_lock.immutable_source)
                 snapshot_sha256 = _hash_file(target)
                 body = {
                     "schema_name": SHARED_MODEL_SNAPSHOT_SCHEMA,
@@ -1053,8 +985,7 @@ class SharedSessionManager:
                         artifact.unlink(missing_ok=True)
                     except Exception as cleanup_exc:
                         cleanup_errors.append(
-                            f"{artifact.name}: {type(cleanup_exc).__name__}: "
-                            f"{cleanup_exc}"
+                            f"{artifact.name}: {type(cleanup_exc).__name__}: {cleanup_exc}"
                         )
                 return {
                     "success": False,
@@ -1065,19 +996,13 @@ class SharedSessionManager:
                         target_owned and target is not None and target.is_file()
                     ),
                     "complete_manifest_exists": bool(
-                        manifest_owned
-                        and manifest_path is not None
-                        and manifest_path.is_file()
+                        manifest_owned and manifest_path is not None and manifest_path.is_file()
                     ),
                     "artifacts_removed": (
                         not cleanup_errors
+                        and not bool(target_owned and target is not None and target.exists())
                         and not bool(
-                            target_owned and target is not None and target.exists()
-                        )
-                        and not bool(
-                            manifest_owned
-                            and manifest_path is not None
-                            and manifest_path.exists()
+                            manifest_owned and manifest_path is not None and manifest_path.exists()
                         )
                     ),
                     "cleanup_errors": cleanup_errors,
@@ -1120,18 +1045,12 @@ class SharedSessionManager:
                     normalize_attached_execution_backend,
                 )
 
-                source = _verify_immutable_source(
-                    self._model_lock.immutable_source
-                )
+                source = _verify_immutable_source(self._model_lock.immutable_source)
                 if source is None:
-                    raise ValueError(
-                        "attached durable work requires an immutable source"
-                    )
+                    raise ValueError("attached durable work requires an immutable source")
                 requested_path = Path(source_model_path).expanduser().resolve()
                 declared_path = Path(source["path"]).expanduser().resolve()
-                if os.path.normcase(str(requested_path)) != os.path.normcase(
-                    str(declared_path)
-                ):
+                if os.path.normcase(str(requested_path)) != os.path.normcase(str(declared_path)):
                     raise ValueError(
                         "job source_model_path does not match the locked immutable source"
                     )
@@ -1222,9 +1141,7 @@ class SharedSessionManager:
             selector = {
                 "tag": model["tag"],
                 "expected_label": model["label"],
-                "expected_file_path": (
-                    None if model["unsaved"] else model["file_path"]
-                ),
+                "expected_file_path": (None if model["unsaved"] else model["file_path"]),
                 "expected_unsaved": True if model["unsaved"] else None,
             }
             adoption = self.adopt_model(selector)
@@ -1247,9 +1164,7 @@ class SharedSessionManager:
                 "server_identity_sha256": server["identity_sha256"],
                 "model_identity_sha256": model["identity_sha256"],
                 "model_lock_restored": False,
-                "next_action": (
-                    "lock the adopted model before further mutation or execution"
-                ),
+                "next_action": ("lock the adopted model before further mutation or execution"),
             }
 
     def detach(self) -> dict[str, Any]:
@@ -1305,9 +1220,7 @@ class SharedSessionManager:
                 return {
                     "success": False,
                     "state": "detach_cleanup_pending",
-                    "error": release.get(
-                        "error", "Attached lease release was not verified."
-                    ),
+                    "error": release.get("error", "Attached lease release was not verified."),
                     "client_disconnected": True,
                     "lease_released": False,
                     "detach_release": release,
@@ -1333,7 +1246,7 @@ class SharedSessionManager:
                     self._server_identity.endpoint, snapshot
                 )
                 listener_active = True
-            except (KeyError, TypeError, ValueError):
+            except KeyError, TypeError, ValueError:
                 server_after = None
                 listener_active = False
             outcome = evaluate_attached_detach(

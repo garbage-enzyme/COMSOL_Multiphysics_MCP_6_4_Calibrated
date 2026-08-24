@@ -168,9 +168,7 @@ def _readback(model: Any, selected_variables: list[str]) -> dict[str, Any]:
         },
         "wavelength_plist": str(wavelength.getString("plist")),
         "gradient_method": str(sensitivity.getString("gradientMethod")),
-        "variable_order": [
-            str(item) for item in list(sensitivity.getStringArray("pname"))
-        ],
+        "variable_order": [str(item) for item in list(sensitivity.getStringArray("pname"))],
         "variable_value_types": [
             str(item) for item in list(sensitivity.getStringArray("valuetype"))
         ],

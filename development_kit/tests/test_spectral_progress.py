@@ -423,9 +423,7 @@ def test_non_cap_expansion_stop_is_not_labeled_as_a_declared_cap(tmp_path):
 
     progress_module._expansion_plan = no_new_points
     try:
-        result = progress_module._action_after_completed_stage(
-            spec, plans, rows, artifacts
-        )
+        result = progress_module._action_after_completed_stage(spec, plans, rows, artifacts)
     finally:
         progress_module._expansion_plan = original
 

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import math
 import os
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 import psutil
@@ -18,7 +18,6 @@ from .process_control import (
     verify_absent,
 )
 from .store import JobStore, atomic_write_json, cancel_request_targets_attempt, process_identity
-
 
 _RESUMABLE_PHASES = {"terminate", "force_kill", "verifying"}
 _PROCESS_IDENTITY_FIELDS = ("pid", "process_create_time", "command_signature")
@@ -621,7 +620,10 @@ def run(
                 identity,
                 str(
                     captured.get("reason")
-                    or "worker exited before descendants were captured and no process-tree containment is proved"
+                    or (
+                        "worker exited before descendants were captured and no "
+                        "process-tree containment is proved"
+                    )
                 ),
             )
             return None

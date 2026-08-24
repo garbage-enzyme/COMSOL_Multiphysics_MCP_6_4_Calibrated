@@ -1207,7 +1207,7 @@ class SessionManager:
             self._initialize_model_revision(name, self._model_paths.get(name))
         try:
             self._ownership.heartbeat(model_path=str(model_path) if model_path else None)
-        except Exception:
+        except Exception:  # noqa: S110 - a failed heartbeat must not break activation
             pass
         return name
 
@@ -1355,7 +1355,7 @@ class SessionManager:
                     if self._current_model == name:
                         self._current_model = next(iter(self._models.keys()), None)
                 return True
-            except Exception:
+            except Exception:  # noqa: S110 - best-effort cleanup keeps close() truthful
                 pass
         return False
 

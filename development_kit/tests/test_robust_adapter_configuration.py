@@ -293,9 +293,9 @@ def test_merged_sensitivity_group_binds_to_selected_not_legacy_configured_tag():
     # solver; the merged-group gate must bind to the selection.
     value = _native_sensitivity_controls()
     value["linear_solver_tag"] = "i1"
-    assert normalize_robust_condition_controls(value)[
-        "sensitivity_merged_linear_solver_tag"
-    ] == "d1"
+    assert (
+        normalize_robust_condition_controls(value)["sensitivity_merged_linear_solver_tag"] == "d1"
+    )
 
 
 def test_merged_sensitivity_group_rejects_nonselected_direct_solver():

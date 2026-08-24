@@ -28,31 +28,70 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 _TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 _CAPABILITY_FIELDS = {
-    "schema_name", "schema_version", "client", "provider", "model",
-    "transport", "image_input", "supported_media_types", "max_images",
-    "max_total_bytes", "original_resolution_support",
-    "host_capability_confirmed", "delivery_confirmed", "delivered_artifacts",
-    "self_reported_image_input", "host_evidence", "calibration",
-    "scientific_review_eligible", "capability_state", "inspection_status",
+    "schema_name",
+    "schema_version",
+    "client",
+    "provider",
+    "model",
+    "transport",
+    "image_input",
+    "supported_media_types",
+    "max_images",
+    "max_total_bytes",
+    "original_resolution_support",
+    "host_capability_confirmed",
+    "delivery_confirmed",
+    "delivered_artifacts",
+    "self_reported_image_input",
+    "host_evidence",
+    "calibration",
+    "scientific_review_eligible",
+    "capability_state",
+    "inspection_status",
     "contract_sha256",
 }
 _HOST_EVIDENCE_FIELDS = {
-    "evidence_kind", "metadata_image_input", "transport_available",
-    "image_content_results_confirmed", "model_identity_confirmed",
+    "evidence_kind",
+    "metadata_image_input",
+    "transport_available",
+    "image_content_results_confirmed",
+    "model_identity_confirmed",
 }
 _CALIBRATION_FIELDS = {
-    "calibration_id", "artifact_sha256", "axis_direction_passed",
-    "labels_passed", "colorbar_order_passed", "shared_limits_passed",
-    "localized_feature_passed", "completed_at", "passed",
+    "calibration_id",
+    "artifact_sha256",
+    "axis_direction_passed",
+    "labels_passed",
+    "colorbar_order_passed",
+    "shared_limits_passed",
+    "localized_feature_passed",
+    "completed_at",
+    "passed",
 }
 _ARTIFACT_REF_FIELDS = {"artifact_id", "sha256"}
 _ARTIFACT_FIELDS = {
-    "artifact_id", "sha256", "media_type", "byte_count", "relative_path", "role",
+    "artifact_id",
+    "sha256",
+    "media_type",
+    "byte_count",
+    "relative_path",
+    "role",
 }
 _VIEW_FIELDS = {
-    "artifact_id", "slice_axis", "slice_value", "slice_unit", "grid_shape",
-    "x_range", "y_range", "coordinate_unit", "color_limits", "color_scale",
-    "quantity", "quantity_unit", "wavelength_m", "config_sha256",
+    "artifact_id",
+    "slice_axis",
+    "slice_value",
+    "slice_unit",
+    "grid_shape",
+    "x_range",
+    "y_range",
+    "coordinate_unit",
+    "color_limits",
+    "color_scale",
+    "quantity",
+    "quantity_unit",
+    "wavelength_m",
+    "config_sha256",
 }
 _SHARED_VIEW_FIELDS = (
     "slice_axis",
@@ -68,23 +107,49 @@ _SHARED_VIEW_FIELDS = (
     "quantity_unit",
 )
 _REQUEST_FIELDS = {
-    "schema_name", "schema_version", "request_id", "configuration_sha256",
-    "artifacts", "views", "required_artifact_ids", "numerical_summary",
-    "questions", "review_mode", "status", "contract_sha256",
+    "schema_name",
+    "schema_version",
+    "request_id",
+    "configuration_sha256",
+    "artifacts",
+    "views",
+    "required_artifact_ids",
+    "numerical_summary",
+    "questions",
+    "review_mode",
+    "status",
+    "contract_sha256",
 }
 _FINDING_FIELDS = {"question", "observation", "confidence", "uncertainty"}
 _REVIEWER_FIELDS = {"client", "provider", "model", "session_id"}
 _RECEIPT_FIELDS = {
-    "schema_name", "schema_version", "review_id", "request_sha256",
-    "capability_sha256", "reviewer", "received_artifacts",
-    "visual_inspection_performed", "findings", "uncertainties",
-    "rejected_claims", "prior_review_exposure", "timestamp",
-    "inspection_status", "status", "incomplete_reasons",
-    "numerical_policy_authority", "host_capability_evidence", "contract_sha256",
+    "schema_name",
+    "schema_version",
+    "review_id",
+    "request_sha256",
+    "capability_sha256",
+    "reviewer",
+    "received_artifacts",
+    "visual_inspection_performed",
+    "findings",
+    "uncertainties",
+    "rejected_claims",
+    "prior_review_exposure",
+    "timestamp",
+    "inspection_status",
+    "status",
+    "incomplete_reasons",
+    "numerical_policy_authority",
+    "host_capability_evidence",
+    "contract_sha256",
 }
 _RECEIPT_HOST_FIELDS = {
-    "capability_state", "transport", "delivery_confirmed",
-    "scientific_review_eligible", "delivered_artifacts", "calibration_id",
+    "capability_state",
+    "transport",
+    "delivery_confirmed",
+    "scientific_review_eligible",
+    "delivered_artifacts",
+    "calibration_id",
 }
 
 
@@ -209,13 +274,18 @@ def _calibration(value: Any) -> dict[str, Any] | None:
     item = _mapping(value, "calibration")
     _unknown(item, _CALIBRATION_FIELDS, "calibration")
     result = {
-        "calibration_id": _text(item.get("calibration_id"), "calibration.calibration_id", identifier=True),
+        "calibration_id": _text(
+            item.get("calibration_id"), "calibration.calibration_id", identifier=True
+        ),
         "artifact_sha256": _hash(item.get("artifact_sha256"), "calibration.artifact_sha256"),
         "completed_at": _text(item.get("completed_at"), "calibration.completed_at"),
     }
     for field in (
-        "axis_direction_passed", "labels_passed", "colorbar_order_passed",
-        "shared_limits_passed", "localized_feature_passed",
+        "axis_direction_passed",
+        "labels_passed",
+        "colorbar_order_passed",
+        "shared_limits_passed",
+        "localized_feature_passed",
     ):
         if not isinstance(item.get(field), bool):
             raise ValueError(f"calibration.{field} must be boolean")
@@ -246,7 +316,8 @@ def _capability_payload(
 ) -> dict[str, Any]:
     scientific = bool(host_capability_confirmed and calibration and calibration.get("passed"))
     state = (
-        "delivery_confirmed" if delivery_confirmed
+        "delivery_confirmed"
+        if delivery_confirmed
         else ("host_capability_confirmed" if host_capability_confirmed else "unavailable")
     )
     payload = {
@@ -300,8 +371,13 @@ def normalize_opencode_capability(
         isinstance(metadata_identity, str)
         and (metadata_identity == model or metadata_identity.endswith(f"/{model}"))
     )
-    refs = [_artifact_ref(item, f"delivered_artifacts[{index}]") for index, item in enumerate(delivered_artifacts or [])]
-    host_confirmed = bool(metadata_image_input and cli_attachment_supported and model_identity_confirmed)
+    refs = [
+        _artifact_ref(item, f"delivered_artifacts[{index}]")
+        for index, item in enumerate(delivered_artifacts or [])
+    ]
+    host_confirmed = bool(
+        metadata_image_input and cli_attachment_supported and model_identity_confirmed
+    )
     delivery = bool(host_confirmed and attachment_part_confirmed and refs)
     return _capability_payload(
         client="opencode",
@@ -343,12 +419,21 @@ def normalize_codex_capability(
     confirmed_results = 0
     for index, value in enumerate(view_image_results or []):
         item = _mapping(value, f"view_image_results[{index}]")
-        _unknown(item, {"artifact_id", "sha256", "image_content_returned"}, f"view_image_results[{index}]")
+        _unknown(
+            item,
+            {"artifact_id", "sha256", "image_content_returned"},
+            f"view_image_results[{index}]",
+        )
         if not isinstance(item.get("image_content_returned"), bool):
             raise ValueError(f"view_image_results[{index}].image_content_returned must be boolean")
         if item["image_content_returned"]:
             confirmed_results += 1
-            refs.append(_artifact_ref({"artifact_id": item.get("artifact_id"), "sha256": item.get("sha256")}, f"view_image_results[{index}]"))
+            refs.append(
+                _artifact_ref(
+                    {"artifact_id": item.get("artifact_id"), "sha256": item.get("sha256")},
+                    f"view_image_results[{index}]",
+                )
+            )
     host_confirmed = bool(view_image_available)
     delivery = bool(host_confirmed and refs and confirmed_results == len(view_image_results or []))
     return _capability_payload(
@@ -382,7 +467,10 @@ def validate_reviewer_capability(value: Any) -> dict[str, Any]:
     if set(item) != _CAPABILITY_FIELDS:
         missing = sorted(_CAPABILITY_FIELDS - set(item))
         raise ValueError(f"reviewer_capability is missing {missing}")
-    if item.get("schema_name") != VISUAL_CAPABILITY_SCHEMA or item.get("schema_version") != VISUAL_REVIEW_SCHEMA_VERSION:
+    if (
+        item.get("schema_name") != VISUAL_CAPABILITY_SCHEMA
+        or item.get("schema_version") != VISUAL_REVIEW_SCHEMA_VERSION
+    ):
         raise ValueError("reviewer_capability schema is unsupported")
     client = _text(item.get("client"), "reviewer_capability.client", identifier=True)
     transport = item.get("transport")
@@ -400,23 +488,41 @@ def validate_reviewer_capability(value: Any) -> dict[str, Any]:
     if client == "codex" and transport != "view_image_tool":
         raise ValueError("codex capability requires view_image_tool transport")
     for field in (
-        "image_input", "original_resolution_support", "host_capability_confirmed",
-        "delivery_confirmed", "scientific_review_eligible",
+        "image_input",
+        "original_resolution_support",
+        "host_capability_confirmed",
+        "delivery_confirmed",
+        "scientific_review_eligible",
     ):
         if not isinstance(item.get(field), bool):
             raise ValueError(f"reviewer_capability.{field} must be boolean")
-    if item.get("self_reported_image_input") is not None and not isinstance(item.get("self_reported_image_input"), bool):
+    if item.get("self_reported_image_input") is not None and not isinstance(
+        item.get("self_reported_image_input"), bool
+    ):
         raise ValueError("reviewer_capability.self_reported_image_input must be boolean or null")
-    media = _strings(item.get("supported_media_types"), "reviewer_capability.supported_media_types", 16)
+    media = _strings(
+        item.get("supported_media_types"), "reviewer_capability.supported_media_types", 16
+    )
     if any(media_type not in ALLOWED_IMAGE_MEDIA_TYPES for media_type in media):
         raise ValueError("reviewer_capability contains an unsupported media type")
     max_images = item.get("max_images")
     max_bytes = item.get("max_total_bytes")
-    if isinstance(max_images, bool) or not isinstance(max_images, int) or not 1 <= max_images <= MAX_ARTIFACTS:
+    if (
+        isinstance(max_images, bool)
+        or not isinstance(max_images, int)
+        or not 1 <= max_images <= MAX_ARTIFACTS
+    ):
         raise ValueError("reviewer_capability.max_images is out of bounds")
-    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_TOTAL_ARTIFACT_BYTES:
+    if (
+        isinstance(max_bytes, bool)
+        or not isinstance(max_bytes, int)
+        or not 1 <= max_bytes <= MAX_TOTAL_ARTIFACT_BYTES
+    ):
         raise ValueError("reviewer_capability.max_total_bytes is out of bounds")
-    refs = [_artifact_ref(ref, f"reviewer_capability.delivered_artifacts[{index}]") for index, ref in enumerate(item.get("delivered_artifacts", []))]
+    refs = [
+        _artifact_ref(ref, f"reviewer_capability.delivered_artifacts[{index}]")
+        for index, ref in enumerate(item.get("delivered_artifacts", []))
+    ]
     if len(refs) > max_images or len({ref["artifact_id"] for ref in refs}) != len(refs):
         raise ValueError("reviewer_capability.delivered_artifacts is oversized or duplicated")
     host_evidence = _mapping(item.get("host_evidence"), "reviewer_capability.host_evidence")
@@ -461,9 +567,7 @@ def validate_reviewer_capability(value: Any) -> dict[str, Any]:
     else:
         raise ValueError("reviewer_capability host evidence kind is unsupported")
     expected_delivery = bool(
-        expected_host_confirmed
-        and host_evidence["image_content_results_confirmed"]
-        and refs
+        expected_host_confirmed and host_evidence["image_content_results_confirmed"] and refs
     )
     if (
         item["host_capability_confirmed"] != expected_host_confirmed
@@ -473,17 +577,26 @@ def validate_reviewer_capability(value: Any) -> dict[str, Any]:
     if item.get("delivery_confirmed") and (not item.get("host_capability_confirmed") or not refs):
         raise ValueError("delivery_confirmed requires host capability and delivered artifacts")
     calibration = _calibration(item.get("calibration"))
-    expected_scientific = bool(item.get("host_capability_confirmed") and calibration and calibration.get("passed"))
+    expected_scientific = bool(
+        item.get("host_capability_confirmed") and calibration and calibration.get("passed")
+    )
     if item.get("scientific_review_eligible") != expected_scientific:
         raise ValueError("scientific_review_eligible conflicts with host/calibration evidence")
-    expected_state = "delivery_confirmed" if item.get("delivery_confirmed") else ("host_capability_confirmed" if item.get("host_capability_confirmed") else "unavailable")
+    expected_state = (
+        "delivery_confirmed"
+        if item.get("delivery_confirmed")
+        else (
+            "host_capability_confirmed" if item.get("host_capability_confirmed") else "unavailable"
+        )
+    )
     if item.get("capability_state") != expected_state:
         raise ValueError("reviewer_capability.capability_state is inconsistent")
     expected_inspection = "ready_for_inspection" if item.get("delivery_confirmed") else "not_ready"
     if item.get("inspection_status") != expected_inspection:
         raise ValueError("reviewer_capability.inspection_status is inconsistent")
     supplied = _hash(item.get("contract_sha256"), "reviewer_capability.contract_sha256")
-    unhashed = dict(item); unhashed.pop("contract_sha256", None)
+    unhashed = dict(item)
+    unhashed.pop("contract_sha256", None)
     if supplied != _visual_contract_sha256(unhashed):
         raise ValueError("reviewer_capability.contract_sha256 does not match")
     canonical_json_bytes(item)
@@ -496,8 +609,13 @@ def _view(value: Any, label: str) -> dict[str, Any]:
     if item.get("slice_axis") not in {"x", "y", "z"}:
         raise ValueError(f"{label}.slice_axis must be x, y, or z")
     grid = item.get("grid_shape")
-    if not isinstance(grid, list) or len(grid) != 2 or any(isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 8192 for v in grid):
+    if (
+        not isinstance(grid, list)
+        or len(grid) != 2
+        or any(isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 8192 for v in grid)
+    ):
         raise ValueError(f"{label}.grid_shape must contain two bounded positive integers")
+
     def pair(name: str, ordered: bool = False) -> list[float]:
         raw = item.get(name)
         if not isinstance(raw, list) or len(raw) != 2:
@@ -506,6 +624,7 @@ def _view(value: Any, label: str) -> dict[str, Any]:
         if ordered and result[0] > result[1]:
             raise ValueError(f"{label}.{name} must be ordered")
         return result
+
     color_scale = item.get("color_scale")
     if color_scale not in {"linear", "log"}:
         raise ValueError(f"{label}.color_scale must be linear or log")
@@ -544,7 +663,9 @@ def build_visual_review_request(
         raise ValueError("review_mode must be single or dual_blind")
     if not isinstance(artifacts, list) or not 1 <= len(artifacts) <= MAX_ARTIFACTS:
         raise ValueError(f"artifacts must contain 1..{MAX_ARTIFACTS} entries")
-    normalized_artifacts = [_artifact(item, f"artifacts[{index}]") for index, item in enumerate(artifacts)]
+    normalized_artifacts = [
+        _artifact(item, f"artifacts[{index}]") for index, item in enumerate(artifacts)
+    ]
     ids = [item["artifact_id"] for item in normalized_artifacts]
     if len(ids) != len(set(ids)):
         raise ValueError("artifact IDs must be unique")
@@ -557,9 +678,7 @@ def build_visual_review_request(
         reference = normalized_views[0]
         for field in _SHARED_VIEW_FIELDS:
             if any(view[field] != reference[field] for view in normalized_views[1:]):
-                raise ValueError(
-                    f"paired visual views must share comparison field {field}"
-                )
+                raise ValueError(f"paired visual views must share comparison field {field}")
     normalized_config = _hash(configuration_sha256, "configuration_sha256")
     if any(view["config_sha256"] != normalized_config for view in normalized_views):
         raise ValueError("every view must reference the request configuration_sha256")
@@ -588,7 +707,10 @@ def build_visual_review_request(
 def validate_visual_review_request(value: Any) -> dict[str, Any]:
     item = _mapping(value, "visual_review_request")
     _unknown(item, _REQUEST_FIELDS, "visual_review_request")
-    if item.get("schema_name") != VISUAL_REQUEST_SCHEMA or item.get("schema_version") != VISUAL_REVIEW_SCHEMA_VERSION:
+    if (
+        item.get("schema_name") != VISUAL_REQUEST_SCHEMA
+        or item.get("schema_version") != VISUAL_REVIEW_SCHEMA_VERSION
+    ):
         raise ValueError("visual_review_request schema is unsupported")
     if item.get("status") != "visual_review_required":
         raise ValueError("visual_review_request.status must remain visual_review_required")
@@ -599,15 +721,26 @@ def validate_visual_review_request(value: Any) -> dict[str, Any]:
     artifacts = item.get("artifacts")
     if not isinstance(artifacts, list) or not 1 <= len(artifacts) <= MAX_ARTIFACTS:
         raise ValueError(f"visual_review_request.artifacts must contain 1..{MAX_ARTIFACTS} entries")
-    normalized_artifacts = [_artifact(value, f"visual_review_request.artifacts[{index}]") for index, value in enumerate(artifacts)]
+    normalized_artifacts = [
+        _artifact(value, f"visual_review_request.artifacts[{index}]")
+        for index, value in enumerate(artifacts)
+    ]
     ids = [artifact["artifact_id"] for artifact in normalized_artifacts]
-    if len(ids) != len(set(ids)) or sum(artifact["byte_count"] for artifact in normalized_artifacts) > MAX_TOTAL_ARTIFACT_BYTES:
+    if (
+        len(ids) != len(set(ids))
+        or sum(artifact["byte_count"] for artifact in normalized_artifacts)
+        > MAX_TOTAL_ARTIFACT_BYTES
+    ):
         raise ValueError("visual_review_request artifacts are duplicated or oversized")
     views = item.get("views")
     if not isinstance(views, list):
         raise ValueError("visual_review_request.views must be a list")
-    normalized_views = [_view(value, f"visual_review_request.views[{index}]") for index, value in enumerate(views)]
-    if len(normalized_views) != len(ids) or {view["artifact_id"] for view in normalized_views} != set(ids):
+    normalized_views = [
+        _view(value, f"visual_review_request.views[{index}]") for index, value in enumerate(views)
+    ]
+    if len(normalized_views) != len(ids) or {
+        view["artifact_id"] for view in normalized_views
+    } != set(ids):
         raise ValueError("visual_review_request.views must describe every artifact exactly once")
     if len(normalized_views) > 1:
         reference = normalized_views[0]
@@ -623,12 +756,19 @@ def validate_visual_review_request(value: Any) -> dict[str, Any]:
     questions = _strings(item.get("questions"), "visual_review_request.questions", MAX_QUESTIONS)
     if not questions or len(questions) != len(set(questions)):
         raise ValueError("visual_review_request.questions must be non-empty and unique")
-    canonical_json_bytes(_mapping(item.get("numerical_summary"), "visual_review_request.numerical_summary"))
+    canonical_json_bytes(
+        _mapping(item.get("numerical_summary"), "visual_review_request.numerical_summary")
+    )
     supplied = _hash(item.get("contract_sha256"), "visual_review_request.contract_sha256")
-    unhashed = dict(item); unhashed.pop("contract_sha256", None)
+    unhashed = dict(item)
+    unhashed.pop("contract_sha256", None)
     if supplied != _visual_contract_sha256(unhashed):
         raise ValueError("visual_review_request.contract_sha256 does not match")
-    if normalized_artifacts != artifacts or normalized_views != views or questions != item.get("questions"):
+    if (
+        normalized_artifacts != artifacts
+        or normalized_views != views
+        or questions != item.get("questions")
+    ):
         raise ValueError("visual_review_request is not canonical")
     canonical_json_bytes(item)
     return deepcopy(item)
@@ -664,10 +804,17 @@ def build_visual_review_receipt(
 ) -> dict[str, Any]:
     request = validate_visual_review_request(request)
     capability = validate_reviewer_capability(capability)
-    if not isinstance(visual_inspection_performed, bool) or not isinstance(prior_review_exposure, bool):
+    if not isinstance(visual_inspection_performed, bool) or not isinstance(
+        prior_review_exposure, bool
+    ):
         raise ValueError("inspection and prior-review flags must be boolean")
-    refs = [_artifact_ref(item, f"received_artifacts[{index}]") for index, item in enumerate(received_artifacts)]
-    normalized_findings = [_finding(item, f"findings[{index}]") for index, item in enumerate(findings)]
+    refs = [
+        _artifact_ref(item, f"received_artifacts[{index}]")
+        for index, item in enumerate(received_artifacts)
+    ]
+    normalized_findings = [
+        _finding(item, f"findings[{index}]") for index, item in enumerate(findings)
+    ]
     if len(normalized_findings) > MAX_FINDINGS:
         raise ValueError(f"findings exceeds {MAX_FINDINGS} entries")
     expected = {item["artifact_id"]: item["sha256"] for item in request["artifacts"]}
@@ -699,7 +846,8 @@ def build_visual_review_receipt(
         "request_sha256": request["contract_sha256"],
         "capability_sha256": capability["contract_sha256"],
         "reviewer": {
-            "client": capability["client"], "provider": capability["provider"],
+            "client": capability["client"],
+            "provider": capability["provider"],
             "model": capability["model"],
             "session_id": _text(session_id, "session_id", identifier=True),
         },
@@ -722,7 +870,8 @@ def build_visual_review_receipt(
             "delivered_artifacts": capability["delivered_artifacts"],
             "calibration_id": (
                 capability["calibration"]["calibration_id"]
-                if capability.get("calibration") else None
+                if capability.get("calibration")
+                else None
             ),
         },
     }
@@ -735,7 +884,10 @@ def validate_visual_review_receipt(value: Any) -> dict[str, Any]:
     _unknown(item, _RECEIPT_FIELDS, "visual_review_receipt")
     if set(item) != _RECEIPT_FIELDS:
         raise ValueError("visual_review_receipt fields are incomplete")
-    if item.get("schema_name") != VISUAL_RECEIPT_SCHEMA or item.get("schema_version") != VISUAL_REVIEW_SCHEMA_VERSION:
+    if (
+        item.get("schema_name") != VISUAL_RECEIPT_SCHEMA
+        or item.get("schema_version") != VISUAL_REVIEW_SCHEMA_VERSION
+    ):
         raise ValueError("visual_review_receipt schema is unsupported")
     reviewer = _mapping(item.get("reviewer"), "visual_review_receipt.reviewer")
     _unknown(reviewer, _REVIEWER_FIELDS, "visual_review_receipt.reviewer")
@@ -789,14 +941,20 @@ def validate_visual_review_receipt(value: Any) -> dict[str, Any]:
     _strings(item.get("uncertainties"), "visual_review_receipt.uncertainties", MAX_FINDINGS)
     _strings(item.get("rejected_claims"), "visual_review_receipt.rejected_claims", MAX_FINDINGS)
     _strings(item.get("incomplete_reasons"), "visual_review_receipt.incomplete_reasons", 16)
-    host = _mapping(item.get("host_capability_evidence"), "visual_review_receipt.host_capability_evidence")
+    host = _mapping(
+        item.get("host_capability_evidence"), "visual_review_receipt.host_capability_evidence"
+    )
     _unknown(host, _RECEIPT_HOST_FIELDS, "visual_review_receipt.host_capability_evidence")
     if set(host) != _RECEIPT_HOST_FIELDS:
         raise ValueError("visual_review_receipt host capability evidence is incomplete")
-    if not isinstance(host.get("delivery_confirmed"), bool) or not isinstance(host.get("scientific_review_eligible"), bool):
+    if not isinstance(host.get("delivery_confirmed"), bool) or not isinstance(
+        host.get("scientific_review_eligible"), bool
+    ):
         raise ValueError("visual_review_receipt host capability booleans are invalid")
     if host.get("capability_state") not in {
-        "unavailable", "host_capability_confirmed", "delivery_confirmed"
+        "unavailable",
+        "host_capability_confirmed",
+        "delivery_confirmed",
     } or host.get("transport") not in {"file_attachment", "view_image_tool"}:
         raise ValueError("visual_review_receipt host capability state is invalid")
     delivered_raw = host.get("delivered_artifacts")
@@ -811,9 +969,7 @@ def validate_visual_review_receipt(value: Any) -> dict[str, Any]:
     ]
     if len({ref["artifact_id"] for ref in delivered}) != len(delivered):
         raise ValueError("visual_review_receipt host delivered artifacts are duplicated")
-    expected_inspection = (
-        "performed" if item["visual_inspection_performed"] else "not_performed"
-    )
+    expected_inspection = "performed" if item["visual_inspection_performed"] else "not_performed"
     if item.get("inspection_status") != expected_inspection:
         raise ValueError("visual_review_receipt inspection status is inconsistent")
     if item.get("status") == "visual_review_complete":
@@ -832,7 +988,8 @@ def validate_visual_review_receipt(value: Any) -> dict[str, Any]:
         if not prerequisites or item.get("incomplete_reasons"):
             raise ValueError("complete visual review does not satisfy its prerequisites")
     supplied = _hash(item.get("contract_sha256"), "visual_review_receipt.contract_sha256")
-    unhashed = dict(item); unhashed.pop("contract_sha256", None)
+    unhashed = dict(item)
+    unhashed.pop("contract_sha256", None)
     if supplied != _visual_contract_sha256(unhashed):
         raise ValueError("visual_review_receipt.contract_sha256 does not match")
     canonical_json_bytes(item)
@@ -854,7 +1011,10 @@ def evaluate_dual_visual_review(
     reasons = []
     if request["review_mode"] != "dual_blind":
         reasons.append("request_not_dual_blind")
-    if first["request_sha256"] != request["contract_sha256"] or second["request_sha256"] != request["contract_sha256"]:
+    if (
+        first["request_sha256"] != request["contract_sha256"]
+        or second["request_sha256"] != request["contract_sha256"]
+    ):
         reasons.append("receipt_request_mismatch")
     if first["reviewer"]["session_id"] == second["reviewer"]["session_id"]:
         reasons.append("review_sessions_not_independent")
@@ -870,15 +1030,12 @@ def evaluate_dual_visual_review(
     }
     if first_artifacts != second_artifacts:
         reasons.append("artifact_sets_differ")
-    expected_artifacts = {
-        (item["artifact_id"], item["sha256"]) for item in request["artifacts"]
-    }
+    expected_artifacts = {(item["artifact_id"], item["sha256"]) for item in request["artifacts"]}
     if first_artifacts != expected_artifacts or second_artifacts != expected_artifacts:
         reasons.append("receipt_artifacts_do_not_match_request")
     expected_questions = set(request["questions"])
     if any(
-        {finding["question"] for finding in receipt["findings"]}
-        != expected_questions
+        {finding["question"] for finding in receipt["findings"]} != expected_questions
         for receipt in (first, second)
     ):
         reasons.append("receipt_findings_do_not_cover_request")
@@ -908,11 +1065,18 @@ def evaluate_dual_visual_review(
 
 
 __all__ = [
-    "ALLOWED_IMAGE_MEDIA_TYPES", "VISUAL_CAPABILITY_SCHEMA",
-    "VISUAL_DUAL_REVIEW_SCHEMA", "VISUAL_RECEIPT_SCHEMA",
-    "VISUAL_REQUEST_SCHEMA", "VISUAL_REVIEW_SCHEMA_VERSION",
-    "build_visual_review_receipt", "build_visual_review_request",
-    "evaluate_dual_visual_review", "normalize_codex_capability",
-    "normalize_opencode_capability", "validate_reviewer_capability",
-    "validate_visual_review_receipt", "validate_visual_review_request",
+    "ALLOWED_IMAGE_MEDIA_TYPES",
+    "VISUAL_CAPABILITY_SCHEMA",
+    "VISUAL_DUAL_REVIEW_SCHEMA",
+    "VISUAL_RECEIPT_SCHEMA",
+    "VISUAL_REQUEST_SCHEMA",
+    "VISUAL_REVIEW_SCHEMA_VERSION",
+    "build_visual_review_receipt",
+    "build_visual_review_request",
+    "evaluate_dual_visual_review",
+    "normalize_codex_capability",
+    "normalize_opencode_capability",
+    "validate_reviewer_capability",
+    "validate_visual_review_receipt",
+    "validate_visual_review_request",
 ]

@@ -98,7 +98,9 @@ def _evaluate_angle(model: Any, expression: str, unit: str, parameters: set[str]
     return {
         "expression": expression,
         "expression_kind": (
-            "parameter" if _IDENTIFIER.fullmatch(expression) and expression in parameters else "expression"
+            "parameter"
+            if _IDENTIFIER.fullmatch(expression) and expression in parameters
+            else "expression"
         ),
         "evaluated_value": _real_scalar(raw, expression=expression),
         "evaluated_unit": unit,
@@ -141,7 +143,9 @@ def _incidence_snapshot(model: Any, component_tag: str, physics_tag: str) -> dic
     references = [
         (tag, feature)
         for tag, feature, kind in children
-        if _is_kind(tag, kind, _label(feature), ("referencedirection", "reference direction", "rdir"))
+        if _is_kind(
+            tag, kind, _label(feature), ("referencedirection", "reference direction", "rdir")
+        )
     ]
     selected_references = []
     for tag, feature in references:
@@ -164,8 +168,7 @@ def _incidence_snapshot(model: Any, component_tag: str, physics_tag: str) -> dic
             "settings": _properties(parent, _SETTING_NAMES),
         },
         "periodic_ports": [
-            {"tag": tag, "settings": _properties(feature, _SETTING_NAMES)}
-            for tag, feature in ports
+            {"tag": tag, "settings": _properties(feature, _SETTING_NAMES)} for tag, feature in ports
         ],
         "reference_direction": selected_references[0],
     }
@@ -231,7 +234,9 @@ def _preview_incidence_unlocked(
 ) -> dict[str, Any]:
     """Inspect and normalize one incidence request without mutating or solving."""
     if record.dirty:
-        raise ValueError(f"derived model is dirty and unusable for validation: {record.dirty_reason}")
+        raise ValueError(
+            f"derived model is dirty and unusable for validation: {record.dirty_reason}"
+        )
     alpha1 = _bounded_text(alpha1_inc, name="alpha1_inc", limit=200)
     alpha2 = _bounded_text(alpha2_inc, name="alpha2_inc", limit=200)
     target = _bounded_text(
@@ -337,10 +342,7 @@ def _incidence_nodes(
     )
     parent = _get(physics.feature(), snapshot["periodic_structure"]["tag"])
     children = parent.feature()
-    ports = {
-        item["tag"]: _get(children, item["tag"])
-        for item in snapshot["periodic_ports"]
-    }
+    ports = {item["tag"]: _get(children, item["tag"]) for item in snapshot["periodic_ports"]}
     return parent, ports
 
 
@@ -353,9 +355,7 @@ def _planned_readback_mismatches(
     for name, expected in planned["periodic_structure"]["settings"].items():
         actual = parent["settings"].get(name)
         if actual != expected:
-            mismatches.append(
-                f"{parent['tag']}.{name}: expected {expected!r}, read {actual!r}"
-            )
+            mismatches.append(f"{parent['tag']}.{name}: expected {expected!r}, read {actual!r}")
     ports = {item["tag"]: item for item in snapshot["periodic_ports"]}
     for planned_port in planned["periodic_ports"]:
         actual_port = ports.get(planned_port["tag"])
@@ -478,8 +478,7 @@ def _apply_incidence_unlocked(
         if not rollback_proved:
             record.dirty = True
             record.dirty_reason = (
-                "incidence rollback unproven: "
-                + "; ".join(rollback_readback_mismatches)
+                "incidence rollback unproven: " + "; ".join(rollback_readback_mismatches)
             )[:500]
         event = {
             "operation": "periodic_structure_incidence",

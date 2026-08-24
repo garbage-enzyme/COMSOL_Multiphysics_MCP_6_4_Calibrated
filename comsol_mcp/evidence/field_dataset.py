@@ -77,9 +77,7 @@ def _collect_dataset_field_evidence(
     source = view["source"]
     if source["kind"] != source_kind:
         if source_kind == "existing_dataset":
-            raise ValueError(
-                "existing-dataset adapter cannot read a validation-matrix source"
-            )
+            raise ValueError("existing-dataset adapter cannot read a validation-matrix source")
         raise ValueError(f"dataset adapter requires source kind {source_kind}")
     if model is None or not callable(getattr(model, "evaluate", None)):
         raise ValueError("model must provide MPh evaluate()")
@@ -122,9 +120,7 @@ def _collect_dataset_field_evidence(
 
     expressions = [item["expression"] for item in request_value["expressions"]]
     local_coordinates = ["x", "y", "z"]
-    component_coordinates = [
-        f'{source["component_tag"]}.{axis}' for axis in local_coordinates
-    ]
+    component_coordinates = [f"{source['component_tag']}.{axis}" for axis in local_coordinates]
     evaluation_expressions = [
         *expressions,
         *local_coordinates,
@@ -135,16 +131,12 @@ def _collect_dataset_field_evidence(
             evaluation_expressions,
             dataset=source["dataset_name"],
             inner=(
-                [source["solution_number"]]
-                if source.get("solution_number") is not None
-                else None
+                [source["solution_number"]] if source.get("solution_number") is not None else None
             ),
         )
     except Exception as exc:
         raise RuntimeError(f"existing dataset field evaluation failed: {exc}") from exc
-    if not isinstance(evaluated, (list, tuple)) or len(evaluated) != len(
-        evaluation_expressions
-    ):
+    if not isinstance(evaluated, (list, tuple)) or len(evaluated) != len(evaluation_expressions):
         raise ValueError("field evaluation did not preserve expression order and count")
     vectors = [
         _real_vector(value, f"evaluation[{expression}]")
@@ -212,9 +204,7 @@ def collect_existing_dataset_field_evidence(**kwargs: Any) -> dict[str, Any]:
 
 def collect_validation_matrix_field_evidence(**kwargs: Any) -> dict[str, Any]:
     """Evaluate the dataset left by one exact validation-matrix point."""
-    return _collect_dataset_field_evidence(
-        source_kind="validation_matrix_point", **kwargs
-    )
+    return _collect_dataset_field_evidence(source_kind="validation_matrix_point", **kwargs)
 
 
 __all__ = [

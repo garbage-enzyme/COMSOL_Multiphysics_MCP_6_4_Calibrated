@@ -162,7 +162,7 @@ def _run(
                 mesh = get_mesh_info(model)
                 if mesh.get("success"):
                     mesh_elements = mesh.get("mesh", {}).get("num_elements")
-            except Exception:
+            except Exception:  # noqa: S110 - optional mesh telemetry must not fail admission
                 pass
             return collect_resource_telemetry(
                 stage=stage,

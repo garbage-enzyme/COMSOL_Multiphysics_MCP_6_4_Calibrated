@@ -199,9 +199,9 @@ def test_save_failure_preserves_primary_error_when_staging_retry_fails(tmp_path,
             Path(staging).write_bytes(b"partial")
             raise RuntimeError("save failed")
 
-    namespace["_retry_permission_error"] = lambda *_args, **_kwargs: (
-        _ for _ in ()
-    ).throw(PermissionError("sharing violation"))
+    namespace["_retry_permission_error"] = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        PermissionError("sharing violation")
+    )
 
     with pytest.raises(RuntimeError, match="save failed") as caught:
         namespace["save_staged_model"](Java(), tmp_path / "duct.mph")

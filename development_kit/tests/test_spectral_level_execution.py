@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import time
-from pathlib import Path
 import shutil
+import time
 import uuid
+from pathlib import Path
 
 import pytest
-
-from development_kit.tests.spectral_job_fixtures import spectral_job_spec, write_fake_point_audit
 from src.jobs.spectral_level_execution import execute_loaded_spectral_level
 from src.jobs.store import JobStore
+
+from development_kit.tests.spectral_job_fixtures import spectral_job_spec, write_fake_point_audit
 
 
 @pytest.fixture
@@ -45,15 +45,22 @@ def _telemetry(stage, point_id, model, directory, elapsed):
 def _state(total):
     now = time.time()
     return {
-        "schema_version": "2", "status": "running", "attempt": 1,
-        "created_at_epoch": now, "updated_at_epoch": now,
-        "worker_pid": None, "worker_process_create_time": None,
+        "schema_version": "2",
+        "status": "running",
+        "attempt": 1,
+        "created_at_epoch": now,
+        "updated_at_epoch": now,
+        "worker_pid": None,
+        "worker_process_create_time": None,
         "worker_command_signature": None,
-        "progress": {"completed": 0, "total": total}, "last_error": None,
+        "progress": {"completed": 0, "total": total},
+        "last_error": None,
     }
 
 
-def test_loaded_level_composes_resource_checks_collector_and_spectral_runner(tmp_path, ascii_jobs_root):
+def test_loaded_level_composes_resource_checks_collector_and_spectral_runner(
+    tmp_path, ascii_jobs_root
+):
     source_root = tmp_path / "source"
     source_root.mkdir()
     spec = spectral_job_spec(source_root, maximum_points=10)
@@ -74,11 +81,21 @@ def test_loaded_level_composes_resource_checks_collector_and_spectral_runner(tmp
         )
 
     output = execute_loaded_spectral_level(
-        store=store, job_id=job_id, spec=spec, directory=directory, attempt=1,
-        model=object(), client=object(), model_name="fixture", ownership=ownership,
-        preflight={"ready": True}, worker_started=time.monotonic(),
-        should_stop=lambda: False, on_durable_row=lambda row: rows.append(row),
-        collector_executor=collector, telemetry_provider=_telemetry,
+        store=store,
+        job_id=job_id,
+        spec=spec,
+        directory=directory,
+        attempt=1,
+        model=object(),
+        client=object(),
+        model_name="fixture",
+        ownership=ownership,
+        preflight={"ready": True},
+        worker_started=time.monotonic(),
+        should_stop=lambda: False,
+        on_durable_row=lambda row: rows.append(row),
+        collector_executor=collector,
+        telemetry_provider=_telemetry,
     )
 
     assert output["result"]["completed"] is True
@@ -88,7 +105,9 @@ def test_loaded_level_composes_resource_checks_collector_and_spectral_runner(tmp
     assert output["latest_resource_decision"]["action"] == "start_point"
 
 
-def test_loaded_level_stops_before_collector_when_control_requests_cancel(tmp_path, ascii_jobs_root):
+def test_loaded_level_stops_before_collector_when_control_requests_cancel(
+    tmp_path, ascii_jobs_root
+):
     source_root = tmp_path / "source"
     source_root.mkdir()
     spec = spectral_job_spec(source_root, maximum_points=10)
@@ -96,11 +115,19 @@ def test_loaded_level_stops_before_collector_when_control_requests_cancel(tmp_pa
     job_id = store.create(spec, _state(10))
     called = []
     output = execute_loaded_spectral_level(
-        store=store, job_id=job_id, spec=spec,
-        directory=store.job_dir(job_id) / "level", attempt=1,
-        model=object(), client=object(), model_name="fixture", ownership=_Ownership(),
-        preflight={"ready": True}, worker_started=time.monotonic(),
-        should_stop=lambda: True, on_durable_row=lambda row: called.append(row),
+        store=store,
+        job_id=job_id,
+        spec=spec,
+        directory=store.job_dir(job_id) / "level",
+        attempt=1,
+        model=object(),
+        client=object(),
+        model_name="fixture",
+        ownership=_Ownership(),
+        preflight={"ready": True},
+        worker_started=time.monotonic(),
+        should_stop=lambda: True,
+        on_durable_row=lambda row: called.append(row),
         collector_executor=lambda *args: (_ for _ in ()).throw(AssertionError("collector started")),
         telemetry_provider=_telemetry,
     )
@@ -126,11 +153,19 @@ def test_loaded_level_reports_mesh_telemetry_failure_that_blocks_admission(
         lambda _model: (_ for _ in ()).throw(RuntimeError("backend unavailable")),
     )
     output = execute_loaded_spectral_level(
-        store=store, job_id=job_id, spec=spec,
-        directory=store.job_dir(job_id) / "level", attempt=1,
-        model=object(), client=object(), model_name="fixture", ownership=_Ownership(),
-        preflight={"ready": True}, worker_started=time.monotonic(),
-        should_stop=lambda: False, on_durable_row=lambda _row: None,
+        store=store,
+        job_id=job_id,
+        spec=spec,
+        directory=store.job_dir(job_id) / "level",
+        attempt=1,
+        model=object(),
+        client=object(),
+        model_name="fixture",
+        ownership=_Ownership(),
+        preflight={"ready": True},
+        worker_started=time.monotonic(),
+        should_stop=lambda: False,
+        on_durable_row=lambda _row: None,
         collector_executor=lambda *_args: pytest.fail("collector must not start"),
     )
 

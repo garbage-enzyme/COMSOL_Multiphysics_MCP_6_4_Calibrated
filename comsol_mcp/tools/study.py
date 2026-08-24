@@ -191,7 +191,9 @@ def solve_study(
     if solver.is_running:
         return {
             "success": False,
-            "error": "Another solving operation is in progress. Use study_get_progress to check status.",
+            "error": (
+                "Another solving operation is in progress. Use study_get_progress to check status."
+            ),
         }
 
     tag = _resolve_study_tag(model, study_name)

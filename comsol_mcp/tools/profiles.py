@@ -25,9 +25,7 @@ DEFAULT_PROFILE = "core"
 _PROFILE_SELECTION_TOKEN = object()
 
 PROFILE_DESCRIPTIONS = {
-    "core": (
-        "Default mature ownership, job, session, inspection, and one-point solve surface."
-    ),
+    "core": ("Default mature ownership, job, session, inspection, and one-point solve surface."),
     "basic_fem": (
         "Core plus typed conventional FEM construction, bounded exports, and standalone execution."
     ),
