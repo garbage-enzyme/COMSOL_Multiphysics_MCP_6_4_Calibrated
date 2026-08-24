@@ -575,6 +575,12 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="public_response",
         ),
         _entry(
+            "comsol_mcp.offline_export_manifest",
+            "1.0.0",
+            "comsol_mcp.evidence.offline_export",
+            artifact_kind="public_response",
+        ),
+        _entry(
             "comsol_mcp.mph_artifact_probe",
             "1.0.0",
             "comsol_mcp.evidence.inspection.probe",

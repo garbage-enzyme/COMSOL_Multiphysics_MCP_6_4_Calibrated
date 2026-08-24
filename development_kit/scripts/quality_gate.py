@@ -64,6 +64,7 @@ LINT_TARGETS = (
     "comsol_mcp/tools/catalog.py",
     "comsol_mcp/tools/configuration.py",
     "comsol_mcp/tools/compatibility_registry.py",
+    "comsol_mcp/tools/offline_export.py",
     "comsol_mcp/tools/mph_inspection.py",
     "comsol_mcp/tools/model_identity.py",
     "comsol_mcp/tools/thermal_radiation.py",
@@ -84,6 +85,7 @@ LINT_TARGETS = (
     "development_kit/tests/conftest.py",
     "development_kit/tests/test_bounded_steps.py",
     "development_kit/tests/test_compatibility_registry.py",
+    "development_kit/tests/test_offline_export.py",
     "development_kit/tests/test_control_plane_startup.py",
     "development_kit/tests/test_dependency_license_gate.py",
     "development_kit/tests/test_durable_primitives.py",
@@ -133,6 +135,7 @@ MYPY_GROUPS = (
         "comsol_mcp/contracts/job_submission.py",
         "comsol_mcp/contracts/mph_inspection.py",
         "comsol_mcp/contracts/model_identity.py",
+        "comsol_mcp/contracts/offline_export.py",
         "comsol_mcp/contracts/simulation_configuration.py",
         "comsol_mcp/contracts/thermal_radiation.py",
         "comsol_mcp/contracts/thermal_material.py",
@@ -155,6 +158,8 @@ MYPY_GROUPS = (
         "comsol_mcp/tools/model_identity.py",
         "comsol_mcp/evidence/compatibility_registry.py",
         "comsol_mcp/tools/compatibility_registry.py",
+        "comsol_mcp/evidence/offline_export.py",
+        "comsol_mcp/tools/offline_export.py",
         "comsol_mcp/jobs/bounded_steps.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay_execution.py",
@@ -192,7 +197,7 @@ MYPY_GROUPS = (
     ),
 )
 PRODUCTION_ROOTS = ("comsol_mcp", "src")
-LINT_EXCLUSIONS_SHA256 = "c24ac0b5fc598314755dd5ccd412097eb13f5cca8a9ed5bd09df6ce2def0f875"
+LINT_EXCLUSIONS_SHA256 = "2ad57c6658d4d0da9f2df0eb3256da088a1540c23631aea8327ea8fde68bc1cc"
 MYPY_EXCLUSIONS_SHA256 = "0ee71edbf253ed405fd397ce377ae5b2202e4913d6e8c5863ee01485ae64a402"
 PARALLEL_TEST_WORKERS = 4
 SERIAL_TEST_TARGETS = ("development_kit/tests/test_control_plane_startup.py",)

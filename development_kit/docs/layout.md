@@ -286,6 +286,7 @@ models are intentionally absent.
 - `development_kit/tests/test_model_identity.py` — This module solver-free tests the offline model-identity contract, checkpoint readiness, and passive session lanes.
 - `development_kit/tests/test_model.py` — This module tests model management helpers without a COMSOL client.
 - `development_kit/tests/test_outcome_contract.py` — This module tests orthogonal execution, evidence, and scientific outcome contracts.
+- `development_kit/tests/test_offline_export.py` — This module solver-free tests offline export-manifest construction, tamper rejection, and dispatch.
 - `development_kit/tests/test_operation_arbiter.py` — This module tests durable serialization and responsive control-plane operation classes.
 - `development_kit/tests/test_native_cancel_probe.py` — This module tests native cancellation discovery and allowlisting without COMSOL.
 - `development_kit/tests/test_namespace_compatibility.py` — This module tests canonical package identity and the bounded legacy import interval.
@@ -495,6 +496,7 @@ models are intentionally absent.
 - `comsol_mcp/contracts/thermal_radiation.py` — This module defines closed Kirchhoff-assessment and thermal-radiation request inputs.
 - `comsol_mcp/contracts/thermal_material.py` — This module defines closed temperature/state material ledger and evaluation inputs.
 - `comsol_mcp/contracts/thermo_optomechanical.py` — This module defines the closed durable thermal-to-optical replay input contract.
+- `comsol_mcp/contracts/offline_export.py` — This module defines bounded offline export-validation input contracts.
 - `comsol_mcp/contracts/structural.py` — This module applies shared public schema and runtime structural limits.
 - `comsol_mcp/durable/__init__.py` — This module exports versioned canonicalization and durable filesystem primitives.
 - `comsol_mcp/durable/canonical.py` — This module preserves legacy canonical bytes and adds domain-separated identities for new schemas.
@@ -550,6 +552,7 @@ models are intentionally absent.
 - `comsol_mcp/evidence/field_render.py` — This module coordinates isolated field PNG rendering.
 - `comsol_mcp/evidence/field_sampling.py` — This module selects bounded raw samples for one declared slice.
 - `comsol_mcp/evidence/material_expressions.py` — This module constructs and previews dispersive material expressions.
+- `comsol_mcp/evidence/offline_export.py` — This module builds and validates the offline export manifest with tamper detection, without a solver.
 - `comsol_mcp/evidence/outcome_contract.py` — This module validates solver-free execution, evidence-completeness, and scientific-disposition outcomes.
 - `comsol_mcp/evidence/portfolio_verifier.py` — This module verifies summary claims against exact values in hash-bound evidence chains.
 - `comsol_mcp/evidence/power_audit.py` — This module normalizes declared reference-power evidence.
@@ -663,6 +666,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/model.py` — This module exposes model creation, loading, cloning, saving, and listing tools.
 - `comsol_mcp/tools/model_identity.py` — This module exposes the read-only offline model-identity tool.
 - `comsol_mcp/tools/mph_inspection.py` — This module exposes the bounded offline `.mph` archive inspection tool.
+- `comsol_mcp/tools/offline_export.py` — This module exposes the read-only offline export validation tool.
 - `comsol_mcp/tools/ownership.py` — This module enforces cross-process solver ownership and collision preflight.
 - `comsol_mcp/tools/parameters.py` — This module exposes COMSOL parameter tools.
 - `comsol_mcp/tools/periodic_mesh_audit.py` — This module exposes periodic geometry and mesh evidence tools.

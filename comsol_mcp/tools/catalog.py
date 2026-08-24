@@ -251,6 +251,9 @@ _TOOLS_BY_REGISTRAR = {
     "comsol_mcp.tools.compatibility_registry.register_compatibility_registry_tools": (
         "runtime_compatibility_status",
     ),
+    "comsol_mcp.tools.offline_export.register_offline_export_tools": (
+        "offline_export_validate",
+    ),
     "comsol_mcp.tools.configuration.register_configuration_tools": (
         "simulation_configuration_validate",
         "simulation_configuration_diff",
@@ -339,6 +342,7 @@ _GROUP_BY_REGISTRAR = {
     "register_mph_inspection_tools": "mph_inspection",
     "register_model_identity_tools": "model_identity",
     "register_compatibility_registry_tools": "compatibility_registry",
+    "register_offline_export_tools": "offline_export",
     "register_thermal_radiation_tools": "thermal_radiation_evidence",
     "register_thermal_material_tools": "thermal_material_evidence",
     "register_convergence_evaluation_tools": "convergence_evidence",
@@ -563,6 +567,7 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "results_outer_values",
         "results_plots_list",
         "runtime_compatibility_status",
+        "offline_export_validate",
         "shared_model_verify",
         "shared_server_models",
         "shared_server_preflight",
@@ -644,6 +649,7 @@ _SOLVER_FREE_TOOLS = frozenset(
         "mph_diff",
         "mph_inspect",
         "model_identity",
+        "offline_export_validate",
         "runtime_compatibility_status",
         "wave_optics_material_expression_preview",
         "visual_review_capability_normalize",
@@ -756,6 +762,7 @@ _CORE_TOOLS = frozenset(
         "model_remove",
         "model_inspect",
         "model_identity",
+        "offline_export_validate",
         "runtime_compatibility_status",
         "mph_diff",
         "mph_inspect",
@@ -1006,6 +1013,7 @@ def _build_registry() -> dict[str, ToolMetadata]:
             "mph_diff",
             "model_identity",
             "runtime_compatibility_status",
+            "offline_export_validate",
         },
     }
     registry: dict[str, ToolMetadata] = {}

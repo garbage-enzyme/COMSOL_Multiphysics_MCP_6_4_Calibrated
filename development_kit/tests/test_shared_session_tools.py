@@ -76,7 +76,7 @@ def test_shared_feature_capabilities_and_tools_are_explicit():
         },
         "restart_required_after_change": True,
     }
-    assert capabilities["tool_count"] == 88
+    assert capabilities["tool_count"] == 89
 
 
 def test_shared_attach_public_schema_requires_confirmation():
