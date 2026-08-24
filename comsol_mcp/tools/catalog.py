@@ -251,9 +251,7 @@ _TOOLS_BY_REGISTRAR = {
     "comsol_mcp.tools.compatibility_registry.register_compatibility_registry_tools": (
         "runtime_compatibility_status",
     ),
-    "comsol_mcp.tools.offline_export.register_offline_export_tools": (
-        "offline_export_validate",
-    ),
+    "comsol_mcp.tools.offline_export.register_offline_export_tools": ("offline_export_validate",),
     "comsol_mcp.tools.configuration.register_configuration_tools": (
         "simulation_configuration_validate",
         "simulation_configuration_diff",
