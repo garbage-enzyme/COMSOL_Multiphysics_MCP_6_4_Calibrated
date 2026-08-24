@@ -294,6 +294,26 @@ PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数�
 
 ## 更新与恢复
 
+### 离线检查与证据工具（alpha7.3）
+
+所有 profile 都提供五个只读、不依赖求解器的工具。它们在 COMSOL 关闭的状态下
+检查已保存的 `.mph` 模型与离线证据，绝不导入或启动 COMSOL、Java、MPh、JPype：
+
+| 工具 | 用途 |
+| --- | --- |
+| `mph_inspect` | 对单个 `.mph` 归档做有界离线检查：声明版本、节点/可运行/求解/预览状态、参数、标签、存档点、确定性的体积分解。 |
+| `mph_diff` | 双归档的元数据/标签/参数/条目差异对比，并证明输入未被修改；零差异不是科学等价性证明。 |
+| `model_identity` | 源/派生文件的只读身份与检查点就绪状态；活动会话身份默认返回结构化"不可用"，仅在显式请求且会话已连接时读取。 |
+| `runtime_compatibility_status` | 当前 Python/MPh/JPype 身份、支持范围、profile 与技能层哈希；仅显式请求时读取已绑定 COMSOL 身份；绝不选择回退运行时。 |
+| `offline_export_validate` | 完全离线地校验导出清单及其 VTU/CSV/TXT 文件（路径、ID、顺序、单位、字节数、哈希）。 |
+
+`comsolless_read_only` profile 只暴露这五个工具，因此未安装 COMSOL 的轻量
+计算机也可以探查模型与离线证据。与其他 profile 一样，切换进入或退出该
+profile 需要重启 MCP host。
+
+这些工具只产生完整性证据，永远不能替代 FEM 校验、求解器证据或持久任务
+回执链。
+
 更新或重装 MCP package 前，先备份实际生效的可写 `settings.json`。如果使用了
 `COMSOL_MCP_SETTINGS_PATH`，应备份它指向的准确文件。安装后恢复或重新检查设置，重启
 MCP 客户端，再查看 `capabilities.project_settings`：

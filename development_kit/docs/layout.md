@@ -216,6 +216,7 @@ models are intentionally absent.
 - `development_kit/tests/test_acceptance_resources.py` — This module tests caller-declared, live-bounded licensed acceptance resources.
 - `development_kit/tests/test_acoustic_duct_recipe.py` — This module tests staging, cleanup ordering, collision refusal, and sharing retries for the acoustic recipe.
 - `development_kit/tests/test_acoustics_pde.py` — This module tests bounded Acoustics and mathematical PDE interface and boundary transactions without COMSOL.
+- `development_kit/tests/test_alpha73_public_surface.py` — This module tests the alpha7.3 public surface: frozen comsolless dispatch, cold discovery, and package boundaries.
 - `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
 - `development_kit/tests/test_acdc_differential_coils_recipe.py` — This module tests static portability and input contracts for the differential-coil recipe.
 - `development_kit/tests/test_attached_job_backend.py` — This module tests immutable attached-job targets, handoff, worker execution, resume, cancellation, and preservation.

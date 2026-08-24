@@ -84,6 +84,7 @@ LINT_TARGETS = (
     "development_kit/scripts/standalone_licensed_gate.py",
     "development_kit/benchmarks/research_campaign.py",
     "development_kit/tests/conftest.py",
+    "development_kit/tests/test_alpha73_public_surface.py",
     "development_kit/tests/test_bounded_steps.py",
     "development_kit/tests/test_compatibility_registry.py",
     "development_kit/tests/test_offline_export.py",
