@@ -291,7 +291,7 @@ def execute_native_adjoint_optimization(
                 cleanup["client_clear"] = True
             except Exception as exc:
                 cleanup_errors.append(f"client_clear:{type(exc).__name__}:{exc}")
-        cleanup_record = dict(cleanup)
+        cleanup_record: dict[str, Any] = dict(cleanup)
         if cleanup_errors:
             cleanup_record["cleanup_errors"] = cleanup_errors
         receipt["cleanup"] = cleanup_record
