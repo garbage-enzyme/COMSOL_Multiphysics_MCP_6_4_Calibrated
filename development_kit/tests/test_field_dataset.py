@@ -349,3 +349,82 @@ def test_adapter_requires_ordered_result_list_and_model_readback(tmp_path):
             view_id="on",
             artifact_root=tmp_path / "no-java",
         )
+
+
+def test_real_vector_accepts_numerically_tiny_imaginary_noise():
+    from src.evidence.field_dataset import _real_vector
+
+    array = _real_vector([1.0 + 5e-30j, 2.0 - 3e-30j], "probe")
+    assert array.tolist() == [1.0, 2.0]
+
+
+def test_real_vector_still_rejects_physically_complex_values():
+    from src.evidence.field_dataset import _real_vector
+
+    with pytest.raises(ValueError, match="contains complex values"):
+        _real_vector([1.0 + 1e-6j], "probe")
+
+
+def _validation_matrix_source() -> dict:
+    return {
+        "kind": "validation_matrix_point",
+        "source_model_sha256": "d" * 64,
+        "job_id": "job-123",
+        "point_id": "target",
+        "point_fingerprint": "a" * 64,
+        "artifact_id": "audit-target",
+        "component_tag": "comp1",
+        "dataset_name": "研究 1//解 1",
+        "dataset_tag": "dset_on",
+        "solution_tag": "sol_on",
+    }
+
+
+def test_evaluation_failure_names_the_actual_source_kind(tmp_path, monkeypatch):
+    import src.evidence.field_dataset as fd
+
+    class _BoomModel(_Model):
+        def evaluate(self, *args, **kwargs):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(fd, "_resolve_mph_dataset", lambda *args, **kwargs: object())
+
+    raw = _request(paired=False, png=False)
+    raw["views"][0]["source"] = _validation_matrix_source()
+    raw["grid"]["shape"] = [9, 11]
+    raw["limits"]["max_grid_points"] = 200
+    request = normalize_field_evidence_request(raw)
+    with pytest.raises(RuntimeError, match="validation_matrix_point field evaluation failed"):
+        fd.collect_validation_matrix_field_evidence(
+            model=_BoomModel(),
+            request=request,
+            view_id="on",
+            artifact_root=tmp_path / "vm",
+        )
+
+    raw_existing = _request(paired=False, png=False)
+    existing_keys = {
+        "kind",
+        "source_model_sha256",
+        "component_tag",
+        "dataset_name",
+        "dataset_tag",
+        "solution_tag",
+    }
+    for view in raw_existing["views"]:
+        view["source"] = {
+            **{
+                key: value
+                for key, value in _validation_matrix_source().items()
+                if key in existing_keys - {"kind"}
+            },
+            "kind": "existing_dataset",
+        }
+    plain_request = normalize_field_evidence_request(raw_existing)
+    with pytest.raises(RuntimeError, match="existing_dataset field evaluation failed"):
+        fd.collect_existing_dataset_field_evidence(
+            model=_BoomModel(),
+            request=plain_request,
+            view_id="on",
+            artifact_root=tmp_path / "existing",
+        )

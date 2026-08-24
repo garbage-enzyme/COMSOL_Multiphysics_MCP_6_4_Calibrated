@@ -441,3 +441,16 @@ def test_pdf_build_emits_monotonic_stage_and_percentage_progress(ascii_tmp_path)
     assert [event["percent"] for event in events] == sorted(event["percent"] for event in events)
     assert events[-1]["percent"] == 100
     assert events[-1]["total_pages"] == 2
+
+
+def test_protocol_errors_map_to_request_invalid_before_configuration():
+    from src.knowledge.lexical_build_worker import RequestInvalid, _error_payload
+
+    protocol = _error_payload(RequestInvalid("request shape is invalid"))
+    assert protocol["reason_code"] == "request_invalid"
+    assert protocol["message"] == (
+        "The index build request is malformed or exceeds its size bound."
+    )
+
+    configuration = _error_payload(ValueError("pdf root missing"))
+    assert configuration["reason_code"] == "index_configuration_invalid"

@@ -473,3 +473,18 @@ assert len(TOOL_METADATA) == 170
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+def test_empty_knowledge_documentation_reports_a_distinct_error(tmp_path, monkeypatch):
+    import comsol_mcp.knowledge.embedded as embedded_module
+
+    topic = next(iter(embedded_module.KNOWLEDGE_FILES))
+    target = tmp_path / embedded_module.KNOWLEDGE_FILES[topic]["file"]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("", encoding="utf-8")
+    monkeypatch.setattr(embedded_module, "KNOWLEDGE_DIR", tmp_path)
+
+    result = embedded_module.get_docs(topic)
+
+    assert result["success"] is False
+    assert "is empty" in result["error"]

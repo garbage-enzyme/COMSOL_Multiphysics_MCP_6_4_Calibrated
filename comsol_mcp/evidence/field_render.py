@@ -112,7 +112,11 @@ def render_field_png_bundle(
         raise ValueError("paired field PNGs require shared color limits")
     if len(views) == 1 and shared_color_limits:
         raise ValueError("shared color limits require exactly two views")
-    if not isinstance(timeout_seconds, (int, float)) or not 1 <= timeout_seconds <= 120:
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not 1 <= timeout_seconds <= 120
+    ):
         raise ValueError("timeout_seconds must be between 1 and 120")
 
     root = Path(output_root).expanduser().resolve()
@@ -240,8 +244,14 @@ def render_field_png_bundle(
             "plot_process_isolated": True,
         }
     except Exception:
+        # Best-effort cleanup: a locked or read-only partial PNG must not
+        # replace the original render/validation error, so each unlink is
+        # guarded independently and cleanup failures are deliberately ignored.
         for view in normalized:
-            Path(view["png_path"]).unlink(missing_ok=True)
+            try:
+                Path(view["png_path"]).unlink(missing_ok=True)
+            except OSError:
+                pass
         raise
 
 

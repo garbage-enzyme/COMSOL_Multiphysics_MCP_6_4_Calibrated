@@ -389,3 +389,36 @@ def test_mcp_server_registration_never_imports_tkinter() -> None:
     result = json.loads(completed.stdout.strip())
 
     assert result == {"tkinter": False, "tool": True}
+
+
+def test_handshake_accepts_non_ascii_parent_directory(tmp_path):
+    from comsol_mcp.settings_gui_handshake import validate_handshake_path
+
+    parent = tmp_path / "设置" / "settings_gui"
+    parent.mkdir(parents=True)
+    path = validate_handshake_path(parent / ".settings-gui-{}.json".format("a" * 32))
+    assert path.parent == parent.resolve(strict=True)
+
+
+def test_handshake_filename_still_must_be_ascii_and_exact(tmp_path):
+    import pytest as _pytest
+
+    from comsol_mcp.settings_gui_handshake import validate_handshake_path
+
+    parent = tmp_path / "settings_gui"
+    parent.mkdir()
+    with _pytest.raises(ValueError, match="handshake path is invalid"):
+        validate_handshake_path(parent / ".settings-gui-中文.json")
+    with _pytest.raises(ValueError, match="handshake path is invalid"):
+        validate_handshake_path(parent / ".settings-gui-ZZ.json")
+
+
+def test_read_handshake_enforces_size_bound_on_bytes_actually_read(tmp_path):
+    from comsol_mcp.settings_gui_handshake import MAX_HANDSHAKE_BYTES, read_handshake
+
+    oversized = tmp_path / "settings_gui"
+    oversized.mkdir()
+    path = oversized / ".settings-gui-{}.json".format("b" * 32)
+    path.write_text(json.dumps({"state": "ready", "padding": "x" * (MAX_HANDSHAKE_BYTES + 8)}))
+
+    assert read_handshake(path) is None

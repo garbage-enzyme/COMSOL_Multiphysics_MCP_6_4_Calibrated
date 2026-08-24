@@ -78,6 +78,9 @@ def _process_records() -> tuple[list[dict[str, Any]], bool]:
             complete = False
             continue
         except psutil.NoSuchProcess, psutil.ZombieProcess:
+            # The process raced away or became a zombie mid-inspection: the
+            # snapshot silently omits it, so completeness must stay truthful.
+            complete = False
             continue
         if len(records) > MAX_PROCESS_RECORDS:
             raise RuntimeError("process inventory exceeds the bounded maximum")
@@ -307,6 +310,8 @@ def collect_shared_preflight_snapshot(
         inventory_complete = inventory_complete and listener_inventory_complete
     else:
         listeners = provided_listeners
+    if len(records) > MAX_PROCESS_RECORDS:
+        raise RuntimeError("process inventory exceeds the bounded maximum")
     if len(listeners) > MAX_LISTENER_RECORDS:
         raise RuntimeError("listener inventory exceeds the bounded maximum")
     windows = window_provider()

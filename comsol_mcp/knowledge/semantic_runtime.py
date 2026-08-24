@@ -271,6 +271,10 @@ class SemanticService:
             self._health_gate_passed = False
             if result.get("success"):
                 self._last_error = None
+            else:
+                # Mirror search(): a failed reset replaces any stale error so
+                # status() reports the actual reset failure, never an older one.
+                self._last_error = result.get("error") or {"message": str(result)}
             return result
 
 

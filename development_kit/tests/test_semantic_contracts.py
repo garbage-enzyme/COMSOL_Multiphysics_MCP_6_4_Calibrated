@@ -802,3 +802,23 @@ def test_evaluation_query_ids_are_canonicalized_like_other_identities():
     assert [item["id"] for item in normalized["queries"]] == [
         f"q{index:02d}" for index in range(60)
     ]
+
+
+def test_evaluation_set_name_and_frozen_at_are_validated_not_coerced():
+    payload = _evaluation_payload()
+    payload.pop("name", None)
+    payload.pop("frozen_at", None)
+
+    normalized = validate_evaluation_set(payload)
+    assert normalized["name"] == "semantic-retrieval-evaluation"
+    assert normalized["frozen_at"] == ""
+
+    bad_name = _evaluation_payload()
+    bad_name["name"] = 123
+    with pytest.raises(ValueError, match="name must be a nonempty string"):
+        validate_evaluation_set(bad_name)
+
+    bad_frozen = _evaluation_payload()
+    bad_frozen["frozen_at"] = 5
+    with pytest.raises(ValueError, match="frozen_at must be a string"):
+        validate_evaluation_set(bad_frozen)

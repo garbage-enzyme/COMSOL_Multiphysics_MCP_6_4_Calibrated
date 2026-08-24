@@ -602,3 +602,53 @@ def test_render_rejects_divergent_shared_color_limits(tmp_path, monkeypatch):
             shared_color_limits=True,
             output_root=tmp_path / "divergent-output",
         )
+
+
+def test_boolean_timeout_seconds_is_rejected(tmp_path):
+    array = tmp_path / "bool-timeout.npz"
+    digest = _array(array)
+
+    with pytest.raises(ValueError, match="timeout_seconds must be between 1 and 120"):
+        render_field_png_bundle(
+            views=[_view("target", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=tmp_path / "bool-out",
+            timeout_seconds=True,
+        )
+
+
+def test_cleanup_unlink_failure_preserves_the_original_error(tmp_path, monkeypatch):
+    array = tmp_path / "locked.npz"
+    digest = _array(array)
+
+    class FakeProcess:
+        returncode = 1
+
+        def __init__(self, _command, **kwargs):
+            self.stderr = kwargs["stderr"]
+
+        def communicate(self, *, input, timeout):
+            self.stderr.write(b"controlled worker failure")
+
+    monkeypatch.setattr(field_render_module.subprocess, "Popen", FakeProcess)
+
+    def exploding_unlink(self, missing_ok=False):
+        raise OSError("png briefly locked")
+
+    monkeypatch.setattr(Path, "unlink", exploding_unlink)
+
+    # Every cleanup unlink fails, yet the original worker error still surfaces.
+    with pytest.raises(RuntimeError, match="worker failed"):
+        render_field_png_bundle(
+            views=[_view("target", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=tmp_path / "locked-output",
+        )

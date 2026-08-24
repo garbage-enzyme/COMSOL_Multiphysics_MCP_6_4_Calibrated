@@ -267,11 +267,15 @@ def load_evidence_integrity_status(
             "settings_rejected", exc, raw_sha256=_sha256(raw) if raw is not None else None
         )
 
+    # Attestation identity must depend on the effective configuration only:
+    # hashing the raw file here would make cosmetic whitespace/key-order edits
+    # invalidate previously attested results and diverge from the default and
+    # project-settings sources. Raw bytes stay confined to error diagnostics.
     return _valid_status(
         effective,
         checks,
         source="explicit_settings",
-        fingerprint=_sha256(raw),
+        fingerprint=_sha256(_canonical_bytes(effective)),
     )
 
 

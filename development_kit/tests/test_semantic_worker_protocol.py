@@ -970,3 +970,24 @@ print(json.dumps({'ok': True, 'launches': process_launch_events}))
     )
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout)["ok"] is True
+
+
+def test_failed_reset_replaces_stale_last_error(monkeypatch):
+    import threading as threading_module
+    from types import SimpleNamespace as _Namespace
+
+    from src.knowledge.semantic_runtime import SemanticService
+
+    service = object.__new__(SemanticService)
+    service._lock = threading_module.Lock()
+    service._manager = _Namespace(
+        reset=lambda: {"success": False, "error": {"message": "worker pipe broken"}}
+    )
+    service._health_gate_passed = True
+    service._last_error = {"message": "stale query failure"}
+
+    result = service.reset()
+
+    assert result["success"] is False
+    assert service._health_gate_passed is False
+    assert service._last_error == {"message": "worker pipe broken"}

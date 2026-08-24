@@ -312,7 +312,9 @@ def test_source_backed_extrapolation_cannot_cross_far_side_discontinuity():
         "interpolation": {
             "wavelength_method": "linear",
             "temperature_method": "linear",
-            "wavelength_discontinuities_m": [2.1e-6],
+            # The discontinuity sits on the declared grid edge; an out-of-range
+            # value is rejected outright by the ledger contract.
+            "wavelength_discontinuities_m": [2.0e-6],
             "temperature_discontinuities_K": [],
             "extrapolation": {
                 "mode": "source_backed_linear",
@@ -326,6 +328,25 @@ def test_source_backed_extrapolation_cannot_cross_far_side_discontinuity():
     result = evaluate_thermal_material(_request(_ledger([_state(model=model)]), wavelength=2.2e-6))
     assert result["available"] is False
     assert result["reason_code"] == "declared_discontinuity_requires_explicit_state"
+
+
+def test_interpolation_discontinuity_outside_the_grid_is_rejected():
+    model = {
+        "model_kind": "nk_table",
+        "wavelengths_m": [1.0e-6, 2.0e-6],
+        "temperatures_K": [400.0],
+        "n_flat": [2.0, 3.0],
+        "k_flat": [0.1, 0.2],
+        "interpolation": {
+            "wavelength_method": "linear",
+            "temperature_method": "linear",
+            "wavelength_discontinuities_m": [2.1e-6],
+            "temperature_discontinuities_K": [],
+        },
+        "table_sha256": "f" * 64,
+    }
+    with pytest.raises(ValidationError, match="within the declared grid"):
+        NkTableModel(**model)
 
 
 def test_invalid_table_shape_and_negative_passive_loss_fail_closed():
@@ -517,3 +538,41 @@ def test_table_query_inside_both_validity_and_grid_remains_normal():
     assert result["available"] is True
     assert result["extrapolated"] is False
     assert result["model_kind"] == "nk_table"
+
+
+def _table_kwargs(model_kind: str, *, discontinuities: dict) -> dict:
+    common = {
+        "model_kind": model_kind,
+        "wavelengths_m": [1.0e-6, 2.0e-6],
+        "temperatures_K": [300.0, 400.0],
+        "interpolation": {
+            "wavelength_method": "linear",
+            "temperature_method": "linear",
+            "wavelength_discontinuities_m": discontinuities.get("wavelength", []),
+            "temperature_discontinuities_K": discontinuities.get("temperature", []),
+        },
+        "table_sha256": "c" * 64,
+    }
+    if model_kind == "nk_table":
+        common["n_flat"] = [2.0] * 4
+        common["k_flat"] = [0.1] * 4
+    else:
+        common["epsilon_real_flat"] = [2.0] * 4
+        common["epsilon_imag_flat"] = [0.1] * 4
+    return common
+
+
+def test_interpolation_wavelength_discontinuities_must_be_sorted_and_unique():
+    duplicated = _table_kwargs("nk_table", discontinuities={"wavelength": [1.5e-6, 1.5e-6]})
+    with pytest.raises(ValidationError, match="strictly increasing"):
+        NkTableModel(**duplicated)
+
+    unsorted = _table_kwargs("nk_table", discontinuities={"wavelength": [1.8e-6, 1.2e-6]})
+    with pytest.raises(ValidationError, match="strictly increasing"):
+        NkTableModel(**unsorted)
+
+
+def test_permittivity_side_rejects_temperature_discontinuity_outside_grid():
+    model = _table_kwargs("permittivity_table", discontinuities={"temperature": [500.0]})
+    with pytest.raises(ValidationError, match="within the declared grid"):
+        PermittivityTableModel(**model)

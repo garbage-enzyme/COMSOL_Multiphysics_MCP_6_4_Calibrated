@@ -44,10 +44,17 @@ def _isolate_native_stdout() -> Iterator[None]:
         protocol_stream.close()
 
 
+class RequestInvalid(ValueError):
+    """The parent sent a malformed, oversized, or undecodable request."""
+
+
 def _error_payload(exc: BaseException) -> dict[str, Any]:
     if isinstance(exc, IndexBuildCancelled):
         code = "cancelled"
         message = "Index generation was cancelled. The previous index was preserved."
+    elif isinstance(exc, RequestInvalid):
+        code = "request_invalid"
+        message = "The index build request is malformed or exceeds its size bound."
     elif isinstance(exc, FileNotFoundError):
         code = "pdfs_not_found"
         message = "No readable PDF manuals were found below the selected folder."
@@ -70,17 +77,20 @@ def _run_request() -> int:
     try:
         raw = sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1)
         if not raw or len(raw) > MAX_REQUEST_BYTES:
-            raise ValueError("request size is invalid")
-        request = json.loads(raw.decode("utf-8"))
+            raise RequestInvalid("request size is invalid")
+        try:
+            request = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RequestInvalid(f"request payload is not valid UTF-8 JSON: {exc}") from exc
         if not isinstance(request, dict) or set(request) != {
             "pdf_root",
             "index_path",
             "temporary_path",
         }:
-            raise ValueError("request shape is invalid")
+            raise RequestInvalid("request shape is invalid")
         for key, value in request.items():
             if not isinstance(value, str) or not value or len(value) > 4096:
-                raise ValueError(f"{key} is invalid")
+                raise RequestInvalid(f"{key} is invalid")
         result = build_index_from_pdfs(
             Path(request["pdf_root"]),
             Path(request["index_path"]),

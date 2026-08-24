@@ -275,10 +275,10 @@ BEST_PRACTICES = {
 }
 
 
-def _load_knowledge_file(name: str) -> str:
-    """Load content from a knowledge file."""
+def _load_knowledge_file(name: str) -> str | None:
+    """Load content from a knowledge file; ``None`` signals a load failure."""
     if name not in KNOWLEDGE_FILES:
-        return ""
+        return None
 
     file_path = KNOWLEDGE_DIR / KNOWLEDGE_FILES[name]["file"]
     try:
@@ -289,7 +289,7 @@ def _load_knowledge_file(name: str) -> str:
         return payload.decode("utf-8")
     except (OSError, ValueError, UnicodeError) as exc:
         logger.exception("embedded knowledge file %s failed to load", file_path, exc_info=exc)
-        return ""
+        return None
 
 
 # Module-level functions for testing and direct use
@@ -304,10 +304,15 @@ def get_docs(topic: str) -> dict:
         }
 
     content = _load_knowledge_file(topic)
-    if not content:
+    if content is None:
         return {
             "success": False,
             "error": f"Could not load documentation for: {topic}",
+        }
+    if not content.strip():
+        return {
+            "success": False,
+            "error": f"Documentation for {topic} is empty",
         }
 
     info = KNOWLEDGE_FILES[topic]

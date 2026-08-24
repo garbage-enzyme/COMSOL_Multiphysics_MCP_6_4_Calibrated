@@ -265,10 +265,27 @@ def validate_evaluation_set(
             }
         )
 
+    # name and frozen_at are canonical frozen-schema text: validate them
+    # explicitly instead of silently stringifying arbitrary payload values.
+    raw_name = payload.get("name")
+    if raw_name is None:
+        name = "semantic-retrieval-evaluation"
+    elif isinstance(raw_name, str) and raw_name.strip():
+        name = raw_name.strip()
+    else:
+        raise ValueError("evaluation name must be a nonempty string when provided")
+    raw_frozen_at = payload.get("frozen_at")
+    if raw_frozen_at is None:
+        frozen_at = ""
+    elif isinstance(raw_frozen_at, str):
+        frozen_at = raw_frozen_at
+    else:
+        raise ValueError("evaluation frozen_at must be a string when provided")
+
     return {
         "schema_version": EVALUATION_SCHEMA_VERSION,
-        "name": str(payload.get("name") or "semantic-retrieval-evaluation"),
-        "frozen_at": str(payload.get("frozen_at") or ""),
+        "name": name,
+        "frozen_at": frozen_at,
         "corpus_fingerprint": corpus_fingerprint,
         "queries": normalized_queries,
     }

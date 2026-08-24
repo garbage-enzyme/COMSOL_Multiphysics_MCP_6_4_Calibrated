@@ -324,3 +324,19 @@ def test_every_advertised_capability_schema_pair_is_readable():
         if not check_schema_support(schema_name, schema_version)["supported"]
     ]
     assert unsupported == []
+
+
+def test_explicitly_empty_readable_versions_is_not_readable():
+    from comsol_mcp.schema_registry import _entry
+
+    not_readable = _entry(
+        "demo.artifact.schema",
+        "2.0.0",
+        "demo-producer",
+        readable_versions=(),
+    )
+    assert not_readable["readable_versions"] == []
+    assert not_readable["writable_version"] == "2.0.0"
+
+    fallback = _entry("demo.artifact.schema", "2.0.0", "demo-producer")
+    assert fallback["readable_versions"] == ["2.0.0"]

@@ -24,7 +24,10 @@ def _real_vector(value: Any, label: str) -> Any:
     if array.size == 0 or array.dtype.kind not in "fciu":
         raise ValueError(f"{label} must be a nonempty numeric array")
     if np.iscomplexobj(array):
-        if not np.all(array.imag == 0):
+        # Solver output can carry numerically tiny imaginary noise on a real
+        # expression; accept it within tight tolerance instead of demanding
+        # exact zeros, and reject anything physically complex.
+        if not np.allclose(array.imag, 0.0, rtol=0.0, atol=1.0e-15):
             raise ValueError(
                 f"{label} contains complex values; request an explicit real scalar expression"
             )
@@ -135,7 +138,7 @@ def _collect_dataset_field_evidence(
             ),
         )
     except Exception as exc:
-        raise RuntimeError(f"existing dataset field evaluation failed: {exc}") from exc
+        raise RuntimeError(f"{source_kind} field evaluation failed: {exc}") from exc
     if not isinstance(evaluated, (list, tuple)) or len(evaluated) != len(evaluation_expressions):
         raise ValueError("field evaluation did not preserve expression order and count")
     vectors = [

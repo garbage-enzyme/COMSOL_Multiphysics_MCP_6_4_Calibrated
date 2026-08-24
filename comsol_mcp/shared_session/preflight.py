@@ -37,8 +37,12 @@ _LISTENER_FIELDS = frozenset({"host", "port", "pid"})
 _SNAPSHOT_FIELDS = frozenset({"inventory_complete", "observed_at_epoch", "processes", "listeners"})
 _PROCESS_KINDS = frozenset({"comsol_desktop", "comsol_server", "mph_client", "other_comsol"})
 _HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
-_VERSION = re.compile(r"(?<!\d)(\d+)\.(\d+)\.(\d+)\.(\d+)(?!\d)")
-_CLIENTAPI_DISPLAY_VERSION = re.compile(r"^[^\d]*(\d+)\.(\d+)(?:\.(\d+))?.*?\([^\d)]*(\d+)[^)]*\)")
+# The whole bounded string must BE the four-part build; a version embedded in
+# unrelated prose (for example a path component) must not satisfy release gates.
+_VERSION = re.compile(r"\s*(\d+)\.(\d+)\.(\d+)\.(\d+)\s*")
+# Display fallbacks may only contribute a LABELED build number: an unlabeled
+# parenthesized digit run such as "(64-bit)" is architecture text, not a build.
+_CLIENTAPI_DISPLAY_VERSION = re.compile(r"^[^\d]*(\d+)\.(\d+)(?:\.(\d+))?.*?\bbuild\s*(\d+)")
 
 
 def _exact_mapping(value: Any, fields: frozenset[str], label: str) -> dict[str, Any]:
@@ -77,7 +81,7 @@ def _normalize_version(
         return None, None
     if not isinstance(value, str) or not value or len(value) > 128:
         raise ValueError("COMSOL file version must be a bounded string or null")
-    match = _VERSION.search(value)
+    match = _VERSION.fullmatch(value)
     if match is None:
         return "unreadable", None
     parts = tuple(int(item) for item in match.groups())
@@ -141,6 +145,10 @@ def _normalize_process(value: Any, index: int) -> dict[str, Any]:
         ),
         "responding": raw["responding"],
     }
+    # Identity keys on process replacement only. Windows GetProcessTimes
+    # exposes creation time at 100 ns resolution, so a recycled PID colliding
+    # on create_time across two probes is not physically realizable; the
+    # varying window_count/responding fields are deliberately excluded.
     body["identity_sha256"] = canonical_sha256_v1(
         {
             key: body[key]
