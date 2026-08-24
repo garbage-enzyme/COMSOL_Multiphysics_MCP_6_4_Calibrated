@@ -245,9 +245,9 @@ _TOOLS_BY_REGISTRAR = {
     ),
     "comsol_mcp.tools.mph_inspection.register_mph_inspection_tools": (
         "mph_diff",
-        "mph_diff",
         "mph_inspect",
     ),
+    "comsol_mcp.tools.model_identity.register_model_identity_tools": ("model_identity",),
     "comsol_mcp.tools.configuration.register_configuration_tools": (
         "simulation_configuration_validate",
         "simulation_configuration_diff",
@@ -334,6 +334,7 @@ _GROUP_BY_REGISTRAR = {
     "register_spectral_characterization_tools": "spectral_evidence",
     "register_configuration_tools": "configuration_evidence",
     "register_mph_inspection_tools": "mph_inspection",
+    "register_model_identity_tools": "model_identity",
     "register_thermal_radiation_tools": "thermal_radiation_evidence",
     "register_thermal_material_tools": "thermal_material_evidence",
     "register_convergence_evaluation_tools": "convergence_evidence",
@@ -540,6 +541,7 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "model_list",
         "model_list_components",
         "modeling_best_practices",
+        "model_identity",
         "mph_diff",
         "mph_inspect",
         "param_get",
@@ -636,6 +638,7 @@ _SOLVER_FREE_TOOLS = frozenset(
         "modeling_best_practices",
         "mph_diff",
         "mph_inspect",
+        "model_identity",
         "wave_optics_material_expression_preview",
         "visual_review_capability_normalize",
         "visual_review_request_create",
@@ -746,6 +749,7 @@ _CORE_TOOLS = frozenset(
         "model_set_current",
         "model_remove",
         "model_inspect",
+        "model_identity",
         "mph_diff",
         "mph_inspect",
         "param_get",
@@ -990,7 +994,7 @@ def _build_registry() -> dict[str, ToolMetadata]:
         "wave_optics": _CORE_TOOLS | _WAVE_OPTICS_ADDITIONS,
         "experimental": _CORE_TOOLS | _EXPERIMENTAL_ADDITIONS,
         "full": base_names,
-        "comsolless_read_only": {"mph_inspect", "mph_diff"},
+        "comsolless_read_only": {"mph_inspect", "mph_diff", "model_identity"},
     }
     registry: dict[str, ToolMetadata] = {}
     for registrar, names in _TOOLS_BY_REGISTRAR.items():

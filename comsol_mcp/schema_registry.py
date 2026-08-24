@@ -558,6 +558,12 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.tools.model",
         ),
         _entry(
+            "comsol_mcp.model_identity",
+            "1.0.0",
+            "comsol_mcp.evidence.model_identity",
+            artifact_kind="public_response",
+        ),
+        _entry(
             "comsol_mcp.mph_artifact_probe",
             "1.0.0",
             "comsol_mcp.evidence.inspection.probe",

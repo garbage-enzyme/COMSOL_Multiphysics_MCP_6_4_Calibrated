@@ -553,6 +553,11 @@ _MODEL_READ_ARGUMENTS = {
         ("left_path", (".mph",)),
         ("right_path", (".mph",)),
     ),
+    "model_identity": (
+        ("file_path", (".mph",)),
+        ("source_path", (".mph",)),
+        ("checkpoint_path", (".mph",)),
+    ),
     "geometry_import": (("file_path", None),),
     "solver_preflight": (("model_path", (".mph",)),),
     "wave_optics_preflight": (("expected_source_path", (".mph",)),),
