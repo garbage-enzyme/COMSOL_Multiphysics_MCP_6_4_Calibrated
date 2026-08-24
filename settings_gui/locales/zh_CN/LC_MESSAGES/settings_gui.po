@@ -323,7 +323,7 @@ msgstr "正在启动索引工作进程……"
 msgid "Cancelling safely..."
 msgstr "正在安全取消……"
 
-msgid "{percent}% — {files}/{total_files} PDFs, {pages}/{total_pages} pages{source}"
+msgid "{percent}% — {files}/{total_files} PDF(s), {pages}/{total_pages} page(s){source}"
 msgstr "{percent}% — {files}/{total_files} 个 PDF，{pages}/{total_pages} 页{source}"
 
 msgid "Replace existing index?"
@@ -341,7 +341,7 @@ msgstr "无法启动索引生成。请检查所选路径和权限。"
 msgid "Manual index ready"
 msgstr "手册索引已就绪"
 
-msgid "Indexed {pdfs} PDFs and {pages} pages. Corpus fingerprint: {fingerprint}"
+msgid "Indexed {pdfs} PDF(s) and {pages} page(s). Corpus fingerprint: {fingerprint}"
 msgstr "已索引 {pdfs} 个 PDF、{pages} 页。语料指纹：{fingerprint}"
 
 msgid "Index generation failed"

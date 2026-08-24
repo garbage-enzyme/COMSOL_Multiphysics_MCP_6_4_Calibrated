@@ -688,7 +688,9 @@ def _dry_run(spec: dict[str, Any]) -> dict[str, Any]:
         "source_sha256": spec["source_sha256"],
         "stages": stages,
         "gradient_policy": _GRADIENT_POLICY,
-        "commands": {stage: _stage_command(spec, stage)[2] for stage in stages},
+        # Emit the full subprocess command (interpreter + args), not just the
+        # module name: a dry-run report must show what would actually run.
+        "commands": {stage: _stage_command(spec, stage) for stage in stages},
         "budgets": _declared_budgets(spec),
         "mma_budget": _declared_mma_budget(spec),
         "optimizer_execution": _declared_optimizer_execution(spec),

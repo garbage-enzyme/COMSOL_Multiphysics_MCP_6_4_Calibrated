@@ -837,6 +837,29 @@ def test_distribution_inventory_rejects_normalized_name_collisions(tmp_path):
         _distribution_inventory(sdist)
 
 
+def test_distribution_inventory_rejects_case_only_name_collisions(tmp_path):
+    # Windows is the declared install target: members differing only by case
+    # would overwrite each other during installation.
+    wheel = tmp_path / "case-duplicate.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("comsol_mcp/First.py", "upper\n")
+        archive.writestr("comsol_mcp/first.py", "lower\n")
+    with pytest.raises(RuntimeError, match="duplicate normalized paths"):
+        _distribution_inventory(wheel)
+
+    sdist = tmp_path / "package-1.tar.gz"
+    with tarfile.open(sdist, "w:gz") as archive:
+        for name, payload in (
+            ("package-1/comsol_mcp/First.py", b"upper\n"),
+            ("package-1/comsol_mcp/first.py", b"lower\n"),
+        ):
+            member = tarfile.TarInfo(name)
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+    with pytest.raises(RuntimeError, match="duplicate normalized paths"):
+        _distribution_inventory(sdist)
+
+
 def test_sdist_inventory_requires_its_exact_filename_root(tmp_path):
     valid = tmp_path / "package-1.tar.gz"
     with tarfile.open(valid, "w:gz") as archive:

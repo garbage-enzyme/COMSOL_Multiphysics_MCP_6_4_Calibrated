@@ -73,7 +73,7 @@ def check_release_facts(path: Path = FACTS_PATH) -> None:
     expected = build_release_facts()
     try:
         actual = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise SystemExit("committed release facts are missing or corrupt") from exc
 
     def canonical(value: Any) -> str:

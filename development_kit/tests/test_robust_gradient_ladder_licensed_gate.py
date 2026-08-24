@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import uuid
 from pathlib import Path
 
@@ -194,6 +195,20 @@ def test_dry_run_freezes_serial_fresh_process_plan_without_starting_solver(
     spec = gate._spec(_args(gate_root, tmp_path, run_mma=True))
     receipt = gate._dry_run(spec)
     assert receipt["stages"] == ["native", "finite_difference", "directional", "gcmma", "mma"]
+    # Dry-run "commands" must show the full subprocess command, not just the
+    # module name: the report is the operator's preview of what would run.
+    expected_modules = {
+        "native": "development_kit.scripts.native_gradient_licensed_gate",
+        "finite_difference": "development_kit.scripts.native_gradient_fd_licensed_gate",
+        "directional": "development_kit.scripts.native_gradient_directional_licensed_gate",
+        "gcmma": "development_kit.scripts.native_optimizer_licensed_gate",
+        "mma": "development_kit.scripts.native_optimizer_licensed_gate",
+    }
+    for stage, command in receipt["commands"].items():
+        assert isinstance(command, list), stage
+        assert command[0] == sys.executable
+        assert command[1] == "-m"
+        assert command[2] == expected_modules[stage]
     assert receipt["budgets"]["max_commit_fraction"] == 0.9
     assert receipt["budgets"]["total_max_solves"] == 150
     assert receipt["budgets"]["total_max_wall_time_seconds"] == 14_400

@@ -225,6 +225,10 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     import mph
 
     source_before = _sha(spec["source"])
+    # Close the TOCTOU gap: the file was approved through --source-sha256 in
+    # _spec, but another process could replace it before this baseline hash.
+    if source_before != spec["source_sha256"]:
+        raise RuntimeError("source changed after specification validation")
     client = None
     model = None
     ownership = SolverOwnership()

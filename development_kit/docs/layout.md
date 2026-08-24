@@ -266,6 +266,7 @@ models are intentionally absent.
 - `development_kit/tests/test_field_tools.py` — This module tests public field discovery and extraction adapters.
 - `development_kit/tests/test_geometry.py` — This module tests geometry helpers without a COMSOL client.
 - `development_kit/tests/test_geometry_selections.py` — This module tests bounded named Box and rectangular-side selection transactions without COMSOL.
+- `development_kit/tests/test_geometry_tools.py` — This module tests structured input contracts for the difference/union geometry tools.
 - `development_kit/tests/test_incidence_config.py` — This module tests typed periodic incidence preview and mutation gates.
 - `development_kit/tests/test_integration_boundaries.py` — This module tests isolation and safety boundaries for integration probes.
 - `development_kit/tests/test_installed_stdio_probe.py` — This module tests installed stdio probe result decoding.
@@ -295,6 +296,7 @@ models are intentionally absent.
 - `development_kit/tests/test_power_audit.py` — This module tests solver-free declared physical-power evidence.
 - `development_kit/tests/test_process_control.py` — This module tests exact-identity process inspection and termination policy.
 - `development_kit/tests/test_process_inventory_stress.py` — This module stress-tests host inventory under PID churn without COMSOL.
+- `development_kit/tests/test_python_compatibility_gate.py` — This module tests the compatibility gate's raced-worker identity tolerance.
 - `development_kit/tests/test_public_error_redaction.py` — This module tests stable path-free public failures across tools, resources, and integrity receipts.
 - `development_kit/tests/test_property_transport.py` — This module tests bounded JSON transport for clientapi properties.
 - `development_kit/tests/test_public_input_contracts.py` — This module tests bounded discovery schemas and matching pre-side-effect runtime limits.
@@ -370,6 +372,8 @@ models are intentionally absent.
 - `development_kit/tests/test_shared_session_contracts.py` — This module tests default-off feature and loopback endpoint contracts.
 - `development_kit/tests/test_shared_session_identity.py` — This module tests attached-server and exact model-selector identities.
 - `development_kit/tests/test_shared_session_lifecycle.py` — This module tests fake-client attach, failure cleanup, and external-resource-preserving detach.
+- `development_kit/tests/test_shared_session_preflight.py` — This module tests shared-preflight version gates and process identity hashing.
+- `development_kit/tests/test_shared_session_registration.py` — This module tests registration-time tolerance of the shared-session feature gate.
 - `development_kit/tests/test_shared_session_tools.py` — This module tests the public default-off shared lifecycle tools and capability surface.
 - `development_kit/tests/test_shared_server_preflight.py` — This module tests two-probe Desktop, listener, collision, and COMSOL release-line classification.
 - `development_kit/tests/test_spectral_characterization.py` — This module tests provenance-bound offline spectral validation and measurements.

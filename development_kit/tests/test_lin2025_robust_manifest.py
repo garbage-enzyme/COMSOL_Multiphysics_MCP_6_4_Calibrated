@@ -140,6 +140,26 @@ def test_compiler_emits_self_validated_24_condition_submission(ascii_tmp_path):
     assert read_json(manifest)["synthetic_mode"] is False
 
 
+def test_compiler_rejects_pedot_fixture_without_condition_table(ascii_tmp_path):
+    source = _write_inputs(ascii_tmp_path)
+    pedot_path = ascii_tmp_path / "pedot.json"
+    pedot = read_json(pedot_path)
+    del pedot["condition_table"]
+    pedot_path.write_text(json.dumps(pedot), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="lacks condition table"):
+        compile_lin2025_robust_submission(
+            source_model=source,
+            fixture_path=ascii_tmp_path / "fixture.json",
+            tree_path=ascii_tmp_path / "tree.json",
+            support_path=ascii_tmp_path / "support.json",
+            pedot_fixture_path=pedot_path,
+            campaign_path=ascii_tmp_path / "campaign.json",
+            manifest_path=ascii_tmp_path / "licensed-manifest.json",
+            envelope_path=ascii_tmp_path / "licensed-envelope.json",
+        )
+
+
 def test_compiler_passes_through_1_5_0_forward_shape_controls(ascii_tmp_path):
     source = _write_inputs(ascii_tmp_path)
     campaign_path = ascii_tmp_path / "campaign.json"

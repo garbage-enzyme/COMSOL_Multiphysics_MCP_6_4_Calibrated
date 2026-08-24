@@ -59,6 +59,29 @@ def test_dry_run_binds_source_domain_and_cores_without_solver(tmp_path, gate_roo
     assert receipt["paths_included"] is False
 
 
+def test_run_refuses_source_replaced_after_spec_validation(
+    tmp_path: Path, gate_root: Path, monkeypatch
+):
+    spec = _spec(tmp_path, gate_root, monkeypatch)
+    real_sha = probe._sha
+    calls = {"count": 0}
+
+    def staged_sha(_path):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return "b" * 64  # baseline hash of an unapproved replacement file
+        return real_sha(_path)
+
+    monkeypatch.setattr(probe, "_sha", staged_sha)
+    monkeypatch.setattr(probe, "_git_identity", lambda: {"revision": "a" * 40, "clean": True})
+    monkeypatch.setitem(sys.modules, "mph", SimpleNamespace())
+
+    with pytest.raises(RuntimeError, match="changed after specification validation"):
+        probe._run(spec)
+
+    assert calls["count"] == 1
+
+
 def test_inventory_identifies_unique_patch_owner_and_bounds_property_readback():
     class Selection:
         def entities(self):

@@ -10,23 +10,34 @@ from comsol_mcp.shared_session.preflight import (
 )
 
 
-def test_file_version_must_be_the_whole_build_string():
-    assert normalize_comsol_version_readback("6.4.0.293")[1] == (6, 4, 0, 293)
-    assert normalize_comsol_version_readback(" 6.4.0.293 ")[1] == (6, 4, 0, 293)
+def test_file_version_prefix_is_allowed_but_tail_must_be_the_build():
+    assert normalize_comsol_version_readback("COMSOL Multiphysics 6.4.0.293")[1] == (
+        6,
+        4,
+        0,
+        293,
+    )
+    assert normalize_comsol_version_readback("  6.4.0.293")[1] == (6, 4, 0, 293)
 
 
-def test_version_embedded_in_prose_is_unreadable():
-    normalized, parts = normalize_comsol_version_readback(r"C:\apps\comsol\6.4.0.13\bin")
+def test_extra_dotted_segment_after_build_is_unreadable():
+    normalized, parts = normalize_comsol_version_readback("COMSOL Multiphysics 6.4.0.293.1")
     assert normalized == "unreadable"
     assert parts is None
 
 
-def test_display_fallback_requires_a_labeled_build_token():
+def test_display_fallback_requires_digits_to_reach_the_closing_paren():
     labeled = normalize_comsol_version_readback(
-        "COMSOL Multiphysics 6.4.0 (build 293)",
+        "COMSOL Multiphysics 6.4.0 (Build: 293)",
         expected_file_version="6.4.0.293",
     )
     assert labeled[1] == (6, 4, 0, 293)
+
+    localized = normalize_comsol_version_readback(
+        "COMSOL Multiphysics 6.4 (开发版本: 293)",
+        expected_file_version="6.4.0.293",
+    )
+    assert localized == ("6.4.0.293", (6, 4, 0, 293))
 
     bitness = normalize_comsol_version_readback(
         "COMSOL Multiphysics 6.4.0 (64-bit)",

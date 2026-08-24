@@ -164,7 +164,11 @@ def _normalized_archive_members(
     sdist_root: str | None,
 ) -> list[str]:
     normalized = [_normalized_archive_path(name, sdist_root=sdist_root) for name in names]
-    if len(normalized) != len(set(normalized)):
+    # Windows is the declared install target: names that collide only by
+    # case would overwrite each other during installation, so deduplicate
+    # on the case-folded form.
+    folded = [name.casefold() for name in normalized]
+    if len(folded) != len(set(folded)):
         raise RuntimeError("distribution contains duplicate normalized paths")
     return normalized
 

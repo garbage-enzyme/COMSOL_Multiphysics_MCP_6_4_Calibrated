@@ -93,6 +93,8 @@ def compile_lin2025_robust_submission(
         raise ValueError("PEDOT fixture schema is unsupported")
     if "material_tensor_rows" not in pedot:
         raise ValueError("PEDOT fixture lacks material tensor rows")
+    if "condition_table" not in pedot:
+        raise ValueError("PEDOT fixture lacks condition table")
     body = {
         "schema_name": "comsol_mcp.robust_shape_optimization_manifest",
         "schema_version": "1.1.0",

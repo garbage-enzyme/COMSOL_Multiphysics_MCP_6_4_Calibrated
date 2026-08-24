@@ -29,12 +29,15 @@ def _wheel_members(path: Path) -> tuple[set[str], str]:
 
 def _sdist_members(path: Path) -> set[str]:
     with tarfile.open(path, "r:gz") as archive:
-        names = {member.name.replace("\\", "/") for member in archive.getmembers()}
-    roots = {PurePosixPath(name).parts[0] for name in names if PurePosixPath(name).parts}
+        names = {member.name.replace("\\", "/").rstrip("/") for member in archive.getmembers()}
+    # Only nested paths prove the single archive root: git-archive tarballs
+    # carry top-level non-directory members such as pax_global_header, and a
+    # bare root entry must not count as (or hide) that root either.
+    roots = {PurePosixPath(name).parts[0] for name in names if len(PurePosixPath(name).parts) > 1}
     if len(roots) != 1:
         raise ValueError("sdist must contain one archive root")
     root = next(iter(roots))
-    return {name.removeprefix(root + "/") for name in names}
+    return {name[len(root) + 1 :] for name in names if name.startswith(root + "/")}
 
 
 def _entry_point_target(value: str, section: str, name: str) -> str | None:

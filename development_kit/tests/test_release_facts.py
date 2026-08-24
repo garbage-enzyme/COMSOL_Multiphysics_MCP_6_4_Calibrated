@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from development_kit.scripts.release_facts import (
     FACTS_PATH,
     build_release_facts,
@@ -14,6 +16,16 @@ from development_kit.scripts.release_facts import (
 
 def test_committed_release_facts_match_live_implementation():
     check_release_facts()
+
+
+def test_check_treats_unreadable_path_as_corrupt(tmp_path):
+    # A directory (or an unreadable file) raises OSError, not
+    # FileNotFoundError; the gate must still fail with the bounded message.
+    target = tmp_path / "release-facts-dir"
+    target.mkdir()
+
+    with pytest.raises(SystemExit, match="missing or corrupt"):
+        check_release_facts(target)
 
 
 def test_check_rejects_type_drift_that_plain_equality_would_accept(tmp_path):

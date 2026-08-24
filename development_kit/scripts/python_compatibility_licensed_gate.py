@@ -68,6 +68,17 @@ def _require_determinable_clean_git(git: dict) -> None:
         raise RuntimeError("licensed gate requires a determinable clean git tree")
 
 
+def _attach_worker_identity(receipt: dict, process: "psutil.Process") -> None:
+    """Attach worker identity, tolerating a worker that races away."""
+    try:
+        receipt["worker_process"] = _process_identity(process.pid)
+    except psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied:
+        # A worker exiting inside this window must not abort the parent
+        # before its durable receipt is read; record incompleteness instead.
+        receipt["worker_process"] = None
+        receipt["worker_identity_incomplete"] = True
+
+
 def _process_identity(pid: int) -> dict:
     process = psutil.Process(pid)
     with process.oneshot():
@@ -525,7 +536,7 @@ def _run_parent(args) -> int:
                 stderr=stderr_handle,
                 creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
-            receipt["worker_process"] = _process_identity(process.pid)
+            _attach_worker_identity(receipt, process)
             # Snapshot immediately: a worker that exits before the first poll
             # iteration can already have spawned solver processes.
             descendants = observe_descendants()

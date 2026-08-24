@@ -101,6 +101,26 @@ def test_distribution_probe_accepts_exact_gui_membership(tmp_path: Path) -> None
     assert result["wheel_root_launcher_excluded"] is True
 
 
+def test_sdist_members_ignore_pax_header_and_bare_root_entry(tmp_path: Path) -> None:
+    from development_kit.scripts.settings_gui_package_probe import _sdist_members
+
+    sdist = tmp_path / "git-archive-style.tar.gz"
+    with tarfile.open(sdist, "w:gz") as archive:
+        payload = b"git\n"
+        info = tarfile.TarInfo("pax_global_header")
+        info.size = len(payload)
+        archive.addfile(info, io.BytesIO(payload))
+        root_info = tarfile.TarInfo("comsol_mcp-0.6.0/")
+        archive.addfile(root_info, io.BytesIO(b""))
+        nested = tarfile.TarInfo("comsol_mcp-0.6.0/settings_gui/__init__.py")
+        nested.size = 4
+        archive.addfile(nested, io.BytesIO(b"init"))
+
+    names = _sdist_members(sdist)
+
+    assert names == {"settings_gui/__init__.py"}
+
+
 def test_distribution_probe_rejects_gui_tests_in_wheel(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="tests"):
         inspect_settings_gui_distributions(_archives(tmp_path, include_test=True))

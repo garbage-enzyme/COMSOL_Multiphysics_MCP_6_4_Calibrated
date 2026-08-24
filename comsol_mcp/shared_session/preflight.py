@@ -37,12 +37,17 @@ _LISTENER_FIELDS = frozenset({"host", "port", "pid"})
 _SNAPSHOT_FIELDS = frozenset({"inventory_complete", "observed_at_epoch", "processes", "listeners"})
 _PROCESS_KINDS = frozenset({"comsol_desktop", "comsol_server", "mph_client", "other_comsol"})
 _HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
-# The whole bounded string must BE the four-part build; a version embedded in
-# unrelated prose (for example a path component) must not satisfy release gates.
-_VERSION = re.compile(r"\s*(\d+)\.(\d+)\.(\d+)\.(\d+)\s*")
-# Display fallbacks may only contribute a LABELED build number: an unlabeled
-# parenthesized digit run such as "(64-bit)" is architecture text, not a build.
-_CLIENTAPI_DISPLAY_VERSION = re.compile(r"^[^\d]*(\d+)\.(\d+)(?:\.(\d+))?.*?\bbuild\s*(\d+)")
+# The first digit-run must be the four-part build: a non-digit prefix (the
+# localized product name) is allowed, but the match ends at the build, so
+# extra dotted segments or trailing numbers keep the readback unreadable.
+_VERSION = re.compile(r"^\D*?(\d+)\.(\d+)\.(\d+)\.(\d+)(?![\d.])")
+# Display fallbacks may only use a parenthesized build whose digits reach the
+# closing parenthesis (any localized label prefix allowed): "(Build: 293)",
+# "(开发版本: 293)", "(293)". Architecture text such as "(64-bit)" leaves the
+# digit run mid-parenthesis and must not be accepted as a build number.
+_CLIENTAPI_DISPLAY_VERSION = re.compile(
+    r"^[^\d]*(\d+)\.(\d+)(?:\.(\d+))?.*\(\D*(\d+)\s*\)"
+)
 
 
 def _exact_mapping(value: Any, fields: frozenset[str], label: str) -> dict[str, Any]:
@@ -81,7 +86,7 @@ def _normalize_version(
         return None, None
     if not isinstance(value, str) or not value or len(value) > 128:
         raise ValueError("COMSOL file version must be a bounded string or null")
-    match = _VERSION.fullmatch(value)
+    match = _VERSION.search(value)
     if match is None:
         return "unreadable", None
     parts = tuple(int(item) for item in match.groups())
