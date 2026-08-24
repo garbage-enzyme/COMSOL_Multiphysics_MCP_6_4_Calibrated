@@ -42,6 +42,29 @@ def _sha(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _cleanup_source_entry(source_path: Path, source_before: str) -> dict[str, Any]:
+    """Re-hash the source without letting cleanup mask the primary outcome."""
+    try:
+        return {"source_unchanged": _sha(source_path) == source_before}
+    except Exception as exc:
+        return {
+            "source_unchanged": False,
+            "source_hash_error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def _persist_receipts(
+    receipt_path: Path,
+    receipt: dict[str, Any],
+    private_path: Path,
+    private: dict[str, Any],
+) -> None:
+    """Persist the private receipt first so a public success receipt always
+    has its counterpart on disk even if the second write fails."""
+    atomic_write_json(private_path, private)
+    atomic_write_json(receipt_path, receipt)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--test-root", type=Path, required=True)
@@ -289,6 +312,10 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     import mph
 
     source_before = _sha(spec["source"])
+    if source_before != spec["source_sha256"]:
+        # The trusted-source check ran earlier; re-verify immediately before
+        # any load so a file swapped in between cannot be silently accepted.
+        raise RuntimeError("trusted model source changed after spec validation")
     for path in (spec["base_copy"], spec["configured_copy"]):
         path.unlink(missing_ok=True)
     client = None
@@ -374,7 +401,7 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         }
         private["error"] = f"{type(exc).__name__}: {exc}"
     finally:
-        cleanup = {"client_clear": False, "source_unchanged": _sha(spec["source"]) == source_before}
+        cleanup = {"client_clear": False, **_cleanup_source_entry(spec["source"], source_before)}
         if client is not None:
             try:
                 client.clear()
@@ -393,8 +420,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(_dry_run(spec), ensure_ascii=False, sort_keys=True))
         return 0
     receipt, private = _run(spec)
-    atomic_write_json(spec["receipt"], receipt)
-    atomic_write_json(spec["private_receipt"], private)
+    _persist_receipts(spec["receipt"], receipt, spec["private_receipt"], private)
     print(json.dumps(receipt, ensure_ascii=False, sort_keys=True))
     return 0 if receipt["success"] else 1
 

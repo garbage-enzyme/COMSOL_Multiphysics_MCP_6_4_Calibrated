@@ -29,6 +29,8 @@ def _outcome(result: dict[str, Any]) -> str:
     if normalized_code in _TIMEOUT_ERROR_CODES:
         return "timeout"
     if normalized_code is not None:
+        # Structured codes take precedence by contract; the message fallback
+        # below applies only to payloads without any code field.
         return "error"
     text = " ".join(
         str(value) for value in (result.get("error_type"), error) if value is not None

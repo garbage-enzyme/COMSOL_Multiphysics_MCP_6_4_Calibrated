@@ -150,10 +150,10 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
     ):
         raise ValueError("robust condition controls require exactly two periodic ports")
     polarization_values = raw["polarization_values"]
-    if not isinstance(polarization_values, dict) or set(polarization_values) < {
+    if not isinstance(polarization_values, dict) or not {
         "x_linear",
         "y_linear",
-    }:
+    } <= set(polarization_values):
         raise ValueError("robust condition controls require x_linear and y_linear mappings")
     normalized_polarization_values = {
         _identifier(key, "polarization_values key"): _text(
@@ -166,6 +166,7 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         SOLVER_SELECTION_SCHEMA_VERSION,
         COARSE_SOLVER_MEMORY_SCHEMA_VERSION,
         MESH_REFERENCE_SCHEMA_VERSION,
+        NATIVE_SENSITIVITY_SCHEMA_VERSION,
         SCHEMA_VERSION,
     }:
         selected = _identifier(raw["selected_linear_solver_tag"], "selected_linear_solver_tag")
@@ -190,7 +191,8 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
         }
     coarse_solver_memory: dict[str, Any] = {}
     if version == COARSE_SOLVER_MEMORY_SCHEMA_VERSION or (
-        version in {MESH_REFERENCE_SCHEMA_VERSION, SCHEMA_VERSION}
+        version
+        in {MESH_REFERENCE_SCHEMA_VERSION, NATIVE_SENSITIVITY_SCHEMA_VERSION, SCHEMA_VERSION}
         and _COARSE_SOLVER_MEMORY_FIELDS <= set(raw)
     ):
         feature_path = raw["coarse_solver_feature_path"]
@@ -222,7 +224,11 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             "coarse_solver_out_of_core_value": coarse_value,
         }
     mesh_reference: dict[str, Any] = {}
-    if version in {MESH_REFERENCE_SCHEMA_VERSION, SCHEMA_VERSION}:
+    if version in {
+        MESH_REFERENCE_SCHEMA_VERSION,
+        NATIVE_SENSITIVITY_SCHEMA_VERSION,
+        SCHEMA_VERSION,
+    }:
         mesh_reference = {
             "mesh_reference_parameter": _identifier(
                 raw["mesh_reference_parameter"], "mesh_reference_parameter"
@@ -346,7 +352,9 @@ def normalize_robust_condition_controls(value: object) -> dict[str, Any]:
             raise ValueError(
                 "native sensitivity merged and removed step identities are inconsistent"
             )
-        if merged_solver != raw["linear_solver_tag"]:
+        # The declared contract binds the merged group to the caller-selected
+        # direct solver, not to the legacy configured tag.
+        if merged_solver != selection["selected_linear_solver_tag"]:
             raise ValueError("native sensitivity merged group must use the selected direct solver")
         if group_policy != "merge_material_coordinates_into_wave_optics":
             raise ValueError("native sensitivity constraint group policy is unsupported")

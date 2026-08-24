@@ -175,6 +175,28 @@ def test_condition_runtime_honors_explicit_execution_limit(ascii_tmp_path):
     assert [call[0] for call in backend.calls] == ["condition-0"]
 
 
+@pytest.mark.parametrize("field", ["reflectance", "transmittance", "absorption"])
+def test_condition_runtime_rejects_out_of_range_power_channels(ascii_tmp_path, field):
+    spec = _condition_runtime_spec()
+    target = ascii_tmp_path / f"negative-{field}"
+    target.mkdir()
+
+    class _NegativeBackend(_ConditionBackend):
+        def evaluate_condition(self, condition, tensor_expressions):
+            result = super().evaluate_condition(condition, tensor_expressions)
+            result[field] = -0.1
+            return result
+
+    with pytest.raises(ValueError, match=f"{field} must be within"):
+        execute_robust_conditions(
+            spec,
+            target,
+            attempt=1,
+            backend=_NegativeBackend(),
+            cancel_requested=lambda: False,
+        )
+
+
 def test_condition_runtime_recovers_receipt_written_before_row(ascii_tmp_path, monkeypatch):
     spec = _condition_runtime_spec()
     spec["condition_table"]["conditions"] = spec["condition_table"]["conditions"][:1]
@@ -204,6 +226,36 @@ def test_condition_runtime_recovers_receipt_written_before_row(ascii_tmp_path, m
         cancel_requested=lambda: False,
     )
     assert recovery_backend.calls == []
+
+
+def test_condition_runtime_rejects_stale_receipt_with_drifted_condition_parameters(
+    ascii_tmp_path,
+):
+    spec = _condition_runtime_spec()
+    spec["condition_table"]["conditions"] = spec["condition_table"]["conditions"][:1]
+    backend = _ConditionBackend()
+    execute_robust_conditions(
+        spec,
+        ascii_tmp_path,
+        attempt=1,
+        backend=backend,
+        cancel_requested=lambda: False,
+    )
+
+    drifted = _condition_runtime_spec()
+    drifted["condition_table"]["conditions"] = drifted["condition_table"]["conditions"][:1]
+    drifted_condition = drifted["condition_table"]["conditions"][0]
+    drifted_condition["material_state_id"] = (
+        "MR" if drifted_condition["material_state_id"] != "MR" else "OX"
+    )
+    with pytest.raises(ValueError, match="persisted robust condition receipt is invalid"):
+        execute_robust_conditions(
+            drifted,
+            ascii_tmp_path,
+            attempt=1,
+            backend=_ConditionBackend(),
+            cancel_requested=lambda: False,
+        )
 
 
 @pytest.mark.parametrize(
@@ -804,8 +856,6 @@ def test_native_sensitivity_preparation_follows_exact_condition_staging():
         ("parameter", "wl", "7.9999999999999996e-07[m]"),
         ("incidence",),
         ("study_step", "plist", "wl"),
-        ("solver_memory",),
-        ("solver_selection",),
         ("deformation", True),
         ("sensitivity_prepare", ["rx", "ry"], 8e-7),
     ]
@@ -975,6 +1025,8 @@ def test_native_sensitivity_initval_uses_prepared_initial_values():
             return self.properties[name]
 
     class Stationary:
+        tag = "s1"
+
         def __init__(self):
             self.items = {
                 "sn1": SensitivityNode("sn1"),
@@ -994,14 +1046,24 @@ def test_native_sensitivity_initval_uses_prepared_initial_values():
                 return self.nonlin
             raise KeyError(name)
 
+        def getType(self):
+            return "Stationary"
+
     stationary = Stationary()
 
     class Solution:
+        def __init__(self):
+            self.attributes = [
+                _FakeSolverFeature("st1", "StudyStep"),
+                stationary,
+            ]
+
         def feature(self, tag=None):
             if tag is None:
-                return _FakeSolverFeatures([_FakeSolverFeature("st1", "StudyStep"), stationary])
-            if tag == "s1":
-                return stationary
+                return _FakeSolverFeatures(list(self.attributes))
+            for attribute in self.attributes:
+                if attribute.tag == tag:
+                    return attribute
             raise KeyError(tag)
 
     class Solutions:
@@ -2201,3 +2263,20 @@ def test_rejected_finalist_is_durable_and_cleans_before_terminal_failure(
     state = manager.store.read_state(job_id)
     assert state["status"] == "failed"
     assert state["solver_started"] is False
+
+
+@pytest.mark.parametrize(
+    ("execution_limit", "declared", "expected"),
+    [
+        (None, 24, True),
+        (1, 24, False),
+        (23, 24, False),
+        (24, 24, True),
+        (30, 24, True),
+    ],
+)
+def test_full_gradient_request_covers_declared_conditions(execution_limit, declared, expected):
+    assert (
+        robust_shape_worker._requests_full_condition_gradients(execution_limit, declared)
+        is expected
+    )

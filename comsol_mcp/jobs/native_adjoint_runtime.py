@@ -276,12 +276,28 @@ def execute_native_adjoint_optimization(
             }
         )
     finally:
-        cleanup = {"client_clear": False, "source_unchanged": _sha(source) == source_before}
+        # Cleanup itself is fallible; neither a re-hash failure nor client
+        # teardown failure may mask the original outcome or lose the durable
+        # receipt, so every step is guarded and the receipt is always written.
+        cleanup = {"client_clear": False, "source_unchanged": False}
+        cleanup_errors: list[str] = []
+        try:
+            cleanup["source_unchanged"] = _sha(source) == source_before
+        except Exception as exc:
+            cleanup_errors.append(f"source_hash:{type(exc).__name__}:{exc}")
         if client is not None:
-            client.clear()
-            cleanup["client_clear"] = True
-        receipt["cleanup"] = cleanup
-        receipt["success"] = receipt.get("success") is True and all(cleanup.values())
+            try:
+                client.clear()
+                cleanup["client_clear"] = True
+            except Exception as exc:
+                cleanup_errors.append(f"client_clear:{type(exc).__name__}:{exc}")
+        cleanup_record: dict[str, Any] = dict(cleanup)
+        if cleanup_errors:
+            cleanup_record["cleanup_errors"] = cleanup_errors
+        receipt["cleanup"] = cleanup_record
+        receipt["success"] = (
+            receipt.get("success") is True and not cleanup_errors and all(cleanup.values())
+        )
         atomic_write_json(receipt_path, receipt)
     return receipt
 

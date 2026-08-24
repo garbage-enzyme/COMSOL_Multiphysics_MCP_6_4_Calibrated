@@ -225,3 +225,65 @@ def test_licensed_ladder_acceptance_rejects_malformed_receipt_digest():
             finite_difference_receipt_sha256="d" * 64,
             directional_receipt_sha256="e" * 64,
         )
+
+
+def _resigned(receipt: dict, fingerprint_field: str, domain: str) -> dict:
+    from comsol_mcp.durable import domain_sha256_v2
+
+    body = dict(receipt)
+    body.pop(fingerprint_field)
+    receipt[fingerprint_field] = domain_sha256_v2(domain, body)
+    return receipt
+
+
+def _component_domain() -> str:
+    return "comsol_mcp.gradient_check"
+
+
+def test_robust_path_rejects_negative_component_relative_error():
+    component = _component()
+    component["rows"][0]["selected"]["relative_error"] = -0.01
+    component = _resigned(component, "check_fingerprint", _component_domain())
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        assess_robust_gradient_acceptance(_policy(), component, _directional())
+
+
+def test_robust_path_rejects_cosine_outside_unit_interval():
+    component = _component()
+    component["cosine_similarity"] = 2.0
+    component = _resigned(component, "check_fingerprint", _component_domain())
+    with pytest.raises(ValueError, match=r"outside \[-1, 1\]"):
+        assess_robust_gradient_acceptance(_policy(), component, _directional())
+
+
+def test_robust_path_rejects_negative_directional_relative_error():
+    directional = _directional()
+    directional["relative_error"] = -0.01
+    directional = _resigned(
+        directional, "directional_check_fingerprint", "comsol_mcp.directional_gradient_check"
+    )
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        assess_robust_gradient_acceptance(_policy(), _component(), directional)
+
+
+@pytest.mark.parametrize("junk", [42, "0.01", None, [0.01]])
+def test_robust_path_rejects_non_mapping_step_entries_as_value_errors(junk):
+    # A fingerprint-valid receipt can still carry structurally malformed step
+    # rows; they must raise the controlled ValueError, never AttributeError.
+    component = _component()
+    component["rows"][0]["steps"] = [component["rows"][0]["steps"][0], junk]
+    component = _resigned(component, "check_fingerprint", _component_domain())
+    with pytest.raises(ValueError, match="step structure"):
+        assess_robust_gradient_acceptance(_policy(), component, _directional())
+
+
+@pytest.mark.parametrize("step_value", [None, "0.01", True, 0.0, -0.01])
+def test_robust_path_rejects_malformed_relative_steps_as_value_errors(step_value):
+    component = _component()
+    component["rows"][0]["steps"] = [
+        component["rows"][0]["steps"][0],
+        {"relative_step": step_value},
+    ]
+    component = _resigned(component, "check_fingerprint", _component_domain())
+    with pytest.raises(ValueError, match="relative_step"):
+        assess_robust_gradient_acceptance(_policy(), component, _directional())

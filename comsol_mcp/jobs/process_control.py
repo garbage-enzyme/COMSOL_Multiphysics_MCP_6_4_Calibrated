@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import ctypes
-from ctypes import wintypes
 import hashlib
 import math
 import os
+from ctypes import wintypes
 from typing import Any
 
 import psutil
 
 from .store import (
     CREATE_TIME_TOLERANCE_SECONDS,
-    process_identity,
     process_identity_state,
 )
 
@@ -236,7 +235,22 @@ def capture_owned_descendants(worker_identity: dict[str, Any]) -> dict[str, Any]
     descendants: list[dict[str, Any]] = []
     for child in children:
         try:
-            descendants.append(process_identity(child.pid))
+            # Snapshot identity through the enumerated Process object itself.
+            # Re-resolving by PID here would silently adopt an unrelated
+            # replacement process when the child exits and its PID is reused
+            # before the second lookup runs; the snapshot keeps later exact
+            # termination bound to the process that was actually observed.
+            with child.oneshot():
+                command = list(child.cmdline())
+                descendants.append(
+                    {
+                        "pid": child.pid,
+                        "process_create_time": child.create_time(),
+                        "command_signature": hashlib.sha256(
+                            "\0".join(command).encode("utf-8", errors="replace")
+                        ).hexdigest(),
+                    }
+                )
         except psutil.NoSuchProcess:
             # A child that exits while the stable list is converted is already
             # absent. Preserve identities captured before and after it.
@@ -286,10 +300,18 @@ def _inspect_open_process(
     if abs(actual_created - expected_created) > CREATE_TIME_TOLERANCE_SECONDS:
         return {"identity": identity, "state": "stale", "reason": "worker PID was reused"}
     expected_signature = identity.get("command_signature")
+    if not isinstance(expected_signature, str) or not expected_signature:
+        # The exact-identity contract includes the command signature; without
+        # it PID + create time alone can never prove an active match.
+        return {
+            "identity": identity,
+            "state": "uncertain",
+            "reason": "worker command signature is missing from the captured identity",
+        }
     actual_signature = hashlib.sha256(
         "\0".join(command).encode("utf-8", errors="replace")
     ).hexdigest()
-    if expected_signature and actual_signature != expected_signature:
+    if actual_signature != expected_signature:
         return {
             "identity": identity,
             "state": "stale",
@@ -340,7 +362,17 @@ def terminate_exact(identity: dict[str, Any], *, force: bool = False) -> dict[st
     try:
         before = _inspect_open_process(process, identity)
         if before["state"] != "active":
-            return {"acted": False, "before": before, "reason": "identity_not_active"}
+            # Preserve the distinction: "uncertain" is never proof of absence
+            # and must not be reported as a proven-inactive identity.
+            return {
+                "acted": False,
+                "before": before,
+                "reason": (
+                    "identity_uncertain"
+                    if before["state"] == "uncertain"
+                    else "identity_not_active"
+                ),
+            }
         action = "kill" if force else "terminate"
         if pinned_handle is not None and kernel32 is not None:
             if not kernel32.TerminateProcess(pinned_handle, 1):

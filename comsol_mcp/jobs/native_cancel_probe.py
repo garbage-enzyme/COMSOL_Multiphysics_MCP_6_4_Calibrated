@@ -123,7 +123,7 @@ def _load_native_cancel_profiles() -> list[dict[str, Any]]:
     profiles_path = Path(__file__).with_name("native_cancel_profiles.json")
     try:
         document = json.loads(profiles_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except OSError, UnicodeDecodeError, json.JSONDecodeError:
         return []
     if not isinstance(document, Mapping):
         return []
@@ -279,7 +279,10 @@ def request_native_cancel_once() -> dict[str, Any]:
     """Invoke the native cancellation-approved public candidate only in an exact profile.
 
     Caller owns attempt binding and process-level verification. This function
-    neither starts a JVM nor claims that the solve has stopped.
+    neither starts a JVM nor claims that the solve has stopped. The allowlisted
+    candidate has no handle to a caller-owned progress context, so the probe
+    invokes a fresh instance and records that binding explicitly: a returned
+    call proves invocation only, never that a running solve was stopped.
     """
     environment = discover_environment()
     profile = select_progress_context_profile(environment)
@@ -295,11 +298,13 @@ def request_native_cancel_once() -> dict[str, Any]:
             "outcome": jvm_outcome,
             "profile_id": profile["profile_id"],
         }
+    binding = "fresh_instance_not_bound_to_running_solve"
     try:
         jpype.JClass(profile["candidate"]["class_name"])().cancel()
         return {
             "attempted": True,
             "supported": True,
+            "binding": binding,
             "outcome": "returned",
             "profile_id": profile["profile_id"],
         }
@@ -307,6 +312,7 @@ def request_native_cancel_once() -> dict[str, Any]:
         return {
             "attempted": True,
             "supported": True,
+            "binding": binding,
             "outcome": f"{type(exc).__name__}: {exc}",
             "profile_id": profile["profile_id"],
         }

@@ -268,9 +268,10 @@ class GaussianProcessExpectedImprovementOptimizer:
         selected = available[0]
         completed = [item for item in self.observations.values() if item["status"] == "completed"]
         if len(completed) >= self.warmup_count:
+            recent = completed[-MAX_GP_OBSERVATIONS:]
             observations = [
                 {"values": item["values"], "loss": math.fsum(item["losses"].values())}
-                for item in completed
+                for item in recent
             ]
             acquisition = select_expected_improvement_candidate(
                 self.space,

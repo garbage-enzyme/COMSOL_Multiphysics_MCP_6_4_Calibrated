@@ -219,6 +219,16 @@ def _evaluate_baseline(name: str, optimizer: Any, spec: Mapping[str, Any], seed:
     while optimizer.state()["remaining_proposals"] and len(rows) < spec["evaluation_budget"]:
         proposal = optimizer.ask()
         rows.append({"proposal": proposal, "score": _baseline_score(proposal["values"], spec)})
+    if not rows:
+        return {
+            "backend": name,
+            "seed": seed,
+            "backend_identity": optimizer.backend_identity,
+            "evaluation_count": 0,
+            "best_proposal": None,
+            "best_score": None,
+            "failure_reason_code": "no_proposals_available",
+        }
     best = min(
         rows,
         key=lambda item: (item["score"]["total_loss"], item["proposal"]["proposal_fingerprint"]),
@@ -238,13 +248,17 @@ def frozen_optimizer_baseline_benchmark() -> dict[str, Any]:
     suite = frozen_benchmark_suite()
     spec = next(item for item in suite["benchmarks"] if item["kind"] == "feasible_hidden_target")
     space = optimizer_benchmark_design_space()
-    runs = []
+    runs = [
+        # The grid baseline is fully deterministic and consumes no seed, so it
+        # is evaluated exactly once; repeating it per seed would recount one
+        # identical run as eight supposedly independent seeded results.
+        _evaluate_baseline(
+            "deterministic_grid", DeterministicGridOptimizer(space, levels=5), spec, None
+        ),
+    ]
     for seed in OPTIMIZER_BENCHMARK_SEEDS:
         runs.extend(
             [
-                _evaluate_baseline(
-                    "deterministic_grid", DeterministicGridOptimizer(space, levels=5), spec, seed
-                ),
                 _evaluate_baseline(
                     "deterministic_random",
                     DeterministicRandomOptimizer(space, seed=seed),

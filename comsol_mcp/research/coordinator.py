@@ -84,22 +84,26 @@ class ResearchCampaignCoordinator:
         return epoch
 
     def _initialize_identity(self) -> None:
-        if self.manifest_path.exists():
-            existing = json.loads(self.manifest_path.read_text(encoding="utf-8"))
-            if existing != self.manifest:
-                raise ValueError("campaign runtime already belongs to a different manifest")
-        else:
-            atomic_write_json(self.manifest_path, self.manifest)
-        if self.runtime_path.exists():
-            runtime = json.loads(self.runtime_path.read_text(encoding="utf-8"))
-            if runtime.get("campaign_fingerprint") != self.campaign_fingerprint:
-                raise ValueError("campaign runtime identity is inconsistent")
-        else:
-            now = self._now()
-            atomic_write_json(
-                self.runtime_path,
-                {"campaign_fingerprint": self.campaign_fingerprint, "started_at_epoch": now},
-            )
+        # Two processes may construct coordinators on one campaign root
+        # concurrently; the exclusive lock keeps manifest/runtime identity
+        # initialization atomic.
+        with JobLock(self.lock_path):
+            if self.manifest_path.exists():
+                existing = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+                if existing != self.manifest:
+                    raise ValueError("campaign runtime already belongs to a different manifest")
+            else:
+                atomic_write_json(self.manifest_path, self.manifest)
+            if self.runtime_path.exists():
+                runtime = json.loads(self.runtime_path.read_text(encoding="utf-8"))
+                if runtime.get("campaign_fingerprint") != self.campaign_fingerprint:
+                    raise ValueError("campaign runtime identity is inconsistent")
+            else:
+                now = self._now()
+                atomic_write_json(
+                    self.runtime_path,
+                    {"campaign_fingerprint": self.campaign_fingerprint, "started_at_epoch": now},
+                )
 
     def _runtime(self) -> dict[str, Any]:
         value = json.loads(self.runtime_path.read_text(encoding="utf-8"))
@@ -127,6 +131,10 @@ class ResearchCampaignCoordinator:
             "request_id": request_id,
             "requested_at": _utc_text(self._now()),
         }
+        # Deliberately lock-free: evaluators invoke this from inside the
+        # lock-holding evaluate() thread, and the pinned cancelled-terminal
+        # contract forbids a nested exclusive acquire. Consumers tolerate
+        # concurrent replacement via exact-byte revalidation below.
         atomic_write_json(self.control_path, control)
         return control
 
@@ -145,9 +153,12 @@ class ResearchCampaignCoordinator:
         return True
 
     def _consume_cancel(self) -> None:
-        if not self.control_path.exists():
+        try:
+            observed = self.control_path.read_bytes()
+        except OSError:
+            # The file vanished between the caller's check and this read;
+            # another consumer already consumed it.
             return
-        observed = self.control_path.read_bytes()
         try:
             value = json.loads(observed.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -157,8 +168,10 @@ class ResearchCampaignCoordinator:
             or value.get("campaign_fingerprint") != self.campaign_fingerprint
         ):
             return
-        if self.control_path.read_bytes() == observed:
+        try:
             self.control_path.unlink()
+        except FileNotFoundError:
+            pass
 
     def _evaluation_records(
         self, records: list[dict[str, Any]], candidate_fingerprint: str

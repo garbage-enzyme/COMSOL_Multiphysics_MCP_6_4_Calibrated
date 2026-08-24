@@ -99,7 +99,8 @@ def add_geometry_feature(
     properties: Optional[dict] = None,
 ) -> dict:
     """Create a generic geometry feature through the 6.4 clientapi."""
-    if not feature_type.strip():
+    feature_type = str(feature_type).strip() if isinstance(feature_type, str) else feature_type
+    if not feature_type:
         return {"success": False, "error": "feature_type must not be empty."}
 
     try:
@@ -237,18 +238,14 @@ def add_primitive_feature(
             normalized_dimensions = _finite_vector(dimensions, "size", 2, positive=True)
             properties = {"pos": normalized_position, "size": normalized_dimensions}
         elif feature_type == "Cylinder":
-            normalized_dimensions = _finite_vector(
-                dimensions, "size", 2, positive=True
-            )
+            normalized_dimensions = _finite_vector(dimensions, "size", 2, positive=True)
             properties = {
                 "pos": normalized_position,
                 "r": normalized_dimensions[0],
                 "h": normalized_dimensions[1],
             }
         elif feature_type == "Sphere":
-            normalized_dimensions = _finite_vector(
-                dimensions, "size", 1, positive=True
-            )
+            normalized_dimensions = _finite_vector(dimensions, "size", 1, positive=True)
             properties = {"pos": normalized_position, "r": normalized_dimensions[0]}
         else:
             raise ValueError("unsupported primitive feature type")
@@ -288,9 +285,14 @@ def add_difference_feature(
     feature_name: Optional[str] = None,
 ) -> dict:
     """Validate referenced objects and roll back incomplete Difference creation."""
-    subtract = (
-        list(objects_to_subtract) if not isinstance(objects_to_subtract, (str, bytes)) else []
-    )
+    try:
+        subtract = (
+            list(objects_to_subtract) if not isinstance(objects_to_subtract, (str, bytes)) else []
+        )
+    except TypeError:
+        # Mirror add_union_feature: a non-iterable input is caller error,
+        # never an internal TypeError escaping through the tool wrapper.
+        return {"success": False, "error": "difference inputs must be nonempty tags"}
     if not isinstance(input_object, str) or not input_object or not subtract:
         return {"success": False, "error": "difference inputs must be nonempty tags"}
     if not all(isinstance(item, str) and item for item in subtract):

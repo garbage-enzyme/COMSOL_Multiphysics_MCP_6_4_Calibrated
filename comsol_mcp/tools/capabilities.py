@@ -41,6 +41,7 @@ from .session_status import get_session_status
 
 ARTIFACT_CHAIN_SCHEMA = "comsol_mcp.artifact_chain"
 ARTIFACT_CHAIN_SCHEMA_VERSION = "1.0.0"
+DEPLOYMENT_IDENTITY_SCHEMA_VERSION = "1.2.0"
 PHYSICAL_EVIDENCE_SCHEMA_NAME = "comsol_mcp.physical_evidence"
 PHYSICAL_EVIDENCE_SCHEMA_VERSION = "1.1.0"
 VALIDATION_POLICY_SCHEMA_NAME = "comsol_mcp.validation_policy"
@@ -114,7 +115,7 @@ def _deployment_identity() -> dict:
     except (OSError, json.JSONDecodeError) as exc:
         return {
             "schema_name": "comsol_mcp.deployment_identity",
-            "schema_version": "1.0.0",
+            "schema_version": DEPLOYMENT_IDENTITY_SCHEMA_VERSION,
             "available": False,
             "source_classification": "unknown",
             "error": f"{type(exc).__name__}: deployment manifest unavailable",
@@ -122,7 +123,7 @@ def _deployment_identity() -> dict:
     if not isinstance(manifest, dict):
         return {
             "schema_name": "comsol_mcp.deployment_identity",
-            "schema_version": "1.0.0",
+            "schema_version": DEPLOYMENT_IDENTITY_SCHEMA_VERSION,
             "available": False,
             "source_classification": "unknown",
             "error": "TypeError: deployment manifest unavailable",
@@ -132,7 +133,7 @@ def _deployment_identity() -> dict:
     if not isinstance(contains_local_path, bool):
         return {
             "schema_name": "comsol_mcp.deployment_identity",
-            "schema_version": "1.0.0",
+            "schema_version": DEPLOYMENT_IDENTITY_SCHEMA_VERSION,
             "available": False,
             "source_classification": source_classification,
             "error": "TypeError: deployment path classification is invalid",
@@ -329,11 +330,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             ],
         },
         "disabled_by_default": [
-            *(
-                []
-                if manuals_feature_enabled
-                else ["manual_search", "manual_read_pages"]
-            ),
+            *([] if manuals_feature_enabled else ["manual_search", "manual_read_pages"]),
             *(
                 []
                 if semantic_feature_enabled

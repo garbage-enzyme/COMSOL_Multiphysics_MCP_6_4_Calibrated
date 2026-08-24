@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-from importlib.metadata import PackageNotFoundError, version
 import json
-from pathlib import Path
 import re
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import Mapping
-
 
 _PIN = re.compile(r"^([A-Za-z0-9_.-]+)==([^ ]+) \\$")
 

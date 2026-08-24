@@ -7,7 +7,6 @@ from typing import Any, Mapping
 
 from .contracts import canonical_json_bytes, canonical_sha256
 
-
 OUTCOME_SCHEMA_NAME = "comsol_mcp.execution_evidence_outcome"
 OUTCOME_SCHEMA_VERSION = "1.0.0"
 
@@ -69,9 +68,7 @@ _SCIENTIFIC_FIELDS = {
     "declared_cap_reached",
     "next_eligible_action",
 }
-_IDENTIFIER_CHARS = frozenset(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-/"
-)
+_IDENTIFIER_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-/")
 _MAX_IDENTIFIER_LENGTH = 192
 _MAX_LIST_ITEMS = 512
 
@@ -162,9 +159,7 @@ def _validate_evidence(value: Any, execution_state: str) -> dict[str, Any]:
         raise ValueError("evidence fields are incomplete")
     state = evidence["state"]
     if state not in EVIDENCE_COMPLETENESS_STATES:
-        raise ValueError(
-            f"evidence.state must be one of {sorted(EVIDENCE_COMPLETENESS_STATES)}"
-        )
+        raise ValueError(f"evidence.state must be one of {sorted(EVIDENCE_COMPLETENESS_STATES)}")
     missing = _identifier_list(evidence["missing_evidence"], "evidence.missing_evidence")
     raw_ids = _identifier_list(evidence["raw_artifact_ids"], "evidence.raw_artifact_ids")
     diagnostic_ids = _identifier_list(
@@ -195,22 +190,19 @@ def _validate_scientific(
         raise ValueError("scientific fields are incomplete")
     disposition = scientific["disposition"]
     if disposition not in SCIENTIFIC_DISPOSITIONS:
-        raise ValueError(
-            f"scientific.disposition must be one of {sorted(SCIENTIFIC_DISPOSITIONS)}"
-        )
+        raise ValueError(f"scientific.disposition must be one of {sorted(SCIENTIFIC_DISPOSITIONS)}")
     _identifier(scientific["reason_code"], "scientific.reason_code")
-    cap_reached = _boolean(
-        scientific["declared_cap_reached"], "scientific.declared_cap_reached"
-    )
+    cap_reached = _boolean(scientific["declared_cap_reached"], "scientific.declared_cap_reached")
     next_action = scientific["next_eligible_action"]
     if next_action not in NEXT_ELIGIBLE_ACTIONS:
         raise ValueError(
-            "scientific.next_eligible_action must be one of "
-            f"{sorted(NEXT_ELIGIBLE_ACTIONS)}"
+            f"scientific.next_eligible_action must be one of {sorted(NEXT_ELIGIBLE_ACTIONS)}"
         )
     if disposition == "accepted":
         if execution_state != "completed" or evidence_state != "complete":
-            raise ValueError("accepted disposition requires completed execution and complete evidence")
+            raise ValueError(
+                "accepted disposition requires completed execution and complete evidence"
+            )
         if cap_reached or next_action != "none":
             raise ValueError("accepted disposition cannot reach a cap or propose another action")
     else:
@@ -219,9 +211,7 @@ def _validate_scientific(
     if disposition in {"residual", "unresolved_at_declared_cap"} and (
         execution_state != "completed" or evidence_state != "complete"
     ):
-        raise ValueError(
-            f"{disposition} requires completed execution and complete evidence"
-        )
+        raise ValueError(f"{disposition} requires completed execution and complete evidence")
     if disposition == "residual" and cap_reached:
         raise ValueError("residual disposition cannot reach the declared cap")
     if disposition == "unresolved_at_declared_cap" and (
@@ -295,12 +285,8 @@ def execution_from_terminal_job_state(value: Mapping[str, Any]) -> dict[str, Any
 
     if status == "cancelled":
         cancel = _mapping(state.get("cancel"), "job_state.cancel")
-        verification = _mapping(
-            cancel.get("verification"), "job_state.cancel.verification"
-        )
-        solver = _mapping(
-            verification.get("solver"), "job_state.cancel.verification.solver"
-        )
+        verification = _mapping(cancel.get("verification"), "job_state.cancel.verification")
+        solver = _mapping(verification.get("solver"), "job_state.cancel.verification.solver")
         verdicts = verification.get("verdicts")
         verdicts_absent = bool(
             isinstance(verdicts, list)
@@ -312,16 +298,12 @@ def execution_from_terminal_job_state(value: Mapping[str, Any]) -> dict[str, Any
         )
         solver_verified = solver.get("ok") is True
         processes_absent = bool(
-            verification.get("absent") is True
-            and verdicts_absent
-            and solver_verified
+            verification.get("absent") is True and verdicts_absent and solver_verified
         )
         cleanup = {
             "processes_absent": processes_absent,
             "descendants_absent": processes_absent,
-            "port_closed": bool(
-                solver_verified and solver.get("recorded_port_closed") is True
-            ),
+            "port_closed": bool(solver_verified and solver.get("recorded_port_closed") is True),
             "lease_absent": bool(
                 solver_verified and solver.get("lease_state") in {"absent", "recovered"}
             ),
@@ -353,9 +335,7 @@ def execution_from_terminal_job_state(value: Mapping[str, Any]) -> dict[str, Any
                 "verified": False,
             }
         else:
-            cleanup = deepcopy(
-                _mapping(supplied_cleanup, "job_state.cleanup_verification")
-            )
+            cleanup = deepcopy(_mapping(supplied_cleanup, "job_state.cleanup_verification"))
         reason_code = {
             "completed": "requested_work_completed",
             "failed": "execution_failed",

@@ -125,6 +125,23 @@ class BoundedResearchCampaignLoop:
             }
         if status not in {"completed", "duplicate_terminal"}:
             raise ValueError("coordinator returned an unsupported campaign-loop status")
+        replay_status = evaluation.get("status")
+        if replay_status in {"failed", "cancelled", "infeasible"}:
+            tell_status = "failed" if replay_status == "cancelled" else replay_status
+            self.optimizer.tell(
+                proposal,
+                candidate_fingerprint=evaluation["candidate_fingerprint"],
+                status=tell_status,
+                score_fingerprint=None,
+                losses={},
+            )
+            checkpoint = self._checkpoint(proposal, evaluation)
+            return {
+                "stop_reason": "continue",
+                "success": False,
+                "evaluation": evaluation,
+                "checkpoint_fingerprint": checkpoint["checkpoint_fingerprint"],
+            }
         response = evaluation.get("response")
         if not isinstance(response, Mapping):
             raise ValueError("completed evaluation response must be an object")

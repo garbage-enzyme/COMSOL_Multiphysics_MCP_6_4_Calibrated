@@ -168,8 +168,7 @@ def evaluate_reference_power_results(
             acceptance["wavelength"]["relative_max"],
         ),
         "source_unchanged": (
-            _mapping_or_empty(point_measurement.get("integrity")).get("source_unchanged")
-            is True
+            _mapping_or_empty(point_measurement.get("integrity")).get("source_unchanged") is True
         ),
     }
     negative_checks = {

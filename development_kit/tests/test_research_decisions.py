@@ -94,6 +94,15 @@ def test_budget_snapshot_rejects_boolean_overrun_and_nonfinite_values():
         normalize_decision_record(value)
 
 
+def test_budget_elapsed_oversized_integer_reports_value_error_not_overflow():
+    # A JSON-representable integer above the float range must surface as the
+    # declared ValueError, never a raw OverflowError.
+    value = _decision()
+    value["budget"]["elapsed_wall_time_seconds"] = 10**400
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        normalize_decision_record(value)
+
+
 def test_budget_exhaustion_is_derived_not_caller_asserted():
     value = _decision()
     value["budget"]["started_fem_evaluations"] = 32

@@ -228,3 +228,61 @@ def test_optimizer_execution_rejects_identity_evidence_or_mesh_drift(mutation, m
         )
         assert receipt["mesh_checks"]["finalist_remesh_admitted"] is False
         assert receipt["disposition"] == "rejected"
+
+
+def test_mesh_statistics_reject_minimum_above_mean():
+    native = _execution_receipt()
+    native["baseline_mesh"]["minimum_quality"] = 0.9
+    native["baseline_mesh"]["mean_quality"] = 0.1
+    with pytest.raises(ValueError, match="minimum_quality must not exceed mean_quality"):
+        assess_robust_optimizer_execution(
+            _optimizer(),
+            native,
+            native_receipt_sha256="c" * 64,
+            max_elements_per_model=300_000,
+            minimum_element_quality=0.1,
+            deformation_jacobian_expression="reldetjac",
+            minimum_relative_jacobian=0.0,
+        )
+
+
+def test_echoed_caller_floats_match_within_tolerance_not_exact_equality():
+    # Native backends may serialize caller thresholds with different last-bit
+    # representations; semantically identical echoes must not be rejected.
+    native = _execution_receipt()
+    native["mesh_admission_policy"]["minimum_element_quality"] = 0.1 + 2e-16
+    native["deformation_feasibility_policy"]["minimum_relative_jacobian"] = 1e-13
+    native["deformation_feasibility"]["threshold"] = 1e-13
+    receipt = assess_robust_optimizer_execution(
+        _optimizer(),
+        native,
+        native_receipt_sha256="c" * 64,
+        max_elements_per_model=300_000,
+        minimum_element_quality=0.1,
+        deformation_jacobian_expression="reldetjac",
+        minimum_relative_jacobian=0.0,
+    )
+    assert receipt["mesh_checks"]["policy_matches"] is True
+    assert receipt["deformation_checks"]["policy_matches"] is True
+    assert receipt["deformation_checks"]["finite_evidence"] is True
+    assert receipt["disposition"] == "accepted"
+
+
+@pytest.mark.parametrize(
+    "threshold",
+    [1e-6, "0.0", None],
+)
+def test_materially_different_or_malformed_thresholds_still_reject(threshold):
+    native = _execution_receipt()
+    native["deformation_feasibility"]["threshold"] = threshold
+    receipt = assess_robust_optimizer_execution(
+        _optimizer(),
+        native,
+        native_receipt_sha256="c" * 64,
+        max_elements_per_model=300_000,
+        minimum_element_quality=0.1,
+        deformation_jacobian_expression="reldetjac",
+        minimum_relative_jacobian=0.0,
+    )
+    assert receipt["deformation_checks"]["finite_evidence"] is False
+    assert receipt["disposition"] == "rejected"

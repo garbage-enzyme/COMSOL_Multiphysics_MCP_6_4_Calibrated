@@ -248,8 +248,14 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         cleanup = {
             "client_clear": False,
             "lease_released": not lease_acquired,
-            "source_unchanged": _sha(spec["source"]) == source_before,
         }
+        try:
+            cleanup["source_unchanged"] = _sha(spec["source"]) == source_before
+        except Exception as exc:
+            # Never let receipt bookkeeping mask the run outcome or skip
+            # lease/client cleanup.
+            private["cleanup_error"] = f"source_hash:{type(exc).__name__}: {exc}"
+            cleanup["source_unchanged"] = False
         if client is not None:
             try:
                 client.clear()
@@ -257,7 +263,14 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             except Exception as exc:
                 private["cleanup_error"] = f"{type(exc).__name__}: {exc}"
         if lease_acquired:
-            released = ownership.release()
+            try:
+                released = ownership.release()
+            except Exception as exc:
+                released = {
+                    "success": False,
+                    "released": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
             cleanup["lease_released"] = bool(released.get("success") and released.get("released"))
             if not cleanup["lease_released"]:
                 private["lease_cleanup_error"] = released

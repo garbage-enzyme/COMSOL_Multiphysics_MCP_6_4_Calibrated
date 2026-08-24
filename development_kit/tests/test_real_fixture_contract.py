@@ -151,6 +151,29 @@ def test_reference_power_spec_rejects_json_array(tmp_path):
         controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
 
 
+@pytest.mark.parametrize("value", [None, "", 42, ["controlled.mph"]])
+def test_reference_power_spec_rejects_missing_or_non_string_source_path(tmp_path, value):
+    path = _spec(tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["source_model_path"] = value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="non-empty absolute path"):
+        controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
+
+
+def test_reference_power_spec_rejects_relative_source_path_instead_of_resolving_against_cwd(
+    tmp_path,
+):
+    path = _spec(tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["source_model_path"] = "controlled.mph"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="absolute path"):
+        controlled_fixture_environment_from_reference_power_spec(path, base_environment={})
+
+
 def test_fixture_rejects_source_bytes_that_differ_from_caller_bound_hash(tmp_path):
     environment = controlled_fixture_environment_from_reference_power_spec(
         _spec(tmp_path), base_environment={}

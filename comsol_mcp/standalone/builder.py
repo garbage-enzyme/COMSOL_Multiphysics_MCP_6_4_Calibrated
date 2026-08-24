@@ -136,11 +136,8 @@ def build_standalone_executable(
     launcher_source = _resource_bytes("Launcher.cs")
     driver_source = _resource_bytes("CapacitorPointTemplate.java")
     source_root = target / "build-sources"
-    source_root.mkdir()
     launcher_path = source_root / "Launcher.cs"
     driver_path = source_root / "CapacitorPointTemplate.java"
-    launcher_path.write_bytes(launcher_source)
-    driver_path.write_bytes(driver_source)
 
     executable = target / EXECUTABLE_NAME
     command = [
@@ -151,10 +148,16 @@ def build_standalone_executable(
         "/optimize+",
         f"/out:{executable}",
         "/reference:System.Web.Extensions.dll",
-        f"/resource:{driver_path},CapacitorPointTemplate.java",
+        # The compiler runs with cwd=source_root, so a bare filename avoids
+        # csc's comma-delimited /resource parsing: absolute Windows paths may
+        # legally contain commas in the output directory.
+        "/resource:CapacitorPointTemplate.java,CapacitorPointTemplate.java",
         str(launcher_path),
     ]
     try:
+        source_root.mkdir()
+        launcher_path.write_bytes(launcher_source)
+        driver_path.write_bytes(driver_source)
         completed, stdout, stderr, overflow = _run_compiler_bounded(
             command, cwd=source_root, run_command=run_command
         )
@@ -166,58 +169,59 @@ def build_standalone_executable(
             raise RuntimeError("standalone compiler output exceeded its bound")
         if completed.returncode != 0 or not executable.is_file():
             raise RuntimeError("standalone launcher compilation failed")
+        executable_hash, executable_bytes = _sha256_file(
+            executable, maximum_bytes=MAX_EXECUTABLE_BYTES
+        )
+        compiler_hash, compiler_bytes = _sha256_file(compiler, maximum_bytes=16 * 1024 * 1024)
+        receipt: dict[str, Any] = {
+            "schema_name": BUILD_SCHEMA,
+            "schema_version": BUILD_SCHEMA_VERSION,
+            "status": "passed",
+            "target_os": ["Windows 10 x64", "Windows 11 x64"],
+            "target_comsol": "6.4 release line",
+            "python_required_at_runtime": False,
+            "external_java_required_at_runtime": False,
+            "windows_inbox_dotnet_framework_required": True,
+            "separate_dotnet_runtime_required": False,
+            "separate_dotnet_sdk_required": False,
+            "visual_studio_required": False,
+            "network_download_required": False,
+            "local_comsol_installation_required": True,
+            "comsol_runtime_bundled": False,
+            "runtime_architecture": [
+                "licensed COMSOL 6.4 installation",
+                "COMSOL-compiled Java point driver",
+                "native Windows x64 launcher",
+            ],
+            "launcher": {
+                "name": EXECUTABLE_NAME,
+                "sha256": executable_hash,
+                "byte_count": executable_bytes,
+            },
+            "sources": {
+                "Launcher.cs": {
+                    "sha256": _sha256_bytes(launcher_source),
+                    "byte_count": len(launcher_source),
+                },
+                "CapacitorPointTemplate.java": {
+                    "sha256": _sha256_bytes(driver_source),
+                    "byte_count": len(driver_source),
+                },
+            },
+            "compiler": {
+                "sha256": compiler_hash,
+                "byte_count": compiler_bytes,
+                "source": "Windows inbox .NET Framework 4.x x64",
+                "locator": "%WINDIR%/Microsoft.NET/Framework64/v4.0.30319/csc.exe",
+            },
+            "command_argument_count": len(command),
+        }
+        atomic_write_json(target / MANIFEST_NAME, receipt)
     except BaseException:
         shutil.rmtree(source_root, ignore_errors=True)
         executable.unlink(missing_ok=True)
         (target / MANIFEST_NAME).unlink(missing_ok=True)
         raise
-
-    executable_hash, executable_bytes = _sha256_file(executable, maximum_bytes=MAX_EXECUTABLE_BYTES)
-    compiler_hash, compiler_bytes = _sha256_file(compiler, maximum_bytes=16 * 1024 * 1024)
-    receipt: dict[str, Any] = {
-        "schema_name": BUILD_SCHEMA,
-        "schema_version": BUILD_SCHEMA_VERSION,
-        "status": "passed",
-        "target_os": ["Windows 10 x64", "Windows 11 x64"],
-        "target_comsol": "6.4 release line",
-        "python_required_at_runtime": False,
-        "external_java_required_at_runtime": False,
-        "windows_inbox_dotnet_framework_required": True,
-        "separate_dotnet_runtime_required": False,
-        "separate_dotnet_sdk_required": False,
-        "visual_studio_required": False,
-        "network_download_required": False,
-        "local_comsol_installation_required": True,
-        "comsol_runtime_bundled": False,
-        "runtime_architecture": [
-            "licensed COMSOL 6.4 installation",
-            "COMSOL-compiled Java point driver",
-            "native Windows x64 launcher",
-        ],
-        "launcher": {
-            "name": EXECUTABLE_NAME,
-            "sha256": executable_hash,
-            "byte_count": executable_bytes,
-        },
-        "sources": {
-            "Launcher.cs": {
-                "sha256": _sha256_bytes(launcher_source),
-                "byte_count": len(launcher_source),
-            },
-            "CapacitorPointTemplate.java": {
-                "sha256": _sha256_bytes(driver_source),
-                "byte_count": len(driver_source),
-            },
-        },
-        "compiler": {
-            "sha256": compiler_hash,
-            "byte_count": compiler_bytes,
-            "source": "Windows inbox .NET Framework 4.x x64",
-            "locator": "%WINDIR%/Microsoft.NET/Framework64/v4.0.30319/csc.exe",
-        },
-        "command_argument_count": len(command),
-    }
-    atomic_write_json(target / MANIFEST_NAME, receipt)
     return deepcopy(receipt)
 
 

@@ -150,7 +150,7 @@ def evaluate_robust_absolute_contrast(
         if set(states) != {state_a, state_b}:
             raise ValueError("every robust condition coordinate must contain both contrast states")
         row_a, row_b = states[state_a], states[state_b]
-        if row_a["weight"] != row_b["weight"]:
+        if not math.isclose(row_a["weight"], row_b["weight"], rel_tol=1e-12, abs_tol=1e-12):
             raise ValueError("paired material-state conditions must use the same weight")
         observation_a = observed[row_a["condition_id"]]
         observation_b = observed[row_b["condition_id"]]
@@ -160,7 +160,9 @@ def evaluate_robust_absolute_contrast(
         ):
             raise ValueError("observation observable differs from the robust objective")
         delta = observation_a["value"] - observation_b["value"]
-        smooth_absolute = math.sqrt(delta * delta + epsilon * epsilon)
+        if not math.isfinite(delta):
+            raise ValueError("robust objective paired-value difference must stay finite")
+        smooth_absolute = math.hypot(delta, epsilon)
         pairs.append(
             {
                 "pair_id": f"pair-{pair_index:04d}",

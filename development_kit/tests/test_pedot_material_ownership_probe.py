@@ -59,6 +59,29 @@ def test_dry_run_binds_source_domain_and_cores_without_solver(tmp_path, gate_roo
     assert receipt["paths_included"] is False
 
 
+def test_run_refuses_source_replaced_after_spec_validation(
+    tmp_path: Path, gate_root: Path, monkeypatch
+):
+    spec = _spec(tmp_path, gate_root, monkeypatch)
+    real_sha = probe._sha
+    calls = {"count": 0}
+
+    def staged_sha(_path):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return "b" * 64  # baseline hash of an unapproved replacement file
+        return real_sha(_path)
+
+    monkeypatch.setattr(probe, "_sha", staged_sha)
+    monkeypatch.setattr(probe, "_git_identity", lambda: {"revision": "a" * 40, "clean": True})
+    monkeypatch.setitem(sys.modules, "mph", SimpleNamespace())
+
+    with pytest.raises(RuntimeError, match="changed after specification validation"):
+        probe._run(spec)
+
+    assert calls["count"] == 1
+
+
 def test_inventory_identifies_unique_patch_owner_and_bounds_property_readback():
     class Selection:
         def entities(self):
@@ -122,6 +145,82 @@ def test_inventory_identifies_unique_patch_owner_and_bounds_property_readback():
     assert inventory["materials"][0]["property_groups"][0]["properties"] == {
         "relpermittivity": ["2", "2", "3"]
     }
+
+
+def _single_material_java(selection, entities):
+    class Selection:
+        def entities(self):
+            if isinstance(selection, Exception):
+                raise selection
+            return selection
+
+    class Material:
+        def selection(self):
+            return Selection()
+
+        def propertyGroup(self):
+            raise RuntimeError("no groups")
+
+        def label(self):
+            return "M"
+
+    class Materials:
+        def tags(self):
+            return ["mat_a"]
+
+        def get(self, _tag):
+            return Material()
+
+    class Component:
+        def material(self):
+            return Materials()
+
+    class Java:
+        def material(self):
+            class Empty:
+                def tags(self):
+                    return []
+
+                def get(self, _tag):
+                    raise AssertionError("no global materials")
+
+            return Empty()
+
+        def component(self, tag):
+            assert tag == "comp1"
+            return Component()
+
+    return SimpleNamespace(java=Java())
+
+
+def test_inventory_reports_incomplete_evidence_when_selection_is_unreadable():
+    model = _single_material_java(RuntimeError("selection unavailable"), None)
+
+    inventory = probe._inventory(model, component_tag="comp1", patch_domain=3)
+
+    # An unreadable selection can be neither confirmed owner nor confirmed
+    # non-owner; the disposition must surface the unknown state.
+    assert inventory["ownership_disposition"] == "incomplete_evidence"
+    assert inventory["unresolved_materials"] == [{"scope": "component", "tag": "mat_a"}]
+    assert inventory["owner_count"] == 0
+
+
+def test_inventory_decides_on_full_domains_and_flags_display_truncation():
+    entities = [3] + list(range(10, 5100))
+    model = _single_material_java(entities, None)
+
+    inventory = probe._inventory(model, component_tag="comp1", patch_domain=3)
+
+    # Ownership is decided on the full selection even though the published
+    # domain list is bounded; truncation must downgrade the disposition.
+    assert inventory["patch_domain_owners"] == [
+        {"scope": "component", "tag": "mat_a", "label": "M"}
+    ]
+    material = inventory["materials"][0]
+    assert material["domains_total"] == len(entities)
+    assert material["domains_truncated"] is True
+    assert material["domains"] == entities[:4096]
+    assert inventory["ownership_disposition"] == "incomplete_evidence"
 
 
 def test_runtime_failure_redacts_source_and_releases_ownership(tmp_path, gate_root, monkeypatch):

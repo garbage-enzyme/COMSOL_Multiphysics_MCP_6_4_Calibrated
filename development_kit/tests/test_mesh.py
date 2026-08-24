@@ -152,6 +152,20 @@ def test_get_mesh_info_resolves_label():
     assert result["mesh"]["name"] == "mesh1"
 
 
+def test_get_mesh_info_label_lookup_skips_tags_with_unreadable_labels():
+    class BrokenLabelMesh(FakeMesh):
+        def label(self):
+            raise RuntimeError("stale proxy")
+
+    result = get_mesh_info(
+        FakeModel({"mesh1": BrokenLabelMesh(), "mesh2": FakeMesh()}),
+        mesh_name="Physics-controlled mesh",
+    )
+
+    assert result["success"] is True
+    assert result["mesh"]["name"] == "mesh2"
+
+
 def test_get_mesh_info_reports_available_tags():
     result = get_mesh_info(FakeModel({"mesh1": FakeMesh()}), mesh_name="missing")
 
@@ -164,9 +178,7 @@ def test_get_mesh_info_distinguishes_label_lookup_failure_from_absence():
         def label(self):
             raise RuntimeError("backend label failure")
 
-    result = get_mesh_info(
-        FakeModel({"mesh1": FailingLabelMesh()}), mesh_name="named mesh"
-    )
+    result = get_mesh_info(FakeModel({"mesh1": FailingLabelMesh()}), mesh_name="named mesh")
 
     assert result["success"] is False
     assert result["error"] == "Mesh label lookup failed."
@@ -234,9 +246,7 @@ class MutableMeshSequence:
 
 
 class MutableMeshList:
-    def __init__(
-        self, existing=(), *, fail_feature=False, fail_run=False, fail_statistics=False
-    ):
+    def __init__(self, existing=(), *, fail_feature=False, fail_run=False, fail_statistics=False):
         self.meshes = {tag: object() for tag in existing}
         self.fail_feature = fail_feature
         self.fail_run = fail_run
@@ -309,3 +319,20 @@ def test_create_mesh_sequence_preserves_built_mesh_when_statistics_fail():
     assert result["statistics_complete"] is False
     assert result["statistics_error_type"] == "RuntimeError"
     assert "mesh2" in mesh_list.meshes
+
+
+def test_create_failure_before_creation_reports_no_rollback():
+    mesh_list = MutableMeshList(existing=())
+
+    def explode(_tag):
+        raise RuntimeError("backend create refused")
+
+    mesh_list.create = explode
+    model = FakeModel({})
+    model.java = FakeJava(MutableMeshComponent(mesh_list))
+
+    result = create_mesh_sequence(model, mesh_name="meshX")
+
+    assert result["success"] is False
+    # Nothing was created, so claiming a rollback would misrepresent state.
+    assert result["rolled_back"] is False

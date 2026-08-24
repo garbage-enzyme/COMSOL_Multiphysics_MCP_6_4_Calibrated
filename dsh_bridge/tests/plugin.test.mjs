@@ -1,7 +1,10 @@
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { publicToolName, normalizeConfig } from "../lib/index.js";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { publicToolName, normalizeConfig, apply } from "../lib/index.js";
 import { extractText } from "../lib/mcp-client-core.mjs";
+import { spawnFakeServer, createFakeJobs, quietLogger, FIXTURE } from "./helpers.mjs";
 
 test("publicToolName keeps clean comsol names verbatim", () => {
 	for (const name of ["job_submit", "job_status", "comsol_start", "wave_optics_preflight"]) {
@@ -61,4 +64,106 @@ test("extractText projects MCP content blocks and discards binaries", () => {
 	assert.ok(out.includes("[audio:"));
 	assert.ok(out.includes("[unsupported content type: custom]"));
 	assert.equal(extractText([], "t"), "(t returned no text content)");
+});
+
+// ---- plugin-level mirror bookkeeping (mirror pinning only after start) ----
+
+const fakeServer = spawnFakeServer({ FAKE_POLLS: "120" });
+after(() => fakeServer.close());
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function makeCtx({ jobs } = {}) {
+	const registered = [];
+	const disposers = [];
+	return {
+		registered,
+		logger: quietLogger(),
+		tools: {
+			register(def) {
+				registered.push(def);
+				return () => {};
+			},
+		},
+		get: (key) => (key === "jobs" ? jobs : undefined),
+		effect: (factory) => disposers.push(factory()),
+		dispose() {
+			for (const d of disposers.splice(0)) {
+				try { d(); } catch {}
+			}
+		},
+	};
+}
+
+async function submitOnce(def, agent) {
+	return def.execute(
+		{ spec: { job_type: "staged_sweep" } },
+		{ signal: new AbortController().signal, ...(agent ? { agent } : {}) },
+	);
+}
+
+test("apply mirrors job_submit only after the mirror starts", { timeout: 20000 }, async () => {
+	// ASCII root per repo convention; the fake-server child's spawn cwd stays
+	// outside this directory so Windows rmSync cannot hit a cwd EPERM.
+	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b16plug"));
+	try {
+		const jobs = createFakeJobs();
+		const ctx = makeCtx({ jobs });
+		await apply(ctx, {
+			command: process.execPath,
+			args: [FIXTURE],
+			env: fakeServer.extraEnv,
+			cwd: "D:\\mcp_tests",
+			stateFile: join(stateDir, "jobs-a.json"),
+			pollIntervalMs: 30,
+			cancelConfirmTimeoutMs: 50,
+			reconnect: { enabled: false },
+			initTimeoutMs: 5000,
+			failOnStartupError: true,
+		});
+		const submit = ctx.registered.find((d) => d.name === "job_submit");
+		assert.ok(submit, "job_submit must be registered natively");
+
+		const result = await submitOnce(submit, "agent-1");
+		const text = result.content.map((b) => b.text ?? "").join("\n");
+		const jobId = JSON.parse(text).job_id;
+		assert.match(jobId, /^job-\d+$/);
+
+		// jobs registry available -> exactly one mirror started
+		assert.equal(jobs.started.length, 1);
+		// the state row is durable only after the successful start
+		const rowsOnDisk = JSON.parse(readFileSync(join(stateDir, "jobs-a.json"), "utf8"));
+		assert.deepEqual(rowsOnDisk.map((r) => r.jobId), [jobId]);
+
+		jobs.started[0].hooks.cancel();
+		ctx.dispose();
+		await Promise.race([jobs.started[0].done, sleep(3000)]);
+	} finally { rmSync(stateDir, { recursive: true, force: true }); }
+});
+
+test("apply keeps failed mirror starts retryable in the state file", { timeout: 20000 }, async () => {
+	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b16plug"));
+	try {
+		const ctx = makeCtx(); // no ctx.jobs registry available
+		await apply(ctx, {
+			command: process.execPath,
+			args: [FIXTURE],
+			env: fakeServer.extraEnv,
+			cwd: "D:\\mcp_tests",
+			stateFile: join(stateDir, "jobs-b.json"),
+			reconnect: { enabled: false },
+			initTimeoutMs: 5000,
+			failOnStartupError: true,
+		});
+		const submit = ctx.registered.find((d) => d.name === "job_submit");
+		assert.ok(submit, "job_submit must still register without ctx.jobs");
+		const result = await submitOnce(submit);
+		const text = result.content.map((b) => b.text ?? "").join("\n");
+		assert.match(JSON.parse(text).job_id, /^job-\d+$/);
+		ctx.dispose();
+		// a failed start must stay retryable: no pinned row survives
+		let rows = [];
+		try { rows = JSON.parse(readFileSync(join(stateDir, "jobs-b.json"), "utf8")); } catch {}
+		assert.deepEqual(rows.map((r) => r.jobId), []);
+	} finally { rmSync(stateDir, { recursive: true, force: true }); }
 });

@@ -138,6 +138,99 @@ def test_runtime_failure_redacts_paths_and_still_clears_client(tmp_path, gate_ro
     ]
 
 
+def test_pre_try_failure_still_writes_a_terminal_receipt(tmp_path, gate_root, monkeypatch):
+    # A failing git identity happens before the old try block and previously
+    # bypassed receipt persistence entirely.
+    source, manifest, audit = _inputs(tmp_path)
+    monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
+    spec = gate._spec(_args(gate_root, source, manifest, audit))
+
+    def broken_git():
+        raise RuntimeError("git executable is unavailable")
+
+    class RefusingOwnership:
+        def acquire(self, **_kwargs):
+            raise AssertionError("ownership must not be acquired after pre-try failure")
+
+        def release(self):
+            raise AssertionError("foreign lease must not be released")
+
+    monkeypatch.setattr(gate, "_git_identity", broken_git)
+    monkeypatch.setattr(gate, "SolverOwnership", RefusingOwnership)
+    receipt, private = gate._run(spec)
+    assert receipt["success"] is False
+    assert receipt["error"] == {
+        "code": "robust_shape_adapter_failed",
+        "type": "RuntimeError",
+    }
+    assert "git executable is unavailable" in private["error"]
+    assert receipt["cleanup"] == {
+        "client_clear": False,
+        "lease_released": True,
+        "source_unchanged": False,
+    }
+
+
+def test_raising_ownership_release_cannot_mask_the_original_failure(
+    tmp_path, gate_root, monkeypatch
+):
+    source, manifest, audit = _inputs(tmp_path)
+    monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
+    spec = gate._spec(_args(gate_root, source, manifest, audit))
+    cleared = []
+
+    class ExplodingReleaseOwnership:
+        def acquire(self, **_kwargs):
+            return {"success": True, "acquired": True}
+
+        def heartbeat(self, **_kwargs):
+            return True
+
+        def release(self):
+            raise RuntimeError("release transport failed")
+
+    class FakeClient:
+        def __init__(self, *, cores, version):
+            pass
+
+        def load(self, _path):
+            raise RuntimeError("original load failure")
+
+        def clear(self):
+            cleared.append(True)
+
+    monkeypatch.setattr(gate, "_git_identity", lambda: {"revision": "a" * 40, "clean": True})
+    monkeypatch.setattr(gate, "SolverOwnership", ExplodingReleaseOwnership)
+    monkeypatch.setitem(sys.modules, "mph", SimpleNamespace(Client=FakeClient))
+    receipt, private = gate._run(spec)
+    assert receipt["error"] == {"code": "robust_shape_adapter_failed", "type": "RuntimeError"}
+    assert "original load failure" in private["error"]
+    assert cleared == [True]
+    assert receipt["cleanup"]["lease_released"] is False
+    assert "RuntimeError: release transport failed" in private["lease_cleanup_error"]
+    assert receipt["success"] is False
+
+
+def test_snapshot_copy_is_independent_of_later_backend_mutation():
+    class AliasingBackend:
+        def __init__(self):
+            self.state = {"physics": ["dg_a71"], "variables": {"x": [1.0, 2.0]}}
+
+        def snapshot(self):
+            return self.state
+
+        def restore(self, _snapshot):
+            self.state["variables"]["x"][0] = 99.0
+
+    backend = AliasingBackend()
+    baseline = gate._snapshot_copy(backend)
+    backend.restore(baseline)
+    # The shallow dict() copy used before would alias the nested list and the
+    # mutated value would compare equal to its own baseline.
+    assert backend.snapshot() != baseline
+    assert baseline["variables"]["x"] == [1.0, 2.0]
+
+
 def test_runtime_refuses_client_start_when_solver_lease_is_unavailable(
     tmp_path, gate_root, monkeypatch
 ):

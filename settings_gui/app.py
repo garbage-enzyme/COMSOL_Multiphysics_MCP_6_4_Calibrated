@@ -213,8 +213,8 @@ class ManualIndexProgressDialog:
                 self.stage.set(self.controller.text(stage))
                 self.detail.set(
                     self.controller.text(
-                        "{percent}% — {files}/{total_files} PDFs, "
-                        "{pages}/{total_pages} pages{source}"
+                        "{percent}% — {files}/{total_files} PDF(s), "
+                        "{pages}/{total_pages} page(s){source}"
                     ).format(
                         percent=percent,
                         files=int(event.get("processed_files", 0)),
@@ -234,7 +234,8 @@ class ManualIndexProgressDialog:
                 self.controller.dialogs.info(
                     title=self.controller.text("Manual index ready"),
                     message=self.controller.text(
-                        "Indexed {pdfs} PDFs and {pages} pages. Corpus fingerprint: {fingerprint}"
+                        "Indexed {pdfs} PDF(s) and {pages} page(s). "
+                        "Corpus fingerprint: {fingerprint}"
                     ).format(
                         pdfs=int(event.get("pdf_count", 0)),
                         pages=int(event.get("page_count", 0)),

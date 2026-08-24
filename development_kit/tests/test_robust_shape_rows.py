@@ -158,6 +158,35 @@ def test_legacy_1_0_iteration_row_remains_readable(ascii_tmp_path):
     assert restored[0]["payload"]["shape_application_fingerprint"] is None
 
 
+def test_uppercase_chain_digests_are_normalized_like_payload_digests(ascii_tmp_path):
+    path = ascii_tmp_path / "uppercase.jsonl"
+    first = append_robust_shape_row(
+        path, job_fingerprint=JOB, attempt=1, kind="condition", payload=_condition()
+    )
+    append_robust_shape_row(
+        path, job_fingerprint=JOB, attempt=1, kind="condition", payload=_condition()
+    )
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    tampered = records[1]
+    tampered["job_fingerprint"] = JOB.upper()
+    tampered["previous_row_sha256"] = first["row_sha256"].upper()
+    for field in ("observation_fingerprint", "candidate_fingerprint"):
+        if isinstance(tampered["payload"].get(field), str):
+            tampered["payload"][field] = tampered["payload"][field].upper()
+    tampered["row_sha256"] = domain_sha256_v2(
+        tampered["schema_name"],
+        {key: value for key, value in tampered.items() if key != "row_sha256"},
+    )
+    path.write_text(json.dumps(records[0]) + "\n" + json.dumps(tampered) + "\n", encoding="utf-8")
+
+    restored = read_robust_shape_rows(path, job_fingerprint=JOB)
+
+    assert len(restored) == 2
+    assert restored[1]["job_fingerprint"] == JOB.upper()
+    assert restored[1]["previous_row_sha256"] == first["row_sha256"].upper()
+    assert restored[1]["row_sha256"] == tampered["row_sha256"].lower()
+
+
 def test_failed_condition_cannot_claim_observation_or_objective_contribution(ascii_tmp_path):
     payload = _condition()
     payload["status"] = "failed"

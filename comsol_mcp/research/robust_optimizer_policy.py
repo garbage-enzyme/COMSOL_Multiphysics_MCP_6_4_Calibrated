@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
@@ -21,6 +22,26 @@ _SUPPORT_STATES = {"validated", "structural_only", "restricted", "rejected"}
 
 def _optional_sha256(value: object, name: str) -> str | None:
     return None if value is None else _sha256(value, name)
+
+
+def _echoes_caller_policy(
+    actual: object, expected: dict[str, Any], tolerance_keys: frozenset[str]
+) -> bool:
+    """Compare a native policy echo exactly except caller floats within tolerance."""
+    if not isinstance(actual, Mapping) or set(actual) != set(expected):
+        return False
+    for key, value in expected.items():
+        observed = actual[key]
+        if key in tolerance_keys:
+            if (
+                isinstance(observed, bool)
+                or not isinstance(observed, (int, float))
+                or not math.isclose(float(observed), float(value), rel_tol=1e-12, abs_tol=1e-12)
+            ):
+                return False
+        elif observed != value:
+            return False
+    return True
 
 
 def normalize_robust_optimizer_policy(value: object) -> dict[str, Any]:
@@ -126,6 +147,8 @@ def _mesh_statistics(value: object, name: str) -> dict[str, Any]:
     mean = _finite(raw["mean_quality"], f"{name}.mean_quality")
     if not 0.0 <= minimum <= 1.0 or not 0.0 <= mean <= 1.0:
         raise ValueError(f"{name} quality values must be within [0, 1]")
+    if minimum > mean:
+        raise ValueError(f"{name}.minimum_quality must not exceed mean_quality")
     if not isinstance(raw["quality_measure"], str) or not raw["quality_measure"]:
         raise ValueError(f"{name}.quality_measure must be nonempty")
     return {
@@ -223,12 +246,16 @@ def assess_robust_optimizer_execution(
         mesh_policy = receipt.get("mesh_admission_policy")
         if not isinstance(mesh_policy, dict):
             raise ValueError("native optimizer mesh admission policy is missing")
-        mesh_checks["policy_matches"] = mesh_policy == {
-            "max_elements_per_model": maximum,
-            "minimum_element_quality": minimum_quality,
-            "scope": "baseline_and_explicit_finalist_remesh",
-            "internal_optimizer_remesh_callback": False,
-        }
+        mesh_checks["policy_matches"] = _echoes_caller_policy(
+            mesh_policy,
+            {
+                "max_elements_per_model": maximum,
+                "minimum_element_quality": minimum_quality,
+                "scope": "baseline_and_explicit_finalist_remesh",
+                "internal_optimizer_remesh_callback": False,
+            },
+            frozenset({"minimum_element_quality"}),
+        )
         baseline_mesh = _mesh_statistics(receipt.get("baseline_mesh"), "baseline_mesh")
         remesh = _object(receipt.get("remesh"), {"explicit_rebuild", "before", "after"}, "remesh")
         if remesh["explicit_rebuild"] is not True:
@@ -260,8 +287,10 @@ def assess_robust_optimizer_execution(
             "comparison": "strictly_greater_than",
             "scope": "fresh_forward_finalist_deformed_geometry",
         }
-        deformation_checks["policy_matches"] = (
-            receipt.get("deformation_feasibility_policy") == expected_deformation_policy
+        deformation_checks["policy_matches"] = _echoes_caller_policy(
+            receipt.get("deformation_feasibility_policy"),
+            expected_deformation_policy,
+            frozenset({"minimum_relative_jacobian"}),
         )
         evidence = receipt.get("deformation_feasibility")
         if not isinstance(evidence, dict):
@@ -275,12 +304,20 @@ def assess_robust_optimizer_execution(
             evidence.get("maximum_relative_jacobian"),
             "deformation_feasibility.maximum_relative_jacobian",
         )
+        evidence_threshold = evidence.get("threshold")
+        threshold_matches = (
+            not isinstance(evidence_threshold, bool)
+            and isinstance(evidence_threshold, (int, float))
+            and math.isclose(
+                float(evidence_threshold), jacobian_threshold, rel_tol=1e-12, abs_tol=1e-12
+            )
+        )
         deformation_checks["finite_evidence"] = (
             isinstance(sample_count, int)
             and not isinstance(sample_count, bool)
             and sample_count >= 1
             and minimum_jacobian <= maximum_jacobian
-            and evidence.get("threshold") == jacobian_threshold
+            and threshold_matches
         )
         deformation_checks["above_caller_threshold"] = (
             minimum_jacobian > jacobian_threshold and evidence.get("passed") is True

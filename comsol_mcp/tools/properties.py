@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Literal, Optional
 
 from mcp.server.mcpserver import MCPServer
 
@@ -101,13 +101,20 @@ def _resolve_existing_target(
 def _read_property(target, property_name: str) -> tuple[JSONValue, str]:
     try:
         value_type = str(target.getValueType(property_name))
-    except Exception:
-        value_type = "String"
+    except Exception as exc:
+        # Guessing "String" here would either mask the real failure or return
+        # a stringified value under a wrong declared type; surface the cause.
+        raise RuntimeError("clientapi property type read failed") from exc
     normalized_type = value_type.lower().replace("[]", "array")
 
     if "matrix" in normalized_type:
-        getter = target.getStringMatrix
-        value = [[str(item) for item in row] for row in getter(property_name)]
+        if "double" in normalized_type or "float" in normalized_type:
+            value = [[float(item) for item in row] for row in target.getDoubleMatrix(property_name)]
+        elif "int" in normalized_type:
+            value = [[int(item) for item in row] for row in target.getIntMatrix(property_name)]
+        else:
+            getter = target.getStringMatrix
+            value = [[str(item) for item in row] for row in getter(property_name)]
     elif "array" in normalized_type:
         if "double" in normalized_type or "float" in normalized_type:
             value = [float(item) for item in target.getDoubleArray(property_name)]
@@ -129,6 +136,12 @@ def _read_property(target, property_name: str) -> tuple[JSONValue, str]:
 
 
 def _exact_json_value_equal(left: JSONValue, right: JSONValue) -> bool:
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        # COMSOL returns doubles for Double properties, so a JSON integer
+        # request reads back as 5.0; compare numerically instead of by type.
+        return float(left) == float(right)
     if type(left) is not type(right):
         return False
     if isinstance(left, list):
@@ -139,13 +152,22 @@ def _exact_json_value_equal(left: JSONValue, right: JSONValue) -> bool:
     return left == right
 
 
-def _restore_property(target, property_name: str, old_value: JSONValue, value_type: str) -> bool:
+def _attempt_restore(
+    target, property_name: str, old_value: JSONValue, value_type: str
+) -> tuple[bool, Optional[str]]:
+    """Best-effort restore; returns (restored, failure_detail)."""
     try:
         target.set(property_name, old_value)
         restored_value, restored_type = _read_property(target, property_name)
-    except Exception:
-        return False
-    return restored_type == value_type and _exact_json_value_equal(restored_value, old_value)
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"[:300]
+    restored = restored_type == value_type and _exact_json_value_equal(restored_value, old_value)
+    return restored, (None if restored else "restored readback mismatch")
+
+
+def _restore_property(target, property_name: str, old_value: JSONValue, value_type: str) -> bool:
+    restored, _detail = _attempt_restore(target, property_name, old_value, value_type)
+    return restored
 
 
 def get_existing_property(
@@ -195,27 +217,47 @@ def set_existing_property(
         try:
             target.set(property_name, normalized_value)
         except Exception:
-            return {
+            rolled_back, restore_error = _attempt_restore(
+                target, property_name, old_value, value_type
+            )
+            payload = {
                 "success": False,
                 "error": "clientapi property set failed",
-                "rolled_back": _restore_property(target, property_name, old_value, value_type),
+                "old_value": old_value,
+                "rolled_back": rolled_back,
             }
+            if restore_error:
+                payload["rollback_error"] = restore_error
+            return payload
         try:
             new_value, new_value_type = _read_property(target, property_name)
         except Exception as readback_exc:
-            return {
+            rolled_back, restore_error = _attempt_restore(
+                target, property_name, old_value, value_type
+            )
+            payload = {
                 "success": False,
                 "error": f"clientapi property readback failed: {readback_exc}",
-                "rolled_back": _restore_property(target, property_name, old_value, value_type),
+                "old_value": old_value,
+                "rolled_back": rolled_back,
             }
+            if restore_error:
+                payload["rollback_error"] = restore_error
+            return payload
         if new_value_type != value_type or not _exact_json_value_equal(new_value, normalized_value):
-            return {
+            rolled_back, restore_error = _attempt_restore(
+                target, property_name, old_value, value_type
+            )
+            payload = {
                 "success": False,
                 "error": "clientapi property assignment did not match the requested value",
                 "old_value": old_value,
                 "observed_value": new_value,
-                "rolled_back": _restore_property(target, property_name, old_value, value_type),
+                "rolled_back": rolled_back,
             }
+            if restore_error:
+                payload["rollback_error"] = restore_error
+            return payload
         return {
             "success": True,
             "target": f"{component_name}/{container}/{feature_tag}/{property_name}",

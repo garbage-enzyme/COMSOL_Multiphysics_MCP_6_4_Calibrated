@@ -323,7 +323,7 @@ msgstr ""
 msgid "Cancelling safely..."
 msgstr ""
 
-msgid "{percent}% — {files}/{total_files} PDFs, {pages}/{total_pages} pages{source}"
+msgid "{percent}% — {files}/{total_files} PDF(s), {pages}/{total_pages} page(s){source}"
 msgstr ""
 
 msgid "Replace existing index?"
@@ -341,7 +341,7 @@ msgstr ""
 msgid "Manual index ready"
 msgstr ""
 
-msgid "Indexed {pdfs} PDFs and {pages} pages. Corpus fingerprint: {fingerprint}"
+msgid "Indexed {pdfs} PDF(s) and {pages} page(s). Corpus fingerprint: {fingerprint}"
 msgstr ""
 
 msgid "Index generation failed"

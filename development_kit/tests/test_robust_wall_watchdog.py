@@ -157,6 +157,86 @@ def test_store_refuses_expected_attempt_mismatch_atomically(ascii_tmp_path):
     assert store.read_control(job_id)["request"] is None
 
 
+def test_failed_cancel_racing_a_terminal_transition_records_truth(
+    ascii_tmp_path,
+):
+    clock = _Clock()
+    store, job_id = _prepare(ascii_tmp_path / "jobs")
+    calls = []
+
+    class _RacingManager:
+        def cancel(self, target_job_id, *, expected_attempt=None):
+            calls.append((target_job_id, expected_attempt))
+            # The worker finished between the watchdog's read and the cancel.
+            store.update_state(job_id, "completed", event="test_terminal_race")
+            return {
+                "success": False,
+                "job_id": target_job_id,
+                "status": str(store.read_state(job_id)["status"]),
+                "reason": "terminal",
+            }
+
+    assert (
+        run(
+            store.root,
+            job_id,
+            1,
+            105.0,
+            clock=clock.time,
+            sleep=clock.sleep,
+            manager_factory=lambda *_args, **_kwargs: _RacingManager(),
+        )
+        == 0
+    )
+    receipt = read_json(store.job_dir(job_id) / "wall-watchdog.json")
+    assert receipt["status"] == "terminal_before_deadline"
+    assert receipt["terminal_job_status"] == "completed"
+    assert receipt["cancellation"]["success"] is False
+
+
+def test_stale_refusal_survives_artifact_rearm_by_successor_attempt(ascii_tmp_path):
+    import src.jobs.robust_wall_watchdog as watchdog_module
+
+    clock = _Clock()
+    store, job_id = _prepare(ascii_tmp_path / "jobs", state_attempt=2)
+    artifact = store.job_dir(job_id) / "wall-watchdog.json"
+
+    def rearm_and_write(*_args, **_kwargs):
+        atomic_write_json(
+            artifact,
+            {
+                "schema_name": "comsol_mcp.robust_wall_watchdog",
+                "schema_version": "1.0.0",
+                "job_id": job_id,
+                "attempt": 2,
+                "budget_seconds": 5,
+                "deadline_epoch": 105.0,
+                "status": "armed",
+            },
+        )
+        raise RuntimeError("wall watchdog artifact attempt changed")
+
+    original = watchdog_module._write_outcome
+    watchdog_module._write_outcome = rearm_and_write
+    try:
+        code = run(
+            store.root,
+            job_id,
+            1,
+            105.0,
+            clock=clock.time,
+            sleep=clock.sleep,
+            manager_factory=lambda *_args, **_kwargs: pytest.fail("cancel was called"),
+        )
+    finally:
+        watchdog_module._write_outcome = original
+
+    assert code == 0
+    receipt = read_json(artifact)
+    assert receipt["attempt"] == 2
+    assert receipt["status"] == "armed"
+
+
 def test_watchdog_launch_failure_is_recorded_durably(ascii_tmp_path, monkeypatch):
     store, job_id = _prepare(ascii_tmp_path / "jobs", status="submitted")
     manager = JobManager(store.root, reconcile_on_start=False)

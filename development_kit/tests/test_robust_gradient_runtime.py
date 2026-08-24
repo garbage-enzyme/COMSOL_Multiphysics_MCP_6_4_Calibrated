@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 
@@ -146,6 +147,31 @@ def test_native_condition_gradient_rejects_limited_condition_tables(ascii_tmp_pa
     assert list(ascii_tmp_path.glob("condition-gradient-*.json")) == []
 
 
+@pytest.mark.parametrize("field", ["reflectance", "transmittance", "absorption"])
+def test_native_condition_gradient_rejects_out_of_range_power_channels(ascii_tmp_path, field):
+    spec = _spec(ascii_tmp_path)
+    observations = _observations(spec)
+    backend = _Backend(observations)
+    original_evaluate = backend.evaluate_condition_gradient
+
+    def evaluate_with_bad_channel(condition, tensor_expressions, variable_ids):
+        result = original_evaluate(condition, tensor_expressions, variable_ids)
+        result[field] = 1.5
+        return result
+
+    backend.evaluate_condition_gradient = evaluate_with_bad_channel
+    target = ascii_tmp_path / f"overshoot-{field}"
+    target.mkdir()
+    with pytest.raises(ValueError, match=f"{field} must be within"):
+        execute_native_condition_gradients(
+            spec,
+            target,
+            backend=backend,
+            observations=observations,
+            cancel_requested=lambda: False,
+        )
+
+
 def test_native_condition_gradient_rejects_tampered_replay(ascii_tmp_path):
     spec = _spec(ascii_tmp_path)
     observations = _observations(spec)
@@ -208,5 +234,44 @@ def test_native_condition_gradient_rejects_baseline_objective_drift(ascii_tmp_pa
             ascii_tmp_path,
             backend=_Backend(_observations(spec)),
             observations=observations,
+            cancel_requested=lambda: False,
+        )
+
+
+class _UlpBackend(_Backend):
+    """Backend whose accepted real part is one ulp above the raw value."""
+
+    def evaluate_condition_gradient(self, condition, tensor_expressions, variable_ids):
+        result = super().evaluate_condition_gradient(condition, tensor_expressions, variable_ids)
+        result["accepted_real_gradients"] = [
+            math.nextafter(item, math.inf) for item in result["accepted_real_gradients"]
+        ]
+        return result
+
+
+def test_accepted_real_gradient_tolerates_last_ulp_rounding(ascii_tmp_path):
+    spec = _spec(ascii_tmp_path)
+    observations = _observations(spec)
+    receipt = execute_native_condition_gradients(
+        spec,
+        ascii_tmp_path,
+        backend=_UlpBackend(observations),
+        observations=observations,
+        cancel_requested=lambda: False,
+    )
+    assert receipt["complete"] is True
+    assert len(list(ascii_tmp_path.glob("condition-gradient-*.json"))) == 24
+
+
+def test_native_condition_gradient_rejects_duplicate_baseline_observations(ascii_tmp_path):
+    spec = _spec(ascii_tmp_path)
+    observations = _observations(spec)
+    duplicated = [*observations, dict(observations[0])]
+    with pytest.raises(ValueError, match="unique baseline observations"):
+        execute_native_condition_gradients(
+            spec,
+            ascii_tmp_path,
+            backend=_Backend(_observations(spec)),
+            observations=duplicated,
             cancel_requested=lambda: False,
         )

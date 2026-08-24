@@ -355,3 +355,30 @@ def test_study_wait_rejects_invalid_timeout_without_starting(timeout):
 
     assert result["success"] is False
     assert result["error"] == "timeout must be a finite non-negative number"
+
+
+def test_study_wait_helpers_reject_invalid_timeouts():
+    from comsol_mcp.tools.study import _validate_wait_timeout
+
+    for bad in (True, -1, 0, float("inf"), "1"):
+        with pytest.raises(ValueError, match="timeout must be a positive number"):
+            _validate_wait_timeout(bad)
+    _validate_wait_timeout(None)
+    _validate_wait_timeout(0.25)
+
+
+def test_study_wait_payload_maps_expired_deadline_to_failure():
+    from comsol_mcp.tools.study import _wait_payload
+
+    progress = {"status": "running", "progress": 0.4}
+    assert _wait_payload(False, progress) == {
+        "success": False,
+        "completed": False,
+        "timed_out": True,
+        "progress": progress,
+    }
+    assert _wait_payload(True, progress) == {
+        "success": True,
+        "completed": True,
+        "progress": progress,
+    }

@@ -6,7 +6,6 @@ from typing import Any, Mapping
 
 from .field_bundle import validate_field_evidence_request
 
-
 _SELECTION_FIELDS = {
     "request_id",
     "request_fingerprint",
@@ -32,17 +31,21 @@ def interpolate_field_slice(
     if not isinstance(selection, Mapping) or set(selection) != _SELECTION_FIELDS:
         raise ValueError("selection is not a canonical field-slice selection")
     selection_value = dict(selection)
-    if selection_value["request_id"] != request_value["request_id"] or selection_value[
-        "request_fingerprint"
-    ] != request_value["request_fingerprint"]:
+    if (
+        selection_value["request_id"] != request_value["request_id"]
+        or selection_value["request_fingerprint"] != request_value["request_fingerprint"]
+    ):
         raise ValueError("selection request identity does not match")
-    if len(
-        [
-            view
-            for view in request_value["views"]
-            if view["view_id"] == selection_value["view_id"]
-        ]
-    ) != 1:
+    if (
+        len(
+            [
+                view
+                for view in request_value["views"]
+                if view["view_id"] == selection_value["view_id"]
+            ]
+        )
+        != 1
+    ):
         raise ValueError("selection view identity does not match the request")
     if selection_value["slice"] != request_value["slice"]:
         raise ValueError("selection slice does not match the request")
@@ -109,8 +112,7 @@ def interpolate_field_slice(
             not isinstance(values, list)
             or len(values) != 2
             or any(
-                isinstance(value, bool) or not isinstance(value, (int, float))
-                for value in values
+                isinstance(value, bool) or not isinstance(value, (int, float)) for value in values
             )
             or not np.all(np.isfinite(values))
         ):
@@ -140,9 +142,7 @@ def interpolate_field_slice(
             raise ValueError(f"selection quantities.{name} are invalid")
         quantity_arrays[name] = values.astype(np.float64, copy=False)
 
-    points = np.column_stack(
-        (coordinate_arrays[plane_axes[0]], coordinate_arrays[plane_axes[1]])
-    )
+    points = np.column_stack((coordinate_arrays[plane_axes[0]], coordinate_arrays[plane_axes[1]]))
     unique_points, inverse, duplicate_counts = np.unique(
         points, axis=0, return_inverse=True, return_counts=True
     )

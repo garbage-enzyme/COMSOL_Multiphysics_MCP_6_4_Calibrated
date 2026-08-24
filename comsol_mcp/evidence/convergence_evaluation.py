@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import hashlib
 import json
 import math
-from pathlib import PurePosixPath
 import re
+from copy import deepcopy
+from pathlib import PurePosixPath
 from typing import Any, Mapping
 
-from comsol_mcp.evidence.spectral_characterization import (
-    validate_spectral_analysis_decision,
-    validate_spectral_characterization,
-    validate_spectral_point_bundle,
-)
-
+# The spectral validators are imported lazily inside _summarize_level: their
+# module pulls numpy and scipy, which must not load during core-profile
+# control-plane startup (capabilities discovery stays solver-free).
 
 CONVERGENCE_LADDER_SCHEMA = "comsol_mcp.convergence_ladder"
 CONVERGENCE_EVALUATION_SCHEMA = "comsol_mcp.convergence_evaluation"
@@ -27,24 +24,46 @@ MAX_SENSITIVITY_SUPPORT_ROWS = 1024
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 _LEVEL_INPUT_FIELDS = {
-    "level_id", "ordinal", "declared_predecessor_level_id",
-    "source_model_sha256", "configuration_sha256", "mesh_counts",
-    "material_identity_sha256", "incidence_identity_sha256",
-    "spectral_bundle", "analysis_decision", "candidate_measurements",
-    "optional_field_metrics", "fixed_reference_diagnostics",
+    "level_id",
+    "ordinal",
+    "declared_predecessor_level_id",
+    "source_model_sha256",
+    "configuration_sha256",
+    "mesh_counts",
+    "material_identity_sha256",
+    "incidence_identity_sha256",
+    "spectral_bundle",
+    "analysis_decision",
+    "candidate_measurements",
+    "optional_field_metrics",
+    "fixed_reference_diagnostics",
 }
 _MESH_FIELDS = {"element_count", "vertex_count"}
 _METRIC_FIELDS = {"value", "unit", "evidence_artifact_sha256"}
 _LEVEL_SUMMARY_FIELDS = {
-    "level_id", "ordinal", "declared_predecessor_level_id", "source_model",
-    "configuration_sha256", "mesh_counts", "material_identity_sha256",
-    "incidence_identity_sha256", "spectral_artifacts", "evidence_state",
-    "measurements", "fit_support_sensitivity", "optional_field_metrics",
-    "fixed_reference_diagnostics", "level_sha256",
+    "level_id",
+    "ordinal",
+    "declared_predecessor_level_id",
+    "source_model",
+    "configuration_sha256",
+    "mesh_counts",
+    "material_identity_sha256",
+    "incidence_identity_sha256",
+    "spectral_artifacts",
+    "evidence_state",
+    "measurements",
+    "fit_support_sensitivity",
+    "optional_field_metrics",
+    "fixed_reference_diagnostics",
+    "level_sha256",
 }
 _POLICY_FIELDS = {
-    "policy_id", "metrics", "minimum_level_count", "governing_pairs",
-    "relative_denominator", "declared_cap_reached",
+    "policy_id",
+    "metrics",
+    "minimum_level_count",
+    "governing_pairs",
+    "relative_denominator",
+    "declared_cap_reached",
 }
 _RULE_FIELDS = {"metric", "unit", "absolute_tolerance", "relative_tolerance"}
 _BUILTIN_METRIC_UNITS = {
@@ -58,7 +77,10 @@ _BUILTIN_METRIC_UNITS = {
 def _canonical_bytes(value: Any) -> bytes:
     try:
         return json.dumps(
-            value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
             allow_nan=False,
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
@@ -120,9 +142,11 @@ def _bounded_text(value: Any, label: str, maximum: int = 128) -> str:
 
 def _relative_identity(value: Any, label: str) -> str:
     text = _bounded_text(value, label, 512).replace("\\", "/")
-    path = PurePosixPath(text)
-    if path.is_absolute() or ".." in path.parts or re.match(r"^[A-Za-z]:", text):
+    if re.match(r"^[A-Za-z]:", text):
         raise ValueError(f"{label} must be relative and traversal-free")
+    path = PurePosixPath(text)
+    if path.is_absolute() or ".." in path.parts or not path.parts or text != str(path):
+        raise ValueError(f"{label} must be a canonical traversal-free relative identity")
     return text
 
 
@@ -163,6 +187,8 @@ def _normalize_sensitivity(value: Any, label: str) -> dict[str, Any]:
     sensitivity_state = item["state"]
     if sensitivity_state not in {"not_requested", "measured_not_classified", "unavailable"}:
         raise ValueError(f"{label}.state is invalid")
+    if sensitivity_state in {"not_requested", "unavailable"} and measurements:
+        raise ValueError(f"{label} with state {sensitivity_state} cannot carry measurements")
     if item["policy_authority"] is not False:
         raise ValueError(f"{label}.policy_authority must be false")
     normalized_measurements = []
@@ -176,18 +202,25 @@ def _normalize_sensitivity(value: Any, label: str) -> dict[str, Any]:
         if state == "fit_failed":
             if set(entry) != {"support_point_count", "state", "failure_reason"}:
                 raise ValueError(f"{measurement_label} failure fields are invalid")
-            normalized_measurements.append({
-                "support_point_count": support_count,
-                "state": state,
-                "failure_reason": _bounded_text(
-                    entry["failure_reason"], f"{measurement_label}.failure_reason", 2048
-                ),
-            })
+            normalized_measurements.append(
+                {
+                    "support_point_count": support_count,
+                    "state": state,
+                    "failure_reason": _bounded_text(
+                        entry["failure_reason"], f"{measurement_label}.failure_reason", 2048
+                    ),
+                }
+            )
             continue
         expected = {
-            "support_point_count", "state", "peak_wavelength_m",
-            "peak_response_value", "fwhm_m", "quality_factor",
-            "support_rows", "diagnostics",
+            "support_point_count",
+            "state",
+            "peak_wavelength_m",
+            "peak_response_value",
+            "fwhm_m",
+            "quality_factor",
+            "support_rows",
+            "diagnostics",
         }
         if state != "measured" or set(entry) != expected:
             raise ValueError(f"{measurement_label} measured fields are invalid")
@@ -198,35 +231,37 @@ def _normalize_sensitivity(value: Any, label: str) -> dict[str, Any]:
         for row_index, row in enumerate(support_rows):
             if not isinstance(row, Mapping) or "raw_row_sha256" not in row:
                 raise ValueError(f"{measurement_label}.support_rows[{row_index}] is invalid")
-            hashes.append(_hash(
-                row["raw_row_sha256"],
-                f"{measurement_label}.support_rows[{row_index}].raw_row_sha256",
-            ))
+            hashes.append(
+                _hash(
+                    row["raw_row_sha256"],
+                    f"{measurement_label}.support_rows[{row_index}].raw_row_sha256",
+                )
+            )
         if len(hashes) > MAX_SENSITIVITY_SUPPORT_ROWS:
             raise ValueError(f"{measurement_label}.support_rows exceeds its limit")
         if len(hashes) != support_count:
-            raise ValueError(
-                f"{measurement_label}.support_point_count must match support_rows"
-            )
+            raise ValueError(f"{measurement_label}.support_point_count must match support_rows")
         if len(hashes) != len(set(hashes)):
             raise ValueError(f"{measurement_label}.support_rows must be unique")
-        normalized_measurements.append({
-            "support_point_count": support_count,
-            "state": state,
-            "peak_wavelength_m": _finite(
-                entry["peak_wavelength_m"], f"{measurement_label}.peak_wavelength_m"
-            ),
-            "peak_response_value": _finite(
-                entry["peak_response_value"], f"{measurement_label}.peak_response_value"
-            ),
-            "fwhm_m": None if entry["fwhm_m"] is None else _finite(
-                entry["fwhm_m"], f"{measurement_label}.fwhm_m"
-            ),
-            "quality_factor": None if entry["quality_factor"] is None else _finite(
-                entry["quality_factor"], f"{measurement_label}.quality_factor"
-            ),
-            "support_row_hashes": hashes,
-        })
+        normalized_measurements.append(
+            {
+                "support_point_count": support_count,
+                "state": state,
+                "peak_wavelength_m": _finite(
+                    entry["peak_wavelength_m"], f"{measurement_label}.peak_wavelength_m"
+                ),
+                "peak_response_value": _finite(
+                    entry["peak_response_value"], f"{measurement_label}.peak_response_value"
+                ),
+                "fwhm_m": None
+                if entry["fwhm_m"] is None
+                else _finite(entry["fwhm_m"], f"{measurement_label}.fwhm_m"),
+                "quality_factor": None
+                if entry["quality_factor"] is None
+                else _finite(entry["quality_factor"], f"{measurement_label}.quality_factor"),
+                "support_row_hashes": hashes,
+            }
+        )
     counts = [entry["support_point_count"] for entry in normalized_measurements]
     if counts != sorted(counts) or len(counts) != len(set(counts)):
         raise ValueError(f"{label} support counts must be sorted and unique")
@@ -248,9 +283,13 @@ def _summarize_level(value: Any, expected_ordinal: int) -> dict[str, Any]:
     if predecessor is not None:
         predecessor = _identifier(predecessor, f"{label}.declared_predecessor_level_id")
     source_hash = _hash(item["source_model_sha256"], f"{label}.source_model_sha256")
-    configuration_hash = _hash(
-        item["configuration_sha256"], f"{label}.configuration_sha256"
+    configuration_hash = _hash(item["configuration_sha256"], f"{label}.configuration_sha256")
+    from comsol_mcp.evidence.spectral_characterization import (
+        validate_spectral_analysis_decision,
+        validate_spectral_characterization,
+        validate_spectral_point_bundle,
     )
+
     bundle = validate_spectral_point_bundle(item["spectral_bundle"])
     decision = validate_spectral_analysis_decision(item["analysis_decision"], bundle=bundle)
     characterization = validate_spectral_characterization(
@@ -268,9 +307,7 @@ def _summarize_level(value: Any, expected_ordinal: int) -> dict[str, Any]:
     measurements = {
         "peak_wavelength_m": candidate["peak"]["wavelength_m"] if measured else None,
         "peak_response_value": candidate["peak"]["response_value"] if measured else None,
-        "fwhm_m": (
-            fwhm["value_m"] if fwhm is not None and fwhm["state"] == "bracketed" else None
-        ),
+        "fwhm_m": (fwhm["value_m"] if fwhm is not None and fwhm["state"] == "bracketed" else None),
         "quality_factor": (
             quality["value"]
             if quality is not None and quality["state"] == "computed_from_bracketed_fwhm"
@@ -281,7 +318,8 @@ def _summarize_level(value: Any, expected_ordinal: int) -> dict[str, Any]:
         _normalize_sensitivity(
             candidate["fit_support_sensitivity"], f"{label}.fit_support_sensitivity"
         )
-        if measured else {"state": "unavailable", "measurements": [], "policy_authority": False}
+        if measured
+        else {"state": "unavailable", "measurements": [], "policy_authority": False}
     )
     body = {
         "level_id": level_id,
@@ -304,11 +342,14 @@ def _summarize_level(value: Any, expected_ordinal: int) -> dict[str, Any]:
             "decision_sha256": decision["decision_sha256"],
             "characterization_sha256": characterization["characterization_sha256"],
             "analysis_policy_sha256": decision["analysis_policy_sha256"],
-            "measurement_configuration_sha256": characterization["measurement_configuration_sha256"],
+            "measurement_configuration_sha256": characterization[
+                "measurement_configuration_sha256"
+            ],
             "raw_row_sha256s": [row["raw_row_sha256"] for row in bundle["rows"]],
         },
         "evidence_state": (
-            "complete_own_peak" if all(value is not None for value in measurements.values())
+            "complete_own_peak"
+            if all(value is not None for value in measurements.values())
             else "incomplete_own_peak"
         ),
         "measurements": measurements,
@@ -345,8 +386,11 @@ def _validate_level_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
     artifacts = _exact_fields(
         item["spectral_artifacts"],
         {
-            "bundle_sha256", "decision_sha256", "characterization_sha256",
-            "analysis_policy_sha256", "measurement_configuration_sha256",
+            "bundle_sha256",
+            "decision_sha256",
+            "characterization_sha256",
+            "analysis_policy_sha256",
+            "measurement_configuration_sha256",
             "raw_row_sha256s",
         },
         f"{label}.spectral_artifacts",
@@ -363,8 +407,11 @@ def _validate_level_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
     normalized_artifacts = {
         name: _hash(artifacts[name], f"{label}.spectral_artifacts.{name}")
         for name in (
-            "bundle_sha256", "decision_sha256", "characterization_sha256",
-            "analysis_policy_sha256", "measurement_configuration_sha256",
+            "bundle_sha256",
+            "decision_sha256",
+            "characterization_sha256",
+            "analysis_policy_sha256",
+            "measurement_configuration_sha256",
         )
     }
     normalized_artifacts["raw_row_sha256s"] = normalized_raw_hashes
@@ -375,28 +422,29 @@ def _validate_level_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
         item["measurements"], set(_BUILTIN_METRIC_UNITS), f"{label}.measurements"
     )
     normalized_measurements = {
-        name: None if measurements[name] is None else _finite(
-            measurements[name], f"{label}.measurements.{name}"
-        )
+        name: None
+        if measurements[name] is None
+        else _finite(measurements[name], f"{label}.measurements.{name}")
         for name in _BUILTIN_METRIC_UNITS
     }
     complete = all(value is not None for value in normalized_measurements.values())
     if (evidence_state == "complete_own_peak") != complete:
         raise ValueError(f"{label}.evidence_state does not match its measurements")
-    sensitivity = _mapping(
-        item["fit_support_sensitivity"], f"{label}.fit_support_sensitivity"
-    )
+    sensitivity = _mapping(item["fit_support_sensitivity"], f"{label}.fit_support_sensitivity")
     if set(sensitivity) != {"state", "measurements", "policy_authority"}:
         raise ValueError(f"{label}.fit_support_sensitivity fields are invalid")
-    if sensitivity["state"] not in {
-        "not_requested", "measured_not_classified", "unavailable"
-    }:
+    if sensitivity["state"] not in {"not_requested", "measured_not_classified", "unavailable"}:
         raise ValueError(f"{label}.fit_support_sensitivity.state is invalid")
     if not isinstance(sensitivity["policy_authority"], bool) or sensitivity["policy_authority"]:
         raise ValueError(f"{label}.fit_support_sensitivity cannot have policy authority")
     sensitivity_measurements = sensitivity["measurements"]
     if not isinstance(sensitivity_measurements, list) or len(sensitivity_measurements) > 16:
         raise ValueError(f"{label}.fit_support_sensitivity.measurements is invalid")
+    if sensitivity["state"] in {"not_requested", "unavailable"} and sensitivity_measurements:
+        raise ValueError(
+            f"{label}.fit_support_sensitivity with state {sensitivity['state']}"
+            " cannot carry measurements"
+        )
     normalized_sensitivity_measurements = []
     for index, measurement in enumerate(sensitivity_measurements):
         measurement_label = f"{label}.fit_support_sensitivity.measurements[{index}]"
@@ -407,17 +455,23 @@ def _validate_level_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
         if entry.get("state") == "fit_failed":
             if set(entry) != {"support_point_count", "state", "failure_reason"}:
                 raise ValueError(f"{measurement_label} failure fields are invalid")
-            normalized_sensitivity_measurements.append({
-                "support_point_count": support_count,
-                "state": "fit_failed",
-                "failure_reason": _bounded_text(
-                    entry["failure_reason"], f"{measurement_label}.failure_reason", 2048
-                ),
-            })
+            normalized_sensitivity_measurements.append(
+                {
+                    "support_point_count": support_count,
+                    "state": "fit_failed",
+                    "failure_reason": _bounded_text(
+                        entry["failure_reason"], f"{measurement_label}.failure_reason", 2048
+                    ),
+                }
+            )
             continue
         expected_measurement = {
-            "support_point_count", "state", "peak_wavelength_m",
-            "peak_response_value", "fwhm_m", "quality_factor",
+            "support_point_count",
+            "state",
+            "peak_wavelength_m",
+            "peak_response_value",
+            "fwhm_m",
+            "quality_factor",
             "support_row_hashes",
         }
         if entry.get("state") != "measured" or set(entry) != expected_measurement:
@@ -430,8 +484,7 @@ def _validate_level_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
         ):
             raise ValueError(f"{measurement_label}.support_row_hashes is invalid")
         normalized_support_hashes = [
-            _hash(digest, f"{measurement_label}.support_row_hashes")
-            for digest in support_hashes
+            _hash(digest, f"{measurement_label}.support_row_hashes") for digest in support_hashes
         ]
         if len(normalized_support_hashes) != support_count:
             raise ValueError(
@@ -439,26 +492,26 @@ def _validate_level_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
             )
         if len(normalized_support_hashes) != len(set(normalized_support_hashes)):
             raise ValueError(f"{measurement_label}.support_row_hashes must be unique")
-        normalized_sensitivity_measurements.append({
-            "support_point_count": support_count,
-            "state": "measured",
-            "peak_wavelength_m": _finite(
-                entry["peak_wavelength_m"], f"{measurement_label}.peak_wavelength_m"
-            ),
-            "peak_response_value": _finite(
-                entry["peak_response_value"], f"{measurement_label}.peak_response_value"
-            ),
-            "fwhm_m": None if entry["fwhm_m"] is None else _finite(
-                entry["fwhm_m"], f"{measurement_label}.fwhm_m"
-            ),
-            "quality_factor": None if entry["quality_factor"] is None else _finite(
-                entry["quality_factor"], f"{measurement_label}.quality_factor"
-            ),
-            "support_row_hashes": normalized_support_hashes,
-        })
-    support_counts = [
-        entry["support_point_count"] for entry in normalized_sensitivity_measurements
-    ]
+        normalized_sensitivity_measurements.append(
+            {
+                "support_point_count": support_count,
+                "state": "measured",
+                "peak_wavelength_m": _finite(
+                    entry["peak_wavelength_m"], f"{measurement_label}.peak_wavelength_m"
+                ),
+                "peak_response_value": _finite(
+                    entry["peak_response_value"], f"{measurement_label}.peak_response_value"
+                ),
+                "fwhm_m": None
+                if entry["fwhm_m"] is None
+                else _finite(entry["fwhm_m"], f"{measurement_label}.fwhm_m"),
+                "quality_factor": None
+                if entry["quality_factor"] is None
+                else _finite(entry["quality_factor"], f"{measurement_label}.quality_factor"),
+                "support_row_hashes": normalized_support_hashes,
+            }
+        )
+    support_counts = [entry["support_point_count"] for entry in normalized_sensitivity_measurements]
     if support_counts != sorted(support_counts) or len(support_counts) != len(set(support_counts)):
         raise ValueError(f"{label}.fit_support_sensitivity support counts are invalid")
     normalized_sensitivity = {
@@ -494,9 +547,8 @@ def _validate_level_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
     }
     supplied_hash = _hash(item["level_sha256"], f"{label}.level_sha256")
     rebuilt = {**body, "level_sha256": _sha256(body)}
-    if (
-        rebuilt["level_sha256"] != supplied_hash
-        or _canonical_bytes(rebuilt) != _canonical_bytes(item)
+    if rebuilt["level_sha256"] != supplied_hash or _canonical_bytes(rebuilt) != _canonical_bytes(
+        item
     ):
         raise ValueError(f"{label} is noncanonical or its hash does not match")
     return rebuilt
@@ -506,10 +558,14 @@ def _validate_ladder_invariants(levels: list[dict[str, Any]]) -> None:
     collections = (
         ("level IDs", [level["level_id"] for level in levels]),
         ("configuration hashes", [level["configuration_sha256"] for level in levels]),
-        ("spectral bundle hashes", [level["spectral_artifacts"]["bundle_sha256"] for level in levels]),
-        ("spectral characterization hashes", [
-            level["spectral_artifacts"]["characterization_sha256"] for level in levels
-        ]),
+        (
+            "spectral bundle hashes",
+            [level["spectral_artifacts"]["bundle_sha256"] for level in levels],
+        ),
+        (
+            "spectral characterization hashes",
+            [level["spectral_artifacts"]["characterization_sha256"] for level in levels],
+        ),
     )
     for label, values in collections:
         if len(values) != len(set(values)):
@@ -524,9 +580,7 @@ def _validate_ladder_invariants(levels: list[dict[str, Any]]) -> None:
         raise ValueError("incidence identity must remain consistent across the ladder")
 
 
-def build_convergence_ladder(
-    *, ladder_id: str, levels: list[Mapping[str, Any]]
-) -> dict[str, Any]:
+def build_convergence_ladder(*, ladder_id: str, levels: list[Mapping[str, Any]]) -> dict[str, Any]:
     """Build one ordered immutable ladder from complete spectral artifact triples."""
     if not isinstance(levels, list) or not 2 <= len(levels) <= MAX_CONVERGENCE_LEVELS:
         raise ValueError(f"levels must contain 2..{MAX_CONVERGENCE_LEVELS} entries")
@@ -548,13 +602,21 @@ def validate_convergence_ladder(value: Any) -> dict[str, Any]:
     """Validate a canonical convergence ladder without reading external files."""
     item = _mapping(value, "convergence_ladder")
     expected = {
-        "schema_name", "schema_version", "ladder_id", "level_count",
-        "material_identity_sha256", "incidence_identity_sha256", "levels",
+        "schema_name",
+        "schema_version",
+        "ladder_id",
+        "level_count",
+        "material_identity_sha256",
+        "incidence_identity_sha256",
+        "levels",
         "ladder_sha256",
     }
     if set(item) != expected:
         raise ValueError("convergence ladder fields are invalid")
-    if item["schema_name"] != CONVERGENCE_LADDER_SCHEMA or item["schema_version"] != CONVERGENCE_SCHEMA_VERSION:
+    if (
+        item["schema_name"] != CONVERGENCE_LADDER_SCHEMA
+        or item["schema_version"] != CONVERGENCE_SCHEMA_VERSION
+    ):
         raise ValueError("convergence ladder schema is unsupported")
     ladder_id = _identifier(item["ladder_id"], "ladder.ladder_id")
     level_count = _positive_count(item["level_count"], "ladder.level_count")
@@ -567,9 +629,7 @@ def validate_convergence_ladder(value: Any) -> dict[str, Any]:
         raise ValueError("convergence ladder level count is invalid")
     normalized = [_validate_level_summary(level, index) for index, level in enumerate(levels)]
     _validate_ladder_invariants(normalized)
-    material_identity = _hash(
-        item["material_identity_sha256"], "ladder.material_identity_sha256"
-    )
+    material_identity = _hash(item["material_identity_sha256"], "ladder.material_identity_sha256")
     incidence_identity = _hash(
         item["incidence_identity_sha256"], "ladder.incidence_identity_sha256"
     )
@@ -588,9 +648,8 @@ def validate_convergence_ladder(value: Any) -> dict[str, Any]:
         "levels": normalized,
     }
     rebuilt = {**body, "ladder_sha256": _sha256(body)}
-    if (
-        rebuilt["ladder_sha256"] != supplied_hash
-        or _canonical_bytes(rebuilt) != _canonical_bytes(item)
+    if rebuilt["ladder_sha256"] != supplied_hash or _canonical_bytes(rebuilt) != _canonical_bytes(
+        item
     ):
         raise ValueError("convergence ladder is noncanonical or its hash does not match")
     return rebuilt
@@ -618,9 +677,7 @@ def _metric_value(level: Mapping[str, Any], metric: str) -> tuple[float | None, 
     raise ValueError(f"unsupported convergence metric: {metric}")
 
 
-def _normalize_convergence_policy(
-    value: Any, *, ladder: Mapping[str, Any]
-) -> dict[str, Any]:
+def _normalize_convergence_policy(value: Any, *, ladder: Mapping[str, Any]) -> dict[str, Any]:
     item = _exact_fields(value, _POLICY_FIELDS, "convergence_policy")
     metrics = item["metrics"]
     if not isinstance(metrics, list) or not 1 <= len(metrics) <= MAX_OPTIONAL_METRICS:
@@ -638,30 +695,29 @@ def _normalize_convergence_policy(
             field_name = metric.split(":", 1)[1]
             _identifier(field_name, f"{label}.metric field name")
         unit = _bounded_text(rule["unit"], f"{label}.unit")
-        absolute = _nonnegative_optional(
-            rule["absolute_tolerance"], f"{label}.absolute_tolerance"
-        )
-        relative = _nonnegative_optional(
-            rule["relative_tolerance"], f"{label}.relative_tolerance"
-        )
+        absolute = _nonnegative_optional(rule["absolute_tolerance"], f"{label}.absolute_tolerance")
+        relative = _nonnegative_optional(rule["relative_tolerance"], f"{label}.relative_tolerance")
         if absolute is None and relative is None:
             raise ValueError(f"{label} must declare an absolute and/or relative tolerance")
         for level in ladder["levels"]:
             _value, observed_unit = _metric_value(level, metric)
             if observed_unit is not None and observed_unit != unit:
                 raise ValueError(f"{label}.unit does not match ladder evidence")
-        normalized_rules.append({
-            "metric": metric,
-            "unit": unit,
-            "absolute_tolerance": absolute,
-            "relative_tolerance": relative,
-        })
+        normalized_rules.append(
+            {
+                "metric": metric,
+                "unit": unit,
+                "absolute_tolerance": absolute,
+                "relative_tolerance": relative,
+            }
+        )
     names = [rule["metric"] for rule in normalized_rules]
     if len(names) != len(set(names)):
         raise ValueError("convergence policy metrics must be unique")
     minimum = item["minimum_level_count"]
     if (
-        isinstance(minimum, bool) or not isinstance(minimum, int)
+        isinstance(minimum, bool)
+        or not isinstance(minimum, int)
         or not 2 <= minimum <= MAX_CONVERGENCE_LEVELS
     ):
         raise ValueError("convergence_policy.minimum_level_count is out of bounds")
@@ -685,8 +741,7 @@ def _relative_change(
     previous: float, current: float, absolute_change: float, convention: str
 ) -> float | None:
     denominator = (
-        abs(previous) if convention == "previous_abs"
-        else max(abs(previous), abs(current))
+        abs(previous) if convention == "previous_abs" else max(abs(previous), abs(current))
     )
     if denominator == 0.0:
         return 0.0 if absolute_change == 0.0 else None
@@ -729,31 +784,33 @@ def _fit_support_comparison(
             previous_value, current_value, absolute_change, relative_denominator
         )
         absolute_passed = (
-            None if rule["absolute_tolerance"] is None
+            None
+            if rule["absolute_tolerance"] is None
             else absolute_change <= rule["absolute_tolerance"]
         )
         relative_passed = (
-            None if rule["relative_tolerance"] is None
+            None
+            if rule["relative_tolerance"] is None
             else relative_change is not None and relative_change <= rule["relative_tolerance"]
         )
         declared = [
-            outcome for outcome in (absolute_passed, relative_passed)
-            if outcome is not None
+            outcome for outcome in (absolute_passed, relative_passed) if outcome is not None
         ]
-        comparisons.append({
-            "support_point_count": count,
-            "previous_value": previous_value,
-            "current_value": current_value,
-            "absolute_change": absolute_change,
-            "relative_change": relative_change,
-            "absolute_passed": absolute_passed,
-            "relative_passed": relative_passed,
-            "passed": all(declared),
-        })
+        comparisons.append(
+            {
+                "support_point_count": count,
+                "previous_value": previous_value,
+                "current_value": current_value,
+                "absolute_change": absolute_change,
+                "relative_change": relative_change,
+                "absolute_passed": absolute_passed,
+                "relative_passed": relative_passed,
+                "passed": all(declared),
+            }
+        )
     outcomes = [item["passed"] for item in comparisons]
     changed = bool(outcomes) and (
-        any(outcome != primary_passed for outcome in outcomes)
-        or len(set(outcomes)) > 1
+        any(outcome != primary_passed for outcome in outcomes) or len(set(outcomes)) > 1
     )
     return {
         "state": "compared" if comparisons else "not_available",
@@ -802,15 +859,19 @@ def _pair_comparison(
         }
     absolute_change = abs(float(current_value) - float(previous_value))
     relative_change = _relative_change(
-        float(previous_value), float(current_value), absolute_change,
+        float(previous_value),
+        float(current_value),
+        absolute_change,
         relative_denominator,
     )
     absolute_passed = (
-        None if rule["absolute_tolerance"] is None
+        None
+        if rule["absolute_tolerance"] is None
         else absolute_change <= rule["absolute_tolerance"]
     )
     relative_passed = (
-        None if rule["relative_tolerance"] is None
+        None
+        if rule["relative_tolerance"] is None
         else relative_change is not None and relative_change <= rule["relative_tolerance"]
     )
     declared_checks = [
@@ -856,31 +917,38 @@ def _monotonicity_observations(
                 state = "nonincreasing"
             else:
                 state = "non_monotonic"
-        observations.append({
-            "metric": rule["metric"],
-            "unit": rule["unit"],
-            "state": state,
-            "adjacent_signed_changes": differences,
-            "convergence_proof": False,
-            "policy_authority": False,
-        })
+        observations.append(
+            {
+                "metric": rule["metric"],
+                "unit": rule["unit"],
+                "state": state,
+                "adjacent_signed_changes": differences,
+                "convergence_proof": False,
+                "policy_authority": False,
+            }
+        )
     for metric in ("element_count", "vertex_count"):
         values = [level["mesh_counts"][metric] for level in levels]
         differences = [current - previous for previous, current in zip(values, values[1:])]
         state = (
-            "constant" if all(change == 0 for change in differences)
-            else "nondecreasing" if all(change >= 0 for change in differences)
-            else "nonincreasing" if all(change <= 0 for change in differences)
+            "constant"
+            if all(change == 0 for change in differences)
+            else "nondecreasing"
+            if all(change >= 0 for change in differences)
+            else "nonincreasing"
+            if all(change <= 0 for change in differences)
             else "non_monotonic"
         )
-        observations.append({
-            "metric": f"mesh:{metric}",
-            "unit": "count",
-            "state": state,
-            "adjacent_signed_changes": differences,
-            "convergence_proof": False,
-            "policy_authority": False,
-        })
+        observations.append(
+            {
+                "metric": f"mesh:{metric}",
+                "unit": "count",
+                "state": state,
+                "adjacent_signed_changes": differences,
+                "convergence_proof": False,
+                "policy_authority": False,
+            }
+        )
     return observations
 
 
@@ -905,36 +973,42 @@ def _fixed_reference_pair_diagnostics(
                 and previous_record["unit"] == current_record["unit"]
             )
             absolute_change = (
-                abs(current_record["value"] - previous_record["value"])
-                if complete else None
+                abs(current_record["value"] - previous_record["value"]) if complete else None
             )
             relative_change = (
                 _relative_change(
-                    previous_record["value"], current_record["value"],
-                    absolute_change, relative_denominator,
+                    previous_record["value"],
+                    current_record["value"],
+                    absolute_change,
+                    relative_denominator,
                 )
-                if complete else None
+                if complete
+                else None
             )
-            comparisons.append({
-                "diagnostic": name,
-                "unit": previous_record["unit"] if previous_record is not None else (
-                    current_record["unit"] if current_record is not None else None
-                ),
-                "previous_value": previous_record["value"] if previous_record else None,
-                "current_value": current_record["value"] if current_record else None,
-                "absolute_change": absolute_change,
-                "relative_change": relative_change,
-                "evidence_complete": complete,
-                "diagnostic_only": True,
-                "policy_authority": False,
-            })
-        diagnostics.append({
-            "pair_index": index - 1,
-            "previous_level_id": previous["level_id"],
-            "current_level_id": current["level_id"],
-            "comparisons": comparisons,
-            "governs_convergence": False,
-        })
+            comparisons.append(
+                {
+                    "diagnostic": name,
+                    "unit": previous_record["unit"]
+                    if previous_record is not None
+                    else (current_record["unit"] if current_record is not None else None),
+                    "previous_value": previous_record["value"] if previous_record else None,
+                    "current_value": current_record["value"] if current_record else None,
+                    "absolute_change": absolute_change,
+                    "relative_change": relative_change,
+                    "evidence_complete": complete,
+                    "diagnostic_only": True,
+                    "policy_authority": False,
+                }
+            )
+        diagnostics.append(
+            {
+                "pair_index": index - 1,
+                "previous_level_id": previous["level_id"],
+                "current_level_id": current["level_id"],
+                "comparisons": comparisons,
+                "governs_convergence": False,
+            }
+        )
     return diagnostics
 
 
@@ -943,33 +1017,33 @@ def evaluate_convergence(
 ) -> dict[str, Any]:
     """Compare adjacent own-peak evidence under one caller-supplied policy."""
     normalized_ladder = validate_convergence_ladder(ladder)
-    policy = _normalize_convergence_policy(
-        convergence_policy, ladder=normalized_ladder
-    )
+    policy = _normalize_convergence_policy(convergence_policy, ladder=normalized_ladder)
     levels = normalized_ladder["levels"]
     pairs = []
     for index in range(1, len(levels)):
         previous = levels[index - 1]
         current = levels[index]
         comparisons = [
-            _pair_comparison(
-                previous, current, rule, policy["relative_denominator"]
-            )
+            _pair_comparison(previous, current, rule, policy["relative_denominator"])
             for rule in policy["metrics"]
         ]
-        pairs.append({
-            "pair_index": index - 1,
-            "previous_level_id": previous["level_id"],
-            "current_level_id": current["level_id"],
-            "declared_adjacent": current["declared_predecessor_level_id"] == previous["level_id"],
-            "comparisons": comparisons,
-            "evidence_complete": all(item["evidence_complete"] for item in comparisons),
-            "passed": all(item["passed"] for item in comparisons),
-        })
+        pairs.append(
+            {
+                "pair_index": index - 1,
+                "previous_level_id": previous["level_id"],
+                "current_level_id": current["level_id"],
+                "declared_adjacent": current["declared_predecessor_level_id"]
+                == previous["level_id"],
+                "comparisons": comparisons,
+                "evidence_complete": all(item["evidence_complete"] for item in comparisons),
+                "passed": all(item["passed"] for item in comparisons),
+            }
+        )
     governing = pairs if policy["governing_pairs"] == "all_adjacent" else pairs[-1:]
     fit_sensitive = any(
         comparison["fit_support_sensitivity"]["outcome_changed_by_support"]
-        for pair in governing for comparison in pair["comparisons"]
+        for pair in governing
+        for comparison in pair["comparisons"]
     )
     issues = []
     if len(levels) < policy["minimum_level_count"]:
@@ -1005,9 +1079,7 @@ def evaluate_convergence(
         "governing_pair_indices": [pair["pair_index"] for pair in governing],
         "evidence_issues": issues,
         "fit_sensitive": fit_sensitive,
-        "monotonicity_observations": _monotonicity_observations(
-            levels, policy["metrics"]
-        ),
+        "monotonicity_observations": _monotonicity_observations(levels, policy["metrics"]),
         "fixed_reference_diagnostics": _fixed_reference_pair_diagnostics(
             levels, policy["relative_denominator"]
         ),
@@ -1018,18 +1090,26 @@ def evaluate_convergence(
     return {**body, "evaluation_sha256": _sha256(body)}
 
 
-def validate_convergence_evaluation(
-    value: Any, *, ladder: Mapping[str, Any]
-) -> dict[str, Any]:
+def validate_convergence_evaluation(value: Any, *, ladder: Mapping[str, Any]) -> dict[str, Any]:
     """Recompute one convergence evaluation and reject hash tampering."""
     item = _mapping(value, "convergence_evaluation")
     expected = {
-        "schema_name", "schema_version", "ladder_id", "ladder_sha256",
-        "convergence_policy", "convergence_policy_sha256", "pair_comparisons",
-        "governing_pair_indices", "evidence_issues", "scientific_disposition",
-        "fit_sensitive", "monotonicity_observations",
-        "fixed_reference_diagnostics", "reason_code",
-        "undeclared_configuration_started", "evaluation_sha256",
+        "schema_name",
+        "schema_version",
+        "ladder_id",
+        "ladder_sha256",
+        "convergence_policy",
+        "convergence_policy_sha256",
+        "pair_comparisons",
+        "governing_pair_indices",
+        "evidence_issues",
+        "scientific_disposition",
+        "fit_sensitive",
+        "monotonicity_observations",
+        "fixed_reference_diagnostics",
+        "reason_code",
+        "undeclared_configuration_started",
+        "evaluation_sha256",
     }
     if set(item) != expected:
         raise ValueError("convergence evaluation fields are invalid")
@@ -1040,9 +1120,12 @@ def validate_convergence_evaluation(
 
 
 __all__ = [
-    "CONVERGENCE_EVALUATION_SCHEMA", "CONVERGENCE_LADDER_SCHEMA",
+    "CONVERGENCE_EVALUATION_SCHEMA",
+    "CONVERGENCE_LADDER_SCHEMA",
     "CONVERGENCE_SCHEMA_VERSION",
-    "MAX_CONVERGENCE_LEVELS", "build_convergence_ladder",
-    "evaluate_convergence", "validate_convergence_evaluation",
+    "MAX_CONVERGENCE_LEVELS",
+    "build_convergence_ladder",
+    "evaluate_convergence",
+    "validate_convergence_evaluation",
     "validate_convergence_ladder",
 ]

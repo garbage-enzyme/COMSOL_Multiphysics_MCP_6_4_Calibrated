@@ -14,7 +14,6 @@ from comsol_mcp.compatibility import module_identity_matches
 from .spectral_characterization import normalize_spectral_characterization_job_spec
 from .store import JOB_SCHEMA_VERSION
 
-
 MIN_BRANCH_CONTINUATION_STATES = 2
 MAX_BRANCH_CONTINUATION_STATES = 16
 MAX_BRANCH_CONTINUATION_POINTS = 512
@@ -66,7 +65,10 @@ def _sha256(value: object, name: str) -> str:
 def _finite(value: object, name: str, *, positive: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be numeric")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be numeric") from exc
     if not math.isfinite(number) or (positive and number <= 0.0):
         qualifier = "positive and finite" if positive else "finite"
         raise ValueError(f"{name} must be {qualifier}")

@@ -150,7 +150,13 @@ def _require_identity_text(value: Any, label: str, *, maximum: int = 256) -> str
         raise ValueError(f"{label} must be a non-empty string of at most {maximum} characters")
     if value != value.strip() or unicodedata.normalize("NFKC", value) != value:
         raise ValueError(f"{label} must be canonical text without surrounding whitespace")
-    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+    if any(
+        ord(char) < 32
+        or ord(char) == 127
+        or 0x80 <= ord(char) <= 0x9F
+        or ord(char) in (0x2028, 0x2029)
+        for char in value
+    ):
         raise ValueError(f"{label} must not contain control characters")
     return value
 
@@ -196,9 +202,7 @@ def validate_evaluation_set(
     for index, item in enumerate(queries):
         if not isinstance(item, Mapping):
             raise ValueError(f"queries[{index}] must be an object")
-        qid = item.get("id")
-        if not isinstance(qid, str) or not qid or len(qid) > 80:
-            raise ValueError(f"queries[{index}].id is invalid")
+        qid = _require_identity_text(item.get("id"), f"queries[{index}].id", maximum=80)
         if qid in seen_ids:
             raise ValueError(f"duplicate query id: {qid}")
         seen_ids.add(qid)
@@ -261,10 +265,27 @@ def validate_evaluation_set(
             }
         )
 
+    # name and frozen_at are canonical frozen-schema text: validate them
+    # explicitly instead of silently stringifying arbitrary payload values.
+    raw_name = payload.get("name")
+    if raw_name is None:
+        name = "semantic-retrieval-evaluation"
+    elif isinstance(raw_name, str) and raw_name.strip():
+        name = raw_name.strip()
+    else:
+        raise ValueError("evaluation name must be a nonempty string when provided")
+    raw_frozen_at = payload.get("frozen_at")
+    if raw_frozen_at is None:
+        frozen_at = ""
+    elif isinstance(raw_frozen_at, str):
+        frozen_at = raw_frozen_at
+    else:
+        raise ValueError("evaluation frozen_at must be a string when provided")
+
     return {
         "schema_version": EVALUATION_SCHEMA_VERSION,
-        "name": str(payload.get("name") or "semantic-retrieval-evaluation"),
-        "frozen_at": str(payload.get("frozen_at") or ""),
+        "name": name,
+        "frozen_at": frozen_at,
         "corpus_fingerprint": corpus_fingerprint,
         "queries": normalized_queries,
     }

@@ -126,7 +126,13 @@ def _admit_mesh(statistics: dict, *, max_elements: int, minimum_quality: float) 
         raise ValueError("minimum_element_quality must be caller supplied in (0, 1]")
     if statistics["element_count"] > max_elements:
         raise ValueError("mesh element count exceeds the caller-supplied per-model ceiling")
-    if statistics["minimum_quality"] < minimum_quality:
+    measured_quality = statistics["minimum_quality"]
+    if not math.isfinite(measured_quality):
+        # NaN would compare False against every threshold and admit an
+        # invalid mesh, so the measured statistic is finite-validated just
+        # like the caller-supplied threshold.
+        raise ValueError("mesh minimum quality statistic is not finite")
+    if measured_quality < minimum_quality:
         raise ValueError("mesh minimum quality is below the caller-supplied threshold")
 
 
@@ -145,9 +151,7 @@ def _requested_move_limit(args: argparse.Namespace) -> float:
     try:
         requested = float(args.move_limit)
     except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "move_limit must be a caller-supplied positive finite number"
-        ) from exc
+        raise ValueError("move_limit must be a caller-supplied positive finite number") from exc
     if not math.isfinite(requested) or requested <= 0.0:
         raise ValueError("move_limit must be a caller-supplied positive finite number")
     return requested
@@ -189,8 +193,16 @@ def _deformation_feasibility_evidence(values, policy: dict) -> dict:
     }
 
 
+def _assert_meter_variables(support: dict, names: list[str]) -> None:
+    """Assert the meter-suffix assumption before finalist parameter writes."""
+    units = {item["variable_id"]: item.get("unit") for item in support["variables"]}
+    offending = sorted(name for name in names if units.get(name) != "m")
+    if offending:
+        raise ValueError(f"optimizer finalist parameters do not declare meter units: {offending}")
+
+
 def _configure_solver_move_limit(
-    model, study, move_limit: float, optimizer_iterations: int
+    model, study, move_limit: float, optimizer_iterations: int, *, method: str
 ) -> dict:
     study.createAutoSequences("sol")
     matches = []
@@ -205,18 +217,23 @@ def _configure_solver_move_limit(
     if len(matches) != 1:
         raise ValueError("native optimization solver identity is ambiguous")
     solution_tag, feature_tag, feature = matches[0]
-    feature.set("movelimitactive", "on")
-    feature.set("movelimit", f"{move_limit:.17g}")
-    feature.set("mmamaxiteractive", "on")
-    feature.set("mmamaxiter", str(optimizer_iterations))
-    return {
-        "solution_tag": solution_tag,
-        "feature_tag": feature_tag,
-        "movelimitactive": str(feature.getString("movelimitactive")),
-        "movelimit": str(feature.getString("movelimit")),
-        "mmamaxiteractive": str(feature.getString("mmamaxiteractive")),
-        "mmamaxiter": str(feature.getString("mmamaxiter")),
-    }
+    readback = {"solution_tag": solution_tag, "feature_tag": feature_tag}
+    # movelimit/mmamaxiter are MMA/GCMMA solver-feature properties; writing
+    # them on an ipopt feature would fail or silently not apply.
+    if method in ("gcmma", "mma"):
+        feature.set("movelimitactive", "on")
+        feature.set("movelimit", f"{move_limit:.17g}")
+        feature.set("mmamaxiteractive", "on")
+        feature.set("mmamaxiter", str(optimizer_iterations))
+        readback.update(
+            {
+                "movelimitactive": str(feature.getString("movelimitactive")),
+                "movelimit": str(feature.getString("movelimit")),
+                "mmamaxiteractive": str(feature.getString("mmamaxiteractive")),
+                "mmamaxiter": str(feature.getString("mmamaxiter")),
+            }
+        )
+    return readback
 
 
 def run(args: argparse.Namespace) -> dict:
@@ -304,24 +321,35 @@ def run(args: argparse.Namespace) -> dict:
             std2,
             spec["optimizer"]["move_limit"],
             requested_iterations,
+            method=spec["optimizer"]["method"],
         )
-        if not math.isclose(
-            float(receipt["solver_move_limit"]["movelimit"]),
-            requested_move_limit,
-            rel_tol=1e-12,
-            abs_tol=0.0,
-        ):
-            raise ValueError("native optimizer solver move-limit readback drifted")
+        if spec["optimizer"]["method"] != "ipopt":
+            if not math.isclose(
+                float(receipt["solver_move_limit"]["movelimit"]),
+                requested_move_limit,
+                rel_tol=1e-12,
+                abs_tol=0.0,
+            ):
+                raise ValueError("native optimizer solver move-limit readback drifted")
         if time.monotonic() - started > spec["optimizer"]["budget"]["max_wall_time_seconds"]:
             raise TimeoutError("native optimizer wall budget exhausted before optimization")
         std2.run()
+        if time.monotonic() - started > spec["optimizer"]["budget"]["max_wall_time_seconds"]:
+            # The declared bounded-run contract covers the solve itself, not
+            # only the moment before it starts.
+            raise TimeoutError("native optimizer wall budget exhausted during optimization")
         phase = "final_objective"
         optimizer_dataset = _dataset_for_solution(
             model, receipt["solver_move_limit"]["solution_tag"]
         )
         variables = [item["variable_id"] for item in support["variables"]]
         evaluated = model.evaluate(
-            [receipt["objective_expression"], *variables], dataset=optimizer_dataset
+            [receipt["objective_expression"], *variables],
+            dataset=optimizer_dataset,
+            # Every other evaluation in this gate pins one sweep point; without
+            # it _numeric_series could flatten a different evaluation scope
+            # and read the wrong final scalar.
+            outer=1,
         )
         optimizer_series = _numeric_series(evaluated[0])
         final = optimizer_series[-1]
@@ -334,6 +362,7 @@ def run(args: argparse.Namespace) -> dict:
         client.remove(model)
         phase = "final_fresh_forward"
         finalist = client.load(str(spec["configured_copy"]))
+        _assert_meter_variables(support, list(final_variables))
         for name, value in final_variables.items():
             finalist.java.param().set(name, f"{value:.17g}[m]")
         finalist_study = finalist.java.study("std1")

@@ -103,11 +103,16 @@ def evaluate_global_result(
 
 
 def export_result_file(model, node_name: str | None, file_path: str) -> str:
-    """Export through a complete staging file before publishing the destination."""
+    """Export one named node through a complete staging file before publishing."""
+    if node_name is None or not str(node_name).strip():
+        raise ValueError(
+            "an explicit export node_name is required; running every export "
+            "node into one caller-supplied file is not supported"
+        )
     path = Path(file_path).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     overwrite = path.exists()
-    staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}.export")
+    staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}{path.suffix}")
     try:
         model.export(node_name, str(staging))
         if not staging.is_file():
@@ -289,7 +294,8 @@ def register_results_tools(mcp: MCPServer) -> None:
         Export data from an export node.
 
         Args:
-            node_name: Export node name (default: run all exports)
+            node_name: Export node name (required; one caller-supplied file
+                cannot represent every export node)
             file_path: Output file path (overrides node setting)
             model_name: Model name (default: current model)
 
@@ -315,7 +321,7 @@ def register_results_tools(mcp: MCPServer) -> None:
                 "success": True,
                 "node": node_name,
                 "file": exported,
-                "message": f"Export completed: {node_name or 'all exports'}",
+                "message": f"Export completed: {node_name}",
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to export data: {str(e)}"}

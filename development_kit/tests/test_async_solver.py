@@ -3,7 +3,6 @@
 import threading
 
 import pytest
-
 from src.async_handler.solver import AsyncSolver, SolverStatus
 
 
@@ -46,6 +45,44 @@ class FakeModel:
 
 def raising_callback(progress, message):
     raise RuntimeError("callback failed")
+
+
+def test_chained_start_solve_from_terminal_callback_is_accepted():
+    study = FakeStudy()
+    solver = AsyncSolver()
+    chained = threading.Event()
+    accepted = {}
+
+    def callback(progress, message):
+        if message == "Completed" and not chained.is_set():
+            chained.set()
+            accepted["second"] = solver.start_solve(
+                FakeModel(study), "std1", progress_callback=callback
+            )
+            if accepted.get("second"):
+                solver.wait(timeout=5.0)
+
+    assert solver.start_solve(FakeModel(study), "std1", progress_callback=callback)
+    assert chained.wait(timeout=5.0)
+    solver.wait(timeout=5.0)
+
+    assert accepted.get("second") is True
+    assert study.run_count == 2
+    assert solver.get_progress()["status"] == SolverStatus.COMPLETED.value
+
+
+def test_failed_solve_releases_the_thread_for_a_retry():
+    study = FakeStudy(error=RuntimeError("boom"))
+    solver = AsyncSolver()
+
+    assert solver.start_solve(FakeModel(study), "std1")
+    solver.wait(timeout=5.0)
+    assert solver.get_progress()["status"] == SolverStatus.FAILED.value
+
+    good = FakeStudy()
+    assert solver.start_solve(FakeModel(good), "std1") is True
+    solver.wait(timeout=5.0)
+    assert good.run_count == 1
 
 
 def test_callback_failure_does_not_change_completed_solve():
@@ -250,3 +287,23 @@ def test_progress_callback_cannot_join_its_worker_thread():
     )
     assert solver.wait(timeout=2) is True
     assert observations == [False]
+
+
+def test_thread_start_failure_notifies_callback_and_clears_it(monkeypatch):
+    solver = AsyncSolver()
+    observations = []
+    monkeypatch.setattr(
+        threading.Thread, "start", lambda _thread: (_ for _ in ()).throw(RuntimeError("limit"))
+    )
+
+    with pytest.raises(RuntimeError, match="limit"):
+        solver.start_solve(
+            FakeModel(FakeStudy()),
+            "std1",
+            progress_callback=lambda progress, message: observations.append((progress, message)),
+        )
+
+    assert observations == [(-1.0, "Error: limit")]
+    assert solver.progress.status is SolverStatus.FAILED
+    with solver._lock:
+        assert solver._progress_callback is None

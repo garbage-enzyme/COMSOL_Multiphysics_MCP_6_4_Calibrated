@@ -15,6 +15,7 @@ LANGUAGES = ("en", "zh_CN", "zh_TW")
 ICON_MEMBER = "settings_gui/assets/comsol_mcp.ico"
 ROOT_LAUNCHER_MEMBER = "Open_Settings_GUI.ps1"
 SHORTCUT_MEMBER = "settings_gui/desktop_shortcut.py"
+ENTRY_POINT_MODULE_MEMBER = "settings_gui/__main__.py"
 
 
 def _wheel_members(path: Path) -> tuple[set[str], str]:
@@ -28,12 +29,15 @@ def _wheel_members(path: Path) -> tuple[set[str], str]:
 
 def _sdist_members(path: Path) -> set[str]:
     with tarfile.open(path, "r:gz") as archive:
-        names = {member.name.replace("\\", "/") for member in archive.getmembers()}
-    roots = {PurePosixPath(name).parts[0] for name in names if PurePosixPath(name).parts}
+        names = {member.name.replace("\\", "/").rstrip("/") for member in archive.getmembers()}
+    # Only nested paths prove the single archive root: git-archive tarballs
+    # carry top-level non-directory members such as pax_global_header, and a
+    # bare root entry must not count as (or hide) that root either.
+    roots = {PurePosixPath(name).parts[0] for name in names if len(PurePosixPath(name).parts) > 1}
     if len(roots) != 1:
         raise ValueError("sdist must contain one archive root")
     root = next(iter(roots))
-    return {name.removeprefix(root + "/") for name in names}
+    return {name[len(root) + 1 :] for name in names if name.startswith(root + "/")}
 
 
 def _entry_point_target(value: str, section: str, name: str) -> str | None:
@@ -103,6 +107,10 @@ def inspect_settings_gui_distributions(dist: Path) -> dict:
         != "settings_gui.__main__:main"
     ):
         raise ValueError("wheel is missing the Settings GUI GUI entry point")
+    # The declared entry-point target is only meaningful when the target module
+    # actually ships in both distributions.
+    if ENTRY_POINT_MODULE_MEMBER not in wheel_names or ENTRY_POINT_MODULE_MEMBER not in sdist_names:
+        raise ValueError("distribution is missing the Settings GUI entry-point module")
     return {
         "schema_name": "comsol_mcp.settings_gui_package_receipt",
         "schema_version": "1.0.0",

@@ -25,7 +25,18 @@ def main() -> None:
             "error_type": type(exc).__name__,
             "error": str(exc),
         }
-    sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
+    try:
+        encoded = json.dumps(result, ensure_ascii=False).encode("utf-8")
+    except TypeError, ValueError:
+        encoded = json.dumps(
+            {
+                "success": False,
+                "error_type": "SerializationError",
+                "error": "worker result is not JSON-serializable",
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+    sys.stdout.buffer.write(encoded)
 
 
 if __name__ == "__main__":

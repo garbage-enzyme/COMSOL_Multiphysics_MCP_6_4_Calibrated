@@ -335,6 +335,10 @@ def write_spectral_stage_plan(
             raise ValueError("spectral stage index is invalid")
         if requested_index > len(existing):
             raise ValueError("spectral stage index is not contiguous")
+        if requested_index == len(existing) and len(existing) >= MAX_SPECTRAL_STAGE_PLANS:
+            # Reject appends at the cap before any durable bytes are written;
+            # otherwise only the post-write replay would notice.
+            raise ValueError("spectral stage plan count is at its declared maximum")
         previous = existing[requested_index - 1]["stage_sha256"] if requested_index > 0 else None
         normalized = validate_spectral_stage_plan(
             plan,
@@ -354,8 +358,15 @@ def write_spectral_stage_plan(
         build_spectral_progress(spec, [*existing, normalized], rows)
         target = root / "stage_plans" / f"{requested_index:03d}.json"
         atomic_write_json(target, normalized)
-        replayed = _read_spectral_stage_plans_unlocked(root, spec)
+        try:
+            replayed = _read_spectral_stage_plans_unlocked(root, spec)
+        except Exception:
+            # Whole-chain invariants (cap, first-stage equality, duplicate
+            # exact points) must never leave a poisoned durable directory.
+            target.unlink(missing_ok=True)
+            raise
         if replayed[-1] != normalized:
+            target.unlink(missing_ok=True)
             raise RuntimeError("spectral stage did not replay after its atomic write")
         return normalized
 

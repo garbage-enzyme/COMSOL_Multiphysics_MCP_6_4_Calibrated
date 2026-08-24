@@ -12,6 +12,7 @@ from .contracts import (
     normalize_shared_server_endpoint,
     normalize_shared_server_feature_gate,
 )
+
 _ATTACH_REQUEST_FIELDS = frozenset({"endpoint", "user_confirmed"})
 
 
@@ -45,9 +46,7 @@ def normalize_shared_server_attach_request(
     )
     if not gate.gate_open:
         raise ValueError("shared server attach requires the static feature flag")
-    if not isinstance(value, Mapping) or not all(
-        isinstance(key, str) for key in value
-    ):
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ValueError("shared server attach request must be an object with string keys")
     actual = set(value)
     if actual != _ATTACH_REQUEST_FIELDS:

@@ -181,6 +181,15 @@ def run_pending_validation_points(
                     raise _ControlRequest("matching control request observed between collectors")
                 collector = dict(collector_value)
                 artifact_id = str(artifact_ids[index])
+                if (
+                    not artifact_id
+                    or artifact_id in {".", ".."}
+                    or Path(artifact_id).is_absolute()
+                    or (set(artifact_id) & set("/\\"))
+                ):
+                    raise ValueError(
+                        f"artifact id must be a single safe path component: {artifact_id!r}"
+                    )
                 artifact_base = directory / "artifacts" / artifact_id
                 artifact_directory = artifact_base / f"attempt-{attempt}"
                 for retry in range(MAX_ATTEMPT_ARTIFACT_RETRIES + 1):

@@ -146,7 +146,10 @@ def normalize_thermo_optomechanical_replay_spec(value: object) -> dict[str, Any]
     if len(set(branches)) != len(branches):
         raise ValueError("optical replay branches must be unique")
 
-    source_sha256 = _sha256_file(source)
+    try:
+        source_sha256 = _sha256_file(source)
+    except OSError as exc:
+        raise ValueError("source_model_path must name an existing MPH file") from exc
     state = raw["material_state"]
     if state["source_model_sha256"].lower() != source_sha256:
         raise ValueError("material state reference identifies a different source model")
@@ -216,9 +219,11 @@ def normalize_thermo_optomechanical_replay_spec(value: object) -> dict[str, Any]
         "schema_version": JOB_SCHEMA_VERSION,
         "driver_identity": current_thermo_optomechanical_driver_identity(),
     }
+    # Insert the fingerprint before the size check so the stored record that
+    # actually ships is the one measured against the declared bound.
+    normalized["spec_fingerprint"] = _fingerprint(normalized)
     if len(_canonical_bytes(normalized)) > MAX_THERMO_OPTOMECHANICAL_SPEC_BYTES:
         raise ValueError("thermo-optomechanical replay specification exceeds its bound")
-    normalized["spec_fingerprint"] = _fingerprint(normalized)
     return normalized
 
 

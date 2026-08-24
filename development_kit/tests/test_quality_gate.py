@@ -11,10 +11,12 @@ from pathlib import Path
 
 import pytest
 
+from development_kit.scripts import quality_gate as quality_gate_module
 from development_kit.scripts.quality_gate import (
     POLICY_PATH,
     _create_short_pytest_roots,
     _main_pytest_command,
+    _serial_pytest_command,
     evaluate_coverage,
     load_coverage_policy,
     run_quality_gate,
@@ -230,6 +232,38 @@ def test_coverage_report_rejects_nonfinite_and_boolean_percentages(observed: obj
     receipt = evaluate_coverage(report, policy)
     assert receipt["status"] == "failed"
     assert receipt["failures"][0]["reason_code"] == "coverage_target_missing"
+
+
+def test_serial_suite_command_collects_coverage_for_the_same_measurement(
+    tmp_path: Path,
+) -> None:
+    command = _serial_pytest_command(tmp_path)
+
+    assert "--cov=comsol_mcp" in command
+    assert "--cov-branch" in command
+    assert "--cov-report=" in command
+    assert command[command.index("--basetemp") + 1] == str(tmp_path)
+    for target in ("development_kit/tests/test_control_plane_startup.py",):
+        assert target in command
+
+
+def test_configuration_drift_writes_one_failed_receipt(
+    ascii_tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def drift() -> None:
+        raise ValueError("production quality-target classification changed")
+
+    monkeypatch.setattr(quality_gate_module, "validate_quality_target_inventory", drift)
+    receipt = run_quality_gate(ascii_tmp_path, as_of=date(2026, 7, 28))
+    outputs = list(ascii_tmp_path.glob("run-*/quality-receipt.json"))
+
+    assert receipt["status"] == "failed"
+    assert receipt["failures"] == ["configuration"]
+    assert receipt["configuration_failure"]["type"] == "ValueError"
+    assert "classification changed" in receipt["configuration_failure"]["error"]
+    assert len(outputs) == 1
+    assert json.loads(outputs[0].read_text(encoding="utf-8")) == receipt
 
 
 def test_command_failure_writes_one_machine_readable_receipt(

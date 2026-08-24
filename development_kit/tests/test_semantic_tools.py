@@ -302,3 +302,51 @@ def test_semantic_and_other_profile_counts_match_declared_discovery(monkeypatch)
         "experimental": 99,
         "full": 155,
     }
+
+
+def test_search_refuses_a_mismatched_deployment_without_querying(lightweight_deployment, tmp_path):
+    root = Path(lightweight_deployment["COMSOL_SEMANTIC_ROOT"])
+    pointer_path = root / "current.json"
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    pointer["index_path"] = str((tmp_path / "outside-index").resolve())
+    pointer_path.write_text(json.dumps(pointer), encoding="utf-8")
+
+    service = SemanticService(lightweight_deployment)
+
+    class SpyManager:
+        def query(self, *_args, **_kwargs):
+            pytest.fail("search must not query a mismatched deployment")
+
+    service._manager = SpyManager()
+    result = service.search("CopyFace")
+
+    assert result["success"] is False
+    assert result["error"]["code"] == "semantic_unavailable"
+    assert result["deployment"]["readable"] is False
+    assert result["fallback_tool"] == "manual_search"
+    assert service._health_gate_passed is False
+
+
+def test_available_requires_a_live_worker_state_even_after_passed_gate(lightweight_deployment):
+    class StaleManager:
+        def status(self, *, probe=False):
+            return {"state": "stale"}
+
+        def health(self):
+            return {"success": True}
+
+        def query(self, *_args, **_kwargs):
+            return {"success": True, "results": []}
+
+        def reset(self):
+            return {"success": True, "reset": {"absent": True}}
+
+    service = SemanticService(lightweight_deployment)
+    service._manager = StaleManager()
+    service._health_gate_passed = True
+
+    status = service.status(warm=False)
+
+    assert status["worker"]["state"] == "stale"
+    assert status["health_gate_passed"] is True
+    assert status["available"] is False

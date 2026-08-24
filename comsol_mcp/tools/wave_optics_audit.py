@@ -92,7 +92,7 @@ def _read_feature_property(feature: Any, name: str) -> str:
         try:
             value = getattr(feature, getter)(name)
             return str(value)
-        except Exception:
+        except Exception:  # noqa: S112 - try each supported ClientAPI getter
             continue
     raise ValueError(f"study-step property is unreadable: {name}")
 
@@ -1467,9 +1467,7 @@ def _run_wave_optics_point_audit_impl(
                     "evaluated_to_solved_difference_m": evaluated_to_solved,
                     "absolute_difference_m": absolute_difference,
                     "relative_difference": (
-                        None
-                        if requested_m == 0
-                        else absolute_difference / abs(requested_m)
+                        None if requested_m == 0 else absolute_difference / abs(requested_m)
                     ),
                     "raw": {
                         "evaluated_parameter": _json_number(evaluated_raw),

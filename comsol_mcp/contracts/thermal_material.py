@@ -115,6 +115,34 @@ class InterpolationPolicy(_ClosedModel):
     extrapolation: ExtrapolationPolicy = Field(default_factory=ExtrapolationPolicy)
 
 
+def _validate_interpolation_against_grid(
+    interpolation: InterpolationPolicy,
+    label: str,
+    wavelengths_m: list[float],
+    temperatures_K: list[float],
+) -> None:
+    """Discontinuities must be sorted, unique, and inside the owning grid."""
+    grid_bounds = (
+        (
+            "wavelength_discontinuities_m",
+            interpolation.wavelength_discontinuities_m,
+            min(wavelengths_m),
+            max(wavelengths_m),
+        ),
+        (
+            "temperature_discontinuities_K",
+            interpolation.temperature_discontinuities_K,
+            min(temperatures_K),
+            max(temperatures_K),
+        ),
+    )
+    for field, values, low, high in grid_bounds:
+        if any(later <= prior for prior, later in zip(values, values[1:])):
+            raise ValueError(f"{label}.{field} must be strictly increasing")
+        if any(value < low or value > high for value in values):
+            raise ValueError(f"{label}.{field} entries must lie within the declared grid")
+
+
 class CarrierState(_ClosedModel):
     density_per_cubic_metre: NonnegativeFloat
     mobility_square_metre_per_V_s: NonnegativeFloat
@@ -160,6 +188,12 @@ class NkTableModel(_ClosedModel):
         expected = len(self.wavelengths_m) * len(self.temperatures_K)
         if len(self.n_flat) != expected or len(self.k_flat) != expected:
             raise ValueError("nk table arrays must match the declared grid shape")
+        _validate_interpolation_against_grid(
+            self.interpolation,
+            "nk_table",
+            self.wavelengths_m,
+            self.temperatures_K,
+        )
         return self
 
 
@@ -195,6 +229,12 @@ class PermittivityTableModel(_ClosedModel):
         expected = len(self.wavelengths_m) * len(self.temperatures_K)
         if len(self.epsilon_real_flat) != expected or len(self.epsilon_imag_flat) != expected:
             raise ValueError("permittivity table arrays must match the declared grid shape")
+        _validate_interpolation_against_grid(
+            self.interpolation,
+            "permittivity_table",
+            self.wavelengths_m,
+            self.temperatures_K,
+        )
         return self
 
 

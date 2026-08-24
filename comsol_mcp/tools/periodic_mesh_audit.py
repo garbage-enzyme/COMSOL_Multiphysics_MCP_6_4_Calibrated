@@ -389,15 +389,20 @@ def collect_periodic_mesh_audit(
         if component_tag:
             component = _get(model.java.component(), component_tag)
             mesh_sequence, _ = _mesh_sequence(component, expected_mesh_tag)
-            features = mesh_sequence.get("features_in_execution_order", [])
-            recipes = [
-                _recipe_for_group(
-                    group,
-                    features,
-                    feature_count_truncated=bool(mesh_sequence.get("feature_count_truncated")),
-                )
-                for group in groups
-            ]
+            if mesh_sequence.get("selection_status") == "ambiguous":
+                # Without a selected mesh there is no feature sequence to judge;
+                # fabricated recipe mismatches would mislead the caller.
+                recipes = []
+            else:
+                features = mesh_sequence.get("features_in_execution_order", [])
+                recipes = [
+                    _recipe_for_group(
+                        group,
+                        features,
+                        feature_count_truncated=bool(mesh_sequence.get("feature_count_truncated")),
+                    )
+                    for group in groups
+                ]
     all_geometry = bool(groups) and all(group["geometry_consistent"] for group in groups)
     all_recipes = bool(recipes) and all(item["mesh_recipe_present"] for item in recipes)
     actionable = [
@@ -430,7 +435,10 @@ def collect_periodic_mesh_audit(
         "actionable_mismatches": actionable,
         "limitations": [
             "Read-only inspection does not run geometry or mesh features.",
-            "A present recipe or previously built mesh does not prove current node-to-node equality.",
+            (
+                "A present recipe or previously built mesh does not prove current "
+                "node-to-node equality."
+            ),
             "Use the explicit clone-only native mesh smoke for native build evidence.",
         ],
         "preflight_evidence": preflight["evidence"],
@@ -526,7 +534,11 @@ def run_clone_mesh_smoke(
         "schema_name": "comsol_mcp.periodic_mesh_smoke",
         "schema_version": "1.0.0",
         "success": success,
-        "native_mesh_build": "passed" if native_error is None and counts else "failed",
+        "native_mesh_build": (
+            "passed"
+            if native_error is None and counts and counts["element_count"] > 0
+            else "failed"
+        ),
         "native_error": native_error,
         "counts": counts,
         "source_integrity": {
@@ -542,7 +554,10 @@ def run_clone_mesh_smoke(
         "compatibility_assessment": (
             "native_mesh_smoke_passed" if success else "native_mesh_smoke_failed"
         ),
-        "limitation": "A native mesh build is stronger than recipe inspection but is not an explicit node-by-node equality export.",
+        "limitation": (
+            "A native mesh build is stronger than recipe inspection but is not "
+            "an explicit node-by-node equality export."
+        ),
     }
 
 

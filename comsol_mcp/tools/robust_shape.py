@@ -195,6 +195,13 @@ def inspect_robust_shape_evidence(
     return {**body, "summary_sha256": domain_sha256_v2(_SUMMARY_SCHEMA, body)}
 
 
+def _completed_orders_valid(orders: list[Any]) -> bool:
+    """Require integer condition orders forming the canonical zero-based sequence."""
+    if any(isinstance(order, bool) or not isinstance(order, int) for order in orders):
+        return False
+    return orders == list(range(len(orders)))
+
+
 def _spec_fingerprint_valid(spec: dict[str, Any]) -> bool:
     expected = spec.get("spec_fingerprint")
     body = {key: value for key, value in spec.items() if key != "spec_fingerprint"}
@@ -228,9 +235,9 @@ def verify_robust_shape_evidence(
     accepted_iterations = [
         row for row in rows if row["kind"] == "iteration" and row["payload"]["status"] == "accepted"
     ]
-    controls = (
-        spec.get("adapter_configuration", {}).get("configuration", {}).get("condition_controls", {})
-    )
+    controls = ((spec.get("adapter_configuration") or {}).get("configuration") or {}).get(
+        "condition_controls"
+    ) or {}
     shape_application_required = controls.get("schema_version") == "1.5.0"
     finalists = [row for row in rows if row["kind"] == "finalist_validation"]
     checkpoints = [row for row in rows if row["kind"] == "checkpoint"]
@@ -241,8 +248,8 @@ def verify_robust_shape_evidence(
         "row_chain_valid": True,
         "condition_ids_declared": set(completed_ids) <= set(declared_ids),
         "completed_conditions_unique": len(completed_ids) == len(set(completed_ids)),
-        "completed_condition_order_valid": completed_orders == sorted(completed_orders),
-        "all_conditions_complete": completed_ids == declared_ids,
+        "completed_condition_order_valid": _completed_orders_valid(completed_orders),
+        "all_conditions_complete": set(completed_ids) == set(declared_ids),
         "validated_gradient_present": any(
             row["payload"]["evidence_state"] == "gradient_validated" for row in gradients
         ),

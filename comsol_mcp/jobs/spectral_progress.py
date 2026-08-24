@@ -183,6 +183,17 @@ def _fit_support_is_stable(
     return True, "fit_support_within_declared_tolerances"
 
 
+_DECLARED_CAP_REASONS = frozenset(
+    {
+        "refinement_point_cap_reached",
+        "window_expansion_count_cap_reached",
+        "window_expansion_point_cap_reached",
+        # The caller-declared absolute wavelength bound is a declared limit.
+        "window_expansion_absolute_bound_reached",
+    }
+)
+
+
 def _completion(
     *,
     reason_code: str,
@@ -355,7 +366,10 @@ def _final_candidate_disposition(
     artifacts: Mapping[str, Any],
     cap_reason: str,
 ) -> dict[str, Any]:
-    cap_reached = cap_reason != "refinement_converged"
+    # Only configured caps (and the caller-declared absolute bound) are
+    # declared limits; measurement unavailability or a grid that yields no
+    # new exact points must not be reported as hitting one.
+    cap_reached = cap_reason in _DECLARED_CAP_REASONS
     characterization = artifacts["characterization"]
     candidate = characterization.get("candidate")
     if characterization.get("measurement_state") != "measured" or not isinstance(
@@ -444,8 +458,10 @@ def _action_after_completed_stage(
             }
         return _completion(
             reason_code=reason,
-            disposition="unresolved_at_declared_cap",
-            declared_cap_reached=True,
+            disposition=(
+                "unresolved_at_declared_cap" if reason in _DECLARED_CAP_REASONS else "residual"
+            ),
+            declared_cap_reached=reason in _DECLARED_CAP_REASONS,
         )
     if classification == "interior_candidate":
         refinement_count = sum(plan["stage_kind"] == "refinement" for plan in plans)

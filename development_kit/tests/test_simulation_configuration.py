@@ -116,6 +116,51 @@ def test_unit_normalization_is_idempotent_and_semantically_equal():
     assert comparison["classification_counts"]["semantic"] == 0
 
 
+def test_equal_key_ties_in_unit_contracts_and_characteristic_lengths_are_deterministic():
+    left = _configuration()
+    right = deepcopy(left)
+    left["unit_contracts"] = [
+        {"quantity": "wavelength", "requested_unit": "nm", "evaluated_unit": "m"},
+        {"quantity": "wavelength", "requested_unit": "um", "evaluated_unit": "m"},
+    ]
+    right["unit_contracts"] = [
+        {"quantity": "wavelength", "requested_unit": "um", "evaluated_unit": "m"},
+        {"quantity": "wavelength", "requested_unit": "nm", "evaluated_unit": "m"},
+    ]
+    left["mesh"]["characteristic_lengths"] = [
+        {
+            "dimension_id": "width",
+            "semantic": "full_width",
+            "quantity": _quantity(10.0, "nm"),
+        },
+        {
+            "dimension_id": "width",
+            "semantic": "full_width",
+            "quantity": _quantity(20.0, "nm"),
+        },
+    ]
+    right["mesh"]["characteristic_lengths"] = [
+        {
+            "dimension_id": "width",
+            "semantic": "full_width",
+            "quantity": _quantity(20.0, "nm"),
+        },
+        {
+            "dimension_id": "width",
+            "semantic": "full_width",
+            "quantity": _quantity(10.0, "nm"),
+        },
+    ]
+
+    left_norm = normalize_simulation_configuration(left)
+    right_norm = normalize_simulation_configuration(right)
+
+    assert left_norm == right_norm
+    comparison = compare_simulation_configurations(left, right)
+    assert comparison["disposition"] == "equivalent"
+    assert comparison["classification_counts"]["semantic"] == 0
+
+
 def test_celsius_symbol_alias_normalizes_to_kelvin():
     value = _configuration()
     value["materials"][0]["temperature"] = _quantity(26.85, "°C", "temperature")

@@ -673,7 +673,6 @@ _MODEL_REVISION_EXCLUSIONS = frozenset(
         "model_create",
         "model_load",
         "model_set_current",
-        "mim_patch_build",
         "solver_recover_stale_lease",
         "semantic_worker_reset",
         "standalone_start",

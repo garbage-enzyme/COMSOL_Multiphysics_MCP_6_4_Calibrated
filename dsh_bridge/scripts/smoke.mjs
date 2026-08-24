@@ -24,7 +24,10 @@ try {
 	const submit = await conn.callTool("job_submit", { spec: { job_type: "staged_sweep" } });
 	log(`job_submit -> ${submit.text}`);
 	const jobId = JSON.parse(submit.text).job_id;
-	createJobMirror({ jobs, core: conn, jobId, jobType: "staged_sweep", opts: { pollIntervalMs: 50 }, logger: console });
+	// Wire the mirror's disposed probe so conn.dispose() also settles and
+	// stops its poll/tail intervals; otherwise a timeout path would leave
+	// active timers keeping this process alive forever.
+	createJobMirror({ jobs, core: conn, jobId, jobType: "staged_sweep", opts: { pollIntervalMs: 50 }, logger: console, isDisposed: () => conn.disposed });
 	const rec = jobs.started[0];
 	const outcome = await Promise.race([rec.hooks.done, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 8000))]);
 	log(`mirror outcome: ${JSON.stringify(outcome)}`);

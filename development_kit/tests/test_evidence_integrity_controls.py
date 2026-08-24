@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import hashlib
 
 import pytest
 from src.evidence.integrity_controls import (
@@ -80,7 +79,30 @@ def test_each_check_can_be_explicitly_disabled_without_changing_other_checks(
     assert status["warning_codes"] == [DISABLED_CHECK_WARNING_CODE]
     assert status["warning_messages"] == [DISABLED_CHECK_WARNING]
     assert warning_fields(status)["strictly_verified"] is False
-    assert status["settings_fingerprint_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    # The attestation fingerprint hashes canonical effective settings, not raw
+    # file bytes: cosmetic reformatting must not invalidate attested results.
+    from src.evidence.integrity_controls import _canonical_bytes, _normalize_settings, _sha256
+
+    effective, _checks = _normalize_settings(json.loads(path.read_text(encoding="utf-8")))
+    assert status["settings_fingerprint_sha256"] == _sha256(_canonical_bytes(effective))
+
+
+def test_explicit_settings_fingerprint_ignores_cosmetic_reformatting(tmp_path):
+    path = tmp_path / "evidence-settings.json"
+    _write_settings(path, {"summary_claim_verification": False})
+    first = load_evidence_integrity_status({EVIDENCE_SETTINGS_ENV: str(path)})
+
+    document = json.loads(path.read_text(encoding="utf-8"))
+    reordered = {
+        "schema_version": document["schema_version"],
+        "checks": document["checks"],
+        "schema_name": document["schema_name"],
+    }
+    path.write_text(json.dumps(reordered, indent=3), encoding="utf-8")
+    second = load_evidence_integrity_status({EVIDENCE_SETTINGS_ENV: str(path)})
+
+    assert second["success"] is True
+    assert first["settings_fingerprint_sha256"] == second["settings_fingerprint_sha256"]
 
 
 @pytest.mark.parametrize(

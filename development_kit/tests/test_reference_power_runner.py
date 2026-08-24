@@ -77,14 +77,10 @@ def _run_with_solver_observer(command):
             stdout, stderr = process.communicate(timeout=10)
         except subprocess.TimeoutExpired as drain_timeout:
             stdout = (
-                drain_timeout.stdout
-                if drain_timeout.stdout is not None
-                else initial_timeout.stdout
+                drain_timeout.stdout if drain_timeout.stdout is not None else initial_timeout.stdout
             )
             stderr = (
-                drain_timeout.stderr
-                if drain_timeout.stderr is not None
-                else initial_timeout.stderr
+                drain_timeout.stderr if drain_timeout.stderr is not None else initial_timeout.stderr
             )
         raise subprocess.TimeoutExpired(
             initial_timeout.cmd,
@@ -130,9 +126,7 @@ def test_solver_observer_timeout_preserves_post_kill_diagnostics(monkeypatch):
 
     process = Process()
     monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
-    monkeypatch.setattr(
-        sys.modules[__name__], "_solver_descendant_identities", lambda _pid: set()
-    )
+    monkeypatch.setattr(sys.modules[__name__], "_solver_descendant_identities", lambda _pid: set())
 
     with pytest.raises(subprocess.TimeoutExpired) as raised:
         _run_with_solver_observer([sys.executable, "worker.py"])

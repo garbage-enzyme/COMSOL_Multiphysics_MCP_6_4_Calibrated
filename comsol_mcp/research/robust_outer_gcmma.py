@@ -258,8 +258,10 @@ def normalize_gcmma_state(value: object) -> dict[str, Any]:
     }:
         raise ValueError("GCMMA state status is invalid")
     raw["backend_identity"] = _backend_identity(raw["backend_identity"])
+    if supplied is None:
+        raise ValueError("GCMMA state fingerprint is required")
     expected = domain_sha256_v2(GCMMA_STATE_SCHEMA_NAME, raw)
-    if supplied is not None and supplied != expected:
+    if supplied != expected:
         raise ValueError("GCMMA state fingerprint is invalid")
     raw["state_fingerprint"] = expected
     return raw
@@ -281,6 +283,8 @@ def propose_gcmma_candidate(
     current = normalize_gcmma_state(state)
     if current["pending_proposal"] is not None:
         raise ValueError("GCMMA proposal is already pending")
+    if current["status"] in {"complete", "budget_exhausted"}:
+        raise ValueError("GCMMA state is already terminal")
     if current["outer_iteration"] >= current["max_iterations"]:
         raise ValueError("GCMMA outer iteration budget is exhausted")
     if (

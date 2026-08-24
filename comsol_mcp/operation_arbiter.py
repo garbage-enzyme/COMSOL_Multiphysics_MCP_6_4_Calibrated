@@ -247,8 +247,7 @@ class OperationArbiter:
                             "retryable": False,
                             "retry_after_ms": None,
                             "error": (
-                                "operation lock cannot be written: "
-                                f"{type(write_error).__name__}"
+                                f"operation lock cannot be written: {type(write_error).__name__}"
                             ),
                         }
                     try:

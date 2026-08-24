@@ -38,9 +38,21 @@ def _windows_process_create_time(handle: int) -> float | None:
     kernel = wintypes.FILETIME()
     user = wintypes.FILETIME()
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.GetProcessTimes.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME))
+    kernel32.GetProcessTimes.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    )
     kernel32.GetProcessTimes.restype = wintypes.BOOL
-    if not kernel32.GetProcessTimes(wintypes.HANDLE(handle), ctypes.byref(created), ctypes.byref(exited), ctypes.byref(kernel), ctypes.byref(user)):
+    if not kernel32.GetProcessTimes(
+        wintypes.HANDLE(handle),
+        ctypes.byref(created),
+        ctypes.byref(exited),
+        ctypes.byref(kernel),
+        ctypes.byref(user),
+    ):
         return None
     ticks = (created.dwHighDateTime << 32) | created.dwLowDateTime
     return ticks / 10_000_000.0 - 11_644_473_600.0
@@ -58,23 +70,59 @@ class _KillOnCloseJob:
         kernel32.CreateJobObjectW.restype = wintypes.HANDLE
         kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
         kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
-        kernel32.SetInformationJobObject.argtypes = (wintypes.HANDLE, wintypes.INT, wintypes.LPVOID, wintypes.DWORD)
+        kernel32.SetInformationJobObject.argtypes = (
+            wintypes.HANDLE,
+            wintypes.INT,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+        )
         kernel32.SetInformationJobObject.restype = wintypes.BOOL
 
         class Basic(ctypes.Structure):
-            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_longlong), ("PerJobUserTimeLimit", ctypes.c_longlong), ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t), ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD), ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD), ("SchedulingClass", wintypes.DWORD)]
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_longlong),
+                ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
         class IO(ctypes.Structure):
-            _fields_ = [(name, ctypes.c_ulonglong) for name in ("ReadOperationCount", "WriteOperationCount", "OtherOperationCount", "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+            _fields_ = [
+                (name, ctypes.c_ulonglong)
+                for name in (
+                    "ReadOperationCount",
+                    "WriteOperationCount",
+                    "OtherOperationCount",
+                    "ReadTransferCount",
+                    "WriteTransferCount",
+                    "OtherTransferCount",
+                )
+            ]
+
         class Extended(ctypes.Structure):
-            _fields_ = [("BasicLimitInformation", Basic), ("IoInfo", IO), ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+            _fields_ = [
+                ("BasicLimitInformation", Basic),
+                ("IoInfo", IO),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
 
         handle = kernel32.CreateJobObjectW(None, None)
         if not handle:
             return None
         limits = Extended()
         limits.BasicLimitInformation.LimitFlags = 0x00002000
-        if not kernel32.SetInformationJobObject(handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)) or not kernel32.AssignProcessToJobObject(handle, wintypes.HANDLE(process_handle)):
-            kernel32.CloseHandle(handle)
+        if not kernel32.SetInformationJobObject(
+            handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)
+        ) or not kernel32.AssignProcessToJobObject(handle, wintypes.HANDLE(process_handle)):
+            kernel32.CloseHandle(wintypes.HANDLE(handle))
             return None
         return cls(int(handle))
 
@@ -87,7 +135,21 @@ class _KillOnCloseJob:
 class SemanticWorkerManager:
     """Own exactly one localhost semantic worker and never retries a query."""
 
-    def __init__(self, *, python_executable: str | None = None, startup_deadline: float = 5.0, query_deadline: float = PUBLIC_LIMITS["query_deadline_seconds"], idle_ttl: float = 300.0, fault: str | None = None, query_delay: float = 0.0, forced_port: int = 0, backend: str = "fake", deployment_root: str | None = None, lexical_index: str | None = None, model_path: str | None = None):
+    def __init__(
+        self,
+        *,
+        python_executable: str | None = None,
+        startup_deadline: float = 5.0,
+        query_deadline: float = PUBLIC_LIMITS["query_deadline_seconds"],
+        idle_ttl: float = 300.0,
+        fault: str | None = None,
+        query_delay: float = 0.0,
+        forced_port: int = 0,
+        backend: str = "fake",
+        deployment_root: str | None = None,
+        lexical_index: str | None = None,
+        model_path: str | None = None,
+    ):
         self.python_executable = python_executable or sys.executable
         self.startup_deadline = float(startup_deadline)
         self.query_deadline = float(query_deadline)
@@ -98,7 +160,9 @@ class SemanticWorkerManager:
         if backend not in {"fake", "hybrid"}:
             raise ValueError("backend must be fake or hybrid")
         if backend == "hybrid" and not all((deployment_root, lexical_index, model_path)):
-            raise ValueError("hybrid backend requires deployment_root, lexical_index, and model_path")
+            raise ValueError(
+                "hybrid backend requires deployment_root, lexical_index, and model_path"
+            )
         self.backend = backend
         self.deployment_root = deployment_root
         self.lexical_index = lexical_index
@@ -118,7 +182,7 @@ class SemanticWorkerManager:
         try:
             while stream.read(64 * 1024):
                 pass
-        except (OSError, ValueError):
+        except OSError, ValueError:
             pass
 
     def _start_pipe_drain(self, stream: Any, label: str) -> None:
@@ -138,7 +202,7 @@ class SemanticWorkerManager:
             if stream is not None:
                 try:
                     stream.close()
-                except (OSError, ValueError):
+                except OSError, ValueError:
                     pass
         for thread in self._pipe_threads:
             thread.join(timeout=0.2)
@@ -188,14 +252,26 @@ class SemanticWorkerManager:
         }
 
     def _command(self) -> list[str]:
-        command = [self.python_executable, "-m", "comsol_mcp.knowledge.semantic_worker", "--serve", "--port", str(self.forced_port)]
+        command = [
+            self.python_executable,
+            "-m",
+            "comsol_mcp.knowledge.semantic_worker",
+            "--serve",
+            "--port",
+            str(self.forced_port),
+        ]
         command.extend(["--backend", self.backend])
         if self.backend == "hybrid":
-            command.extend([
-                "--deployment-root", str(self.deployment_root),
-                "--lexical-index", str(self.lexical_index),
-                "--model-path", str(self.model_path),
-            ])
+            command.extend(
+                [
+                    "--deployment-root",
+                    str(self.deployment_root),
+                    "--lexical-index",
+                    str(self.lexical_index),
+                    "--model-path",
+                    str(self.model_path),
+                ]
+            )
         if self.fault:
             command.extend(["--fault", self.fault])
         if self.query_delay:
@@ -211,8 +287,16 @@ class SemanticWorkerManager:
             return "stale"
         if self._identity.get("command_signature") != _command_signature(self._command()):
             return "stale"
-        actual = _windows_process_create_time(int(self._process._handle)) if os.name == "nt" else self._identity.get("process_create_time")
-        if actual is None or abs(float(actual) - float(self._identity.get("process_create_time", -1))) > CREATE_TIME_TOLERANCE_SECONDS:
+        actual = (
+            _windows_process_create_time(int(self._process._handle))
+            if os.name == "nt"
+            else self._identity.get("process_create_time")
+        )
+        if (
+            actual is None
+            or abs(float(actual) - float(self._identity.get("process_create_time", -1)))
+            > CREATE_TIME_TOLERANCE_SECONDS
+        ):
             return "uncertain"
         return "active"
 
@@ -220,13 +304,22 @@ class SemanticWorkerManager:
         with self._lock:
             self._expire_idle()
             if self._identity_state() == "active":
-                return {"success": True, "started": False, "identity": dict(self._identity or {}), "port": self._port}
+                return {
+                    "success": True,
+                    "started": False,
+                    "identity": dict(self._identity or {}),
+                    "port": self._port,
+                }
             if self._process is not None:
                 cleanup = self._terminate_owned("replace_nonactive_worker")
-                if cleanup.get("refused"):
+                if not cleanup.get("absent"):
+                    # Cleanup failed to confirm the old worker is gone; never
+                    # orphan a live process by spawning a replacement.
                     error = {
                         "code": "worker_identity_uncertain",
-                        "message": "refusing to replace a live worker whose exact identity does not match",
+                        "message": (
+                            "refusing to replace a live worker that cleanup could not terminate"
+                        ),
                     }
                     self._last_error = error
                     return {"success": False, "error": error, "cleanup": cleanup}
@@ -236,11 +329,20 @@ class SemanticWorkerManager:
             environment["COMSOL_SEMANTIC_SESSION_TOKEN"] = token
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
             try:
-                process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment, creationflags=creationflags)
+                process = subprocess.Popen(  # noqa: S603 - fixed argv worker, no shell
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=environment,
+                    creationflags=creationflags,
+                )
             except OSError as exc:
                 error = {
                     "code": "startup_failed",
-                    "message": f"{type(exc).__name__}: semantic worker process could not be started",
+                    "message": (
+                        f"{type(exc).__name__}: semantic worker process could not be started"
+                    ),
                 }
                 self._last_error = error
                 return {
@@ -254,7 +356,11 @@ class SemanticWorkerManager:
                 }
             self._process = process
             self._start_pipe_drain(process.stderr, "stderr")
-            created = _windows_process_create_time(int(process._handle)) if os.name == "nt" else time.time()
+            created = (
+                _windows_process_create_time(int(process._handle))
+                if os.name == "nt"
+                else time.time()
+            )
             if created is None:
                 error = {
                     "code": "startup_failed",
@@ -263,7 +369,11 @@ class SemanticWorkerManager:
                 self._last_error = error
                 cleanup = self._terminate_unverified_spawn("missing_process_create_time")
                 return {"success": False, "error": error, "cleanup": cleanup}
-            self._identity = {"pid": process.pid, "process_create_time": created, "command_signature": _command_signature(command)}
+            self._identity = {
+                "pid": process.pid,
+                "process_create_time": created,
+                "command_signature": _command_signature(command),
+            }
             self._job = _KillOnCloseJob.assign(int(process._handle)) if os.name == "nt" else None
             self._token = token
             line_queue: queue.Queue[bytes] = queue.Queue(maxsize=1)
@@ -282,27 +392,49 @@ class SemanticWorkerManager:
                 ready = json.loads(line.decode("utf-8"))
                 if not isinstance(ready, dict):
                     raise RuntimeError("worker startup handshake must be a JSON object")
-                if ready.get("schema_version") != WORKER_PROTOCOL_SCHEMA_VERSION or ready.get("event") != "ready" or ready.get("pid") != process.pid or ready.get("host") != "127.0.0.1":
+                if (
+                    ready.get("schema_version") != WORKER_PROTOCOL_SCHEMA_VERSION
+                    or ready.get("event") != "ready"
+                    or ready.get("pid") != process.pid
+                    or ready.get("host") != "127.0.0.1"
+                ):
                     raise RuntimeError("invalid worker startup handshake")
                 port = ready["port"]
-                if (
-                    not isinstance(port, int)
-                    or isinstance(port, bool)
-                    or not 1 <= port <= 65_535
-                ):
+                if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65_535:
                     raise RuntimeError("worker startup port is invalid")
                 self._port = port
                 self._last_activity = time.monotonic()
                 self._start_pipe_drain(stdout, "stdout")
-                return {"success": True, "started": True, "identity": dict(self._identity), "port": self._port, "job_object_contained": self._job is not None}
-            except (queue.Empty, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError, RuntimeError) as exc:
-                error = {"code": "startup_failed", "message": str(exc) or "startup deadline exceeded"}
+                return {
+                    "success": True,
+                    "started": True,
+                    "identity": dict(self._identity),
+                    "port": self._port,
+                    "job_object_contained": self._job is not None,
+                }
+            except (
+                queue.Empty,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                KeyError,
+                TypeError,
+                ValueError,
+                RuntimeError,
+            ) as exc:
+                error = {
+                    "code": "startup_failed",
+                    "message": str(exc) or "startup deadline exceeded",
+                }
                 self._last_error = error
                 cleanup = self._terminate_owned("startup_failure")
                 return {"success": False, "error": error, "cleanup": cleanup}
 
     def _expire_idle(self) -> None:
-        if self._last_activity is not None and self.idle_ttl >= 0 and time.monotonic() - self._last_activity >= self.idle_ttl:
+        if (
+            self._last_activity is not None
+            and self.idle_ttl >= 0
+            and time.monotonic() - self._last_activity >= self.idle_ttl
+        ):
             self._terminate_owned("idle_ttl")
 
     def _terminate_owned(self, reason: str) -> dict[str, Any]:
@@ -374,7 +506,7 @@ class SemanticWorkerManager:
         with self._lock:
             result = self._terminate_owned("explicit_reset")
             return {
-                "success": bool(result.get("absent")) and not result.get("refused", False),
+                "success": bool(result.get("absent")),
                 "reset": result,
             }
 
@@ -391,28 +523,45 @@ class SemanticWorkerManager:
             return value
 
         request_id = f"semantic-{uuid.uuid4().hex}"
-        request = {"schema_version": WORKER_PROTOCOL_SCHEMA_VERSION, "request_id": request_id, "token": self._token, "operation": operation, **fields}
+        request = {
+            "schema_version": WORKER_PROTOCOL_SCHEMA_VERSION,
+            "request_id": request_id,
+            "token": self._token,
+            "operation": operation,
+            **fields,
+        }
         try:
-            encoded = json.dumps(
-                request,
-                ensure_ascii=False,
-                allow_nan=False,
-                separators=(",", ":"),
-            ).encode("utf-8") + b"\n"
-            with socket.create_connection(("127.0.0.1", int(self._port)), timeout=remaining()) as connection:
+            encoded = (
+                json.dumps(
+                    request,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                + b"\n"
+            )
+            with socket.create_connection(
+                ("127.0.0.1", int(self._port)), timeout=remaining()
+            ) as connection:
                 connection.settimeout(remaining())
                 connection.sendall(encoded)
                 chunks = bytearray()
                 while not chunks.endswith(b"\n"):
                     connection.settimeout(remaining())
-                    block = connection.recv(min(4096, PUBLIC_LIMITS["maximum_response_bytes"] + 1 - len(chunks)))
+                    block = connection.recv(
+                        min(4096, PUBLIC_LIMITS["maximum_response_bytes"] + 1 - len(chunks))
+                    )
                     if not block:
                         raise RuntimeError("worker closed connection before a complete response")
                     chunks.extend(block)
                     if len(chunks) > PUBLIC_LIMITS["maximum_response_bytes"]:
                         raise RuntimeError("worker response exceeds maximum_response_bytes")
             response = json.loads(bytes(chunks).decode("utf-8"))
-            if not isinstance(response, dict) or response.get("schema_version") != WORKER_PROTOCOL_SCHEMA_VERSION or response.get("request_id") != request_id:
+            if (
+                not isinstance(response, dict)
+                or response.get("schema_version") != WORKER_PROTOCOL_SCHEMA_VERSION
+                or response.get("request_id") != request_id
+            ):
                 raise RuntimeError("worker response identity or schema mismatch")
             self._last_activity = time.monotonic()
             return response
@@ -428,14 +577,40 @@ class SemanticWorkerManager:
             error = {"code": "worker_protocol_failure", "message": f"{type(exc).__name__}: {exc}"}
             self._last_error = error
             cleanup = self._terminate_owned("protocol_failure")
-            return {"success": False, "error": error, "cleanup": cleanup, "request_id": request_id, "retried": False}
+            return {
+                "success": False,
+                "error": error,
+                "cleanup": cleanup,
+                "request_id": request_id,
+                "retried": False,
+            }
 
-    def query(self, query: str, *, limit: int = 5, filters: dict[str, Any] | None = None, retrieval_mode: str = "hybrid") -> dict[str, Any]:
+    def query(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        filters: dict[str, Any] | None = None,
+        retrieval_mode: str = "hybrid",
+    ) -> dict[str, Any]:
         normalized_query = query.strip() if isinstance(query, str) else ""
-        if not normalized_query or len(normalized_query) > PUBLIC_LIMITS["maximum_query_characters"]:
-            return {"success": False, "error": {"code": "invalid_query", "message": "query violates public limits"}}
-        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= PUBLIC_LIMITS["maximum_results"]:
-            return {"success": False, "error": {"code": "invalid_limit", "message": "limit violates public limits"}}
+        if (
+            not normalized_query
+            or len(normalized_query) > PUBLIC_LIMITS["maximum_query_characters"]
+        ):
+            return {
+                "success": False,
+                "error": {"code": "invalid_query", "message": "query violates public limits"},
+            }
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or not 1 <= limit <= PUBLIC_LIMITS["maximum_results"]
+        ):
+            return {
+                "success": False,
+                "error": {"code": "invalid_limit", "message": "limit violates public limits"},
+            }
         try:
             normalized_filters = validate_semantic_filters(filters)
         except ValueError as exc:
@@ -448,9 +623,24 @@ class SemanticWorkerManager:
             "vector",
             "lexical",
         }:
-            return {"success": False, "error": {"code": "invalid_retrieval_mode", "message": "retrieval_mode is unsupported"}}
+            return {
+                "success": False,
+                "error": {
+                    "code": "invalid_retrieval_mode",
+                    "message": "retrieval_mode is unsupported",
+                },
+            }
         with self._lock:
-            return self._request("query", {"query": normalized_query, "limit": limit, "filters": normalized_filters, "retrieval_mode": retrieval_mode}, self.query_deadline)
+            return self._request(
+                "query",
+                {
+                    "query": normalized_query,
+                    "limit": limit,
+                    "filters": normalized_filters,
+                    "retrieval_mode": retrieval_mode,
+                },
+                self.query_deadline,
+            )
 
     def health(self) -> dict[str, Any]:
         with self._lock:
@@ -460,10 +650,18 @@ class SemanticWorkerManager:
         with self._lock:
             self._expire_idle()
             state = self._identity_state()
-            base = {"state": state, "identity": dict(self._identity or {}), "port": self._port, "last_error": self._last_error}
+            base = {
+                "state": state,
+                "identity": dict(self._identity or {}),
+                "port": self._port,
+                "last_error": self._last_error,
+            }
             if state != "active" or not probe:
                 return base
-            return {**base, "health": self._request("status", {}, PUBLIC_LIMITS["status_deadline_seconds"])}
+            return {
+                **base,
+                "health": self._request("status", {}, PUBLIC_LIMITS["status_deadline_seconds"]),
+            }
 
     def __enter__(self) -> "SemanticWorkerManager":
         return self

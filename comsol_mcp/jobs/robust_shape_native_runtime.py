@@ -685,24 +685,28 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         self.study.run()
         tag = f"robust_eval_{self._counter:04d}"
         evaluator = self.numerical.create(tag, "EvalGlobal")
-        evaluator.set("data", self.controls["dataset_tag"])
-        expressions = [
-            self.controls["observable_expression"],
-            self.controls["reflectance_expression"],
-            self.controls["transmittance_expression"],
-            self.controls["absorption_expression"],
-            self.controls["evaluated_wavelength_expression"],
-            self.controls["solved_wavelength_expression"],
-        ]
-        evaluator.set("expr", JArray(JString)(expressions))
-        values = _flatten_real(evaluator.computeResult())
-        if len(values) < len(expressions):
-            raise ValueError("COMSOL condition evaluator returned too few values")
-        mesh = _get(self.model.java.component(), self.controls["component_tag"]).mesh(
-            self.controls["mesh_tag"]
-        )
-        statistics = mesh.stat()
-        self.numerical.remove(tag)
+        try:
+            evaluator.set("data", self.controls["dataset_tag"])
+            expressions = [
+                self.controls["observable_expression"],
+                self.controls["reflectance_expression"],
+                self.controls["transmittance_expression"],
+                self.controls["absorption_expression"],
+                self.controls["evaluated_wavelength_expression"],
+                self.controls["solved_wavelength_expression"],
+            ]
+            evaluator.set("expr", JArray(JString)(expressions))
+            values = _flatten_real(evaluator.computeResult())
+            if len(values) < len(expressions):
+                raise ValueError("COMSOL condition evaluator returned too few values")
+            mesh = _get(self.model.java.component(), self.controls["component_tag"]).mesh(
+                self.controls["mesh_tag"]
+            )
+            statistics = mesh.stat()
+        finally:
+            # A failed evaluation must not leak the temporary EvalGlobal node
+            # into the derived model's numerical feature list.
+            self.numerical.remove(tag)
         return {
             "condition_id": condition["condition_id"],
             "observable_id": condition["observable_id"],
@@ -806,7 +810,16 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         if observed_solutions != controls["sensitivity_solution_tags"][:1]:
             raise ValueError("pre-solve native sensitivity solution identity changed")
         solution = self.model.java.sol(controls["solution_tag"])
-        stationary = solution.feature(controls["stationary_solver_tag"])
+        # Regeneration re-tags every attribute node, so resolve the Stationary
+        # attribute structurally by type instead of trusting the recorded tag.
+        stationary_tags = [
+            tag
+            for tag in _tags(solution.feature())
+            if str(solution.feature(tag).getType()) == "Stationary"
+        ]
+        if stationary_tags != [controls["stationary_solver_tag"]]:
+            raise ValueError("native sensitivity regenerated stationary solver identity changed")
+        stationary = solution.feature(stationary_tags[0])
         children = {
             tag: str(stationary.feature(tag).getType()) for tag in _tags(stationary.feature())
         }
@@ -921,13 +934,16 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         self.model.java.param().set(controls["wavelength_parameter"], wavelength)
         self._set_incidence(condition)
         self.study_step.set(controls["study_step_property"], controls["wavelength_parameter"])
-        self._set_solver_memory_policy()
-        self._set_solver_selection()
         if not self._native_sensitivity_prepared:
             self.set_shape_deformation_active(True)
             self._prepare_native_sensitivity(
                 variable_ids, wavelength_m=float(condition["wavelength_m"])
             )
+        # Apply the memory policy and solver selection after preparation: on
+        # the first gradient call the regeneration above destroys the forward
+        # solver nodes, so any earlier settings would be silently lost.
+        self._set_solver_memory_policy()
+        self._set_solver_selection()
         if self._sensitivity_sweep is None or self._sensitivity_readback is None:
             raise RuntimeError("native sensitivity preparation state is incomplete")
         _set_vector(self._sensitivity_sweep, "plistarr", [wavelength])

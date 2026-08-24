@@ -38,10 +38,10 @@ _SPECTRAL_INPUT_FIELDS = {
 }
 
 
-def _raw_spectral(tmp_path, index: int) -> dict:
+def _raw_spectral(tmp_path, index: int, *, maximum_points: int = 10) -> dict:
     root = tmp_path / f"level-{index}"
     root.mkdir(parents=True, exist_ok=True)
-    normalized = spectral_job_spec(root, maximum_points=10)
+    normalized = spectral_job_spec(root, maximum_points=maximum_points)
     (root / "source.mph").write_bytes(f"model-level-{index}".encode("ascii"))
     value = {
         key: deepcopy(item) for key, item in normalized.items() if key in _SPECTRAL_INPUT_FIELDS
@@ -54,7 +54,7 @@ def _raw_spectral(tmp_path, index: int) -> dict:
     return value
 
 
-def _raw_campaign(tmp_path) -> dict:
+def _raw_campaign(tmp_path, *, maximum_points: int = 10) -> dict:
     levels = [
         {
             "level_id": f"mesh-{index}",
@@ -63,7 +63,7 @@ def _raw_campaign(tmp_path) -> dict:
             "model_preparation": {"mode": "exact_model"},
             "material_identity_sha256": "d" * 64,
             "incidence_identity_sha256": "e" * 64,
-            "spectral_job": _raw_spectral(tmp_path, index),
+            "spectral_job": _raw_spectral(tmp_path, index, maximum_points=maximum_points),
         }
         for index in range(3)
     ]
@@ -186,6 +186,24 @@ def test_invalid_ladders_hidden_policy_and_unbounded_work_fail_closed(tmp_path, 
     raw = _raw_campaign(tmp_path)
     mutation(raw)
     with pytest.raises(ValueError, match=match):
+        normalize_convergence_campaign_spec(raw)
+
+
+def test_oversized_integer_tolerance_raises_value_error(tmp_path):
+    raw = _raw_campaign(tmp_path)
+    raw["convergence_policy"]["metrics"][0]["absolute_tolerance"] = 10**400
+    with pytest.raises(ValueError, match="nonnegative and finite"):
+        normalize_convergence_campaign_spec(raw)
+
+
+def test_level_point_budgets_summing_above_the_campaign_cap_fail_clearly(tmp_path):
+    # When declared per-level budgets already exceed the campaign cap, the
+    # aggregate violation must be reported directly instead of deriving an
+    # inverted validation range with a misleading per-value message.
+    raw = _raw_campaign(tmp_path, maximum_points=200)
+    raw["wall_time_budget_seconds"] = 6000
+    raw["maximum_total_points"] = 600
+    with pytest.raises(ValueError, match=r"campaign cap \(600 > 512\)"):
         normalize_convergence_campaign_spec(raw)
 
 

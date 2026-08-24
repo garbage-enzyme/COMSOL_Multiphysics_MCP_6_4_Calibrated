@@ -44,6 +44,16 @@ def _direction(seed: int, count: int) -> list[float]:
     return [item / norm for item in vector]
 
 
+def _directional_reference_scale(baselines: dict[str, float]) -> float:
+    """Nonzero positive step scale from the baseline magnitudes.
+
+    The raw minimum could be zero (killing the observed-derivative
+    denominator) or negative (swapping the plus/minus point labels), so the
+    scale is taken over absolute magnitudes instead.
+    """
+    return min(abs(value) for value in baselines.values())
+
+
 def _spec(args: argparse.Namespace) -> dict[str, Any]:
     spec = _fd._spec(args)
     step = float(args.direction_relative_step)
@@ -136,7 +146,7 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         model.java.save(str(spec["configured_copy"]), True)
         client.remove(model)
         baselines = _fd._baseline_values(support, spec["selected_variables"])
-        reference_scale = min(baselines.values())
+        reference_scale = _directional_reference_scale(baselines)
         physical_step = reference_scale * spec["direction_relative_step"]
         for label, sign in (("plus", 1.0), ("minus", -1.0)):
             values = {
@@ -156,7 +166,7 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             gradient * component
             for gradient, component in zip(native_vector, spec["direction"], strict=True)
         )
-        relative_error = abs(predicted - observed) / max(abs(predicted), abs(observed), 1.0)
+        relative_error = _fd._relative_error(predicted, observed)
         sign_agreement = (
             observed == 0.0
             or predicted == 0.0

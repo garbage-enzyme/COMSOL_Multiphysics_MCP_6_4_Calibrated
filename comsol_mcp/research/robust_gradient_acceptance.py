@@ -110,18 +110,29 @@ def assess_robust_gradient_acceptance(
     for row in rows:
         if not isinstance(row, dict) or not isinstance(row.get("steps"), list):
             raise ValueError("component gradient row structure is invalid")
-        row_steps = [item.get("relative_step") for item in row["steps"]]
+        row_steps = []
+        for step in row["steps"]:
+            if not isinstance(step, dict):
+                raise ValueError("component gradient step structure is invalid")
+            row_steps.append(_finite(step.get("relative_step"), "relative_step", positive=True))
         step_match = step_match and row_steps == required_steps
         selected = row.get("selected")
         if not isinstance(selected, dict):
             raise ValueError("component gradient row selection is invalid")
-        component_errors.append(_finite(selected.get("relative_error"), "relative_error"))
+        component_error = _finite(selected.get("relative_error"), "relative_error")
+        if component_error < 0.0:
+            raise ValueError("component relative error must be nonnegative")
+        component_errors.append(component_error)
         sign = selected.get("sign_agreement")
         if not isinstance(sign, bool):
             raise ValueError("component gradient sign evidence is invalid")
         component_signs.append(sign)
     cosine = _finite(component.get("cosine_similarity"), "cosine_similarity")
+    if not -1.0 <= cosine <= 1.0:
+        raise ValueError("component cosine similarity is outside [-1, 1]")
     directional_error = _finite(directional.get("relative_error"), "directional.relative_error")
+    if directional_error < 0.0:
+        raise ValueError("directional relative error must be nonnegative")
     directional_sign = directional.get("sign_agreement")
     if not isinstance(directional_sign, bool):
         raise ValueError("directional gradient sign evidence is invalid")

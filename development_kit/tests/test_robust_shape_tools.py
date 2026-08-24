@@ -241,3 +241,34 @@ def test_public_schemas_are_closed_and_bounded():
         schema = server._tool_manager._tools[name].parameters
         assert schema["additionalProperties"] is False
         assert json.dumps(schema, sort_keys=True)
+
+
+def test_null_adapter_configuration_stays_inside_the_bounded_contract(tmp_path, monkeypatch):
+    spec = {
+        "condition_table": {"conditions": []},
+        "spec_fingerprint": "0" * 64,
+        "adapter_configuration": None,
+    }
+    monkeypatch.setattr(
+        robust_tools,
+        "_robust_job",
+        lambda _manager, _job_id: (spec, {"status": "running"}, tmp_path),
+    )
+
+    verification = robust_tools.verify_robust_shape_evidence("job-x", manager=object())
+
+    assert verification["job_status"] == "running"
+    assert verification["checks"]["spec_fingerprint_valid"] is False
+    assert "validated_gradient_present" in verification["reason_codes"]
+    assert verification["verified_complete"] is False
+
+
+def test_completed_condition_orders_must_form_the_canonical_zero_based_sequence():
+    from comsol_mcp.tools.robust_shape import _completed_orders_valid
+
+    assert _completed_orders_valid([0, 1, 2]) is True
+    assert _completed_orders_valid([0, 1]) is True  # contiguous partial run
+    assert _completed_orders_valid([0, 2]) is False  # gap: a row is missing
+    assert _completed_orders_valid([0, 0, 2]) is False  # duplicated order
+    assert _completed_orders_valid(["0", "1"]) is False
+    assert _completed_orders_valid([True, False]) is False

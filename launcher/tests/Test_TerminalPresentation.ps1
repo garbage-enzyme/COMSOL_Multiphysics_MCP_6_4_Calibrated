@@ -73,6 +73,8 @@ foreach ($Part in @($Scientific.TerminalDetails -split '; ')) {
 }
 $ObservedMetric = 0.0
 $MetricText = $DetailValues['max_cross_helicity_absorption_absolute_difference']
+$ExpectedMetric = [double]0.021967938937959675
+$MetricRoundTripTolerance = [math]::Abs($ExpectedMetric) * 1e-12
 if (
     [string]::IsNullOrWhiteSpace($MetricText) -or
     -not [double]::TryParse(
@@ -81,7 +83,7 @@ if (
         [Globalization.CultureInfo]::InvariantCulture,
         [ref]$ObservedMetric
     ) -or
-    -not $ObservedMetric.Equals([double]0.021967938937959675)
+    -not ([math]::Abs($ObservedMetric - $ExpectedMetric) -le $MetricRoundTripTolerance)
 ) {
     throw "Scientific terminal details omitted the exact failing metric: $($Scientific.TerminalDetails)"
 }

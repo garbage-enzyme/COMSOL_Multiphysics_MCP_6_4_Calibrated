@@ -43,11 +43,12 @@ def handshake_bytes(state: str) -> bytes:
 def validate_handshake_path(value: str | Path) -> Path:
     path = Path(value)
     parent = path.parent
+    # Only the fixed handshake filename itself must be ASCII (_HANDSHAKE_NAME);
+    # Windows temp/profile roots may legitimately contain non-ASCII characters.
     if (
         not path.is_absolute()
-        or not str(path).isascii()
         or not _HANDSHAKE_NAME.fullmatch(path.name)
-        or parent.name != "settings_gui"
+        or parent.name.casefold() != "settings_gui"
         or path.is_symlink()
         or getattr(path, "is_junction", lambda: False)()
         or parent.is_symlink()
@@ -67,9 +68,14 @@ def validate_handshake_path(value: str | Path) -> Path:
 
 def read_handshake(path: Path) -> dict[str, Any] | None:
     try:
-        if not path.is_file() or path.stat().st_size > MAX_HANDSHAKE_BYTES:
+        if not path.is_file():
             return None
-        value = json.loads(path.read_bytes().decode("ascii"))
+        # Enforce the bound on the bytes actually read: a stat-then-read race
+        # could otherwise swap in a larger file between the two calls.
+        data = path.read_bytes()
+        if len(data) > MAX_HANDSHAKE_BYTES:
+            return None
+        value = json.loads(data.decode("ascii"))
     except OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError:
         return None
     if not isinstance(value, dict):

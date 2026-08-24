@@ -738,3 +738,71 @@ def test_stale_launch_records_are_retired_with_their_logs(
     control_module._retire_stale_launch_records(launch_root)
 
     assert not list(launch_root.iterdir())
+
+
+def test_launcher_budget_check_runs_after_completed_journal_recovery() -> None:
+    source = builder_module._resource_bytes("Launcher.cs").decode("utf-8")
+
+    recovery = source.index("existing.Count == Points.Length")
+    budget = source.index("RequireAttemptBudget(paths);")
+
+    assert recovery < budget
+
+
+def test_builder_cleanup_covers_manifest_write_failure(
+    ascii_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    compiler = ascii_tmp_path / "csc.exe"
+    compiler.write_bytes(b"fake-compiler")
+    output = ascii_tmp_path / "manifest-write-failure"
+    monkeypatch.setattr(builder_module, "_validate_build_host", lambda _path: None)
+
+    def succeed(command, **kwargs):
+        executable = Path(next(item[5:] for item in command if item.startswith("/out:")))
+        executable.write_bytes(b"fixture-executable")
+        return subprocess.CompletedProcess(command, 0, b"", b"")
+
+    original_atomic = builder_module.atomic_write_json
+
+    def fail_manifest(_path, _document):
+        raise OSError("injected manifest write failure")
+
+    monkeypatch.setattr(builder_module, "atomic_write_json", fail_manifest)
+    with pytest.raises(OSError, match="injected manifest"):
+        build_standalone_executable(output, csc_path=compiler, run_command=succeed)
+
+    assert not (output / EXECUTABLE_NAME).exists()
+    assert not (output / MANIFEST_NAME).exists()
+    assert not (output / "build-sources").exists()
+
+    monkeypatch.setattr(builder_module, "atomic_write_json", original_atomic)
+    receipt = build_standalone_executable(output, csc_path=compiler, run_command=succeed)
+
+    assert receipt["status"] == "passed"
+    assert (output / EXECUTABLE_NAME).is_file()
+
+
+def test_resource_spec_uses_cwd_relative_bare_filename(ascii_tmp_path, monkeypatch):
+    compiler = ascii_tmp_path / "csc.exe"
+    compiler.write_bytes(b"fake-compiler")
+    output = ascii_tmp_path / "resource-spec-build"
+    monkeypatch.setattr(builder_module, "_validate_build_host", lambda _path: None)
+    captured = {}
+
+    def succeed(command, **kwargs):
+        captured["command"] = list(command)
+        executable = Path(next(item[5:] for item in command if item.startswith("/out:")))
+        executable.write_bytes(b"fixture-executable")
+        return subprocess.CompletedProcess(command, 0, b"spec-out", b"")
+
+    receipt = build_standalone_executable(output, csc_path=compiler, run_command=succeed)
+
+    assert receipt["status"] == "passed"
+    # The bare filename avoids csc's comma-delimited /resource parsing: an
+    # absolute output directory may legally contain commas on Windows.
+    assert (
+        "/resource:CapacitorPointTemplate.java,CapacitorPointTemplate.java" in (captured["command"])
+    )
+    assert not any(
+        item.startswith("/resource:") and str(output) in item for item in captured["command"]
+    )

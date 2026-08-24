@@ -1,6 +1,6 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnFakeServer, createFakeJobs, quietLogger, makeConnection } from "./helpers.mjs";
@@ -168,4 +168,114 @@ test("state store persists add/list/remove atomically", () => {
 		assert.deepEqual(store.list().map((r) => r.jobId), ["job-2"]);
 		store.remove("missing"); // no-op
 	} finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("state store reports persistence outcomes as booleans", () => {
+	const dir = mkdtempSync(join(tmpdir(), "bridge-state-"));
+	try {
+		const okStore = createStateStore(join(dir, "jobs.json"), quietLogger());
+		assert.equal(okStore.add("job-a", "staged_sweep"), true);
+		// duplicate add is a no-op that must not report a persistence failure
+		assert.equal(okStore.add("job-a", "staged_sweep"), true);
+		assert.equal(okStore.remove("missing-id"), true); // persists an emptied row set
+		assert.equal(okStore.remove("job-a"), true);
+
+		// failure path: a parent path component is an existing file, so the
+		// recursive mkdir fails; add/remove must return false instead of
+		// throwing or pretending the row was durably persisted.
+		writeFileSync(join(dir, "blocker"), "not a directory");
+		const blocked = createStateStore(join(dir, "blocker", "jobs.json"), quietLogger());
+		assert.equal(blocked.add("job-b", null), false);
+		assert.equal(blocked.remove("job-b"), false);
+	} finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test("mirror skips tail ticks while the previous tail is still in flight", { timeout: 15000 }, async () => {
+	const jobs = createFakeJobs();
+	const conn = makeConnection(server, {});
+	await conn.connect();
+	let activeTail = 0;
+	let maxActiveTail = 0;
+	const originalCall = conn.callTool.bind(conn);
+	// Hold each job_tail call for 90ms after its response arrives so several
+	// 30ms ticks would overlap if the mirror did not guard in-flight tails.
+	conn.callTool = async (name, args, opts) => {
+		if (name === "job_tail") {
+			activeTail += 1;
+			if (activeTail > maxActiveTail) maxActiveTail = activeTail;
+		}
+		try {
+			const res = await originalCall(name, args, opts);
+			if (name === "job_tail") await sleep(90);
+			return res;
+		} finally {
+			if (name === "job_tail") activeTail -= 1;
+		}
+	};
+	try {
+		createJobMirror({ jobs, core: conn, jobId: "job-1", opts: MIRROR_OPTS, logger: quietLogger() });
+		await sleep(400);
+	} finally { conn.dispose(); }
+	await Promise.race([jobs.started[0].done, sleep(2000)]);
+	assert.equal(maxActiveTail, 1);
+});
+
+// ---- regression: OCR-0022 terminal notification must survive hook throws ----
+
+test("throwing onTerminal still resolves done with the terminal status", async () => {
+	const jobs = createFakeJobs();
+	let calls = 0;
+	createJobMirror({
+		jobs,
+		core: {
+			callTool: async (name) => {
+				calls += 1;
+				if (name === "job_status") {
+					return { text: JSON.stringify({ state: "completed" }) };
+				}
+				return { text: "[]" };
+			},
+		},
+		jobId: "job-hook",
+		jobType: "staged_sweep",
+		opts: MIRROR_OPTS,
+		logger: quietLogger(),
+		onTerminal: () => {
+			throw new Error("hook exploded");
+		},
+	});
+	const rec = jobs.started[0];
+	const outcome = await Promise.race([
+		rec.done,
+		sleep(2000).then(() => { throw new Error("done never resolved"); }),
+	]);
+	assert.equal(outcome.status, "completed");
+	assert.ok(calls >= 1);
+});
+
+// ---- regression: OCR-0020 cancel deadline enforced without a poll tick ----
+
+test("cancel confirmation window fires even when job_status hangs", async () => {
+	const jobs = createFakeJobs();
+	createJobMirror({
+		jobs,
+		core: {
+			callTool: (_name, _args) => new Promise(() => {}), // never settles
+		},
+		jobId: "job-hang",
+		jobType: "staged_sweep",
+		opts: { ...MIRROR_OPTS, pollIntervalMs: 60_000, cancelConfirmTimeoutMs: 80 },
+		logger: quietLogger(),
+	});
+	const rec = jobs.started[0];
+	rec.hooks.cancel();
+	const started = Date.now();
+	const outcome = await Promise.race([
+		rec.done,
+		sleep(3000).then(() => { throw new Error("cancel deadline never fired"); }),
+	]);
+	assert.equal(outcome.status, "killed");
+	assert.ok(Date.now() - started < 2500, "deadline overrun");
 });

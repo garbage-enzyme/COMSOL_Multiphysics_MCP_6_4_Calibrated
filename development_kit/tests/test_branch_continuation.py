@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 import sys
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from mcp.server.mcpserver import MCPServer
-
 from src.evidence.branch_continuation import (
     BRANCH_CONTINUATION_SCHEMA_VERSION,
     BRANCH_CONTINUATION_STATES_SCHEMA,
@@ -28,8 +27,8 @@ from src.evidence.spectral_characterization import (
     build_spectral_point_bundle,
 )
 from src.tools.branch_continuation import register_branch_continuation_tools
-from development_kit.tests.mcp_test_support import decode_tool_result
 
+from development_kit.tests.mcp_test_support import decode_tool_result
 
 MATERIAL_SHA256 = "a" * 64
 COORDINATE_IDENTITY = "b" * 64
@@ -1220,6 +1219,19 @@ def test_public_tool_does_not_misclassify_internal_type_error_as_caller_rejectio
     assert result["success"] is False
     assert result["reason_code"] == "continuation_planning_failed"
     assert "programming defect" not in json.dumps(result)
+
+
+def test_public_tool_import_failure_returns_a_structured_error(monkeypatch):
+    monkeypatch.setitem(sys.modules, "comsol_mcp.evidence.branch_continuation", None)
+    server = MCPServer("branch-continuation-import-failure-test")
+    register_branch_continuation_tools(server)
+
+    result = _call_public_tool(server, {"continuation_policy": {}, "states_spec": {}})
+
+    assert result["success"] is False
+    assert result["reason_code"] == "continuation_planning_failed"
+    assert result["scientific_disposition"] == "internal_error"
+    assert result["solver_started"] is False
 
 
 def test_public_tool_distinguishes_policy_rejection_from_invalid_evidence():

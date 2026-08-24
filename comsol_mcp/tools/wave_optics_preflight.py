@@ -118,7 +118,7 @@ def _feature_type(feature: Any) -> str | None:
     for name in ("getType", "type"):
         try:
             return str(getattr(feature, name)())
-        except Exception:
+        except Exception:  # noqa: S112 - try each documented type getter
             continue
     return None
 
@@ -146,7 +146,7 @@ def _property(feature: Any, name: str) -> str | None:
                 return " ".join(str(item) for item in list(value))
             except Exception:
                 return str(value)
-        except Exception:
+        except Exception:  # noqa: S112 - try each documented property getter
             continue
     return None
 
@@ -792,7 +792,10 @@ def _collect_periodic_ports_incidence(
                     "adjacent_domain_signatures_match": signatures["same"]
                     == signatures["opposite"],
                     "inferred_translation": translation,
-                    "limitation": "This is a topology/selection check, not proof of source-destination mesh compatibility.",
+                    "limitation": (
+                        "This is a topology/selection check, not proof of "
+                        "source-destination mesh compatibility."
+                    ),
                 }
                 if not opposite_groups["count_balanced"]:
                     ledger.add(
@@ -868,7 +871,7 @@ def _collect_periodic_ports_incidence(
             permittivity = None
             try:
                 permittivity = _property(material.propertyGroup("def"), "relpermittivity")
-            except Exception:
+            except Exception:  # noqa: S110 - absent relpermittivity is recorded as None
                 pass
             material_assignments.append(
                 {
@@ -901,7 +904,8 @@ def _collect_periodic_ports_incidence(
             ledger.add(
                 "unknown",
                 "port_medium_unresolved",
-                "A periodic port's adjacent medium could not be established as one scalar-permittivity material from assignments alone.",
+                "A periodic port's adjacent medium could not be established as one "
+                "scalar-permittivity material from assignments alone.",
                 port_tag=port["tag"],
                 adjacent_domains=sorted(adjacent),
             )
@@ -950,7 +954,9 @@ def _collect_periodic_ports_incidence(
         "raw_properties": ps_props,
         "reference_direction_features": reference[:MAX_TAGS],
         "physical_polarization_evidence": "label_only",
-        "limitation": "S/P or CircularPol labels and rdir1 do not prove the physical incident field vector.",
+        "limitation": (
+            "S/P or CircularPol labels and rdir1 do not prove the physical incident field vector."
+        ),
     }
     return periodicity, port_section, incidence
 
@@ -1060,7 +1066,8 @@ def _collect_wavelength(
     ledger.add(
         "observation",
         "wavelength_controls_inspected",
-        "Wavelength parameters and study controls were inspected structurally; no numeric synchronization verdict was made.",
+        "Wavelength parameters and study controls were inspected structurally; "
+        "no numeric synchronization verdict was made.",
     )
     return (
         {
@@ -1234,7 +1241,8 @@ def collect_preflight_foundation(
         ledger.add(
             "unknown",
             "loaded_source_identity_unavailable",
-            "Only the current on-disk file can be measured; the bytes loaded into the model are not attested.",
+            "Only the current on-disk file can be measured; the bytes loaded "
+            "into the model are not attested.",
         )
 
     if (
@@ -1248,7 +1256,8 @@ def collect_preflight_foundation(
         ledger.add(
             "warning",
             "source_file_changed_since_load",
-            "The current source path no longer contains the bytes captured when the model was loaded.",
+            "The current source path no longer contains the bytes captured "
+            "when the model was loaded.",
             loaded_source_sha256=source_sha256,
             current_file_sha256=current_file_sha256,
         )

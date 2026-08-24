@@ -1054,6 +1054,28 @@ def test_job_lock_acquire_removes_owned_partial_publication(jobs_root, monkeypat
         assert lock_path.exists()
 
 
+def test_job_lock_reclaims_aged_unparseable_crash_artifacts(ascii_tmp_path):
+    lock_path = ascii_tmp_path / "wedged.lock"
+    lock_path.write_bytes(b'{"partial":')
+    old = time.time() - 30.0
+    os.utime(lock_path, (old, old))
+
+    with JobLock(lock_path, timeout=3.0):
+        pass
+
+    assert not lock_path.exists()
+
+
+def test_job_lock_never_steals_a_fresh_partial_write_window(ascii_tmp_path):
+    lock_path = ascii_tmp_path / "fresh.lock"
+    lock_path.write_bytes(b'{"partial":')
+
+    with pytest.raises(TimeoutError, match="durable job lock"):
+        JobLock(lock_path, timeout=0.5).acquire()
+
+    assert lock_path.read_bytes() == b'{"partial":'
+
+
 def test_cancel_launch_failure_is_reported_and_next_idempotent_call_retries(jobs_root, monkeypatch):
     manager = JobManager(jobs_root, allow_test_jobs=True, reconcile_on_start=False)
     identity = process_identity(os.getpid())
@@ -2007,3 +2029,48 @@ def fixture_clean(root: Path, *, ignore_errors: bool) -> None:
 
 
 monoclock = time.monotonic
+
+
+def test_standalone_submit_surfaces_durable_job_launch_error():
+    from src.jobs.manager import JobLaunchError
+    from src.tools.jobs import _submit_job
+
+    class RaisingManager:
+        def submit(self, spec):
+            raise JobLaunchError(
+                "job-launch-failure",
+                RuntimeError("worker spawn failed"),
+                state_record_error=ValueError("stale state"),
+            )
+
+    result = _submit_job(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": "C:/fixtures/sweep.mph",
+            "parameter_name": "wl",
+            "parameter_values": [1.0],
+            "expressions": ["ewfd.Rtotal"],
+        },
+        profile_name="core",
+        shared_enabled=False,
+        manager=RaisingManager(),
+    )
+
+    assert result["success"] is False
+    assert result["state"] == "durable_job_requires_reconciliation"
+    assert result["job_id"] == "job-launch-failure"
+    assert result["action"] == "inspect_job_status_before_retrying"
+
+
+def test_job_tail_window_is_clamped_to_the_documented_bound():
+    from comsol_mcp.tools.jobs import _clamp_tail_n
+
+    assert _clamp_tail_n(-5) == 1
+    assert _clamp_tail_n(0) == 1
+    assert _clamp_tail_n(20) == 20
+    assert _clamp_tail_n(200) == 200
+    assert _clamp_tail_n(10_000) == 200
+
+    for bad in (True, "20", 2.5, None):
+        with pytest.raises(ValueError, match="n must be an integer between 1 and 200"):
+            _clamp_tail_n(bad)

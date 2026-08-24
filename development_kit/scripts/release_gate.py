@@ -164,7 +164,11 @@ def _normalized_archive_members(
     sdist_root: str | None,
 ) -> list[str]:
     normalized = [_normalized_archive_path(name, sdist_root=sdist_root) for name in names]
-    if len(normalized) != len(set(normalized)):
+    # Windows is the declared install target: names that collide only by
+    # case would overwrite each other during installation, so deduplicate
+    # on the case-folded form.
+    folded = [name.casefold() for name in normalized]
+    if len(folded) != len(set(folded)):
         raise RuntimeError("distribution contains duplicate normalized paths")
     return normalized
 
@@ -226,6 +230,17 @@ def _distribution_artifacts(dist_dir: Path) -> list[Path]:
     return [wheels[0], sdists[0]]
 
 
+def _reject_private_user_text(name: str, text: str) -> None:
+    """Fail any distribution text embedding a private user profile path.
+
+    Windows paths are case-insensitive and every other forbidden-name check
+    here case-folds, so this scan must too.
+    """
+    folded = text.casefold()
+    if "c:\\users\\" in folded or "c:/users/" in folded or "陆星" in text:
+        raise RuntimeError(f"distribution text contains a private user path: {name}")
+
+
 def _distribution_inventory(path: Path) -> dict:
     normalized, files = _distribution_files(path)
     offenders = []
@@ -248,8 +263,7 @@ def _distribution_inventory(path: Path) -> dict:
             text = payload.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise RuntimeError(f"distribution text member is not UTF-8: {name}") from exc
-        if "C:\\Users\\" in text or "C:/Users/" in text or "陆星" in text:
-            raise RuntimeError(f"distribution text contains a private user path: {name}")
+        _reject_private_user_text(name, text)
         texts[name] = text
     planning_receipt = verify_planning_code_texts(
         texts,

@@ -129,6 +129,34 @@ def test_compiler_accepts_utf8_bom_on_delivery_csv_headers(ascii_tmp_path):
     assert receipt["source_audits"]["OX"]["imaginary_sign_verified"] is True
 
 
+def test_compiler_tolerates_parse_noise_on_exact_boundary_and_fixture_rows(
+    ascii_tmp_path,
+):
+    # Boundary and fixture wavelengths written with sub-nanometre parse noise
+    # still satisfy the exact-row requirements; exact equality on parsed CSV
+    # floats was needlessly brittle.
+    delivery = _delivery(ascii_tmp_path / "parse-noise")
+    for state in ("OX", "MR"):
+        path = delivery / "csv" / f"{state}_optical_constants_and_permittivity.csv"
+        text = path.read_text(encoding="utf-8")
+        text = (
+            text.replace("\n500.0,", "\n500.000000000001,")
+            .replace("\n800.0,", "\n799.999999999999,")
+            .replace("\n1500.0,", "\n1499.999999999998,")
+        )
+        path.write_text(text, encoding="utf-8")
+    receipt = compile_pedot_fixture(
+        delivery,
+        active_domain_id="active_material_domain",
+        temperature_k=300.0,
+        interpolation_method="linear",
+    )
+    assert receipt["source_audits"]["OX"]["common_range_row_count"] == 5
+    assert [
+        row["wavelength_m"] for row in receipt["material_tensor_rows"]["states"][0]["rows"]
+    ] == pytest.approx([8e-7, 1e-6, 1.2e-6])
+
+
 def test_compiler_emits_exact_off_design_tensor_samples_without_extrapolation(ascii_tmp_path):
     delivery = _delivery(ascii_tmp_path / "off-design")
     receipt = compile_pedot_fixture(

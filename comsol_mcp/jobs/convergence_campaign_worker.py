@@ -254,17 +254,43 @@ def _run(
         }:
             cancel_observation_message = "Stopped between convergence operations"
         elif not result.get("completed"):
-            pending_terminal = {
-                "status": "interrupted",
-                "event": "resource_gate_stopped",
-                "patch": {
-                    "resource_gate": latest_resource_decision,
-                    "last_error": {
-                        "type": "ResourceAdmissionStop",
-                        "message": str(result.get("stop_reason")),
-                    },
-                },
+            top_reason = str(result.get("stop_reason") or "spectral_level_incomplete")
+            level_result = result.get("level_result")
+            nested_reason = (
+                str(level_result.get("stop_reason"))
+                if isinstance(level_result, Mapping) and level_result.get("stop_reason")
+                else None
+            )
+            resource_refusal = top_reason == "before_level_stop" or nested_reason in {
+                "before_solve_stop",
+                "after_durable_row_stop",
             }
+            if resource_refusal:
+                pending_terminal = {
+                    "status": "interrupted",
+                    "event": "resource_gate_stopped",
+                    "patch": {
+                        "resource_gate": latest_resource_decision,
+                        "last_error": {
+                            "type": "ResourceAdmissionStop",
+                            "message": top_reason,
+                        },
+                    },
+                }
+            else:
+                pending_terminal = {
+                    "status": "interrupted",
+                    "event": "level_incomplete_stopped",
+                    "patch": {
+                        "last_error": {
+                            "type": "SpectralLevelIncomplete",
+                            "message": (
+                                f"{top_reason}: {nested_reason}" if nested_reason else top_reason
+                            ),
+                        },
+                        "level_result": dict(level_result) if level_result else {},
+                    },
+                }
         else:
             pending_terminal = {
                 "status": "completed",
@@ -320,13 +346,12 @@ def _run(
                 cleanup_errors.append(f"lease_release:{type(exc).__name__}:{exc}")
         try:
             for source, level in zip(sources, spec["levels"]):
-                if (
-                    _sha256_file(source) != level["spectral_job"]["source_model_sha256"]
-                    and worker_error is None
-                ):
-                    worker_error = RuntimeError(
-                        "Immutable convergence source changed after execution"
-                    )
+                if _sha256_file(source) != level["spectral_job"]["source_model_sha256"]:
+                    mismatch = RuntimeError("Immutable convergence source changed after execution")
+                    if worker_error is None:
+                        worker_error = mismatch
+                    else:
+                        cleanup_errors.append(f"final_source_verification:{mismatch}")
         except Exception as exc:
             if worker_error is None:
                 worker_error = exc
@@ -368,23 +393,20 @@ def _run(
         print(f"{type(worker_error).__name__}: {worker_error}", file=sys.stderr, flush=True)
         return 1
     if cancel_observation_message is not None:
-        current = store.read_state(job_id)["status"]
-        if current in {"cancel_requested", "cancelling"}:
-            store.record_cooperative_cancel_observed(
-                job_id,
-                attempt=attempt,
-                message=cancel_observation_message,
-            )
+        store.record_cooperative_cancel_observed(
+            job_id,
+            attempt=attempt,
+            message=cancel_observation_message,
+        )
         return 0
     if pending_terminal is not None:
+        store.record_cooperative_cancel_observed(
+            job_id,
+            attempt=attempt,
+            message="Stopped before terminal state publication",
+        )
         current = store.read_state(job_id)["status"]
-        if current in {"cancel_requested", "cancelling"}:
-            store.record_cooperative_cancel_observed(
-                job_id,
-                attempt=attempt,
-                message="Stopped before terminal state publication",
-            )
-        else:
+        if current not in {"cancel_requested", "cancelling"}:
             if current == "smoke_running" and pending_terminal["status"] == "completed":
                 store.update_state(job_id, "smoke_validated", event="durable_rows_revalidated")
             store.update_state(

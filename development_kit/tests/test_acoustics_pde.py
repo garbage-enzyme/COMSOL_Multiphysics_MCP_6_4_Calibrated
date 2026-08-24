@@ -1,5 +1,7 @@
 """Tests for constrained Acoustics and PDE tools without COMSOL."""
 
+from types import SimpleNamespace
+
 from src.tools.acoustics_pde import (
     add_pde_interface,
     add_pressure_acoustics_interface,
@@ -309,6 +311,32 @@ def test_pde_boundary_alias_supports_named_selection():
     feature = next(item for tag, item in physics.features.items.items() if tag != "cfeq1")
     assert feature.feature_type == "DirichletBoundary"
     assert feature.selection_node.named_tag == "left"
+
+
+class _FailingJavaComponent:
+    def component(self, *_args):
+        raise RuntimeError("injected JVM component failure")
+
+
+def test_pressure_acoustics_preflight_jvm_failures_are_structured():
+    model = SimpleNamespace(java=_FailingJavaComponent())
+
+    result = add_pressure_acoustics_interface(model, component_name="comp1")
+
+    assert result == {"success": False, "error": "injected JVM component failure"}
+
+
+def test_boundary_preflight_jvm_failures_are_structured():
+    model = SimpleNamespace(java=_FailingJavaComponent())
+
+    result = configure_boundaries(
+        model,
+        "acpr",
+        [{"type": "Pressure", "boundaries": [1], "properties": {"p0": "1[Pa]"}}],
+        family="acoustic",
+    )
+
+    assert result == {"success": False, "error": "injected JVM component failure"}
 
 
 def test_boundary_batch_rolls_back_every_created_feature_on_property_failure():

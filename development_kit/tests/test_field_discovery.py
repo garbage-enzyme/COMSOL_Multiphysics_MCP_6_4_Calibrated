@@ -301,3 +301,59 @@ def test_discovery_does_not_evaluate_or_run_study():
     assert _model_snapshot(model) == before
     assert result["model_mutated"] is False
     assert result["study_run"] is False
+
+
+def test_discovery_reports_unresolved_solution_references_as_partial():
+    result = discover_field_datasets(
+        _Model(
+            datasets=[
+                _Node("Solution", "dset1", "Solution", {"solution": "missing"}),
+                _Node("Cut Plane", "cpl1", "CutPlane", {"data": "missing"}),
+            ],
+            solutions=[_Node("Solution 1", "sol1", "Solution", empty=False)],
+        )
+    )
+
+    assert result["success"] is False
+    assert result["discovery_state"] == "partial"
+    assert [item["computed_state"] for item in result["datasets"]] == [
+        "not_solution",
+        "not_solution",
+    ]
+    assert result["eligible_dataset_count"] == 0
+    assert result["solution_diagnostics"] == [
+        {
+            "code": "unresolved_solution_reference",
+            "dataset_tag": "dset1",
+            "reference_kind": "solution",
+            "reference_tag": "missing",
+        },
+        {
+            "code": "unresolved_solution_reference",
+            "dataset_tag": "cpl1",
+            "reference_kind": "data",
+            "reference_tag": "missing",
+        },
+    ]
+
+
+def test_discovery_reports_reference_cycles_as_partial():
+    result = discover_field_datasets(
+        _Model(
+            datasets=[
+                _Node("Cut A", "cpl1", "CutPlane", {"data": "cpl2"}),
+                _Node("Cut B", "cpl2", "CutPlane", {"data": "cpl1"}),
+            ],
+        )
+    )
+
+    assert result["success"] is False
+    assert result["discovery_state"] == "partial"
+    assert [item["computed_state"] for item in result["datasets"]] == [
+        "not_solution",
+        "not_solution",
+    ]
+    assert [item["dataset_tag"] for item in result["solution_diagnostics"]] == ["cpl1", "cpl2"]
+    assert all(
+        item["code"] == "unresolved_solution_reference" for item in result["solution_diagnostics"]
+    )

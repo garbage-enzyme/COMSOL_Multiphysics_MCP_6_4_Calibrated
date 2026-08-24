@@ -22,9 +22,13 @@ def _optional_identifier(value: object, name: str) -> str | None:
 
 
 def _bounded_text(value: object, name: str, *, maximum: int = 64) -> str:
-    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+    if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be bounded nonempty text")
     text = value.strip()
+    # The bound applies to the canonical stripped text so caller-added
+    # indentation cannot push an otherwise valid value over the limit.
+    if len(text) > maximum:
+        raise ValueError(f"{name} must be bounded nonempty text")
     if any(character in text for character in ("\r", "\n", "\x00")):
         raise ValueError(f"{name} contains a forbidden character")
     return text
@@ -59,6 +63,8 @@ def normalize_robust_finalist_validation_policy(value: object) -> dict[str, Any]
     supplied = None
     if isinstance(bounded, dict) and "policy_fingerprint" in bounded:
         supplied = bounded.pop("policy_fingerprint")
+        if supplied is None:
+            raise ValueError("robust finalist validation policy fingerprint is invalid")
     raw = _object(
         bounded,
         {

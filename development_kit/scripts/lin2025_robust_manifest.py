@@ -93,6 +93,8 @@ def compile_lin2025_robust_submission(
         raise ValueError("PEDOT fixture schema is unsupported")
     if "material_tensor_rows" not in pedot:
         raise ValueError("PEDOT fixture lacks material tensor rows")
+    if "condition_table" not in pedot:
+        raise ValueError("PEDOT fixture lacks condition table")
     body = {
         "schema_name": "comsol_mcp.robust_shape_optimization_manifest",
         "schema_version": "1.1.0",
@@ -134,15 +136,25 @@ def compile_lin2025_robust_submission(
         envelope["condition_execution_limit"] = campaign["condition_execution_limit"]
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     envelope_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_preexisting = manifest_path.exists()
     atomic_write_json(manifest_path, body)
     envelope["submission_manifest_sha256"] = _sha256(manifest_path)
     try:
         spec = expand_robust_shape_manifest(envelope)
     except Exception:
-        manifest_path.unlink(missing_ok=True)
-        envelope_path.unlink(missing_ok=True)
+        # Remove only artifacts this invocation created; a pre-existing
+        # envelope from an earlier successful run must survive a failed rerun.
+        if not manifest_preexisting:
+            manifest_path.unlink(missing_ok=True)
         raise
-    atomic_write_json(envelope_path, envelope)
+    try:
+        atomic_write_json(envelope_path, envelope)
+    except Exception:
+        # The envelope never became durable, so the freshly written manifest
+        # must not survive as an orphaned half of an unpublished pair.
+        if not manifest_preexisting:
+            manifest_path.unlink(missing_ok=True)
+        raise
     return {
         "manifest_sha256": envelope["submission_manifest_sha256"],
         "spec_fingerprint": spec["spec_fingerprint"],

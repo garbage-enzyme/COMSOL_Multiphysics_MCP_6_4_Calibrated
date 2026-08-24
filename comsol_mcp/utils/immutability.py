@@ -7,7 +7,17 @@ from typing import Any
 
 
 class FrozenDict(dict):
-    """A JSON-serializable dictionary that rejects mutation after construction."""
+    """A JSON-serializable dictionary that rejects mutation after construction.
+
+    The guard covers the public mapping mutator surface and re-initialization.
+    Direct base-class calls such as ``dict.__setitem__(fd, ...)`` remain a
+    documented interpreter-level escape hatch.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        if self:
+            raise TypeError("frozen snapshot cannot be mutated")
+        super().__init__(*args, **kwargs)
 
     def _immutable(self, *_args: Any, **_kwargs: Any) -> None:
         raise TypeError("frozen snapshot cannot be mutated")
@@ -23,6 +33,9 @@ class FrozenDict(dict):
 
     def __deepcopy__(self, _memo: dict[int, Any]) -> "FrozenDict":
         return self
+
+    def __hash__(self) -> int:
+        return hash(frozenset(self.items()))
 
 
 def deep_freeze(value: Any) -> Any:

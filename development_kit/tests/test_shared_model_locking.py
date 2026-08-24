@@ -96,7 +96,16 @@ def test_revision_changes_for_structural_or_state_readback():
 
     assert baseline.structural_sha256 != structural_change.structural_sha256
     assert baseline.readback_sha256 != desktop_change.readback_sha256
-    assert len({baseline.revision_sha256, structural_change.revision_sha256, desktop_change.revision_sha256}) == 3
+    assert (
+        len(
+            {
+                baseline.revision_sha256,
+                structural_change.revision_sha256,
+                desktop_change.revision_sha256,
+            }
+        )
+        == 3
+    )
 
 
 def test_revision_is_deterministic_for_mapping_order():
@@ -121,9 +130,7 @@ def test_revision_accepts_exact_collection_item_limit():
     revision = build_shared_model_revision(
         _model(),
         sequence=0,
-        structural_readback={
-            "items": list(range(locking_module.MAX_REVISION_COLLECTION_ITEMS))
-        },
+        structural_readback={"items": list(range(locking_module.MAX_REVISION_COLLECTION_ITEMS))},
         state_readback={"state": "ready"},
     )
 

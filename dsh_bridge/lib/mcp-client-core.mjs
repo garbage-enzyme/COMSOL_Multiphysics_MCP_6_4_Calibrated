@@ -69,6 +69,8 @@ export function createComsolConnection(opts) {
 	let reconnectTimer = null;
 	let budgetExhausted = false;
 	let connectedAt = 0;
+	let syncInFlight = false;
+	let resyncPending = false;
 
 	const log = (level, ...a) => {
 		try { logger?.[level]?.(...a) } catch {}
@@ -140,8 +142,7 @@ export function createComsolConnection(opts) {
 			// serialized on the queue; wrapping it would deadlock the queue.
 			void syncTools().catch(() => {});
 			return;
-		}
-		if (msg.method === "notifications/message") {
+		}		if (msg.method === "notifications/message") {
 			log("info", `server message ${msg.params?.level ?? "info"}: ${msg.params?.data ?? ""}`);
 		}
 	}
@@ -204,6 +205,9 @@ export function createComsolConnection(opts) {
 			alive = true;
 			c.stdout.setEncoding("utf8");
 			c.stdout.on("data", onStdoutData);
+			// An unhandled stdin 'error' (EPIPE when the server dies mid-write)
+			// would crash the whole DSH host; treat it as process loss instead.
+			c.stdin.on("error", () => { onChildLost(); });
 			c.stderr.setEncoding("utf8");
 			let stderrBuf = "";
 			c.stderr.on("data", (chunk) => {
@@ -254,15 +258,44 @@ export function createComsolConnection(opts) {
 	}
 
 	async function syncTools() {
-		const tools = await listTools();
-		await onTools(tools);
-		if (Date.now() - connectedAt > reconnect.maxDelayMs) reconnectAttempts = 0;
+		// Coalesce overlapping syncs: the rpc queue serializes individual
+		// tools/list calls but cannot order two interleaved pagination runs,
+		// so a notification arriving mid-sync schedules exactly one follow-up
+		// pass after the in-flight sync completes instead of racing it.
+		if (syncInFlight) {
+			resyncPending = true;
+			return;
+		}
+		syncInFlight = true;
+		try {
+			do {
+				resyncPending = false;
+				const tools = await listTools();
+				await onTools(tools);
+				if (Date.now() - connectedAt > reconnect.maxDelayMs) reconnectAttempts = 0;
+			} while (resyncPending && !disposed);
+		} finally {
+			syncInFlight = false;
+		}
 	}
 
 	async function connectOnce() {
-		await startChild();
-		connectedAt = Date.now();
-		await syncTools();
+		try {
+			await startChild();
+			connectedAt = Date.now();
+			await syncTools();
+		} catch (e) {
+			// Startup or tool discovery failed after spawning: tear the child
+			// down and clear readiness so the connected getter stays truthful
+			// and a scheduled reconnect cannot run beside a live orphan.
+			ready = false;
+			alive = false;
+			if (child) {
+				try { child.kill(); } catch { /* already gone */ }
+				child = null;
+			}
+			throw e;
+		}
 	}
 
 	/** Attempt initial connection; failures schedule background reconnects. */

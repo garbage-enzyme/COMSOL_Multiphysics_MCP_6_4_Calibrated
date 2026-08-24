@@ -475,3 +475,143 @@ def test_cancel_during_cleanup_is_durably_observed(tmp_path, ascii_tmp_path):
     assert state["cancel"]["cooperative_observation"]["message"] == (
         "Stopped before terminal state publication"
     )
+
+
+def test_incomplete_level_result_is_not_misreported_as_resource_stop(
+    tmp_path, ascii_tmp_path, monkeypatch
+):
+    import src.jobs.convergence_campaign_runner as runner_module
+
+    incomplete = {
+        "completed": False,
+        "stop_reason": "spectral_level_incomplete",
+        "solved_this_attempt": 0,
+        "skipped_complete": 0,
+        "progress": {},
+        "level_result": {"stop_reason": "solver_max_iterations"},
+    }
+    monkeypatch.setattr(
+        runner_module, "run_convergence_campaign", lambda *_args, **_kwargs: dict(incomplete)
+    )
+    store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: _Ownership(),
+        client_factory=lambda _spec: _Client(),
+        collector_executor=_collector_for(spec),
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+    )
+    state = store.read_state(job_id)
+    assert code == 0
+    assert state["status"] == "interrupted"
+    assert state["last_error"]["type"] == "SpectralLevelIncomplete"
+    assert state["last_error"]["message"] == "spectral_level_incomplete: solver_max_iterations"
+    assert state["level_result"]["stop_reason"] == "solver_max_iterations"
+
+    refused = {
+        "completed": False,
+        "stop_reason": "before_level_stop",
+        "solved_this_attempt": 0,
+        "skipped_complete": 0,
+        "progress": {},
+    }
+    monkeypatch.setattr(
+        runner_module, "run_convergence_campaign", lambda *_args, **_kwargs: dict(refused)
+    )
+    store2, _spec2, job_id2 = _created_job(tmp_path, ascii_tmp_path)
+    code2 = _run(
+        str(store2.root),
+        job_id2,
+        ownership_factory=lambda *_args: _Ownership(),
+        client_factory=lambda _spec: _Client(),
+        collector_executor=_collector_for(spec),
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+    )
+    state2 = store2.read_state(job_id2)
+    assert code2 == 0
+    assert state2["status"] == "interrupted"
+    assert state2["last_error"]["type"] == "ResourceAdmissionStop"
+    assert "level_result" not in state2
+
+
+def test_lagging_status_still_records_the_observed_cancel(tmp_path, ascii_tmp_path):
+    store, _spec, job_id = _created_job(tmp_path, ascii_tmp_path)
+    identity = process_identity(os.getpid())
+    store.update_state(
+        job_id,
+        "starting",
+        patch={
+            "worker_pid": identity["pid"],
+            "worker_process_create_time": identity["process_create_time"],
+            "worker_command_signature": identity["command_signature"],
+        },
+        event="test_starting",
+    )
+    # The canceller wrote the durable control but has not yet flipped the
+    # status away from starting; the worker must still record its observation.
+    store.write_control(job_id, "cancel_requested", fields={"target_attempt": 1})
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: _Ownership(),
+        client_factory=lambda _spec: _Client(),
+        collector_executor=_collector_for(_spec),
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+    )
+    state = store.read_state(job_id)
+    assert code == 0
+    assert state["status"] == "cancel_requested"
+    assert state["cancel"]["cooperative_observation"]["message"] == (
+        "Stopped before campaign startup"
+    )
+
+
+def test_final_source_mismatch_after_worker_error_is_cleanup_only(
+    tmp_path, ascii_tmp_path, monkeypatch
+):
+    store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
+    first_configuration = spec["levels"][0]["spectral_job"]["configuration_sha256"]
+    second_source = Path(spec["levels"][1]["spectral_job"]["source_model_path"])
+
+    # Source pins make real byte mutation impossible mid-run; simulate drift
+    # behind the same hash seam the pre-startup and final verifications share.
+    real_sha256_file = worker_module._sha256_file
+    level_failed = threading.Event()
+
+    def drifted_after_failure(path):
+        digest = real_sha256_file(path)
+        if level_failed.is_set() and Path(path) == second_source:
+            return "0" * 64
+        return digest
+
+    monkeypatch.setattr(worker_module, "_sha256_file", drifted_after_failure)
+
+    def collector(point, collector_client, artifact_dir):
+        if point["configuration_sha256"] == first_configuration:
+            level_failed.set()
+            raise RuntimeError("injected level solve failure")
+        return _collector_for(spec)(point, collector_client, artifact_dir)
+
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: _Ownership(),
+        client_factory=lambda _spec: _Client(),
+        collector_executor=collector,
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+    )
+
+    assert code == 1
+    state = store.read_state(job_id)
+    assert state["status"] == "failed"
+    # The injected level failure stays the worker error; the later source
+    # mismatch is downgraded to cleanup evidence instead of replacing it.
+    assert "injected level solve failure" in state["last_error"]["message"]
+    assert state["cleanup_errors"] == [
+        "final_source_verification:Immutable convergence source changed after execution"
+    ]

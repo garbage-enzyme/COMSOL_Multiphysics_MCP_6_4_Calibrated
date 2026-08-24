@@ -242,7 +242,11 @@ def _entry(
         "artifact_kind": artifact_kind,
         "producer": producer,
         "producer_version": __version__,
-        "readable_versions": list(readable_versions or (version,)),
+        # An explicitly empty readable_versions tuple means "not readable";
+        # only an omitted value falls back to the writable version.
+        "readable_versions": (
+            list(readable_versions) if readable_versions is not None else [version]
+        ),
         "writable_version": version if writable else None,
         "migration": {
             "available": bool(migration_sources),

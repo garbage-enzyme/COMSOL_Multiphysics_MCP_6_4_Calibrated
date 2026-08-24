@@ -46,9 +46,16 @@ def _call(callback) -> dict[str, Any]:
 
 def _resolve_comsol_root(explicit: str | None) -> str:
     if explicit is not None:
+        text = explicit.strip()
+        if not text:
+            raise ValueError("comsol_root must be a nonempty installation path")
         return explicit
-    configured = load_settings()["comsol"]["installation_root"]
-    if configured is None:
+    settings_document = load_settings()
+    comsol_section = settings_document.get("comsol")
+    configured = (
+        comsol_section.get("installation_root") if isinstance(comsol_section, dict) else None
+    )
+    if configured is None or not str(configured).strip():
         raise ValueError(
             "COMSOL installation root is required; configure it in settings or pass it explicitly."
         )

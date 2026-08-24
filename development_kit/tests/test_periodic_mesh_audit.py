@@ -205,8 +205,7 @@ def test_mesh_feature_truncation_requires_an_observed_extra_item():
 
     component = FakeComponent()
     exactly = {
-        f"size{index}": FakeFeature(f"size{index}", "Size")
-        for index in range(MAX_MESH_FEATURES)
+        f"size{index}": FakeFeature(f"size{index}", "Size") for index in range(MAX_MESH_FEATURES)
     }
     component._mesh.items["mesh1"] = FakeMesh(1, exactly)
     complete, _mesh = _mesh_sequence(component, "mesh1")
@@ -246,9 +245,7 @@ def test_mesh_feature_truncation_requires_an_observed_extra_item():
                         "tag": "fpc1",
                         "type": "PeriodicCondition",
                         "selection": [1, 2],
-                        "opposing_face_groups": {
-                            "adjacent_domain_signatures_match": True
-                        },
+                        "opposing_face_groups": {"adjacent_domain_signatures_match": True},
                     }
                 ]
             },
@@ -413,3 +410,95 @@ def test_clone_smoke_rejects_wrong_source_hash_before_creating_artifact(tmp_path
         )
 
     assert not list(tmp_path.glob("periodic_mesh_smoke_*"))
+
+
+def test_native_mesh_build_field_requires_positive_element_count(tmp_path):
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"source bytes")
+
+    class ZeroMesh(SmokeMesh):
+        def getNumElem(self):
+            return 0
+
+    result = run_clone_mesh_smoke(
+        SmokeModel(source),
+        SmokeClient(SmokeModel(source, SmokeComponent(ZeroMesh()))),
+        expected_source_sha256=_hash(source),
+        expected_component_tag="comp1",
+        expected_mesh_tag="mesh1",
+        runtime_dir=tmp_path,
+    )
+
+    assert result["native_mesh_build"] == "failed"
+    assert result["success"] is False
+    assert result["counts"]["element_count"] == 0
+    assert result["compatibility_assessment"] == "native_mesh_smoke_failed"
+
+
+def test_ambiguous_mesh_selection_skips_recipe_fabrication(tmp_path, monkeypatch):
+    normal = [-0.2, 1.0, 0.0]
+    opposite = [0.2, -1.0, 0.0]
+    preflight = {
+        "inspection_status": "complete",
+        "provenance": {"source_sha256": "a" * 64},
+        "evidence": {"capture": "test"},
+        "topology": {
+            "component_tag": "comp1",
+            "boundaries": [
+                {"boundary": 1, "normal": normal, "center": [0.0, 0.0, 0.25], "interior": False},
+                {"boundary": 2, "normal": normal, "center": [0.0, 0.0, 0.75], "interior": False},
+                {"boundary": 3, "normal": opposite, "center": [0.2, 1.0, 0.25], "interior": False},
+                {"boundary": 4, "normal": opposite, "center": [0.2, 1.0, 0.75], "interior": False},
+            ],
+        },
+        "periodicity": {
+            "floquet_features": [
+                {
+                    "tag": "fpc_oblique",
+                    "type": "PeriodicCondition",
+                    "selection": [1, 2, 3, 4],
+                    "opposing_face_groups": {"adjacent_domain_signatures_match": True},
+                }
+            ]
+        },
+        "ports": {"periodic_port_features": []},
+    }
+    monkeypatch.setattr(
+        "src.tools.periodic_mesh_audit.collect_wave_optics_preflight",
+        lambda *_args, **_kwargs: preflight,
+    )
+
+    class Meshes:
+        def tags(self):
+            return ["meshA", "meshB"]
+
+    class Component:
+        def mesh(self):
+            return Meshes()
+
+    class Components:
+        def tags(self):
+            return ["comp1"]
+
+        def get(self, _tag):
+            return Component()
+
+    class Java:
+        def component(self):
+            return Components()
+
+    class Model:
+        java = Java()
+
+    result = collect_periodic_mesh_audit(
+        Model(),
+        model_name="ExactModel",
+        session_state={"connected": True},
+        active_profile="wave_optics",
+    )
+
+    assert result["mesh_sequence"]["selection_status"] == "ambiguous"
+    assert result["mesh_sequence"]["mesh_tags"] == ["meshA", "meshB"]
+    assert result["group_recipes"] == []
+    assert result["actionable_mismatches"] == []
+    assert result["summary"]["mesh_recipe_present"] is False

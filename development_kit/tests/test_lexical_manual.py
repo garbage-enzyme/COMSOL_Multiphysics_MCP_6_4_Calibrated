@@ -297,6 +297,32 @@ def test_bounded_worker_enforces_deadline(manual_index: Path, monkeypatch):
     assert "connected" in status
 
 
+def test_lexical_worker_emits_json_error_envelope_on_serialization_failure(monkeypatch):
+    import io
+
+    import src.knowledge.lexical_worker as worker_module
+
+    monkeypatch.setattr(worker_module, "search_index", lambda **_kwargs: {"results": object()})
+    monkeypatch.setattr(
+        worker_module.sys,
+        "stdin",
+        SimpleNamespace(
+            buffer=io.BytesIO(json.dumps({"operation": "search", "arguments": {}}).encode("utf-8"))
+        ),
+    )
+    stdout = io.BytesIO()
+    monkeypatch.setattr(worker_module.sys, "stdout", SimpleNamespace(buffer=stdout))
+
+    worker_module.main()
+
+    response = json.loads(stdout.getvalue().decode("utf-8"))
+    assert response == {
+        "success": False,
+        "error_type": "SerializationError",
+        "error": "worker result is not JSON-serializable",
+    }
+
+
 def test_non_ascii_index_path_is_rejected(tmp_path: Path):
     with pytest.raises(ValueError, match="ASCII"):
         build_index_from_records([], tmp_path / "中文" / "manuals.sqlite3")
@@ -415,3 +441,16 @@ def test_pdf_build_emits_monotonic_stage_and_percentage_progress(ascii_tmp_path)
     assert [event["percent"] for event in events] == sorted(event["percent"] for event in events)
     assert events[-1]["percent"] == 100
     assert events[-1]["total_pages"] == 2
+
+
+def test_protocol_errors_map_to_request_invalid_before_configuration():
+    from src.knowledge.lexical_build_worker import RequestInvalid, _error_payload
+
+    protocol = _error_payload(RequestInvalid("request shape is invalid"))
+    assert protocol["reason_code"] == "request_invalid"
+    assert protocol["message"] == (
+        "The index build request is malformed or exceeds its size bound."
+    )
+
+    configuration = _error_payload(ValueError("pdf root missing"))
+    assert configuration["reason_code"] == "index_configuration_invalid"

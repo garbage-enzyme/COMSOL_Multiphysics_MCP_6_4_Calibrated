@@ -252,9 +252,24 @@ def test_descendant_exit_during_capture_preserves_other_exact_identities(monkeyp
         "command_signature": "a" * 64,
     }
 
+    import contextlib
+
     class Child:
         def __init__(self, pid):
             self.pid = pid
+
+        def oneshot(self):
+            return contextlib.nullcontext()
+
+        def create_time(self):
+            if self.pid == 44002:
+                raise psutil.NoSuchProcess(self.pid)
+            return float(self.pid)
+
+        def cmdline(self):
+            if self.pid == 44002:
+                raise psutil.NoSuchProcess(self.pid)
+            return [f"child-{self.pid}"]
 
     class Worker:
         def children(self, recursive):
@@ -277,21 +292,14 @@ def test_descendant_exit_during_capture_preserves_other_exact_identities(monkeyp
         },
     )
 
-    def identity_for(pid):
-        if pid == 44002:
-            raise psutil.NoSuchProcess(pid)
-        return {
-            "pid": pid,
-            "process_create_time": float(pid),
-            "command_signature": f"{pid:064x}",
-        }
-
-    monkeypatch.setattr(process_control_module, "process_identity", identity_for)
-
     captured = capture_owned_descendants(worker_identity)
 
     assert captured["capture_complete"] is True
     assert [item["pid"] for item in captured["descendants"]] == [44001, 44003]
+    for item in captured["descendants"]:
+        assert item["process_create_time"] == float(item["pid"])
+        expected_signature = hashlib.sha256(f"child-{item['pid']}".encode("utf-8")).hexdigest()
+        assert item["command_signature"] == expected_signature
 
 
 def test_descendant_capture_revalidates_the_reopened_worker_identity(monkeypatch):

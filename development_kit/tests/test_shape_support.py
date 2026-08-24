@@ -54,6 +54,14 @@ def test_recommended_gap_uses_only_geometry_and_mesh_and_element_cap_is_per_mode
     assert normalize_shape_support_policy(normalized) == normalized
 
 
+def test_recommended_gap_rejects_overflowing_products():
+    value = _policy()
+    value["minimum_gap"]["mesh_resolution_m"] = 1.0e308
+    value["minimum_gap"]["mesh_multiplier"] = 2.0
+    with pytest.raises(ValueError, match="overflow finite range"):
+        normalize_shape_support_policy(value)
+
+
 def test_manual_override_and_not_requested_have_explicit_claim_dispositions():
     explicit = _policy()
     explicit["minimum_gap"] = {

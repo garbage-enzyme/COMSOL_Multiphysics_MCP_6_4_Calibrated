@@ -14,7 +14,7 @@ $Status = switch ($State) {
     'scientific' {
         [ordered]@{
             status = 'symmetry_gate_failed'; completed = 36; planned = 718; elapsed_seconds = 720
-            symmetry_gate = [ordered]@{ status = 'fail'; max_metric = 0.02196794; evidence = @('excluded') }
+            symmetry_gate = [ordered]@{ status = 'fail'; max_metric = 0.021967938937959675; evidence = @('excluded') }
         }
     }
     'failure' {

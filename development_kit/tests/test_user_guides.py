@@ -84,7 +84,7 @@ def _json_fence_blocks(text: str) -> list[str]:
 
 def test_documentation_fence_parser_rejects_unclosed_non_json_blocks():
     with pytest.raises(AssertionError, match="Markdown fence"):
-        _json_fence_blocks("```text\nnot closed\n```json\n{\"hidden\": true}\n```")
+        _json_fence_blocks('```text\nnot closed\n```json\n{"hidden": true}\n```')
 
 
 def test_documented_default_and_exploration_settings_are_executable():

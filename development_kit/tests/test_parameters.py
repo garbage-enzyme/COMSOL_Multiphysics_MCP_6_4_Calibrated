@@ -366,3 +366,88 @@ def test_parameter_rollback_preserves_unset_clientapi_description():
     assert result["rolled_back"] is True
     assert model.values["wl"] == "1[m]"
     assert model.descriptions["wl"] is None
+
+
+def test_rollback_of_never_created_parameter_does_not_report_a_false_failure():
+    class RejectingJava(FakeParameterJava):
+        def remove(self, name):
+            raise RuntimeError(f"clientapi refuses to remove missing {name}")
+
+    class RejectingModel(FakeParameterModel):
+        def __init__(self):
+            super().__init__()
+            self.java = RejectingJava(self)
+
+        def parameter(self, name, value=None, evaluate=False):
+            if value is not None:
+                raise ValueError("invalid parameter expression")
+            assert evaluate is False
+            return self.values[name]
+
+    model = RejectingModel()
+
+    result = parameters.set_parameter(model, "theta", "10[deg]", description="angle")
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert result["rollback_errors"] == []
+    assert "theta" not in model.values
+
+
+def test_restore_parameter_fallback_clears_stale_description():
+    calls = []
+
+    class _WrapperModel:
+        java = None  # forces the pythonic fallback branch
+
+        def parameter(self, name, value):
+            calls.append(("parameter", name, value))
+
+        def description(self, name, value):
+            calls.append(("description", name, value))
+
+    parameters._restore_parameter(_WrapperModel(), "wl", "4.0e-6", None)
+
+    assert ("parameter", "wl", "4.0e-6") in calls
+    # A stale description from the failed transaction must be cleared so the
+    # readback check does not report a false mismatch.
+    assert ("description", "wl", None) in calls
+
+
+def test_restore_parameter_tolerates_wrappers_without_clear_support():
+    class _StrictModel:
+        java = None
+
+        def parameter(self, name, value):
+            pass
+
+        def description(self, name, value):
+            if value is None:
+                raise TypeError("description cannot be unset")
+
+    # The clear attempt fails, but the restore itself must not raise.
+    parameters._restore_parameter(_StrictModel(), "wl", "4.0e-6", None)
+
+
+class _RefusingStudy:
+    def __init__(self):
+        self.features = {}
+        self._feature_list = SimpleNamespace(tags=lambda: [])
+
+    def feature(self):
+        return self._feature_list
+
+    def create(self, _tag, _kind):
+        raise RuntimeError("study refused new sweep feature")
+
+
+def test_sweep_creation_failure_is_structured_and_leaves_no_feature(monkeypatch):
+    study = _RefusingStudy()
+    model = FakeModel({"std1": study})
+    monkeypatch.setattr(parameters, "_java_string_array", list)
+
+    result = parameters.setup_parametric_sweep(model, "wl", ["4.0e-6", "4.1e-6"])
+
+    assert result["success"] is False
+    assert "study refused new sweep feature" in result["error"]
+    assert study.features == {}

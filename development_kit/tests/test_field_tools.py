@@ -192,6 +192,43 @@ def test_public_field_extract_binds_source_and_owned_runtime(
         assert resolved.is_file()
 
 
+def test_public_field_extract_returns_existing_artifact_without_evaluating(
+    tmp_path, ascii_tmp_path, monkeypatch
+):
+    from src.tools import field_evidence
+
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"immutable-mph-fixture")
+    raw_request = _extraction_request(source)
+    canonical_request = normalize_field_evidence_request(raw_request)
+    model = _DatasetModel()
+    model.file = lambda: str(source)
+    runtime = ascii_tmp_path / "runtime"
+    relative_root = Path("field_evidence") / canonical_request["request_fingerprint"]
+    (runtime / relative_root).mkdir(parents=True)
+    monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: model)
+    monkeypatch.setattr(
+        field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True}
+    )
+    monkeypatch.setattr(field_evidence.ownership_manager, "runtime_dir", runtime)
+    monkeypatch.setattr(
+        field_evidence,
+        "collect_existing_dataset_field_evidence",
+        lambda **_kwargs: pytest.fail("existing artifact must skip evaluation"),
+    )
+
+    result = _tool("wave_optics_field_extract")(
+        model_name="fixture",
+        request=canonical_request,
+        view_id="on",
+    )
+
+    assert result["success"] is True
+    assert result["already_present"] is True
+    assert result["evaluation_skipped"] is True
+    assert result["artifact_root_id"] == relative_root.as_posix()
+
+
 def test_public_field_extract_rejects_source_mismatch_before_evaluation(tmp_path, monkeypatch):
     from src.tools import field_evidence
 
@@ -301,9 +338,7 @@ def test_public_field_extract_never_publishes_artifacts_after_source_drift(
     )
     monkeypatch.setattr(field_evidence.ownership_manager, "runtime_dir", runtime)
 
-    result = _tool("wave_optics_field_extract")(
-        model_name="fixture", request=request, view_id="on"
-    )
+    result = _tool("wave_optics_field_extract")(model_name="fixture", request=request, view_id="on")
 
     final_root = runtime / "field_evidence" / request["request_fingerprint"]
     assert result["success"] is False

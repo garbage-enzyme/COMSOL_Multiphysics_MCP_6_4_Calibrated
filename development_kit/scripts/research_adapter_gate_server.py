@@ -25,6 +25,26 @@ _parameters = import_module("comsol_mcp.tools.parameters")
 _mim_patch = import_module("comsol_mcp.tools.mim_patch")
 
 
+def _spectrum_row(index: int, requested_value: float, numeric: list[float]) -> dict[str, Any]:
+    """One solved point with explicit request/readback/solved provenance."""
+    requested = float(numeric[3])
+    solved = float(numeric[4])
+    return {
+        "point_index": index,
+        "R": float(numeric[0]),
+        "T": float(numeric[1]),
+        "A": float(numeric[2]),
+        # The caller request, the parameter readback, and the frequency-
+        # derived value are distinct provenance levels; keep all three
+        # distinguishable instead of collapsing request into readback.
+        "requested_wavelength_m": requested_value,
+        "evaluated_wavelength_m": requested,
+        "solved_frequency_wavelength_m": solved,
+        "wavelength_sync_abs_m": max(abs(requested_value - requested), abs(requested - solved)),
+        "closure_abs": abs(float(numeric[0]) + float(numeric[1]) + float(numeric[2]) - 1.0),
+    }
+
+
 def _backend(model_name: str, derived_model_id: str, manifest: dict[str, Any]):
     model = session_manager.get_model(model_name)
     if model is None:
@@ -155,14 +175,26 @@ def register_gate_tools(server: Any) -> None:
         ):
             return {"success": False, "error_type": "InvalidWavelengthGrid"}
 
-        study = model.java.study("std1")
-        features = study.feature()
-        sweep = features.get("sweep1")
-        wavelength_step = features.get("step1")
-        if sweep is None or wavelength_step is None:
-            return {"success": False, "error_type": "StudyContractUnavailable"}
-        sweep_before = _parameters._sweep_state(sweep)
-        step_before = str(wavelength_step.getString("plist"))
+        # Study-contract probing runs under the same structured-error
+        # contract as everything below: a missing study or a malformed
+        # control read must never escape as an unhandled exception.
+        try:
+            study = model.java.study("std1")
+            if study is None:
+                return {"success": False, "error_type": "StudyContractUnavailable"}
+            features = study.feature()
+            sweep = features.get("sweep1")
+            wavelength_step = features.get("step1")
+            if sweep is None or wavelength_step is None:
+                return {"success": False, "error_type": "StudyContractUnavailable"}
+            sweep_before = _parameters._sweep_state(sweep)
+            step_before = str(wavelength_step.getString("plist"))
+        except Exception as exc:
+            return {
+                "success": False,
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:2048],
+            }
         restored = False
         try:
             expressions = [
@@ -194,21 +226,11 @@ def register_gate_tools(server: Any) -> None:
                 if len(normalized) != 1:
                     raise ValueError("one-point solve produced an ambiguous spectral result")
                 numeric = [float(value) for value in normalized[0]]
-                requested = numeric[3]
-                solved = numeric[4]
-                rows.append(
-                    {
-                        "point_index": index,
-                        "R": numeric[0],
-                        "T": numeric[1],
-                        "A": numeric[2],
-                        "requested_wavelength_m": requested,
-                        "evaluated_wavelength_m": requested,
-                        "solved_frequency_wavelength_m": solved,
-                        "wavelength_sync_abs_m": abs(requested - solved),
-                        "closure_abs": abs(numeric[0] + numeric[1] + numeric[2] - 1.0),
-                    }
-                )
+                if not all(math.isfinite(value) for value in numeric):
+                    # NaN/Inf would make the tolerance comparisons below
+                    # silently pass; fail closed on non-finite solve output.
+                    raise ValueError("one-point solve produced a non-finite spectral result")
+                rows.append(_spectrum_row(index, requested_value, numeric))
             if any(row["wavelength_sync_abs_m"] > tolerance for row in rows):
                 raise ValueError("requested and solved wavelength grids are not synchronized")
             result = {"success": True, "rows": rows}

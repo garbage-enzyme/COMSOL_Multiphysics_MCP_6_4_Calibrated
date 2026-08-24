@@ -288,21 +288,24 @@ class SessionManager:
 
     def _retire_client(self, client, *, clear_models: bool = True) -> tuple[bool, list[str]]:
         """Deactivate one exact client without constructing a second JVM client."""
-        self._reusable_client = None
-        self._reusable_client_kind = None
+        with self._start_lock:
+            self._reusable_client = None
+            self._reusable_client_kind = None
         errors = self._clear_client_models(client) if clear_models else []
         reusable = bool(getattr(client, "standalone", False))
         if reusable:
-            self._reusable_client = client
-            self._reusable_client_kind = "standalone"
+            with self._start_lock:
+                self._reusable_client = client
+                self._reusable_client_kind = "standalone"
         else:
             try:
                 client.disconnect()
             except Exception as exc:
                 errors.append(f"client_disconnect:{type(exc).__name__}:{exc}")
             if not errors:
-                self._reusable_client = client
-                self._reusable_client_kind = "remote"
+                with self._start_lock:
+                    self._reusable_client = client
+                    self._reusable_client_kind = "remote"
         return reusable or not errors, errors
 
     def _rollback_remote_activation(self, client, *, error: str) -> dict:
@@ -674,7 +677,8 @@ class SessionManager:
                     self._reusable_client = None
                     self._reusable_client_kind = None
                     self._start_message = "Client ready."
-                    self._ownership.heartbeat(refresh_server_processes=True)
+                    if self._ownership.heartbeat(refresh_server_processes=True) is not True:
+                        raise RuntimeError("solver ownership heartbeat could not be verified")
                     self._starting = False
                     self._record_startup_phase_locked(
                         "connected",
@@ -694,15 +698,27 @@ class SessionManager:
                 except Exception:
                     jvm_started_without_client = True
             with self._start_lock:
-                self._client = None
-                self._client_status = None
-                self._client_status_client = None
+                if cleanup_errors:
+                    # Retirement failed, so the client may still be alive;
+                    # surface the uncertainty instead of claiming a clean state.
+                    self._client = client
+                    self._client_status = (
+                        self._client_status_snapshot(client) if client is not None else None
+                    )
+                    self._client_status_client = client
+                    self._start_cleanup_pending = True
+                else:
+                    self._client = None
+                    self._client_status = None
+                    self._client_status_client = None
+                    self._start_cleanup_pending = False
                 self._host_restart_required = jvm_started_without_client
                 self._start_error = str(e)
                 self._start_message = f"Start failed: {e}"
-                self._start_cleanup_pending = False
+                if not cleanup_errors:
+                    self._start_cleanup_pending = False
                 self._starting = False
-                if mph_session_module is not None:
+                if mph_session_module is not None and not cleanup_errors:
                     try:
                         if mph_session_module.client is client:
                             mph_session_module.client = None
@@ -711,7 +727,8 @@ class SessionManager:
                             f"{self._start_message}; singleton cleanup warning: "
                             f"{type(singleton_exc).__name__}"
                         )
-                release_result = self._release_owned_lease()
+                if not cleanup_errors:
+                    release_result = self._release_owned_lease()
                 self._record_startup_phase_locked(
                     "start_failed",
                     state="failed",
@@ -951,6 +968,7 @@ class SessionManager:
             self._current_model = None
             self._publish_control_plane_status_locked()
         release = self._release_owned_lease()
+        lease_release_success = bool(release is None or release.get("success"))
         with self._start_lock:
             if self._startup_record is not None:
                 self._record_startup_phase_locked(
@@ -959,11 +977,14 @@ class SessionManager:
                     terminal=True,
                     details={
                         "client_reusable": reusable,
-                        "lease_release_success": bool(release is None or release.get("success")),
+                        "lease_release_success": lease_release_success,
                     },
                 )
         result = {
-            "success": not cleanup_errors,
+            # A failed owned-lease release must not report a deactivated
+            # session: the solver lease is still held and would poison the
+            # next start attempt.
+            "success": not cleanup_errors and lease_release_success,
             "client_reusable": reusable,
             "message": (
                 "Session deactivated and models cleared. The process-global "
@@ -974,6 +995,8 @@ class SessionManager:
         }
         if cleanup_errors:
             result["cleanup_errors"] = cleanup_errors
+        if not lease_release_success:
+            result["lease_release_pending"] = True
         if release is not None:
             result["lease_release"] = release
         return result
@@ -1062,7 +1085,10 @@ class SessionManager:
         result = {
             "connected": True,
             "starting": False,
-            "cleanup_pending": False,
+            # A failed start retirement can retain a live client; surface the
+            # pending cleanup instead of claiming an unconditionally clean
+            # connected state.
+            "cleanup_pending": cleanup_pending,
             "owns_solver_lease": owns_solver_lease,
             "host_restart_required": host_restart_required,
             **client_status,
@@ -1181,7 +1207,7 @@ class SessionManager:
             self._initialize_model_revision(name, self._model_paths.get(name))
         try:
             self._ownership.heartbeat(model_path=str(model_path) if model_path else None)
-        except Exception:
+        except Exception:  # noqa: S110 - a failed heartbeat must not break activation
             pass
         return name
 
@@ -1329,7 +1355,7 @@ class SessionManager:
                     if self._current_model == name:
                         self._current_model = next(iter(self._models.keys()), None)
                 return True
-            except Exception:
+            except Exception:  # noqa: S110 - best-effort cleanup keeps close() truthful
                 pass
         return False
 

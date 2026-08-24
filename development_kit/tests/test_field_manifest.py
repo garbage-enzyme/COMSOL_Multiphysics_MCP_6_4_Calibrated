@@ -6,6 +6,7 @@ from copy import deepcopy
 import pytest
 from src.evidence.field_bundle import normalize_field_evidence_request
 from src.evidence.field_manifest import (
+    _canonical_bytes,
     build_field_evidence_manifest,
     validate_field_evidence_manifest,
 )
@@ -67,6 +68,41 @@ def _manifest(*, missing: int = 0) -> tuple[dict, dict]:
         png_artifact=_artifact("field-on-png", "on/fields.png", "image/png"),
     )
     return request, manifest
+
+
+def _build_kwargs():
+    request = normalize_field_evidence_request(_request())
+    return request, dict(
+        request=request,
+        view_id="on",
+        raw_point_count=50_000,
+        selected_point_count=12_000,
+        covered_grid_point_count=request["grid_point_count"],
+        missing_grid_point_count=0,
+        coordinate_ranges={
+            "x": [-0.9, 0.9],
+            "y": [-1.4, 1.4],
+            "z": [0.5, 0.5],
+            "unit": "um",
+        },
+        quantity_summaries=_summaries(grid_points=request["grid_point_count"]),
+        array_artifact=_artifact("field-on-npz", "on/fields.npz", "application/x-npz"),
+        png_artifact=_artifact("field-on-png", "on/fields.png", "image/png"),
+    )
+
+
+def test_size_limit_bounds_the_final_serialized_manifest(monkeypatch):
+    import src.evidence.field_manifest as field_manifest_module
+
+    _, kwargs = _build_kwargs()
+    reference = build_field_evidence_manifest(**kwargs)
+    final_length = len(_canonical_bytes(reference))
+    assert final_length < field_manifest_module.MAX_FIELD_MANIFEST_BYTES
+
+    monkeypatch.setattr(field_manifest_module, "MAX_FIELD_MANIFEST_BYTES", final_length - 1)
+
+    with pytest.raises(ValueError, match="exceeds"):
+        build_field_evidence_manifest(**kwargs)
 
 
 def test_manifest_binds_request_source_counts_summaries_and_artifacts():
@@ -187,18 +223,16 @@ def test_summary_names_units_and_counts_must_match_expressions_and_coverage():
             build_field_evidence_manifest(**dict(kwargs, quantity_summaries=summaries))
 
 
-def test_zero_coverage_cannot_claim_invented_summary_statistics():
+def test_zero_coverage_is_rejected_up_front():
     request, _, kwargs = _kwargs()
     grid_points = request["grid_point_count"]
-    summaries = _summaries(grid_points=grid_points, missing=grid_points)
 
-    with pytest.raises(ValueError, match="finite_count.*equal to 1"):
+    with pytest.raises(ValueError, match="covered_grid_point_count.*equal to 1"):
         build_field_evidence_manifest(
             **dict(
                 kwargs,
                 covered_grid_point_count=0,
                 missing_grid_point_count=grid_points,
-                quantity_summaries=summaries,
             )
         )
 

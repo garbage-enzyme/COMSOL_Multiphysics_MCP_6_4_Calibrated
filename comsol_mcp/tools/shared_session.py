@@ -21,7 +21,12 @@ def register_shared_session_tools(mcp: MCPServer) -> None:
     """Register explicit local attached-server lifecycle tools."""
     selection = getattr(mcp, "profile_selection", None)
     profile_name = getattr(selection, "name", "unknown")
-    shared_enabled = bool(selection is not None and selection.feature_enabled("shared_server"))
+    feature_enabled_fn = getattr(selection, "feature_enabled", None)
+    shared_enabled = bool(
+        selection is not None
+        and callable(feature_enabled_fn)
+        and feature_enabled_fn("shared_server")
+    )
 
     @mcp.tool()
     def shared_server_preflight(host: str, port: int) -> dict[str, Any]:

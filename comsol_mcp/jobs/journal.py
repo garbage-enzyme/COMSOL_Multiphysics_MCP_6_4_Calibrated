@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
@@ -41,31 +41,35 @@ def recover_jsonl_tail(path: str | Path, *, max_row_bytes: int) -> None:
         if handle.read(1) == b"\n":
             return
 
-        window = min(end, max_row_bytes + 1)
-        handle.seek(end - window)
-        suffix = handle.read(window)
-        boundary = suffix.rfind(b"\n")
-        if boundary < 0:
-            if end > max_row_bytes:
-                handle.truncate(0)
-                handle.flush()
-                os.fsync(handle.fileno())
-                return
-            record_start = 0
-            tail = suffix
-        else:
-            record_start = end - window + boundary + 1
-            tail = suffix[boundary + 1 :]
-            if len(tail) > max_row_bytes:
-                raise ValueError("unterminated journal row exceeds its byte limit")
+        boundary = -1
+        scan_end = end - 1
+        # Scan exactly one cap-sized window per step: then any tail behind a
+        # found newline is within max_row_bytes, and only the no-newline case
+        # reaches the oversize branch, where dropping the single unterminated
+        # record is the documented repair.
+        chunk_size = max_row_bytes + 1
+        while scan_end > 0 and boundary < 0:
+            window_start = max(0, scan_end - chunk_size)
+            handle.seek(window_start)
+            chunk = handle.read(scan_end - window_start)
+            found = chunk.rfind(b"\n")
+            if found >= 0:
+                boundary = window_start + found
+            scan_end = window_start
+        record_start = boundary + 1
+        handle.seek(record_start)
+        tail = handle.read(end - record_start)
 
-        try:
-            json.loads(tail.decode("utf-8"))
-        except UnicodeDecodeError, json.JSONDecodeError:
+        if len(tail) > max_row_bytes:
             handle.truncate(record_start)
         else:
-            handle.seek(0, os.SEEK_END)
-            handle.write(b"\n")
+            try:
+                json.loads(tail.decode("utf-8"))
+            except UnicodeDecodeError, json.JSONDecodeError:
+                handle.truncate(record_start)
+            else:
+                handle.seek(0, os.SEEK_END)
+                handle.write(b"\n")
         handle.flush()
         os.fsync(handle.fileno())
 

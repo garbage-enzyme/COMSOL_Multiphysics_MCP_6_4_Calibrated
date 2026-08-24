@@ -5,12 +5,60 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
 
 from .adjoint_rows import append_adjoint_row, read_adjoint_rows
 from .process_control import contain_current_process_tree
 from .store import JobStore, cancel_request_targets_attempt, process_identity
+
+
+def _await_licensed_wall_watchdog(
+    store: JobStore,
+    job_id: str,
+    spec: dict[str, Any],
+    attempt: int,
+    *,
+    timeout_seconds: float = 2.0,
+) -> dict[str, Any]:
+    """Fail closed before licensed startup unless this exact attempt is guarded."""
+    import time
+
+    from .store import read_json
+
+    path = store.job_dir(job_id) / "wall-watchdog.json"
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            record = read_json(path)
+        except FileNotFoundError, RuntimeError:
+            record = None
+        if isinstance(record, dict) and record.get("status") == "armed":
+            state = store.read_state(job_id)
+            target_worker = {
+                "pid": state.get("worker_pid"),
+                "process_create_time": state.get("worker_process_create_time"),
+                "command_signature": state.get("worker_command_signature"),
+            }
+            budget = int(spec["optimizer"]["budget"]["max_wall_time_seconds"])
+            if int(record.get("attempt", -1)) != int(attempt):
+                raise RuntimeError("licensed adjoint wall watchdog attempt is not bound")
+            if record.get("target_worker") != target_worker:
+                raise RuntimeError("licensed adjoint wall watchdog worker identity is not bound")
+            if int(record.get("budget_seconds", -1)) != budget:
+                raise RuntimeError("licensed adjoint wall watchdog budget is not bound")
+            expected_deadline = float(target_worker["process_create_time"]) + budget
+            if float(record.get("deadline_epoch", 0.0)) != expected_deadline:
+                raise RuntimeError("licensed adjoint wall watchdog deadline is not bound")
+            if time.time() >= expected_deadline:
+                raise RuntimeError("licensed adjoint wall watchdog deadline already expired")
+            return record
+        if isinstance(record, dict) and record.get("status") == "launch_failed":
+            raise RuntimeError("licensed adjoint wall watchdog launch failed")
+        if time.monotonic() >= deadline:
+            raise RuntimeError("licensed adjoint wall watchdog was not armed before startup")
+        time.sleep(min(0.02, max(0.0, deadline - time.monotonic())))
 
 
 def _run_native(root: str, job_id: str) -> int:
@@ -39,6 +87,7 @@ def _run_native(root: str, job_id: str) -> int:
             store.update_state(job_id, "starting", event="worker_started")
         elif state["status"] != "starting":
             raise ValueError(f"adjoint native worker cannot start from {state['status']}")
+        _await_licensed_wall_watchdog(store, job_id, spec, attempt)
         from comsol_mcp.tools.ownership import SolverOwnership
 
         ownership = SolverOwnership(store.root.parent, owner=f"job:{job_id}")
@@ -116,30 +165,42 @@ def _run_native(root: str, job_id: str) -> int:
         )
         return 0
     except Exception as exc:
-        current = store.read_state(job_id)["status"]
-        if current in {"cancel_requested", "cancelling"}:
-            store.record_cooperative_cancel_observed(
-                job_id,
-                attempt=attempt,
-                message="Stopped during native optimization",
-                worker_error={"type": type(exc).__name__, "message": str(exc)[:2000]},
-            )
-            return 0
-        if current not in {"completed", "failed", "interrupted"}:
-            store.update_state(
-                job_id,
-                "failed",
-                patch={"last_error": {"type": type(exc).__name__, "message": str(exc)[:2000]}},
-                event="worker_failed",
-            )
-        print(f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
-        return 1
+        return _observe_worker_failure(
+            store,
+            job_id,
+            attempt,
+            exc,
+            stopping_message="Stopped during native optimization",
+        )
     finally:
         if ownership is not None and lease_acquired:
             try:
                 ownership.release()
             except Exception as exc:
                 print(f"lease release failed: {type(exc).__name__}", file=sys.stderr, flush=True)
+
+
+def _observe_worker_failure(
+    store: JobStore, job_id: str, attempt: int, exc: Exception, *, stopping_message: str
+) -> int:
+    current = store.read_state(job_id)["status"]
+    if current in {"cancel_requested", "cancelling"}:
+        store.record_cooperative_cancel_observed(
+            job_id,
+            attempt=attempt,
+            message=stopping_message,
+            worker_error={"type": type(exc).__name__, "message": str(exc)[:2000]},
+        )
+        return 0
+    if current not in {"completed", "failed", "interrupted"}:
+        store.update_state(
+            job_id,
+            "failed",
+            patch={"last_error": {"type": type(exc).__name__, "message": str(exc)[:2000]}},
+            event="worker_failed",
+        )
+    print(f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+    return 1
 
 
 def run(root: str, job_id: str) -> int:
@@ -151,68 +212,81 @@ def run(root: str, job_id: str) -> int:
     if not spec.get("synthetic_mode"):
         return _run_native(root, job_id)
     attempt = int(store.read_state(job_id).get("attempt", 1))
-    store.bind_worker_identity(job_id, process_identity(os.getpid()))
-    store.update_state(
-        job_id,
-        patch={"process_tree_contained": bool(contain_current_process_tree())},
-        event="worker_containment_recorded",
-    )
-    state = store.read_state(job_id)
-    if state["status"] == "cancel_requested" or cancel_request_targets_attempt(
-        store.read_control(job_id), attempt
-    ):
-        store.record_cooperative_cancel_observed(
-            job_id, attempt=attempt, message="Stopped before startup"
+    try:
+        store.bind_worker_identity(job_id, process_identity(os.getpid()))
+        store.update_state(
+            job_id,
+            patch={"process_tree_contained": bool(contain_current_process_tree())},
+            event="worker_containment_recorded",
+        )
+        state = store.read_state(job_id)
+        if state["status"] == "cancel_requested" or cancel_request_targets_attempt(
+            store.read_control(job_id), attempt
+        ):
+            store.record_cooperative_cancel_observed(
+                job_id, attempt=attempt, message="Stopped before startup"
+            )
+            return 0
+        if state["status"] == "submitted":
+            store.update_state(job_id, "starting", event="worker_started")
+        elif state["status"] != "starting":
+            raise ValueError(f"adjoint fake worker cannot start from {state['status']}")
+        store.update_state(job_id, "smoke_running", event="adjoint_synthetic_started")
+        rows_path = directory / "optimization_rows.jsonl"
+        existing = [
+            row
+            for row in read_adjoint_rows(rows_path, job_fingerprint=spec["spec_fingerprint"])
+            if row.get("attempt") == attempt
+        ]
+        if {"gradient", "iteration"} - {row.get("kind") for row in existing}:
+            gradient_fp = domain_sha256_v2("comsol_mcp.synthetic_gradient", {"values": [0.0]})
+            check_fp = domain_sha256_v2("comsol_mcp.synthetic_gradient_check", {"passed": True})
+            append_adjoint_row(
+                rows_path,
+                job_fingerprint=spec["spec_fingerprint"],
+                attempt=attempt,
+                kind="gradient",
+                payload={
+                    "iteration_id": "it-0",
+                    "gradient_fingerprint": gradient_fp,
+                    "check_fingerprint": check_fp,
+                    "evidence_state": "gradient_validated",
+                },
+            )
+            append_adjoint_row(
+                rows_path,
+                job_fingerprint=spec["spec_fingerprint"],
+                attempt=attempt,
+                kind="iteration",
+                payload={
+                    "iteration_id": "it-0",
+                    "iteration_index": 0,
+                    "candidate_fingerprint": domain_sha256_v2(
+                        "comsol_mcp.synthetic_candidate", {"values": spec["initial_values"]}
+                    ),
+                    "objective_value": 0.0,
+                    "status": "accepted",
+                    "gradient_fingerprint": gradient_fp,
+                    "forward_fingerprint": check_fp,
+                    "reason_code": "synthetic_contract_only",
+                },
+            )
+        store.update_state(job_id, "smoke_validated", event="adjoint_synthetic_validated")
+        store.update_state(
+            job_id,
+            "completed",
+            patch={"progress": {"completed": 1, "total": 1}, "solver_started": False},
+            event="completed",
         )
         return 0
-    if state["status"] == "submitted":
-        store.update_state(job_id, "starting", event="worker_started")
-    elif state["status"] != "starting":
-        raise ValueError(f"adjoint fake worker cannot start from {state['status']}")
-    store.update_state(job_id, "smoke_running", event="adjoint_synthetic_started")
-    rows_path = directory / "optimization_rows.jsonl"
-    existing = read_adjoint_rows(rows_path, job_fingerprint=spec["spec_fingerprint"])
-    if not existing:
-        gradient_fp = domain_sha256_v2("comsol_mcp.synthetic_gradient", {"values": [0.0]})
-        check_fp = domain_sha256_v2("comsol_mcp.synthetic_gradient_check", {"passed": True})
-        append_adjoint_row(
-            rows_path,
-            job_fingerprint=spec["spec_fingerprint"],
-            attempt=attempt,
-            kind="gradient",
-            payload={
-                "iteration_id": "it-0",
-                "gradient_fingerprint": gradient_fp,
-                "check_fingerprint": check_fp,
-                "evidence_state": "gradient_validated",
-            },
+    except Exception as exc:
+        return _observe_worker_failure(
+            store,
+            job_id,
+            attempt,
+            exc,
+            stopping_message="Stopped during synthetic validation",
         )
-        append_adjoint_row(
-            rows_path,
-            job_fingerprint=spec["spec_fingerprint"],
-            attempt=attempt,
-            kind="iteration",
-            payload={
-                "iteration_id": "it-0",
-                "iteration_index": 0,
-                "candidate_fingerprint": domain_sha256_v2(
-                    "comsol_mcp.synthetic_candidate", {"values": spec["initial_values"]}
-                ),
-                "objective_value": 0.0,
-                "status": "accepted",
-                "gradient_fingerprint": gradient_fp,
-                "forward_fingerprint": check_fp,
-                "reason_code": "synthetic_contract_only",
-            },
-        )
-    store.update_state(job_id, "smoke_validated", event="adjoint_synthetic_validated")
-    store.update_state(
-        job_id,
-        "completed",
-        patch={"progress": {"completed": 1, "total": 1}, "solver_started": False},
-        event="completed",
-    )
-    return 0
 
 
 if __name__ == "__main__":

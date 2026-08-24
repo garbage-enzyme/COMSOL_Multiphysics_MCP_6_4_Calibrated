@@ -152,7 +152,11 @@ def _normalize_row(
         or raw["schema_version"] != ADJOINT_ROW_SCHEMA_VERSION
     ):
         raise ValueError("adjoint row schema is unsupported")
-    if raw["sequence"] != sequence or isinstance(raw["sequence"], bool):
+    if (
+        isinstance(raw["sequence"], bool)
+        or not isinstance(raw["sequence"], int)
+        or raw["sequence"] != sequence
+    ):
         raise ValueError("adjoint row sequence is not contiguous")
     if (
         isinstance(raw["attempt"], bool)
@@ -219,6 +223,10 @@ def append_adjoint_row(
         raise ValueError("adjoint row kind is unsupported")
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
         raise ValueError("attempt must be positive")
+    if created_at_epoch is not None and (
+        isinstance(created_at_epoch, bool) or not isinstance(created_at_epoch, (int, float))
+    ):
+        raise ValueError("created_at_epoch must be a finite number")
     with locked_journal(path) as journal:
         rows = _read_adjoint_rows_unlocked(journal, job)
         if len(rows) >= MAX_ADJOINT_ROWS:

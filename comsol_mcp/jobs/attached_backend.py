@@ -10,7 +10,6 @@ from typing import Any, Mapping
 from comsol_mcp.shared_session.identity import normalize_attached_server_identity
 from comsol_mcp.shared_session.locking import normalize_shared_model_identity
 
-
 ATTACHED_EXECUTION_BACKEND_KIND = "attached_shared_server"
 ATTACHED_EXECUTION_BACKEND_SCHEMA = "comsol_mcp.attached_execution_backend"
 ATTACHED_EXECUTION_BACKEND_VERSION = "1.0.0"
@@ -46,9 +45,7 @@ _SERIALIZED_SERVER_FIELDS = frozenset(
     }
 )
 _SERIALIZED_ENDPOINT_FIELDS = frozenset({"host", "port", "scope"})
-_SERIALIZED_MODEL_FIELDS = frozenset(
-    {"tag", "label", "file_path", "unsaved", "identity_sha256"}
-)
+_SERIALIZED_MODEL_FIELDS = frozenset({"tag", "label", "file_path", "unsaved", "identity_sha256"})
 _SERIALIZED_REVISION_FIELDS = frozenset(
     {
         "sequence",
@@ -79,17 +76,13 @@ def _exact_mapping(
     *,
     optional: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
-    if not isinstance(value, Mapping) or not all(
-        isinstance(key, str) for key in value
-    ):
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ValueError(f"{label} must be an object with string keys")
     actual = set(value)
     missing = sorted(fields - actual)
     unknown = sorted(actual - fields - optional)
     if missing or unknown:
-        raise ValueError(
-            f"{label} fields are invalid; missing={missing}, unknown={unknown}"
-        )
+        raise ValueError(f"{label} fields are invalid; missing={missing}, unknown={unknown}")
     return dict(value)
 
 
@@ -100,9 +93,7 @@ def _hex64(value: Any, label: str) -> str:
 
 
 def _normalize_serialized_server(value: Any) -> dict[str, Any]:
-    raw = _exact_mapping(
-        value, _SERIALIZED_SERVER_FIELDS, "attached execution server identity"
-    )
+    raw = _exact_mapping(value, _SERIALIZED_SERVER_FIELDS, "attached execution server identity")
     endpoint = _exact_mapping(
         raw["endpoint"],
         _SERIALIZED_ENDPOINT_FIELDS,
@@ -130,9 +121,7 @@ def _normalize_serialized_server(value: Any) -> dict[str, Any]:
 
 
 def _normalize_serialized_model(value: Any) -> dict[str, Any]:
-    raw = _exact_mapping(
-        value, _SERIALIZED_MODEL_FIELDS, "attached execution model identity"
-    )
+    raw = _exact_mapping(value, _SERIALIZED_MODEL_FIELDS, "attached execution model identity")
     normalized = normalize_shared_model_identity(
         {
             "tag": raw["tag"],
@@ -148,12 +137,8 @@ def _normalize_serialized_model(value: Any) -> dict[str, Any]:
     return normalized.to_dict()
 
 
-def _normalize_serialized_revision(
-    value: Any, *, model_identity_sha256: str
-) -> dict[str, Any]:
-    raw = _exact_mapping(
-        value, _SERIALIZED_REVISION_FIELDS, "attached execution model revision"
-    )
+def _normalize_serialized_revision(value: Any, *, model_identity_sha256: str) -> dict[str, Any]:
+    raw = _exact_mapping(value, _SERIALIZED_REVISION_FIELDS, "attached execution model revision")
     sequence = raw["sequence"]
     if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
         raise ValueError("attached execution revision sequence must be nonnegative")
@@ -162,12 +147,8 @@ def _normalize_serialized_revision(
         "model_identity_sha256": _hex64(
             raw["model_identity_sha256"], "revision model identity SHA-256"
         ),
-        "structural_sha256": _hex64(
-            raw["structural_sha256"], "revision structural SHA-256"
-        ),
-        "readback_sha256": _hex64(
-            raw["readback_sha256"], "revision readback SHA-256"
-        ),
+        "structural_sha256": _hex64(raw["structural_sha256"], "revision structural SHA-256"),
+        "readback_sha256": _hex64(raw["readback_sha256"], "revision readback SHA-256"),
     }
     if body["model_identity_sha256"] != model_identity_sha256:
         raise ValueError("attached execution revision belongs to a different model")
@@ -183,9 +164,7 @@ def normalize_attached_execution_backend(value: Any) -> dict[str, Any]:
         value,
         _BACKEND_FIELDS,
         "attached execution backend",
-        optional=frozenset(
-            {"schema_name", "schema_version", "backend_identity_sha256"}
-        ),
+        optional=frozenset({"schema_name", "schema_version", "backend_identity_sha256"}),
     )
     if raw.get("schema_name", ATTACHED_EXECUTION_BACKEND_SCHEMA) != (
         ATTACHED_EXECUTION_BACKEND_SCHEMA
@@ -198,9 +177,7 @@ def normalize_attached_execution_backend(value: Any) -> dict[str, Any]:
     if raw["kind"] != ATTACHED_EXECUTION_BACKEND_KIND:
         raise ValueError("attached execution backend kind is unsupported")
     if raw["user_confirmed_automation_exclusive"] is not True:
-        raise ValueError(
-            "attached execution requires explicit automation-exclusive confirmation"
-        )
+        raise ValueError("attached execution requires explicit automation-exclusive confirmation")
     server = _normalize_serialized_server(raw["attached_server"])
     model = _normalize_serialized_model(raw["model"])
     revision = _normalize_serialized_revision(
@@ -221,9 +198,11 @@ def normalize_attached_execution_backend(value: Any) -> dict[str, Any]:
     }
     identity_sha256 = _canonical_sha256(body)
     supplied_identity = raw.get("backend_identity_sha256")
-    if supplied_identity is not None and _hex64(
-        supplied_identity, "attached execution backend identity SHA-256"
-    ) != identity_sha256:
+    if (
+        supplied_identity is not None
+        and _hex64(supplied_identity, "attached execution backend identity SHA-256")
+        != identity_sha256
+    ):
         raise ValueError("attached execution backend identity SHA-256 is inconsistent")
     return {**body, "backend_identity_sha256": identity_sha256}
 
@@ -238,14 +217,10 @@ def normalize_attached_execution_request(value: Any) -> dict[str, Any]:
     if raw["kind"] != ATTACHED_EXECUTION_BACKEND_KIND:
         raise ValueError("attached execution request kind is unsupported")
     if raw["user_confirmed_automation_exclusive"] is not True:
-        raise ValueError(
-            "attached execution requires explicit automation-exclusive confirmation"
-        )
+        raise ValueError("attached execution requires explicit automation-exclusive confirmation")
     return {
         "kind": ATTACHED_EXECUTION_BACKEND_KIND,
-        "expected_lock_sha256": _hex64(
-            raw["expected_lock_sha256"], "expected model lock SHA-256"
-        ),
+        "expected_lock_sha256": _hex64(raw["expected_lock_sha256"], "expected model lock SHA-256"),
         "expected_revision_sha256": _hex64(
             raw["expected_revision_sha256"], "expected model revision SHA-256"
         ),

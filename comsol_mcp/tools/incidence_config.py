@@ -98,7 +98,9 @@ def _evaluate_angle(model: Any, expression: str, unit: str, parameters: set[str]
     return {
         "expression": expression,
         "expression_kind": (
-            "parameter" if _IDENTIFIER.fullmatch(expression) and expression in parameters else "expression"
+            "parameter"
+            if _IDENTIFIER.fullmatch(expression) and expression in parameters
+            else "expression"
         ),
         "evaluated_value": _real_scalar(raw, expression=expression),
         "evaluated_unit": unit,
@@ -141,7 +143,9 @@ def _incidence_snapshot(model: Any, component_tag: str, physics_tag: str) -> dic
     references = [
         (tag, feature)
         for tag, feature, kind in children
-        if _is_kind(tag, kind, _label(feature), ("referencedirection", "reference direction", "rdir"))
+        if _is_kind(
+            tag, kind, _label(feature), ("referencedirection", "reference direction", "rdir")
+        )
     ]
     selected_references = []
     for tag, feature in references:
@@ -164,8 +168,7 @@ def _incidence_snapshot(model: Any, component_tag: str, physics_tag: str) -> dic
             "settings": _properties(parent, _SETTING_NAMES),
         },
         "periodic_ports": [
-            {"tag": tag, "settings": _properties(feature, _SETTING_NAMES)}
-            for tag, feature in ports
+            {"tag": tag, "settings": _properties(feature, _SETTING_NAMES)} for tag, feature in ports
         ],
         "reference_direction": selected_references[0],
     }
@@ -201,6 +204,12 @@ def _validate_preview(preview: object) -> dict[str, Any]:
         raise ValueError(f"incidence preview is not canonical JSON: {exc}") from exc
     if rebuilt_hash != supplied_hash:
         raise ValueError("incidence preview identity mismatch")
+    required = {"before", "planned", "derived_model_id", "operation", "pre_state_sha256"}
+    missing = sorted(required - set(body))
+    if missing:
+        raise ValueError("incidence preview is missing required fields: " + ", ".join(missing))
+    if not isinstance(body["before"], dict) or not isinstance(body["planned"], dict):
+        raise ValueError("incidence preview structure is invalid")
     return body
 
 
@@ -225,7 +234,9 @@ def _preview_incidence_unlocked(
 ) -> dict[str, Any]:
     """Inspect and normalize one incidence request without mutating or solving."""
     if record.dirty:
-        raise ValueError(f"derived model is dirty and unusable for validation: {record.dirty_reason}")
+        raise ValueError(
+            f"derived model is dirty and unusable for validation: {record.dirty_reason}"
+        )
     alpha1 = _bounded_text(alpha1_inc, name="alpha1_inc", limit=200)
     alpha2 = _bounded_text(alpha2_inc, name="alpha2_inc", limit=200)
     target = _bounded_text(
@@ -331,10 +342,7 @@ def _incidence_nodes(
     )
     parent = _get(physics.feature(), snapshot["periodic_structure"]["tag"])
     children = parent.feature()
-    ports = {
-        item["tag"]: _get(children, item["tag"])
-        for item in snapshot["periodic_ports"]
-    }
+    ports = {item["tag"]: _get(children, item["tag"]) for item in snapshot["periodic_ports"]}
     return parent, ports
 
 
@@ -347,9 +355,7 @@ def _planned_readback_mismatches(
     for name, expected in planned["periodic_structure"]["settings"].items():
         actual = parent["settings"].get(name)
         if actual != expected:
-            mismatches.append(
-                f"{parent['tag']}.{name}: expected {expected!r}, read {actual!r}"
-            )
+            mismatches.append(f"{parent['tag']}.{name}: expected {expected!r}, read {actual!r}")
     ports = {item["tag"]: item for item in snapshot["periodic_ports"]}
     for planned_port in planned["periodic_ports"]:
         actual_port = ports.get(planned_port["tag"])
@@ -367,13 +373,7 @@ def _planned_readback_mismatches(
 
 def _rollback_plan(before: dict[str, Any], planned: dict[str, Any]) -> dict[str, Any]:
     parent_before = before["periodic_structure"]
-    parent_names = planned["periodic_structure"]["settings"]
-    missing = [name for name in parent_names if name not in parent_before["settings"]]
-    if missing:
-        raise ValueError(
-            "PeriodicStructure settings required for rollback are unreadable: "
-            + ", ".join(missing)
-        )
+    parent_names = list(parent_before["settings"])
     before_ports = {item["tag"]: item for item in before["periodic_ports"]}
     port_plans = []
     for planned_port in planned["periodic_ports"]:
@@ -381,28 +381,16 @@ def _rollback_plan(before: dict[str, Any], planned: dict[str, Any]) -> dict[str,
         captured = before_ports.get(tag)
         if captured is None:
             raise ValueError(f"PeriodicPort required for rollback is missing: {tag}")
-        missing = [name for name in planned_port["settings"] if name not in captured["settings"]]
-        if missing:
-            raise ValueError(
-                f"PeriodicPort settings required for rollback are unreadable for {tag}: "
-                + ", ".join(missing)
-            )
         port_plans.append(
             {
                 "tag": tag,
-                "settings": {
-                    name: captured["settings"][name]
-                    for name in planned_port["settings"]
-                },
+                "settings": dict(captured["settings"]),
             }
         )
     return {
         "periodic_structure": {
             "tag": parent_before["tag"],
-            "settings": {
-                name: parent_before["settings"][name]
-                for name in parent_names
-            },
+            "settings": {name: parent_before["settings"][name] for name in parent_names},
         },
         "periodic_ports": port_plans,
     }
@@ -463,6 +451,19 @@ def _apply_incidence_unlocked(
         readback_mismatches = _planned_readback_mismatches(after, planned)
         if readback_mismatches:
             raise ValueError("incidence readback mismatch: " + "; ".join(readback_mismatches))
+        # Post-mutation bookkeeping stays inside the rollback-protected region:
+        # a failure here must roll the mutation back instead of leaving the
+        # model changed while the caller sees an unhandled error.
+        post_hash = _incidence_state_hash(record, after)
+        _append_event(
+            record,
+            {
+                "operation": "periodic_structure_incidence",
+                "success": True,
+                "pre_state_sha256": current_hash,
+                "post_state_sha256": post_hash,
+            },
+        )
     except Exception as exc:
         rollback_write_errors: list[str] = []
         try:
@@ -490,8 +491,7 @@ def _apply_incidence_unlocked(
         if not rollback_proved:
             record.dirty = True
             record.dirty_reason = (
-                "incidence rollback unproven: "
-                + "; ".join(rollback_readback_mismatches)
+                "incidence rollback unproven: " + "; ".join(rollback_readback_mismatches)
             )[:500]
         event = {
             "operation": "periodic_structure_incidence",
@@ -513,16 +513,6 @@ def _apply_incidence_unlocked(
             "derived_model_dirty": record.dirty,
             "solver_started": False,
         }
-    post_hash = _incidence_state_hash(record, after)
-    _append_event(
-        record,
-        {
-            "operation": "periodic_structure_incidence",
-            "success": True,
-            "pre_state_sha256": current_hash,
-            "post_state_sha256": post_hash,
-        },
-    )
     return {
         "success": True,
         "derived_model_id": record.derived_model_id,

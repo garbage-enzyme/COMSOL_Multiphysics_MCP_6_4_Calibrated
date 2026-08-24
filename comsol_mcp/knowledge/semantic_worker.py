@@ -15,20 +15,23 @@ from typing import Any
 from .semantic_contracts import PUBLIC_LIMITS, WORKER_PROTOCOL_SCHEMA_VERSION
 
 MAXIMUM_REQUEST_BYTES = 16_384
-TOKEN_ENVIRONMENT_VARIABLE = "COMSOL_SEMANTIC_SESSION_TOKEN"
+# S105: this constant is an environment variable NAME, not a secret value.
+TOKEN_ENVIRONMENT_VARIABLE = "COMSOL_SEMANTIC_SESSION_TOKEN"  # noqa: S105
 
 
 def _response(request_id: str | None, *, success: bool, **fields: Any) -> dict[str, Any]:
     return {
+        **fields,
         "schema_version": WORKER_PROTOCOL_SCHEMA_VERSION,
         "request_id": request_id,
         "success": success,
-        **fields,
     }
 
 
 class _WorkerState:
-    def __init__(self, token: str, fault: str | None, query_delay: float, backend: Any | None = None):
+    def __init__(
+        self, token: str, fault: str | None, query_delay: float, backend: Any | None = None
+    ):
         self.token = token
         self.fault = fault
         self.query_delay = query_delay
@@ -41,19 +44,25 @@ class _WorkerState:
         self.capacity = threading.BoundedSemaphore(PUBLIC_LIMITS["maximum_queue_depth"] + 1)
 
     def status(self) -> dict[str, Any]:
-        backend_status = self.backend.status() if self.backend is not None else {
-            "backend": "fake",
-            "load_count": self.load_count,
-            "query_count": self.query_count,
-            "last_error": self.last_error,
-        }
+        backend_status = (
+            self.backend.status()
+            if self.backend is not None
+            else {
+                "backend": "fake",
+                "load_count": self.load_count,
+                "query_count": self.query_count,
+                "last_error": self.last_error,
+            }
+        )
         return {
             "pid": os.getpid(),
             "started_at_epoch": self.started_at,
             **backend_status,
         }
 
-    def query(self, query: str, limit: int, *, filters: dict[str, Any] | None, retrieval_mode: str) -> dict[str, Any]:
+    def query(
+        self, query: str, limit: int, *, filters: dict[str, Any] | None, retrieval_mode: str
+    ) -> dict[str, Any]:
         if self.fault == "query_hang":
             time.sleep(3600)
         if self.fault == "crash_before_response":
@@ -91,23 +100,59 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         self.connection.settimeout(PUBLIC_LIMITS["query_deadline_seconds"])
         raw = self.rfile.readline(MAXIMUM_REQUEST_BYTES + 1)
         if len(raw) > MAXIMUM_REQUEST_BYTES or not raw.endswith(b"\n"):
-            self._write(_response(None, success=False, error={"code": "invalid_request", "message": "request is oversized or unterminated"}))
+            self._write(
+                _response(
+                    None,
+                    success=False,
+                    error={
+                        "code": "invalid_request",
+                        "message": "request is oversized or unterminated",
+                    },
+                )
+            )
             return
         try:
             request = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            self._write(_response(None, success=False, error={"code": "invalid_json", "message": "request must be UTF-8 JSON"}))
+        except UnicodeDecodeError, json.JSONDecodeError:
+            self._write(
+                _response(
+                    None,
+                    success=False,
+                    error={"code": "invalid_json", "message": "request must be UTF-8 JSON"},
+                )
+            )
             return
         request_id = request.get("request_id") if isinstance(request, dict) else None
-        if not isinstance(request, dict) or request.get("schema_version") != WORKER_PROTOCOL_SCHEMA_VERSION:
-            self._write(_response(request_id, success=False, error={"code": "invalid_schema", "message": "unsupported protocol schema"}))
+        if (
+            not isinstance(request, dict)
+            or request.get("schema_version") != WORKER_PROTOCOL_SCHEMA_VERSION
+        ):
+            self._write(
+                _response(
+                    request_id,
+                    success=False,
+                    error={"code": "invalid_schema", "message": "unsupported protocol schema"},
+                )
+            )
             return
         token = request.get("token")
         if not isinstance(token, str) or not secrets.compare_digest(token, self.server.state.token):
-            self._write(_response(request_id, success=False, error={"code": "unauthorized", "message": "invalid session token"}))
+            self._write(
+                _response(
+                    request_id,
+                    success=False,
+                    error={"code": "unauthorized", "message": "invalid session token"},
+                )
+            )
             return
         if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
-            self._write(_response(None, success=False, error={"code": "invalid_request_id", "message": "request_id is required"}))
+            self._write(
+                _response(
+                    None,
+                    success=False,
+                    error={"code": "invalid_request_id", "message": "request_id is required"},
+                )
+            )
             return
         self._dispatch(request_id, request)
 
@@ -117,9 +162,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             try:
                 status = self.server.state.status()
             except Exception as exc:
-                self.server.state.last_error = (
-                    f"{type(exc).__name__}: backend status failed"
-                )
+                self.server.state.last_error = f"{type(exc).__name__}: backend status failed"
                 response = _response(
                     request_id,
                     success=False,
@@ -135,23 +178,64 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             limit = request.get("limit", 5)
             filters = request.get("filters")
             retrieval_mode = request.get("retrieval_mode", "hybrid")
-            if not isinstance(query, str) or not query.strip() or len(query) > PUBLIC_LIMITS["maximum_query_characters"]:
-                response = _response(request_id, success=False, error={"code": "invalid_query", "message": "query violates public limits"})
-            elif not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= PUBLIC_LIMITS["maximum_results"]:
-                response = _response(request_id, success=False, error={"code": "invalid_limit", "message": "limit violates public limits"})
+            if (
+                not isinstance(query, str)
+                or not query.strip()
+                or len(query) > PUBLIC_LIMITS["maximum_query_characters"]
+            ):
+                response = _response(
+                    request_id,
+                    success=False,
+                    error={"code": "invalid_query", "message": "query violates public limits"},
+                )
+            elif (
+                not isinstance(limit, int)
+                or isinstance(limit, bool)
+                or not 1 <= limit <= PUBLIC_LIMITS["maximum_results"]
+            ):
+                response = _response(
+                    request_id,
+                    success=False,
+                    error={"code": "invalid_limit", "message": "limit violates public limits"},
+                )
             elif filters is not None and not isinstance(filters, dict):
-                response = _response(request_id, success=False, error={"code": "invalid_filters", "message": "filters must be an object"})
-            elif not isinstance(retrieval_mode, str) or retrieval_mode not in {"hybrid", "vector", "lexical"}:
-                response = _response(request_id, success=False, error={"code": "invalid_retrieval_mode", "message": "retrieval_mode is unsupported"})
+                response = _response(
+                    request_id,
+                    success=False,
+                    error={"code": "invalid_filters", "message": "filters must be an object"},
+                )
+            elif not isinstance(retrieval_mode, str) or retrieval_mode not in {
+                "hybrid",
+                "vector",
+                "lexical",
+            }:
+                response = _response(
+                    request_id,
+                    success=False,
+                    error={
+                        "code": "invalid_retrieval_mode",
+                        "message": "retrieval_mode is unsupported",
+                    },
+                )
             else:
                 try:
                     with self.server.state.active:
                         payload = self.server.state.query(
                             query.strip(), limit, filters=filters, retrieval_mode=retrieval_mode
                         )
-                    response = _response(request_id, success=True, **payload, status=self.server.state.status())
+                    reserved = {"schema_version", "request_id", "success", "status"}
+                    response = _response(
+                        request_id,
+                        success=True,
+                        status=self.server.state.status(),
+                        **{key: value for key, value in payload.items() if key not in reserved},
+                    )
                 except ValueError as exc:
-                    response = _response(request_id, success=False, error={"code": "invalid_arguments", "message": str(exc)})
+                    response = _response(
+                        request_id,
+                        success=False,
+                        error={"code": "invalid_arguments", "message": str(exc)},
+                    )
                 except Exception as exc:
                     self.server.state.last_error = f"{type(exc).__name__}: backend query failed"
                     response = _response(
@@ -163,7 +247,11 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                         },
                     )
         else:
-            response = _response(request_id, success=False, error={"code": "unknown_operation", "message": "operation is unsupported"})
+            response = _response(
+                request_id,
+                success=False,
+                error={"code": "unknown_operation", "message": "operation is unsupported"},
+            )
 
         fault = self.server.state.fault
         if fault == "invalid_json":
@@ -171,7 +259,9 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             self.wfile.flush()
             return
         if fault == "oversized_json":
-            self.wfile.write(b'{"padding":"' + b"x" * (PUBLIC_LIMITS["maximum_response_bytes"] + 1) + b'"}\n')
+            self.wfile.write(
+                b'{"padding":"' + b"x" * (PUBLIC_LIMITS["maximum_response_bytes"] + 1) + b'"}\n'
+            )
             self.wfile.flush()
             return
         if fault == "wrong_request_id":
@@ -182,26 +272,45 @@ class _RequestHandler(socketserver.StreamRequestHandler):
 
     def _write(self, response: dict[str, Any]) -> None:
         try:
-            encoded = json.dumps(
-                response,
-                ensure_ascii=False,
-                allow_nan=False,
-                separators=(",", ":"),
-            ).encode("utf-8") + b"\n"
-        except (TypeError, ValueError):
-            encoded = json.dumps(
-                _response(
-                    response.get("request_id"),
-                    success=False,
-                    error={
-                        "code": "invalid_response",
-                        "message": "worker response is not finite JSON",
-                    },
-                ),
-                separators=(",", ":"),
-            ).encode("utf-8") + b"\n"
+            encoded = (
+                json.dumps(
+                    response,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                + b"\n"
+            )
+        except TypeError, ValueError:
+            encoded = (
+                json.dumps(
+                    _response(
+                        response.get("request_id"),
+                        success=False,
+                        error={
+                            "code": "invalid_response",
+                            "message": "worker response is not finite JSON",
+                        },
+                    ),
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                + b"\n"
+            )
         if len(encoded) > PUBLIC_LIMITS["maximum_response_bytes"]:
-            encoded = json.dumps(_response(response.get("request_id"), success=False, error={"code": "response_too_large", "message": "response exceeds public limit"}), separators=(",", ":")).encode("utf-8") + b"\n"
+            encoded = (
+                json.dumps(
+                    _response(
+                        response.get("request_id"),
+                        success=False,
+                        error={
+                            "code": "response_too_large",
+                            "message": "response exceeds public limit",
+                        },
+                    ),
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                + b"\n"
+            )
         self.wfile.write(encoded)
         self.wfile.flush()
 
@@ -259,11 +368,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serve", action="store_true", required=True)
     parser.add_argument("--port", type=int, default=0)
-    parser.add_argument("--fault", choices=[
-        "startup_hang", "query_hang", "invalid_json", "oversized_json",
-        "wrong_request_id", "crash_before_response", "crash_after_response",
-        "stderr_flood",
-    ])
+    parser.add_argument(
+        "--fault",
+        choices=[
+            "startup_hang",
+            "query_hang",
+            "invalid_json",
+            "oversized_json",
+            "wrong_request_id",
+            "crash_before_response",
+            "crash_after_response",
+            "stderr_flood",
+        ],
+    )
     parser.add_argument("--query-delay", type=float, default=0.0)
     parser.add_argument("--backend", choices=["fake", "hybrid"], default="fake")
     parser.add_argument("--deployment-root")

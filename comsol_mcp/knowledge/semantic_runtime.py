@@ -191,6 +191,7 @@ class SemanticService:
                     and deployment
                     and deployment.get("lightweight_identity_match")
                     and self._health_gate_passed
+                    and worker["state"] == "active"
                 ),
                 "last_error": self._last_error,
                 "solver_free": True,
@@ -222,6 +223,19 @@ class SemanticService:
                 return {
                     "success": False,
                     "error": {"code": "semantic_unavailable", "message": str(exc)},
+                    "fallback_tool": "manual_search",
+                    "configuration": self.configuration,
+                }
+            deployment = _lightweight_deployment_identity(self.configuration)
+            if not deployment or not deployment.get("lightweight_identity_match"):
+                self._health_gate_passed = False
+                return {
+                    "success": False,
+                    "error": {
+                        "code": "semantic_unavailable",
+                        "message": "semantic deployment identity is unreadable or mismatched",
+                    },
+                    "deployment": deployment,
                     "fallback_tool": "manual_search",
                     "configuration": self.configuration,
                 }
@@ -257,6 +271,10 @@ class SemanticService:
             self._health_gate_passed = False
             if result.get("success"):
                 self._last_error = None
+            else:
+                # Mirror search(): a failed reset replaces any stale error so
+                # status() reports the actual reset failure, never an older one.
+                self._last_error = result.get("error") or {"message": str(result)}
             return result
 
 

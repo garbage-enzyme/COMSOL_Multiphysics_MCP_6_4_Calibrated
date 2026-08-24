@@ -35,7 +35,7 @@ def register_research_tools(mcp: MCPServer) -> None:
                 "solver_started": False,
                 "filesystem_modified": False,
             }
-        except (TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError) as exc:
             return {
                 "success": False,
                 "reason_code": "research_campaign_rejected",
@@ -64,7 +64,7 @@ def register_research_tools(mcp: MCPServer) -> None:
                 "solver_started": False,
                 "filesystem_modified": False,
             }
-        except (TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError) as exc:
             return {
                 "success": False,
                 "reason_code": "research_robustness_rejected",

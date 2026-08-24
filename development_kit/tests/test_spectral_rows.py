@@ -233,6 +233,55 @@ def test_exact_complete_wavelength_cannot_be_appended_twice(tmp_path):
         _append(journal, root, spec, 4e-6, 0.1)
 
 
+def test_uppercase_source_hash_in_spec_passes_artifact_verification(tmp_path):
+    spec = _spec(tmp_path)
+    upper_spec = {**spec, "source_model_sha256": spec["source_model_sha256"].upper()}
+    root = tmp_path / "job"
+    journal = root / "spectral_rows.jsonl"
+    appended = _append(journal, root, spec, 4e-6, 0.1)
+
+    # Reading through a non-lowercased spec must not spuriously fail the
+    # artifact source-hash comparison.
+    rows = read_spectral_rows(journal, upper_spec, artifact_root=root)
+
+    assert [row["row_sha256"] for row in rows] == [appended["row_sha256"]]
+    assert rows[0]["source_model_sha256"] == spec["source_model_sha256"]
+
+
+def test_inner_artifact_is_parsed_from_the_verified_bytes(tmp_path, monkeypatch):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    journal = root / "spectral_rows.jsonl"
+    _append(journal, root, spec, 4e-6, 0.1)
+    inner = next(
+        path for path in root.rglob("manifest.json") if path.parent.name.startswith("point-")
+    )
+    verified_bytes = inner.read_bytes()
+    swapped = json.dumps({"audit_status": "measurement_complete"}).encode("utf-8")
+    original_read_bytes = Path.read_bytes
+    reads = {"inner": 0}
+
+    def swap_after_first_read(self):
+        data = original_read_bytes(self)
+        if self == inner:
+            reads["inner"] += 1
+            if reads["inner"] == 1:
+                # Simulate a swap between the hash gate and the JSON parse of
+                # a separate second read; the fix parses the hashed buffer.
+                inner.write_bytes(swapped)
+        return data
+
+    monkeypatch.setattr(Path, "read_bytes", swap_after_first_read)
+    try:
+        rows = read_spectral_rows(journal, spec, artifact_root=root)
+    finally:
+        monkeypatch.undo()
+        inner.write_bytes(verified_bytes)
+
+    assert len(rows) == 1
+    assert reads["inner"] == 1
+
+
 @pytest.mark.parametrize(
     "absorption",
     [float("inf"), pytest.param(10**10_000, id="huge-integer")],
@@ -429,3 +478,53 @@ def test_complete_newline_free_tail_is_retained_before_next_append(tmp_path):
 
     assert read_spectral_rows(journal, spec, artifact_root=root) == [first, second]
     assert journal.read_bytes().endswith(b"\n")
+
+
+def test_untrusted_stage_kind_and_audit_status_are_type_checked(tmp_path):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    journal = root / "spectral_rows.jsonl"
+
+    with pytest.raises(ValueError, match="stage_kind is unsupported"):
+        append_spectral_row(
+            journal,
+            spec,
+            attempt=1,
+            stage_index=0,
+            stage_kind=["initial_locator"],
+            requested_wavelength_m=4e-6,
+            evaluated_wavelength_m=4e-6,
+            frequency_wavelength_m=4e-6,
+            R=0.85,
+            T=0.05,
+            A=0.1,
+            mesh_element_count=12,
+            mesh_vertex_count=8,
+            solve_seconds=0.2,
+            audit_artifact=_artifact(root, spec, 4e-6),
+            artifact_root=root,
+            created_at_epoch=1000.0,
+        )
+
+    artifact = _artifact(root, spec, 5e-6)
+    artifact["audit_status"] = ["measurement_complete"]
+    with pytest.raises(ValueError, match="audit_status is not complete"):
+        append_spectral_row(
+            journal,
+            spec,
+            attempt=1,
+            stage_index=0,
+            stage_kind="initial_locator",
+            requested_wavelength_m=5e-6,
+            evaluated_wavelength_m=5e-6,
+            frequency_wavelength_m=5e-6,
+            R=0.15,
+            T=0.05,
+            A=0.8,
+            mesh_element_count=12,
+            mesh_vertex_count=8,
+            solve_seconds=0.2,
+            audit_artifact=artifact,
+            artifact_root=root,
+            created_at_epoch=1001.0,
+        )

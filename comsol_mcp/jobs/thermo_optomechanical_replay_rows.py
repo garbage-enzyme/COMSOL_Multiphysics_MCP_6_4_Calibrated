@@ -312,6 +312,8 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             or frame["topology_change_allowed"] is not False
         ):
             raise ValueError("frame evidence is invalid")
+        _hex_digest(mesh["identity_sha256"], "mesh identity_sha256")
+        _hex_digest(frame["identity_sha256"], "frame identity_sha256")
         _finite(payload["deformation_scale"], "deformation scale")
         _finite(payload["displacement_to_length"], "displacement ratio")
         return
@@ -336,6 +338,8 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             or payload["source_geometry_sha256"] == payload["deformed_geometry_sha256"]
         ):
             raise ValueError("deformation transfer evidence is invalid")
+        _hex_digest(payload["source_geometry_sha256"], "source_geometry_sha256")
+        _hex_digest(payload["deformed_geometry_sha256"], "deformed_geometry_sha256")
         return
     if stage_id == "optical_replay":
         payload = _exact(
@@ -370,6 +374,11 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             solved = _finite(row["solved_wavelength_m"], "solved wavelength")
             if requested != solved:
                 raise ValueError("optical replay wavelength readback is not exact")
+            # Validate against the declared grid before hashing so a malformed
+            # array/object branch yields the intended ValueError, never a
+            # TypeError from an unhashable set member.
+            if row["branch"] not in spec["optical_replay"]["branches"]:
+                raise ValueError("optical replay coordinates differ from the declared grid")
             observed.add((requested, row["branch"]))
             for name in ("baseline_rta", "deformed_rta"):
                 rta = _exact(row[name], {"R", "T", "A", "closure_residual", "passive"}, name)
@@ -392,7 +401,11 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
         if (
             not isinstance(controls, list)
             or len(controls) != len(spec["validation_controls"])
-            or {item.get("control_id") for item in controls if isinstance(item, Mapping)}
+            or {
+                item.get("control_id")
+                for item in controls
+                if isinstance(item, Mapping) and isinstance(item.get("control_id"), str)
+            }
             != set(spec["validation_controls"])
             or any(
                 not isinstance(item, Mapping)
@@ -444,7 +457,12 @@ def _artifact_descriptor(path: Path, root: Path) -> dict[str, Any]:
 
 
 def _load_stage_evidence(root: Path, stage_id: str, spec: Mapping[str, Any]) -> dict[str, Any]:
-    path = root / stage_id / "evidence.json"
+    resolved_root = root.resolve()
+    path = (resolved_root / stage_id / "evidence.json").resolve()
+    try:
+        path.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError("thermo-optomechanical evidence escapes the job directory") from exc
     if not path.is_file() or path.stat().st_size > MAX_STAGE_EVIDENCE_BYTES:
         raise ValueError("completed thermo-optomechanical stage evidence is missing or oversized")
     return _validate_common_evidence(read_json(path), spec, stage_id)

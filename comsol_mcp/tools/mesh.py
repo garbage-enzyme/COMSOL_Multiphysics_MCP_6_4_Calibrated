@@ -51,12 +51,15 @@ def create_mesh_sequence(
         if build:
             mesh_seq.run()
             result["built"] = True
+            collected_statistics = False
             try:
                 if hasattr(mesh_seq, "getNumElem"):
                     result["num_elements"] = int(mesh_seq.getNumElem())
+                    collected_statistics = True
                 if hasattr(mesh_seq, "getNumVertex"):
                     result["num_vertices"] = int(mesh_seq.getNumVertex())
-                result["statistics_complete"] = True
+                    collected_statistics = True
+                result["statistics_complete"] = collected_statistics
             except Exception as exc:
                 result["statistics_complete"] = False
                 result["statistics_error_type"] = type(exc).__name__
@@ -66,8 +69,15 @@ def create_mesh_sequence(
             try:
                 mesh_list.remove(mesh_name)
             except Exception:
-                return {"success": False, "error": "Mesh setup failed and rollback was incomplete.", "rolled_back": False}
-        return {"success": False, "error": "Mesh setup failed.", "rolled_back": True}
+                return {
+                    "success": False,
+                    "error": "Mesh setup failed and rollback was incomplete.",
+                    "rolled_back": False,
+                }
+            return {"success": False, "error": "Mesh setup failed.", "rolled_back": True}
+        # Nothing was created, so nothing was rolled back; reporting a rollback
+        # here would misrepresent the model state to the caller.
+        return {"success": False, "error": "Mesh setup failed.", "rolled_back": False}
 
 
 def get_mesh_info(
@@ -94,6 +104,7 @@ def get_mesh_info(
         return {"success": False, "error": "No meshes defined in model."}
 
     target_tag = None
+    label_failure = None
     if mesh_name is None:
         target_tag = tags[0]
     elif mesh_name in tags:
@@ -105,13 +116,17 @@ def get_mesh_info(
                     target_tag = tag
                     break
             except Exception as exc:
-                return {
-                    "success": False,
-                    "error": "Mesh label lookup failed.",
-                    "mesh_tag": tag,
-                    "error_type": type(exc).__name__,
-                }
+                if label_failure is None:
+                    label_failure = (tag, type(exc).__name__)
+                continue
     if target_tag is None:
+        if label_failure is not None:
+            return {
+                "success": False,
+                "error": "Mesh label lookup failed.",
+                "mesh_tag": label_failure[0],
+                "error_type": label_failure[1],
+            }
         return {
             "success": False,
             "error": f"Mesh not found: {mesh_name}. Available tags: {tags}",
@@ -125,7 +140,7 @@ def get_mesh_info(
     }
     try:
         info["label"] = str(mesh.label())
-    except Exception:
+    except Exception:  # noqa: S110 - labels are optional diagnostics
         pass
     try:
         info["num_elements"] = int(mesh.getNumElem())
@@ -143,15 +158,15 @@ def get_mesh_info(
 
 def register_mesh_tools(mcp: MCPServer) -> None:
     """Register mesh tools with the MCP server."""
-    
+
     @mcp.tool()
     def mesh_list(model_name: Optional[str] = None) -> dict:
         """
         List all mesh sequences in a model.
-        
+
         Args:
             model_name: Model name (default: current model)
-        
+
         Returns:
             List of mesh sequence names
         """
@@ -159,9 +174,9 @@ def register_mesh_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             meshes = model.meshes()
             return {
@@ -171,21 +186,18 @@ def register_mesh_tools(mcp: MCPServer) -> None:
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to list meshes: {str(e)}"}
-    
+
     @mcp.tool()
-    def mesh_create(
-        mesh_name: Optional[str] = None,
-        model_name: Optional[str] = None
-    ) -> dict:
+    def mesh_create(mesh_name: Optional[str] = None, model_name: Optional[str] = None) -> dict:
         """
         Run a mesh sequence to generate the mesh.
-        
+
         This executes the meshing operations defined in the mesh sequence.
-        
+
         Args:
             mesh_name: Mesh sequence name (default: run all mesh sequences)
             model_name: Model name (default: current model)
-        
+
         Returns:
             Mesh generation status
         """
@@ -193,9 +205,9 @@ def register_mesh_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             model.mesh(mesh_name)
             return {
@@ -216,11 +228,11 @@ def register_mesh_tools(mcp: MCPServer) -> None:
     ) -> dict:
         """
         Create a mesh sequence with a single meshing feature and optionally build it.
-        
+
         COMSOL does NOT auto-create a mesh sequence; one must be created before
         solving. This tool creates a mesh sequence on the component, adds one
         meshing feature (default FreeTet = free tetrahedral), and runs it.
-        
+
         Args:
             mesh_name: Tag/name for the mesh sequence (default 'mesh1')
             element_type: Meshing operation type, e.g. 'FreeTet' (free tetrahedral,
@@ -229,7 +241,7 @@ def register_mesh_tools(mcp: MCPServer) -> None:
             component_name: Component name (default: first component)
             build: If True (default), immediately build the mesh after creation.
             model_name: Model name (default: current model)
-        
+
         Returns:
             Created mesh info including element counts if built.
         """
@@ -237,9 +249,9 @@ def register_mesh_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return create_mesh_sequence(
                 model,
@@ -250,21 +262,21 @@ def register_mesh_tools(mcp: MCPServer) -> None:
             )
         except Exception as e:
             return {"success": False, "error": f"Failed to create mesh sequence: {str(e)}"}
-    
+
     @mcp.tool()
     def mesh_info(
         mesh_name: Optional[str] = None,
         component_name: Optional[str] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> dict:
         """
         Get information about a mesh.
-        
+
         Args:
             mesh_name: Mesh sequence name (default: first mesh)
             component_name: Component containing the mesh (default: first)
             model_name: Model name (default: current model)
-        
+
         Returns:
             Mesh statistics including element counts
         """
@@ -272,9 +284,9 @@ def register_mesh_tools(mcp: MCPServer) -> None:
         if model is None:
             return {
                 "success": False,
-                "error": f"Model not found: {model_name or 'no current model'}"
+                "error": f"Model not found: {model_name or 'no current model'}",
             }
-        
+
         try:
             return get_mesh_info(
                 model,

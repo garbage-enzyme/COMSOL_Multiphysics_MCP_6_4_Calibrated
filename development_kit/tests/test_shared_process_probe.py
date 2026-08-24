@@ -585,3 +585,72 @@ def test_windows_file_version_validates_pointer_length_signature_and_api_types(
         ctypes.POINTER(ctypes.c_void_p),
         ctypes.POINTER(wintypes.UINT),
     ]
+
+
+def test_mph_client_classification_requires_a_real_mph_module_token():
+    unrelated = _record(30, 0, "python.exe", ["python.exe", "-m", "mphclient"])
+    snapshot = collect_shared_preflight_snapshot(
+        process_provider=lambda: [unrelated],
+        listener_provider=list,
+        window_provider=dict,
+        version_provider=lambda path: None,
+        clock=lambda: 1000.0,
+    )
+
+    assert snapshot["processes"] == []
+
+    real_mph = _record(30, 0, "python.exe", ["python.exe", "-c", "import mph; mph.Client()"])
+    snapshot = collect_shared_preflight_snapshot(
+        process_provider=lambda: [real_mph],
+        listener_provider=list,
+        window_provider=dict,
+        version_provider=lambda path: None,
+        clock=lambda: 1000.0,
+    )
+
+    assert [item["kind"] for item in snapshot["processes"]] == ["mph_client"]
+
+
+def test_raced_or_zombie_process_marks_inventory_incomplete(monkeypatch):
+    class _RacingProcess:
+        pid = 99
+
+        def oneshot(self):
+            return nullcontext()
+
+        def cmdline(self):
+            return ["comsol"]
+
+        def exe(self):
+            raise psutil.ZombieProcess(99)
+
+        def ppid(self):
+            raise psutil.NoSuchProcess(99)
+
+    monkeypatch.setattr(
+        process_probe.psutil, "process_iter", lambda *_args, **_kwargs: iter([_RacingProcess()])
+    )
+
+    records, complete = process_probe._process_records()
+
+    # The process was silently omitted from the snapshot, so the inventory
+    # must not claim completeness.
+    assert records == []
+    assert complete is False
+
+
+def test_custom_process_provider_honors_the_bounded_maximum():
+    records = [
+        _record(index, index, "proc.exe", ["proc"])
+        for index in range(process_probe.MAX_PROCESS_RECORDS + 1)
+    ]
+
+    with pytest.raises(RuntimeError, match="process inventory exceeds the bounded maximum"):
+        collect_shared_preflight_snapshot(
+            process_provider=lambda: records,
+            listener_provider=lambda: [],
+            window_provider=lambda: [],
+            version_provider=lambda path: None,
+            clock=lambda: 1000.0,
+            exclude_pids=(),
+        )

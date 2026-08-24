@@ -70,7 +70,10 @@ def _candidate_values(value: object, space: Mapping[str, Any]) -> dict[str, Any]
             continue
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):
             raise ValueError(f"candidate.{variable_id} must be numeric")
-        number = float(raw)
+        try:
+            number = float(raw)
+        except OverflowError as exc:
+            raise ValueError(f"candidate.{variable_id} must be finite") from exc
         if not math.isfinite(number):
             raise ValueError(f"candidate.{variable_id} must be finite")
         if kind == "integer":
@@ -79,6 +82,10 @@ def _candidate_values(value: object, space: Mapping[str, Any]) -> dict[str, Any]
             normalized_value: int | float = int(number)
         else:
             normalized_value = round(number, digits)
+            if normalized_value == 0.0:
+                # Canonicalize negative zero so numerically identical values
+                # share one fingerprint under JSON serialization.
+                normalized_value = 0.0
         if not variable["lower"] <= normalized_value <= variable["upper"]:
             raise ValueError(f"candidate.{variable_id} is outside the frozen bounds")
         normalized[variable_id] = normalized_value
@@ -144,7 +151,7 @@ def normalize_candidate_record(value: object, design_space: object) -> dict[str,
     if len(constraint_ids) != len(set(constraint_ids)):
         raise ValueError("preflight constraint IDs must be unique")
     state = raw["lifecycle_state"]
-    if state not in _STATES:
+    if not isinstance(state, str) or state not in _STATES:
         raise ValueError("lifecycle_state is unsupported")
     terminal_reason = _optional_text(raw["terminal_reason"], "terminal_reason", maximum=1024)
     if (state in _TERMINAL_STATES) != (terminal_reason is not None):

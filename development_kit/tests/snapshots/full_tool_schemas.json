@@ -4322,6 +4322,19 @@
         "title": "Ewfd Tag",
         "type": "string"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 16384
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "geometry_name": {
         "anyOf": [
           {
@@ -13805,8 +13818,8 @@
           },
           "values_flat": {
             "items": {
-              "maximum": 1e+308,
-              "minimum": -1e+308,
+              "maximum": 1.0,
+              "minimum": 0.0,
               "type": "number"
             },
             "maxItems": 2048,

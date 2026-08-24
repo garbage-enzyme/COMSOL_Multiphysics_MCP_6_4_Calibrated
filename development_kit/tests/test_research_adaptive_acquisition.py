@@ -124,3 +124,45 @@ def test_adaptive_optimizer_warmup_tell_checkpoint_and_exact_replay():
     restored = _optimizer().restore(_space(), checkpoint)
     assert restored.state() == optimizer.state()
     assert restored.ask() == optimizer.ask()
+
+
+def test_ask_windows_completed_observations_to_the_acquisition_limit(monkeypatch):
+    optimizer = _optimizer()(_space(), seed=17001, warmup_count=2, candidate_pool_count=320)
+    arguments = {
+        "candidate_fingerprint": "a" * 64,
+        "status": "completed",
+        "score_fingerprint": "b" * 64,
+        "losses": {"peak": 1.0, "q": 0.5},
+    }
+    for index in range(300):
+        proposal = optimizer.ask()
+        fingerprint = f"{index:064x}"[-64:]
+        assert optimizer.tell(proposal, **{**arguments, "candidate_fingerprint": fingerprint})
+
+    module = importlib.import_module("comsol_mcp.research.adaptive_acquisition")
+    captured = {}
+    real = module.select_expected_improvement_candidate
+
+    def spy(space, observations, candidates):
+        captured["count"] = len(observations)
+        return real(space, observations, candidates)
+
+    monkeypatch.setattr(module, "select_expected_improvement_candidate", spy)
+
+    followup = optimizer.ask()
+    assert followup["proposal_index"] >= 0
+    assert captured["count"] == module.MAX_GP_OBSERVATIONS
+
+
+def test_numerically_singular_covariance_reports_the_public_value_error():
+    # Two observations separated by less than one scaled ULP make the RBF
+    # covariance numerically singular. numpy raises LinAlgError, which
+    # subclasses ValueError across the declared numpy>=2.0 range, so the
+    # public contract is the wrapped ValueError, not a raw LinAlgError.
+    near = [
+        {"values": {"patch_length_x": 90.0, "patch_length_y": 72.0}, "loss": 1.5},
+        {"values": {"patch_length_x": 90.00000000000001, "patch_length_y": 72.0}, "loss": 1.6},
+    ]
+    candidates = [{"patch_length_x": 100.0, "patch_length_y": 80.0}]
+    with pytest.raises(ValueError, match="covariance is not solvable"):
+        _selector()(_space(), near, candidates, length_scale=0.25, noise=1e-300)

@@ -129,6 +129,32 @@ def test_side_pair_classification_requires_cell_coordinates():
         )
 
 
+def test_side_pair_classification_requires_exterior_boundaries():
+    bbox = (0.0, 1.0, 0.0, 1.0, 0.0, 1.0)
+    interior_edge_face = {
+        "boundary_number": 41,
+        "normal": [0.0, 0.0, -1.0],
+        "center": [0.5, 0.5, 0.0],
+        "interior": True,
+    }
+    exterior_bottom = {
+        "boundary_number": 42,
+        "normal": [0.0, 0.0, -1.0],
+        "center": [0.5, 0.5, 0.0],
+    }
+
+    result = _identify_side_pairs([interior_edge_face, exterior_bottom], bbox=bbox)
+
+    assert result["bottom"] == [42]
+    assert result["top"] == []
+    assert result["x_src"] == result["x_dst"] == result["y_src"] == result["y_dst"] == []
+
+
+def test_square_spectral_matrix_layout_is_rejected_as_ambiguous():
+    with pytest.raises(ValueError, match="square and its layout is ambiguous"):
+        _normalize_spectral_rows([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]], 3)
+
+
 def _side_pairs():
     return {"x_src": [1], "x_dst": [2], "y_src": [3], "y_dst": [4]}
 
@@ -245,9 +271,7 @@ def test_patch_topology_uses_bottom_top_intersection_when_face_counts_tie():
         },
     ]
 
-    domain, footprint = _identify_patch_topology(
-        boundaries, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0]
-    )
+    domain, footprint = _identify_patch_topology(boundaries, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0])
 
     assert domain == 3
     assert footprint == [1]
@@ -398,15 +422,9 @@ def test_spectral_emissivity_preserves_transmission_and_prefers_absorptivity(mon
     )
 
     assert evaluated["spectral_data"][0]["emissivity"] == 0.5
-    assert (
-        evaluated["spectral_data"][0]["emissivity_basis"]
-        == "evaluated_absorptivity"
-    )
+    assert evaluated["spectral_data"][0]["emissivity_basis"] == "evaluated_absorptivity"
     assert derived["spectral_data"][0]["emissivity"] == pytest.approx(0.5)
-    assert (
-        derived["spectral_data"][0]["emissivity_basis"]
-        == "one_minus_reflectance_transmittance"
-    )
+    assert derived["spectral_data"][0]["emissivity_basis"] == "one_minus_reflectance_transmittance"
 
 
 class MeshFeatures:
@@ -488,3 +506,168 @@ def test_periodic_mesh_failure_removes_only_new_sequence():
 
     assert component.meshes.removed == ["mesh2"]
     assert set(component.meshes.nodes) == {"mesh1"}
+
+
+class BuildBlock:
+    def __init__(self, pos, size):
+        self.pos = pos
+        self.size = size
+        self.props = {}
+
+    def getString(self, name):
+        if name == "pos":
+            return self.pos
+        if name == "size":
+            return self.size
+        if name == "action":
+            return "union"
+        raise RuntimeError(f"unsupported property {name}")
+
+    def set(self, name, value):
+        self.props[name] = value
+
+    def selection(self, _name):
+        return type("Selection", (), {"set": lambda self, _v: None})()
+
+
+class BuildFeatures:
+    def __init__(self, nodes):
+        self.nodes = dict(nodes)
+        self.created = []
+        self.removed = []
+
+    def tags(self):
+        return [JavaStringLike(tag) for tag in self.nodes]
+
+    def get(self, tag):
+        return self.nodes[str(tag)]
+
+    def create(self, tag, kind):
+        tag = str(tag)
+        if tag in self.nodes:
+            raise RuntimeError(f"duplicate feature {tag}")
+        feature = BuildBlock(None, None)
+        self.nodes[tag] = feature
+        self.created.append(tag)
+        return feature
+
+    def remove(self, tag):
+        self.removed.append(str(tag))
+        self.nodes.pop(str(tag), None)
+
+
+class BuildGeom:
+    def __init__(self, features):
+        self._features = features
+        self.runs = 0
+
+    def feature(self):
+        return self._features
+
+    def getNBoundaries(self):
+        return 0
+
+    def getNDomains(self):
+        return 2
+
+    def getSDim(self):
+        return 3
+
+    def getUpDown(self):
+        return ([], [])
+
+    def run(self):
+        self.runs += 1
+
+
+def test_air_block_auto_detection_must_contain_the_patch_footprint():
+    geom_features = BuildFeatures(
+        {
+            # Taller substrate is the largest block but is not the air region.
+            "sub": BuildBlock("0, 0, 0", "1e-6, 1e-6, 5e-6"),
+            "air": BuildBlock("0, 0, 5e-6", "1e-6, 1e-6, 2e-6"),
+        }
+    )
+    geom = BuildGeom(geom_features)
+
+    assert _find_air_block_tag(geom) == "sub"
+    with pytest.raises(ValueError, match="does not contain the patch"):
+        mim_patch_module._require_air_block_contains_patch(
+            geom,
+            "sub",
+            [1e-7, 1e-7, 5.5e-6],
+            [2e-7, 2e-7, 1e-7],
+        )
+
+    # The genuine air block accepts the same footprint.
+    mim_patch_module._require_air_block_contains_patch(
+        geom,
+        "air",
+        [1e-7, 1e-7, 5.5e-6],
+        [2e-7, 2e-7, 1e-7],
+    )
+
+
+def test_failed_build_rolls_back_created_geometry_features(monkeypatch):
+    features = BuildFeatures({"air": BuildBlock("0, 0, 0", "1e-6, 1e-6, 4e-6")})
+    geom = BuildGeom(features)
+
+    class Component:
+        def geom(self, _name):
+            return geom
+
+    class Java:
+        def component(self, _name):
+            return Component()
+
+    class Model:
+        java = Java()
+
+    monkeypatch.setattr(mim_patch_module.session_manager, "get_model", lambda _name=None: Model())
+    # The boundary probe needs a live JVM; the rollback contract under test
+    # begins once probing reports no readable patch topology.
+    monkeypatch.setattr(mim_patch_module, "_probe_boundaries", lambda _geom: ([], 2, 0, 3))
+    server = MCPServer("mim-build-rollback-test")
+    register_mim_patch_tools(server)
+    build = server._tool_manager._tools["mim_patch_build"].fn
+
+    first = build([2e-7, 2e-7, 1e-7], [1e-7, 1e-7, 1e-7], geometry_name="geom1")
+
+    assert first["success"] is False
+    assert "patch topology" in first["error"]
+    assert first["rolled_back"] is True
+    assert features.removed == ["dif1", "b_pat"]
+    assert set(features.nodes) == {"air"}
+    assert geom.runs == 2
+
+    second = build([2e-7, 2e-7, 1e-7], [1e-7, 1e-7, 1e-7], geometry_name="geom1")
+
+    assert "duplicate feature" not in second["error"]
+    assert "patch topology" in second["error"]
+
+
+def test_build_failure_before_feature_creation_reports_no_rollback_claims(monkeypatch):
+    features = BuildFeatures({})  # no air block candidate at all
+
+    class Component:
+        def geom(self, _name):
+            return BuildGeom(features)
+
+    class Java:
+        def component(self, _name):
+            return Component()
+
+    class Model:
+        java = Java()
+
+    monkeypatch.setattr(mim_patch_module.session_manager, "get_model", lambda _name=None: Model())
+    server = MCPServer("mim-build-nofeature-test")
+    register_mim_patch_tools(server)
+    build = server._tool_manager._tools["mim_patch_build"].fn
+
+    result = build([2e-7, 2e-7, 1e-7], [1e-7, 1e-7, 1e-7], geometry_name="geom1")
+
+    assert result == {
+        "success": False,
+        "error": "Could not auto-detect air block tag. Please specify air_block_tag.",
+    }

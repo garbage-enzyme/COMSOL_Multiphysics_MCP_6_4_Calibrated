@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import subprocess
 import sys
@@ -169,6 +170,14 @@ def test_new_tool_without_explicit_side_effect_class_fails_closed(monkeypatch):
 
     with pytest.raises(ValueError, match="no explicit side-effect classification"):
         catalog._build_registry()
+
+
+def test_model_mutating_mim_patch_build_requires_a_model_revision():
+    metadata = TOOL_METADATA["mim_patch_build"]
+
+    assert metadata.side_effect_class == "model_mutation"
+    assert metadata.requires_model_revision is True
+    assert metadata.advances_model_revision is True
 
 
 def test_profile_registrar_selection_is_derived_from_tool_specs():
@@ -374,6 +383,24 @@ def test_embedded_knowledge_contains_invalid_utf8(monkeypatch):
     assert embedded_module.get_docs("mph_api")["success"] is False
 
 
+def test_embedded_knowledge_load_failures_are_logged_for_diagnosis(caplog, monkeypatch):
+    monkeypatch.setattr(
+        embedded_module,
+        "read_file_bytes_bounded",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("unreadable")),
+    )
+
+    with caplog.at_level(logging.ERROR, logger="src.knowledge.embedded"):
+        result = embedded_module.get_docs("mph_api")
+
+    assert result == {
+        "success": False,
+        "error": "Could not load documentation for: mph_api",
+    }
+    assert any("failed to load" in record.getMessage() for record in caplog.records)
+    assert any(record.exc_info is not None for record in caplog.records)
+
+
 def test_embedded_knowledge_responses_do_not_expose_module_state():
     docs = embedded_module.list_docs()
     docs["topics"][0]["keywords"].append("injected")
@@ -446,3 +473,18 @@ assert len(TOOL_METADATA) == 170
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+def test_empty_knowledge_documentation_reports_a_distinct_error(tmp_path, monkeypatch):
+    import comsol_mcp.knowledge.embedded as embedded_module
+
+    topic = next(iter(embedded_module.KNOWLEDGE_FILES))
+    target = tmp_path / embedded_module.KNOWLEDGE_FILES[topic]["file"]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("", encoding="utf-8")
+    monkeypatch.setattr(embedded_module, "KNOWLEDGE_DIR", tmp_path)
+
+    result = embedded_module.get_docs(topic)
+
+    assert result["success"] is False
+    assert "is empty" in result["error"]

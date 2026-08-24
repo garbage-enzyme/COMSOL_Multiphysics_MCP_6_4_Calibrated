@@ -107,6 +107,38 @@ def test_gradient_row_binds_order_sign_scale_and_all_native_identities():
     assert normalize_gradient_record(first, support) == first
 
 
+def test_gradient_row_constraint_values_must_reference_support_constraints():
+    from comsol_mcp.research.derivative_support import normalize_derivative_support
+
+    # The base fixture declares no constraints: any reported value is foreign.
+    row = _gradient()
+    row["constraint_values"] = {"undeclared": 1.0}
+    with pytest.raises(ValueError, match="derivative-support constraint ids"):
+        normalize_gradient_record(row, normalize_gradient_support())
+
+    support_value = _support()
+    support_value["constraints"] = [
+        {
+            "constraint_id": "power",
+            "kind": "bound",
+            "expression": "R+T+A",
+            "unit": "1",
+            "lower": 0.99,
+            "upper": 1.01,
+            "derivative_supported": False,
+        }
+    ]
+    bound_support = normalize_derivative_support(support_value)
+    accepted = _gradient()
+    accepted["support_fingerprint"] = bound_support["support_fingerprint"]
+    accepted["constraint_values"] = {"power": 1.0}
+    normalized = normalize_gradient_record(accepted, bound_support)
+    assert normalized["constraint_values"] == {"power": 1.0}
+    accepted["constraint_values"] = {"power": 1.0, "foreign": 2.0}
+    with pytest.raises(ValueError, match="derivative-support constraint ids"):
+        normalize_gradient_record(accepted, bound_support)
+
+
 @pytest.mark.parametrize(
     "field,value",
     [
@@ -143,6 +175,25 @@ def test_optimizer_rejects_unreviewed_backend_or_unbounded_commit_fraction():
     value = copy.deepcopy(_optimizer())
     value["budget"]["max_commit_fraction"] = 1.01
     with pytest.raises(ValueError, match="must not exceed one"):
+        normalize_native_optimizer_configuration(value)
+
+
+def test_untrusted_json_leaves_reject_unhashable_values_as_value_errors():
+    # Set-membership checks on untrusted leaves must never leak TypeError for
+    # valid-JSON arrays or objects.
+    row = _gradient()
+    row["evidence_state"] = ["native_unchecked"]
+    with pytest.raises(ValueError, match="evidence_state"):
+        normalize_gradient_record(row, normalize_gradient_support())
+
+    value = copy.deepcopy(_optimizer())
+    value["method"] = {"gcmma": True}
+    with pytest.raises(ValueError, match="method is unsupported"):
+        normalize_native_optimizer_configuration(value)
+
+    value = copy.deepcopy(_optimizer())
+    value["schema_version"] = ["1.0.0"]
+    with pytest.raises(ValueError, match="schema identity"):
         normalize_native_optimizer_configuration(value)
 
 

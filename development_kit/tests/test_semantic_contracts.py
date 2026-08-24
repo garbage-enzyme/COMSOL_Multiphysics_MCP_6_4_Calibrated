@@ -529,7 +529,10 @@ import json, subprocess, sys
 events = []
 sys.addaudithook(
     lambda event, args: events.append(event)
-    if event in {'os.system', 'os.startfile', 'os.spawn', 'os.posix_spawn', 'subprocess.Popen'} else None
+    if event in {
+        'os.system', 'os.startfile', 'os.spawn',
+        'os.posix_spawn', 'subprocess.Popen',
+    } else None
 )
 process = subprocess.Popen(
     [sys.executable, '-c', 'pass'],
@@ -556,7 +559,10 @@ import json, sys
 process_launch_events = []
 sys.addaudithook(
     lambda event, args: process_launch_events.append(event)
-    if event in {'os.system', 'os.startfile', 'os.spawn', 'os.posix_spawn', 'subprocess.Popen'} else None
+    if event in {
+        'os.system', 'os.startfile', 'os.spawn',
+        'os.posix_spawn', 'subprocess.Popen',
+    } else None
 )
 import src.knowledge.semantic_contracts
 import development_kit.benchmarks.semantic_benchmark
@@ -743,3 +749,76 @@ def test_retrieval_acceptance_compares_before_and_after_ownership_snapshots():
 
     assert retrieval_module._ownership_summary(before) == retrieval_module.CLEAN_OWNERSHIP
     assert retrieval_module._ownership_summary(after) != retrieval_module._ownership_summary(before)
+
+
+@pytest.mark.parametrize("character", ["\u0085", "\u009f", "\u2028", "\u2029"])
+def test_identity_text_rejects_c1_and_unicode_separator_controls(character):
+    with pytest.raises(ValueError, match="control characters"):
+        validate_model_manifest(
+            {
+                "schema_version": "1",
+                "model_id": f"model{character}id",
+                "revision": "local-test",
+                "model_path": "D:/comsol_semantic/models/minilm/local-test",
+                "model_sha256": SHA_A,
+                "dimension": 384,
+            }
+        )
+
+
+def _evaluation_payload(mutate=None) -> dict:
+    queries = [
+        {
+            "id": f"q{index:02d}",
+            "query": f"query text {index}",
+            "category": "exact_clientapi",
+            "style": "exact",
+            "relevant": [{"source": "manual.pdf", "page": 1}],
+            "expected_no_relevant": False,
+            "judge_note": "reviewed",
+        }
+        for index in range(60)
+    ]
+    payload = {
+        "schema_version": "1",
+        "corpus_fingerprint": SHA_A,
+        "queries": queries,
+    }
+    if mutate is not None:
+        mutate(payload)
+    return payload
+
+
+def test_evaluation_query_ids_are_canonicalized_like_other_identities():
+    with pytest.raises(ValueError, match="surrounding whitespace"):
+        validate_evaluation_set(
+            _evaluation_payload(lambda payload: payload["queries"][0].update(id="q01 "))
+        )
+    with pytest.raises(ValueError, match="control characters"):
+        validate_evaluation_set(
+            _evaluation_payload(lambda payload: payload["queries"][0].update(id="q01\u2028x"))
+        )
+    normalized = validate_evaluation_set(_evaluation_payload())
+    assert [item["id"] for item in normalized["queries"]] == [
+        f"q{index:02d}" for index in range(60)
+    ]
+
+
+def test_evaluation_set_name_and_frozen_at_are_validated_not_coerced():
+    payload = _evaluation_payload()
+    payload.pop("name", None)
+    payload.pop("frozen_at", None)
+
+    normalized = validate_evaluation_set(payload)
+    assert normalized["name"] == "semantic-retrieval-evaluation"
+    assert normalized["frozen_at"] == ""
+
+    bad_name = _evaluation_payload()
+    bad_name["name"] = 123
+    with pytest.raises(ValueError, match="name must be a nonempty string"):
+        validate_evaluation_set(bad_name)
+
+    bad_frozen = _evaluation_payload()
+    bad_frozen["frozen_at"] = 5
+    with pytest.raises(ValueError, match="frozen_at must be a string"):
+        validate_evaluation_set(bad_frozen)

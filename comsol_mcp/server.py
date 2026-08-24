@@ -92,11 +92,16 @@ def register_all_resources(server: MCPServer | None = None) -> None:
     original_templates = dict(target._resource_manager._templates)
     try:
         register_model_resources(target)
-    except Exception:
-        target._resource_manager._resources.clear()
-        target._resource_manager._resources.update(original_resources)
-        target._resource_manager._templates.clear()
-        target._resource_manager._templates.update(original_templates)
+    except Exception as registration_error:
+        try:
+            target._resource_manager._resources.clear()
+            target._resource_manager._resources.update(original_resources)
+            target._resource_manager._templates.clear()
+            target._resource_manager._templates.update(original_templates)
+        except Exception as rollback_error:
+            registration_error.add_note(
+                f"resource registry rollback failed: {type(rollback_error).__name__}"
+            )
         raise
     _resource_servers.add(target)
     logger.info("Registered all resources")

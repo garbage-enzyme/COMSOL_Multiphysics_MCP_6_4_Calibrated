@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-from importlib import import_module
 import json
 import os
 import re
 import sys
+from importlib import import_module
 from pathlib import Path
 
 import mph

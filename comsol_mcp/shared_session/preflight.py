@@ -15,7 +15,6 @@ from .contracts import (
     summarize_shared_listener_bindings,
 )
 
-
 SHARED_SERVER_PREFLIGHT_SCHEMA = "comsol_mcp.shared_server_preflight"
 SHARED_SERVER_PREFLIGHT_VERSION = "1.1.0"
 ACCEPTED_RELEASE_LINE = (6, 4, 0)
@@ -35,23 +34,24 @@ _PROCESS_FIELDS = frozenset(
     }
 )
 _LISTENER_FIELDS = frozenset({"host", "port", "pid"})
-_SNAPSHOT_FIELDS = frozenset(
-    {"inventory_complete", "observed_at_epoch", "processes", "listeners"}
-)
-_PROCESS_KINDS = frozenset(
-    {"comsol_desktop", "comsol_server", "mph_client", "other_comsol"}
-)
+_SNAPSHOT_FIELDS = frozenset({"inventory_complete", "observed_at_epoch", "processes", "listeners"})
+_PROCESS_KINDS = frozenset({"comsol_desktop", "comsol_server", "mph_client", "other_comsol"})
 _HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
-_VERSION = re.compile(r"(?<!\d)(\d+)\.(\d+)\.(\d+)\.(\d+)(?!\d)")
+# The first digit-run must be the four-part build: a non-digit prefix (the
+# localized product name) is allowed, but the match ends at the build, so
+# extra dotted segments or trailing numbers keep the readback unreadable.
+_VERSION = re.compile(r"^\D*?(\d+)\.(\d+)\.(\d+)\.(\d+)(?![\d.])")
+# Display fallbacks may only use a parenthesized build whose digits reach the
+# closing parenthesis (any localized label prefix allowed): "(Build: 293)",
+# "(开发版本: 293)", "(293)". Architecture text such as "(64-bit)" leaves the
+# digit run mid-parenthesis and must not be accepted as a build number.
 _CLIENTAPI_DISPLAY_VERSION = re.compile(
-    r"^[^\d]*(\d+)\.(\d+)(?:\.(\d+))?.*?\([^\d)]*(\d+)[^)]*\)"
+    r"^[^\d]*(\d+)\.(\d+)(?:\.(\d+))?.*\(\D*(\d+)\s*\)"
 )
 
 
 def _exact_mapping(value: Any, fields: frozenset[str], label: str) -> dict[str, Any]:
-    if not isinstance(value, Mapping) or not all(
-        isinstance(key, str) for key in value
-    ):
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ValueError(f"{label} must be an object with string keys")
     actual = set(value)
     if actual != fields:
@@ -139,9 +139,7 @@ def _normalize_process(value: Any, index: int) -> dict[str, Any]:
         raise ValueError(f"{label}.responding must be boolean")
     body = {
         "pid": _positive_integer(raw["pid"], f"{label}.pid"),
-        "parent_pid": _positive_integer(
-            raw["parent_pid"], f"{label}.parent_pid", allow_zero=True
-        ),
+        "parent_pid": _positive_integer(raw["parent_pid"], f"{label}.parent_pid", allow_zero=True),
         "kind": kind,
         "create_time": _finite(raw["create_time"], f"{label}.create_time"),
         "command_signature": signature.casefold(),
@@ -152,12 +150,14 @@ def _normalize_process(value: Any, index: int) -> dict[str, Any]:
         ),
         "responding": raw["responding"],
     }
+    # Identity keys on process replacement only. Windows GetProcessTimes
+    # exposes creation time at 100 ns resolution, so a recycled PID colliding
+    # on create_time across two probes is not physically realizable; the
+    # varying window_count/responding fields are deliberately excluded.
     body["identity_sha256"] = canonical_sha256_v1(
         {
             key: body[key]
-            for key in (
-                "pid", "kind", "create_time", "command_signature", "file_version"
-            )
+            for key in ("pid", "kind", "create_time", "command_signature", "file_version")
         }
     )
     return body
@@ -167,9 +167,7 @@ def _normalize_listener(value: Any, index: int) -> dict[str, Any]:
     label = f"listeners[{index}]"
     raw = _exact_mapping(value, _LISTENER_FIELDS, label)
     host, bind_scope = normalize_shared_listener_bind_host(raw["host"])
-    port = normalize_shared_server_endpoint(
-        {"host": "127.0.0.1", "port": raw["port"]}
-    ).port
+    port = normalize_shared_server_endpoint({"host": "127.0.0.1", "port": raw["port"]}).port
     return {
         "host": host,
         "port": port,
@@ -189,21 +187,15 @@ def normalize_shared_preflight_snapshot(value: Any) -> dict[str, Any]:
         raise ValueError("preflight processes must be a bounded list")
     if not isinstance(listeners, list) or len(listeners) > MAX_INVENTORY_LISTENERS:
         raise ValueError("preflight listeners must be a bounded list")
-    normalized_processes = [
-        _normalize_process(item, index) for index, item in enumerate(processes)
-    ]
+    normalized_processes = [_normalize_process(item, index) for index, item in enumerate(processes)]
     pids = [item["pid"] for item in normalized_processes]
     if len(pids) != len(set(pids)):
         raise ValueError("preflight process inventory contains duplicate PIDs")
     return {
         "inventory_complete": True,
-        "observed_at_epoch": _finite(
-            raw["observed_at_epoch"], "preflight observation time"
-        ),
+        "observed_at_epoch": _finite(raw["observed_at_epoch"], "preflight observation time"),
         "processes": normalized_processes,
-        "listeners": [
-            _normalize_listener(item, index) for index, item in enumerate(listeners)
-        ],
+        "listeners": [_normalize_listener(item, index) for index, item in enumerate(listeners)],
     }
 
 
@@ -233,9 +225,7 @@ def classify_shared_server_preflight(
     processes = second["processes"]
     desktops = [item for item in processes if item["kind"] == "comsol_desktop"]
     servers = [item for item in processes if item["kind"] == "comsol_server"]
-    collisions = [
-        item for item in processes if item["kind"] in {"mph_client", "other_comsol"}
-    ]
+    collisions = [item for item in processes if item["kind"] in {"mph_client", "other_comsol"}]
     first_by_pid = {item["pid"]: item for item in first["processes"]}
     second_by_pid = {item["pid"]: item for item in processes}
     changed = [
@@ -244,15 +234,9 @@ def classify_shared_server_preflight(
         if item["pid"] not in first_by_pid
         or item["identity_sha256"] != first_by_pid[item["pid"]]["identity_sha256"]
     ]
-    changed.extend(
-        item for item in first["processes"] if item["pid"] not in second_by_pid
-    )
-    first_listener = summarize_shared_listener_bindings(
-        first["listeners"], endpoint=declared
-    )
-    second_listener = summarize_shared_listener_bindings(
-        second["listeners"], endpoint=declared
-    )
+    changed.extend(item for item in first["processes"] if item["pid"] not in second_by_pid)
+    first_listener = summarize_shared_listener_bindings(first["listeners"], endpoint=declared)
+    second_listener = summarize_shared_listener_bindings(second["listeners"], endpoint=declared)
     violations: list[str] = []
     warnings: list[str] = []
     state = "ready_for_attach"
@@ -261,11 +245,7 @@ def classify_shared_server_preflight(
     if listener_bind_scope == LISTENER_BIND_SCOPE_WILDCARD:
         warnings.append("listener_bind_scope=wildcard")
 
-    comsol_versions = [
-        item["version_parts"]
-        for item in processes
-        if item["kind"] != "mph_client"
-    ]
+    comsol_versions = [item["version_parts"] for item in processes if item["kind"] != "mph_client"]
     if second["observed_at_epoch"] <= first["observed_at_epoch"]:
         violations.append("probe_chronology_invalid")
         state = "probe_chronology_invalid"
@@ -278,10 +258,7 @@ def classify_shared_server_preflight(
         violations.append("unclassified_comsol_or_mph_collision")
         state = "unclassified_comsol_or_mph_collision"
         retryable = True
-    elif any(
-        parts is None or parts[:3] != ACCEPTED_RELEASE_LINE
-        for parts in comsol_versions
-    ):
+    elif any(parts is None or parts[:3] != ACCEPTED_RELEASE_LINE for parts in comsol_versions):
         violations.append("unsupported_or_ambiguous_comsol_version")
         state = "unsupported_or_ambiguous_comsol_version"
     elif len(desktops) > 1 or sum(item["window_count"] for item in desktops) > 1:

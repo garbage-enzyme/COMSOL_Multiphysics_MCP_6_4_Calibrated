@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import ipaddress
+from dataclasses import asdict, dataclass
 from typing import Any, Iterable, Mapping
 
 from comsol_mcp.settings import settings_environment
-
 
 SHARED_SERVER_FEATURE_ENV = "COMSOL_MCP_ENABLE_SHARED_SERVER"
 MAX_ENDPOINT_HOST_CHARACTERS = 253
@@ -50,9 +49,7 @@ class SharedServerEndpoint:
             or not isinstance(self.port, int)
             or not 1 <= self.port <= 65535
         ):
-            raise ValueError(
-                "shared server endpoint port must be an integer from 1 to 65535"
-            )
+            raise ValueError("shared server endpoint port must be an integer from 1 to 65535")
         object.__setattr__(self, "host", normalized_host)
 
     def to_dict(self) -> dict[str, Any]:
@@ -119,9 +116,7 @@ def _normalize_endpoint_host(raw_host: Any) -> str:
 
 def normalize_shared_server_endpoint(value: Any) -> SharedServerEndpoint:
     """Validate one explicit loopback endpoint without DNS resolution."""
-    if not isinstance(value, Mapping) or not all(
-        isinstance(key, str) for key in value
-    ):
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ValueError("shared server endpoint must be an object with string keys")
     unknown = sorted(set(value) - _ENDPOINT_FIELDS)
     if unknown:
@@ -193,9 +188,7 @@ def summarize_shared_listener_bindings(
         host, bind_scope = normalize_shared_listener_bind_host(item.get("host"))
         pid = item.get("pid")
         normalized_pid = (
-            pid
-            if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
-            else None
+            pid if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0 else None
         )
         matches.append((host, bind_scope, normalized_pid))
     if not matches:

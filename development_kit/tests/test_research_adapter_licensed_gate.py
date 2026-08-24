@@ -12,7 +12,9 @@ import uuid
 from pathlib import Path
 
 import pytest
+from mcp.server.mcpserver import MCPServer
 
+from development_kit.scripts import research_adapter_gate_server as server_gate
 from development_kit.scripts import research_adapter_licensed_gate as gate
 from development_kit.scripts import research_campaign_licensed_gate as campaign_gate
 
@@ -128,6 +130,59 @@ def test_gate_requires_requested_evaluated_and_solved_wavelength_identity(
     wavelength: dict, expected: bool
 ):
     assert gate._wavelength_synchronized({"wavelength": wavelength}) is expected
+
+
+def test_impossible_mode_requires_full_budget_of_successful_measurements():
+    passed = campaign_gate._impossible_mode_passed
+
+    assert passed(stop_reason="budget_exhausted", completed=8, successful=8, budget=8)
+    # Failed evaluations must not count as evidence: zero or partial valid
+    # measurements can never prove the impossible-target outcome.
+    for kwargs in (
+        dict(stop_reason="budget_exhausted", completed=8, successful=0, budget=8),
+        dict(stop_reason="budget_exhausted", completed=8, successful=7, budget=8),
+        dict(stop_reason="budget_exhausted", completed=7, successful=7, budget=8),
+        dict(stop_reason="target_met", completed=3, successful=3, budget=8),
+    ):
+        assert not passed(**kwargs)
+
+
+def test_spectrum_rows_keep_request_readback_and_solved_provenance_distinct():
+    requested_value = 1.55e-6
+    readback = 1.5500000000000002e-06
+    solved = 1.5499e-6
+    row = server_gate._spectrum_row(0, requested_value, [0.1, 0.8, 0.1, readback, solved])
+
+    assert row["requested_wavelength_m"] == requested_value
+    assert row["evaluated_wavelength_m"] == pytest.approx(readback)
+    assert row["solved_frequency_wavelength_m"] == pytest.approx(solved)
+    expected_sync = max(abs(requested_value - readback), abs(readback - solved))
+    assert row["wavelength_sync_abs_m"] == pytest.approx(expected_sync)
+    assert row["closure_abs"] == pytest.approx(0.0)
+
+
+def test_spectrum_tool_reports_structured_errors_for_study_contract_gaps(monkeypatch):
+    from types import SimpleNamespace
+
+    server = MCPServer("adapter-spectrum-contract-test")
+    server_gate.register_gate_tools(server)
+    spectrum = server._tool_manager._tools["research_adapter_gate_spectrum"].fn
+
+    missing_study = SimpleNamespace(java=SimpleNamespace(study=lambda name: None))
+    monkeypatch.setattr(server_gate.session_manager, "get_model", lambda _name: missing_study)
+    result = spectrum("model", [1.5e-6, 1.6e-6, 1.7e-6])
+    assert result == {"success": False, "error_type": "StudyContractUnavailable"}
+
+    def broken_features():
+        raise AttributeError("malformed study")
+
+    raising_model = SimpleNamespace(
+        java=SimpleNamespace(study=lambda name: SimpleNamespace(feature=broken_features))
+    )
+    monkeypatch.setattr(server_gate.session_manager, "get_model", lambda _name: raising_model)
+    result = spectrum("model", [1.5e-6, 1.6e-6, 1.7e-6])
+    assert result["success"] is False
+    assert result["error_type"] == "AttributeError"
 
 
 def test_campaign_gate_dry_run_freezes_budget_grid_and_tolerances(tmp_path: Path, gate_root: Path):

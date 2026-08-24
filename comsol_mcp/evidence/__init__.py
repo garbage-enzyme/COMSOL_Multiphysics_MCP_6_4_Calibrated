@@ -2,8 +2,8 @@
 
 from .contracts import (
     EVIDENCE_STATES,
-    PHYSICAL_EVIDENCE_SCHEMA_NAME,
     PHYSICAL_EVIDENCE_READABLE_VERSIONS,
+    PHYSICAL_EVIDENCE_SCHEMA_NAME,
     PHYSICAL_EVIDENCE_SCHEMA_VERSION,
     VALIDATION_POLICY_SCHEMA_NAME,
     VALIDATION_POLICY_SCHEMA_VERSION,
@@ -18,42 +18,28 @@ from .contracts import (
     validate_physical_evidence,
     validate_validation_policy,
 )
-from .visual_review import (
-    build_visual_review_receipt,
-    build_visual_review_request,
-    evaluate_dual_visual_review,
-    normalize_codex_capability,
-    normalize_opencode_capability,
-    validate_reviewer_capability,
-    validate_visual_review_receipt,
-    validate_visual_review_request,
-)
-from .power_audit import (
-    normalize_declared_plane_flux,
-    normalize_internal_absorption_consistency,
-)
+from .field_artifacts import write_field_evidence_artifacts
 from .field_bundle import (
     normalize_field_evidence_request,
     validate_field_evidence_request,
 )
-from .field_manifest import (
-    build_field_evidence_manifest,
-    validate_field_evidence_manifest,
-)
-from .field_artifacts import write_field_evidence_artifacts
-from .field_sampling import select_field_slice_samples
-from .field_interpolation import interpolate_field_slice
-from .field_pipeline import build_field_evidence_from_samples
 from .field_dataset import (
     collect_existing_dataset_field_evidence,
     collect_validation_matrix_field_evidence,
 )
 from .field_discovery import discover_field_datasets
+from .field_interpolation import interpolate_field_slice
+from .field_manifest import (
+    build_field_evidence_manifest,
+    validate_field_evidence_manifest,
+)
 from .field_matrix import (
     bind_validation_matrix_field_request,
     normalize_validation_matrix_field_inputs,
 )
+from .field_pipeline import build_field_evidence_from_samples
 from .field_render import render_field_png_bundle
+from .field_sampling import select_field_slice_samples
 from .outcome_contract import (
     EVIDENCE_COMPLETENESS_STATES,
     EXECUTION_STATES,
@@ -64,6 +50,20 @@ from .outcome_contract import (
     build_outcome_contract,
     execution_from_terminal_job_state,
     validate_outcome_contract,
+)
+from .power_audit import (
+    normalize_declared_plane_flux,
+    normalize_internal_absorption_consistency,
+)
+from .visual_review import (
+    build_visual_review_receipt,
+    build_visual_review_request,
+    evaluate_dual_visual_review,
+    normalize_codex_capability,
+    normalize_opencode_capability,
+    validate_reviewer_capability,
+    validate_visual_review_receipt,
+    validate_visual_review_request,
 )
 
 __all__ = [

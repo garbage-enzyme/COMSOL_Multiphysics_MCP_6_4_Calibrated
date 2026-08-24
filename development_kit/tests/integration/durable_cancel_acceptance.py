@@ -4,18 +4,16 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 from typing import Any, Callable
-
 
 ROOT = Path(__file__).parents[3]
 sys.path.insert(0, str(ROOT))
 
 from src.evidence.outcome_contract import execution_from_terminal_job_state
 from src.jobs.manager import JobManager
-
 
 _TERMINAL_STATES = frozenset({"cancelled", "failed", "interrupted", "completed"})
 

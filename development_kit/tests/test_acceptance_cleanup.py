@@ -71,6 +71,31 @@ def test_default_cleanup_predicate_rejects_explicit_failure_sentinels():
         assert result["cleanup"]["steps"]["reported_failure"]["passed"] is False
 
 
+def test_predicate_bug_fails_the_step_without_masking_the_operation_result():
+    result = {"success": True}
+    cleanup = CleanupRecorder(result)
+
+    def broken_predicate(value):
+        raise KeyError("predicate bug")
+
+    returned = cleanup.run(
+        "lease_release",
+        lambda: {"success": True, "released": True},
+        passed=broken_predicate,
+    )
+
+    assert cleanup.finalize() == 1
+    assert result["success"] is False
+    step = result["cleanup"]["steps"]["lease_release"]
+    assert step["passed"] is False
+    assert step["predicate_error"] is True
+    assert step["error_type"] == "KeyError"
+    # The real operation result stays exposed instead of being replaced by
+    # an error dict attributed to the operation.
+    assert result["lease_release"] == {"success": True, "released": True}
+    assert returned == {"success": True, "released": True}
+
+
 def test_zero_resource_cleanup_does_not_invent_a_failure():
     result = {"success": True}
     cleanup = CleanupRecorder(result)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -281,8 +282,19 @@ def run_convergence_campaign(
                     level_dir=level_dir,
                     artifact_root=root,
                 )
-            except OSError, ValueError:
-                pass
+            except (OSError, ValueError) as err:
+                quarantine = level_dir.with_name(f".{level_dir.name}.invalid-{uuid.uuid4().hex}")
+                level_dir.replace(quarantine)
+                if fault_hook is not None:
+                    fault_hook(
+                        "level_row_quarantined",
+                        {
+                            "level_id": level["level_id"],
+                            "ordinal": level["ordinal"],
+                            "quarantine": str(quarantine),
+                            "error": f"{type(err).__name__}: {err}",
+                        },
+                    )
             else:
                 if on_durable_level is not None:
                     on_durable_level(dict(row))
@@ -292,7 +304,9 @@ def run_convergence_campaign(
         result = level_executor(level, level_dir)
         if not isinstance(result, Mapping):
             raise RuntimeError("spectral level executor returned an invalid result")
-        if result.get("completed") is not True:
+        # Completion is contractual True; accept equivalent truthy values
+        # (e.g. numpy.bool_) instead of identity-comparing the singleton.
+        if result.get("completed") not in (True,):
             return {
                 "completed": False,
                 "stop_reason": str(result.get("stop_reason") or "spectral_level_incomplete"),

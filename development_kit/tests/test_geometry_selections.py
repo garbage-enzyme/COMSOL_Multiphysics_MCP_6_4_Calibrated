@@ -1,7 +1,6 @@
 """Tests for bounded named geometry selections without COMSOL."""
 
 import pytest
-
 from src.tools.geometry_selections import create_box_selection, create_side_selections
 
 
@@ -287,23 +286,76 @@ def test_side_selections_include_the_failed_side_rollback_result(monkeypatch):
     assert result["rolled_back"] is False
 
 
+def test_side_selections_propagate_per_side_entity_warnings(monkeypatch):
+    component = FakeComponent()
+    warning = "Selection exists, but entities are unavailable before geometry build."
+
+    def with_warning(*_args, **_kwargs):
+        return {
+            "success": True,
+            "selection": {
+                "tag": _kwargs["selection_name"],
+                "entities": [],
+                "entities_evaluated": False,
+            },
+            "warning": warning,
+        }
+
+    monkeypatch.setattr("src.tools.geometry_selections.create_box_selection", with_warning)
+    result = create_side_selections(
+        FakeModel(component), x_min="0", x_max="1", y_min="0", y_max="1"
+    )
+
+    assert result["success"] is True
+    assert result["count"] == 4
+    for side in ("left", "right", "bottom", "top"):
+        assert result["selections"][side]["warning"] == warning
+        assert result["selections"][side]["entities_evaluated"] is False
+
+
 def test_side_selections_roll_back_after_geometry_lookup_failure():
     component = FakeComponent(fail_geometry_after=2)
 
-    result = create_side_selections(
-        FakeModel(component),
-        x_min="0",
-        x_max="1",
-        y_min="0",
-        y_max="1",
-        prefix="duct",
-    )
+    # A backend failure during the loop is a genuine error, but it must still
+    # clean up previously created sibling selections before surfacing.
+    with pytest.raises(RuntimeError, match="injected geometry lookup failure"):
+        create_side_selections(
+            FakeModel(component),
+            x_min="0",
+            x_max="1",
+            y_min="0",
+            y_max="1",
+            prefix="duct",
+        )
 
-    assert result["success"] is False
-    assert result["failed_side"] == "right"
-    assert result["rolled_back"] is True
     assert component.selections.items == {}
     assert component.selections.removed == ["duct_left"]
+
+
+def test_remove_selections_returns_failed_tags_and_logs_cause(caplog):
+    import logging as logging_module
+
+    from comsol_mcp.tools.geometry_selections import _remove_selections
+
+    class _LockedList:
+        def __init__(self, failing):
+            self.failing = set(failing)
+            self.removed = []
+
+        def remove(self, tag):
+            if tag in self.failing:
+                raise RuntimeError("selection locked by open feature")
+            self.removed.append(tag)
+
+    listing = _LockedList(failing={"b"})
+    with caplog.at_level(logging_module.WARNING, logger="comsol_mcp.tools.geometry_selections"):
+        failed = _remove_selections(listing, ["a", "b"])
+
+    # Reverse-order removal: b fails and stays, a is still removed.
+    assert failed == ["b"]
+    assert listing.removed == ["a"]
+    assert any("rollback failed" in record.message for record in caplog.records)
+    assert any("selection locked" in record.getMessage() for record in caplog.records)
 
 
 def test_side_selections_are_explicitly_two_dimensional():
@@ -320,13 +372,11 @@ def test_side_selections_are_explicitly_two_dimensional():
 
 
 def test_side_selection_preflight_contains_backend_lookup_failure():
-    result = create_side_selections(
-        FakeModel(FakeComponent(fail_geometry_after=0)),
-        x_min="0",
-        x_max="1",
-        y_min="0",
-        y_max="1",
-    )
-
-    assert result["success"] is False
-    assert "injected geometry lookup failure" in result["error"]
+    with pytest.raises(RuntimeError, match="injected geometry lookup failure"):
+        create_side_selections(
+            FakeModel(FakeComponent(fail_geometry_after=0)),
+            x_min="0",
+            x_max="1",
+            y_min="0",
+            y_max="1",
+        )

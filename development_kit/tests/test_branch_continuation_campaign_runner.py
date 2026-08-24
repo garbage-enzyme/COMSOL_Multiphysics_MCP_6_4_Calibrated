@@ -202,6 +202,59 @@ def test_complete_state_artifacts_close_executor_to_row_gap_without_reexecution(
     assert calls.count("angle-0") == 1
 
 
+def test_transient_append_failure_quarantines_and_notifies_fault_hook(tmp_path, monkeypatch):
+    spec = _spec(tmp_path)
+    root = tmp_path / "campaign-quarantine"
+    calls = []
+    real_append = runner_module.append_branch_continuation_campaign_state
+    events = []
+
+    def execute(state, directory):
+        calls.append(state["state_id"])
+        return _executor([5.0e-6, 5.08e-6, 5.16e-6])(state, directory)
+
+    def fault(phase, payload):
+        events.append((phase, payload))
+
+    # Create an executor-to-row gap: artifacts exist for angle-0 but its
+    # durable journal row was never written because append raised.
+    def gap_append(*_args, **_kwargs):
+        raise RuntimeError("injected row gap")
+
+    monkeypatch.setattr(runner_module, "append_branch_continuation_campaign_state", gap_append)
+    with pytest.raises(RuntimeError, match="row gap"):
+        run_branch_continuation_campaign(spec, root, attempt=1, state_executor=execute)
+    assert calls == ["angle-0"]
+
+    # A transient OSError while re-appending the complete state directory must
+    # quarantine the directory, notify the fault hook, and recompute the state.
+    invocations = []
+
+    def transient_oserror(*_args, **_kwargs):
+        invocations.append(1)
+        if len(invocations) == 1:
+            raise OSError("transient windows file lock")
+        return real_append(*_args, **_kwargs)
+
+    monkeypatch.setattr(
+        runner_module, "append_branch_continuation_campaign_state", transient_oserror
+    )
+    result = run_branch_continuation_campaign(
+        spec, root, attempt=2, state_executor=execute, fault_hook=fault
+    )
+    assert result["completed"] is True
+    quarantined = [payload for phase, payload in events if phase == "state_row_quarantined"]
+    assert len(quarantined) == 1
+    assert quarantined[0]["state_id"] == "angle-0"
+    assert quarantined[0]["error"].startswith("OSError:")
+    assert calls.count("angle-0") == 2
+
+    monkeypatch.setattr(runner_module, "append_branch_continuation_campaign_state", real_append)
+    resumed = run_branch_continuation_campaign(spec, root, attempt=3, state_executor=execute)
+    assert resumed["completed"] is True
+    assert calls.count("angle-0") == 2
+
+
 def test_state_directory_stays_inside_the_windows_legacy_path_budget():
     root = Path("D:/comsol_runtime/jobs") / ("job-" + "a" * 32)
     directory = branch_continuation_state_directory(root, 7)
@@ -252,3 +305,53 @@ def test_invalid_evidence_does_not_claim_the_declared_cap(tmp_path):
     )
 
     assert progress["declared_cap_reached"] is False
+
+
+def _single_state_progress_spec() -> dict:
+    # Minimal spec shape as consumed directly by the progress recomputation;
+    # the exported function must stay total over its documented inputs even
+    # though the product normalizer currently declares at least two states.
+    return {
+        "campaign_id": "single-angle-campaign",
+        "spec_fingerprint": "e" * 64,
+        "states": [{"state_id": "angle-0", "ordinal": 0}],
+        "continuation_policy": {"max_expansions": 3},
+    }
+
+
+def test_single_state_accepted_campaign_completes_without_index_error():
+    progress = build_branch_continuation_campaign_progress(
+        _single_state_progress_spec(),
+        [
+            {
+                "scientific_disposition": "accepted",
+                "reason_code": "spectrum_verified",
+                "expansion_count": 0,
+            }
+        ],
+        artifact_root=Path("unused"),
+    )
+
+    assert progress["action"] == "complete"
+    assert progress["scientific_disposition"] == "accepted"
+    assert progress["reason_code"] == "initial_state_spectrum_spectrum_verified"
+    assert progress["completed_state_count"] == 1
+    assert progress["declared_state_count"] == 1
+    assert progress["declared_cap_reached"] is False
+
+
+def test_single_state_unresolved_campaign_still_reports_declared_cap():
+    progress = build_branch_continuation_campaign_progress(
+        _single_state_progress_spec(),
+        [
+            {
+                "scientific_disposition": "unresolved_at_declared_cap",
+                "reason_code": "window_expansion_count_cap_reached",
+                "expansion_count": 1,
+            }
+        ],
+        artifact_root=Path("unused"),
+    )
+
+    assert progress["action"] == "complete"
+    assert progress["declared_cap_reached"] is True

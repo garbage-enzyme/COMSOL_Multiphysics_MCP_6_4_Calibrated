@@ -82,6 +82,17 @@ class SpectralAxis(_ClosedModel):
         Field(min_length=2, max_length=MAX_SPECTRAL_POINTS),
     ]
 
+    @model_validator(mode="after")
+    def validate_monotonic_coordinates(self) -> SpectralAxis:
+        coordinates = self.coordinates
+        increasing = all(left < right for left, right in zip(coordinates, coordinates[1:]))
+        decreasing = all(left > right for left, right in zip(coordinates, coordinates[1:]))
+        if not (increasing or decreasing):
+            raise ValueError(
+                "spectral coordinates must be strictly monotonic for trapezoid integration"
+            )
+        return self
+
 
 class AngularGrid(_ClosedModel):
     mode: Literal["lambertian_pi", "grid_trapezoid"]
@@ -168,7 +179,10 @@ class ThermalRadiationRequest(_ClosedModel):
     angular_grid: AngularGrid
     polarization: PolarizationContract
     optical_quantity: Literal["emissivity", "absorptivity"]
-    values_flat: Annotated[list[float], Field(min_length=1, max_length=MAX_DATA_VALUES)]
+    values_flat: Annotated[
+        list[Annotated[float, Field(ge=0.0, le=1.0)]],
+        Field(min_length=1, max_length=MAX_DATA_VALUES),
+    ]
     uncertainty_flat: Annotated[
         list[Annotated[float, Field(ge=0.0)]], Field(max_length=MAX_DATA_VALUES)
     ] = Field(default_factory=list)

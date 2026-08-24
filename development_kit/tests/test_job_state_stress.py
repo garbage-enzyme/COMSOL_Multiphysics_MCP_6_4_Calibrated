@@ -148,6 +148,12 @@ def test_concurrent_state_readers_writers_survive_sharing_violations(monkeypatch
 
         with pytest.raises(ValueError, match="Completed job state is immutable"):
             store.update_state(job_id, patch={"late_write": True})
+        # An empty patch must be rejected too: it would otherwise rewrite the
+        # completed artifact with a fresh updated_at_epoch.
+        frozen = store.read_state(job_id)
+        with pytest.raises(ValueError, match="Completed job state is immutable"):
+            store.update_state(job_id, patch={})
+        assert store.read_state(job_id) == frozen
         assert final["status"] == "completed"
         assert final["terminal_marker"] is True
         assert {key: final[key] for key in ("writer_0", "writer_1", "writer_2")} == {

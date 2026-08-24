@@ -212,6 +212,15 @@ def discover_field_datasets(
     dataset_rows: list[dict[str, Any]] = []
     for dataset in dataset_nodes:
         solution = resolve_solution(dataset["dataset_tag"], frozenset())
+        if dataset["solution_reference_kind"] is not None and solution is None:
+            solution_diagnostics.append(
+                {
+                    "code": "unresolved_solution_reference",
+                    "dataset_tag": dataset["dataset_tag"],
+                    "reference_kind": dataset["solution_reference_kind"],
+                    "reference_tag": dataset["reference_tag"],
+                }
+            )
         row = {
             "dataset_name": dataset["dataset_name"],
             "dataset_tag": dataset["dataset_tag"],

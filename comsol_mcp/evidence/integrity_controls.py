@@ -9,8 +9,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
-from comsol_mcp.settings import load_settings, settings_fingerprint, settings_status
 from comsol_mcp.durable import read_file_bytes_bounded
+from comsol_mcp.settings import load_settings, settings_fingerprint, settings_status
 
 EVIDENCE_SETTINGS_ENV = "COMSOL_MCP_EVIDENCE_SETTINGS_PATH"
 EVIDENCE_SETTINGS_SCHEMA = "comsol_mcp.evidence_integrity_settings"
@@ -267,11 +267,15 @@ def load_evidence_integrity_status(
             "settings_rejected", exc, raw_sha256=_sha256(raw) if raw is not None else None
         )
 
+    # Attestation identity must depend on the effective configuration only:
+    # hashing the raw file here would make cosmetic whitespace/key-order edits
+    # invalidate previously attested results and diverge from the default and
+    # project-settings sources. Raw bytes stay confined to error diagnostics.
     return _valid_status(
         effective,
         checks,
         source="explicit_settings",
-        fingerprint=_sha256(raw),
+        fingerprint=_sha256(_canonical_bytes(effective)),
     )
 
 

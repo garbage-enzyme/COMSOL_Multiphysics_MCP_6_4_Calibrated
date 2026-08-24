@@ -310,6 +310,59 @@ def test_array_cannot_change_while_render_worker_consumes_it(tmp_path, monkeypat
     assert hashlib.sha256(array.read_bytes()).hexdigest() == digest
 
 
+def test_worker_verifies_array_digest_of_exact_consumed_bytes(tmp_path, monkeypatch):
+    array = tmp_path / "swap.npz"
+    _array(array)
+    import io
+    import sys
+
+    from src.evidence import field_plot_worker as worker_module
+
+    request = {
+        "quantity_name": "abs_ex",
+        "quantity_unit": "V/m",
+        "coordinate_unit": "um",
+        "color_scale": "linear",
+        "shared_color_limits": False,
+        "views": [
+            {
+                "view_id": "target",
+                "array_path": str(array),
+                "array_sha256": "0" * 64,
+                "png_artifact_id": "target-png",
+                "png_path": str(tmp_path / "out.png"),
+            }
+        ],
+    }
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(request)))
+
+    with pytest.raises(ValueError, match="declared SHA-256"):
+        worker_module.main()
+
+    assert not (tmp_path / "out.png").exists()
+
+
+def test_render_fails_closed_when_parent_hash_check_is_fooled(tmp_path, monkeypatch):
+    array = tmp_path / "stale.npz"
+    _array(array)
+    stale = "a" * 64
+    monkeypatch.setattr(field_render_module, "_sha256_file", lambda _path: stale)
+    output = tmp_path / "output"
+
+    with pytest.raises(RuntimeError, match="worker failed"):
+        render_field_png_bundle(
+            views=[_view("target", array, stale)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=output,
+        )
+
+    assert list(output.rglob("*.png")) == []
+
+
 def test_worker_failure_removes_every_owned_partial_png(tmp_path, monkeypatch):
     array = tmp_path / "partial.npz"
     digest = _array(array)
@@ -454,4 +507,148 @@ def test_renderer_converts_invalid_worker_encoding_to_a_stable_error(tmp_path, m
             color_scale="linear",
             shared_color_limits=False,
             output_root=tmp_path / "encoding-output",
+        )
+
+
+def test_worker_rejects_empty_view_requests_fail_closed(monkeypatch):
+    import io
+    import sys
+
+    from src.evidence import field_plot_worker as worker_module
+
+    request = {
+        "quantity_name": "abs_ex",
+        "quantity_unit": "V/m",
+        "coordinate_unit": "um",
+        "color_scale": "linear",
+        "shared_color_limits": True,
+        "views": [],
+    }
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(request)))
+
+    with pytest.raises(ValueError, match="at least one entry"):
+        worker_module.main()
+
+
+def test_worker_rejects_single_point_coordinate_axes(tmp_path, monkeypatch):
+    import io
+    import sys
+
+    from src.evidence import field_plot_worker as worker_module
+
+    array = tmp_path / "single-axis.npz"
+    x = np.array([1.0])
+    y = np.linspace(-1.0, 1.0, 4)
+    np.savez_compressed(
+        array,
+        coordinate_x=x,
+        coordinate_y=y,
+        quantity_abs_ex=np.zeros((y.size, x.size)),
+    )
+    request = {
+        "quantity_name": "abs_ex",
+        "quantity_unit": "V/m",
+        "coordinate_unit": "um",
+        "color_scale": "linear",
+        "shared_color_limits": False,
+        "views": [
+            {
+                "view_id": "target",
+                "array_path": str(array),
+                "array_sha256": hashlib.sha256(array.read_bytes()).hexdigest(),
+                "png_artifact_id": "target-png",
+                "png_path": str(tmp_path / "out.png"),
+            }
+        ],
+    }
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(request)))
+
+    with pytest.raises(ValueError, match="field coordinates"):
+        worker_module.main()
+
+    assert not (tmp_path / "out.png").exists()
+
+
+def test_render_rejects_divergent_shared_color_limits(tmp_path, monkeypatch):
+    off = tmp_path / "off.npz"
+    target = tmp_path / "target.npz"
+    off_hash = _array(off, 1.0)
+    target_hash = _array(target, 10.0)
+
+    class FakeProcess:
+        returncode = 0
+
+        def __init__(self, _command, **kwargs):
+            self.stdout = kwargs["stdout"]
+
+        def communicate(self, *, input, timeout):
+            assert input and timeout > 0
+            payload = json.loads(input)
+            views = [
+                {"view_id": item["view_id"], "color_limits": [1.0, 5.0 + index]}
+                for index, item in enumerate(payload["views"])
+            ]
+            self.stdout.write(json.dumps({"success": True, "views": views}).encode("utf-8"))
+
+    monkeypatch.setattr(field_render_module.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match="shared color limits"):
+        render_field_png_bundle(
+            views=[_view("off", off, off_hash), _view("target", target, target_hash)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=True,
+            output_root=tmp_path / "divergent-output",
+        )
+
+
+def test_boolean_timeout_seconds_is_rejected(tmp_path):
+    array = tmp_path / "bool-timeout.npz"
+    digest = _array(array)
+
+    with pytest.raises(ValueError, match="timeout_seconds must be between 1 and 120"):
+        render_field_png_bundle(
+            views=[_view("target", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=tmp_path / "bool-out",
+            timeout_seconds=True,
+        )
+
+
+def test_cleanup_unlink_failure_preserves_the_original_error(tmp_path, monkeypatch):
+    array = tmp_path / "locked.npz"
+    digest = _array(array)
+
+    class FakeProcess:
+        returncode = 1
+
+        def __init__(self, _command, **kwargs):
+            self.stderr = kwargs["stderr"]
+
+        def communicate(self, *, input, timeout):
+            self.stderr.write(b"controlled worker failure")
+
+    monkeypatch.setattr(field_render_module.subprocess, "Popen", FakeProcess)
+
+    def exploding_unlink(self, missing_ok=False):
+        raise OSError("png briefly locked")
+
+    monkeypatch.setattr(Path, "unlink", exploding_unlink)
+
+    # Every cleanup unlink fails, yet the original worker error still surfaces.
+    with pytest.raises(RuntimeError, match="worker failed"):
+        render_field_png_bundle(
+            views=[_view("target", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=tmp_path / "locked-output",
         )

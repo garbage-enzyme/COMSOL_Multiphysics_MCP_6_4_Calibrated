@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
 import uuid
+from io import BytesIO
 from pathlib import Path
 
 
@@ -33,6 +35,12 @@ def _expand_constant_limits(value, *, logarithmic: bool, np):
 
 def main() -> int:
     request = json.loads(sys.stdin.read())
+    if (
+        not isinstance(request, dict)
+        or not isinstance(request.get("views"), list)
+        or not request["views"]
+    ):
+        raise ValueError("views must contain at least one entry")
     import matplotlib
 
     matplotlib.use("Agg")
@@ -44,7 +52,12 @@ def main() -> int:
     loaded = []
     finite_sets = []
     for view in request["views"]:
-        with np.load(view["array_path"], allow_pickle=False) as archive:
+        array_bytes = Path(view["array_path"]).read_bytes()
+        if hashlib.sha256(array_bytes).hexdigest() != view["array_sha256"]:
+            raise ValueError(
+                f"view {view['view_id']} array bytes do not match the declared SHA-256"
+            )
+        with np.load(BytesIO(array_bytes), allow_pickle=False) as archive:
             if quantity_key not in archive.files:
                 raise ValueError(f"NPZ does not contain {quantity_key}")
             coordinate_keys = sorted(key for key in archive.files if key.startswith("coordinate_"))
@@ -56,8 +69,8 @@ def main() -> int:
         if (
             first.ndim != 1
             or second.ndim != 1
-            or first.size == 0
-            or second.size == 0
+            or first.size < 2
+            or second.size < 2
             or not np.all(np.isfinite(first))
             or not np.all(np.isfinite(second))
             or np.any(np.diff(first) <= 0.0)

@@ -33,6 +33,27 @@ def test_robustness_plan_dispatches_and_rejects_boundary_clipping():
     assert rejected["reason_code"] == "research_robustness_rejected"
 
 
+def test_missing_required_goal_key_is_rejected_not_raised():
+    goal = _goal()
+    goal.pop("objectives")
+    result = _tools()["research_campaign_compile"].fn(goal, _space(), _approval())
+
+    assert result["success"] is False
+    assert result["reason_code"] == "research_campaign_rejected"
+    assert "'objectives'" in result["error"]
+    assert result["solver_started"] is False
+
+
+def test_missing_required_space_key_is_rejected_not_raised():
+    space = dict(_space())
+    space.pop("variables")
+    result = _tools()["research_robustness_plan"].fn(space, {}, 0.01)
+
+    assert result["success"] is False
+    assert result["reason_code"] == "research_robustness_rejected"
+    assert result["solver_started"] is False
+
+
 def test_optimizer_advance_round_trips_checkpoint_and_exact_feedback():
     tool = _tools()["research_optimizer_advance"]
     first = tool.fn(

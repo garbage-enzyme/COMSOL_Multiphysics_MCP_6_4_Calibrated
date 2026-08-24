@@ -191,7 +191,9 @@ def solve_study(
     if solver.is_running:
         return {
             "success": False,
-            "error": "Another solving operation is in progress. Use study_get_progress to check status.",
+            "error": (
+                "Another solving operation is in progress. Use study_get_progress to check status."
+            ),
         }
 
     tag = _resolve_study_tag(model, study_name)
@@ -260,6 +262,33 @@ def solve_study(
         "progress": progress,
         "message": "Solving completed.",
     }
+
+
+def _validate_wait_timeout(timeout: Optional[float]) -> None:
+    """Reject bool/negative/non-finite/non-numeric deadlines before the solver."""
+    if timeout is not None and (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(timeout)
+        or timeout <= 0
+    ):
+        raise ValueError("timeout must be a positive number of seconds or null")
+
+
+def _wait_payload(completed: bool, progress: dict) -> dict:
+    """Map a finished wait onto the public success contract.
+
+    An expired deadline is a failed wait, never a completed solve wearing
+    ``success=True``; the background solve keeps running either way.
+    """
+    if not completed:
+        return {
+            "success": False,
+            "completed": False,
+            "timed_out": True,
+            "progress": progress,
+        }
+    return {"success": True, "completed": True, "progress": progress}
 
 
 def register_study_tools(mcp: MCPServer) -> None:
@@ -476,14 +505,10 @@ def register_study_tools(mcp: MCPServer) -> None:
         Returns:
             Final progress status
         """
+        _validate_wait_timeout(timeout)
         completed = async_solver.wait(timeout=timeout)
         progress = async_solver.get_progress()
-
-        return {
-            "success": True,
-            "completed": completed,
-            "progress": progress,
-        }
+        return _wait_payload(completed, progress)
 
     @mcp.tool()
     def solutions_list(model_name: Optional[str] = None) -> dict:

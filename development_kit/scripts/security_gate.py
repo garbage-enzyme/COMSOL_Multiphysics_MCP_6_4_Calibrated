@@ -136,15 +136,22 @@ def evaluate_security_report(
     ):
         raise ValueError("security allowlist entries must be validated objects")
     allowed_by_id = {
-        (item["dependency"], item["vulnerability_id"].casefold()): item for item in allowlist
+        # Findings are always casefolded by _findings(); match that identity
+        # even when a direct caller supplies non-canonical allowlist entries.
+        (item["dependency"].casefold(), item["vulnerability_id"].casefold()): item
+        for item in allowlist
     }
     blocked = []
     allowed = []
+    matched_identities: set[tuple[str, str]] = set()
     for finding in findings:
-        entry = allowed_by_id.get((finding["dependency"], finding["vulnerability_id"].casefold()))
+        finding_identity = (finding["dependency"], finding["vulnerability_id"].casefold())
+        entry = allowed_by_id.get(finding_identity)
         if entry is None:
             blocked.append({**finding, "reason_code": "not_allowlisted"})
-        elif entry["expires_on"] < as_of:
+            continue
+        matched_identities.add(finding_identity)
+        if entry["expires_on"] < as_of:
             blocked.append({**finding, "reason_code": "allowlist_expired"})
         else:
             allowed.append(
@@ -154,14 +161,11 @@ def evaluate_security_report(
                     "reason": entry["reason"],
                 }
             )
-    allowed_identities = {
-        (item["dependency"].casefold(), item["vulnerability_id"].casefold()) for item in allowed
-    }
     unused = sorted(
         f"{item['dependency']}:{item['vulnerability_id']}"
         for item in allowlist
         if (item["dependency"].casefold(), item["vulnerability_id"].casefold())
-        not in allowed_identities
+        not in matched_identities
     )
     return {
         "schema_name": "comsol_mcp.security_gate_receipt",

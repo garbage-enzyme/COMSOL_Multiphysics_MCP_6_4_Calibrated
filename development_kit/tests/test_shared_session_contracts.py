@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from src.shared_session.attach_request import normalize_shared_server_attach_request
 from src.shared_session.contracts import (
     SHARED_SERVER_FEATURE_ENV,
     SharedServerEndpoint,
@@ -166,3 +167,18 @@ if 'mph' in sys.modules:
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+def test_attach_request_is_hashable_despite_the_frozen_feature_gate():
+    def request():
+        return normalize_shared_server_attach_request(
+            {"endpoint": {"host": "127.0.0.1", "port": 2036}, "user_confirmed": True},
+            profile="core",
+            feature_enabled=True,
+        )
+
+    first = request()
+    second = request()
+
+    assert hash(first) == hash(second)
+    assert len({first, second}) == 1

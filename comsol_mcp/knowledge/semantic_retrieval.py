@@ -68,10 +68,13 @@ def _quoted_phrases(query: str) -> list[str]:
 
 def _contains_technical_token(haystack: str, token: str) -> bool:
     boundary = r"[A-Za-z0-9_.]"
-    return re.search(
-        rf"(?<!{boundary}){re.escape(token)}(?!{boundary})",
-        haystack,
-    ) is not None
+    return (
+        re.search(
+            rf"(?<!{boundary}){re.escape(token)}(?!{boundary})",
+            haystack,
+        )
+        is not None
+    )
 
 
 def _filters_match(record: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:

@@ -12,15 +12,25 @@ from comsol_mcp.durable import domain_sha256_v2
 from .contracts import normalize_design_space
 
 
+def _float_or_none(value: object) -> float | None:
+    """Return a finite-capable float or None for non-numeric or overflowing input."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        return float(value)
+    except OverflowError:
+        return None
+
+
 def axis_perturbation_matrix(
     design_space: object, candidate_values: object, *, relative_fraction: float
 ) -> dict[str, Any]:
     space = normalize_design_space(design_space)
+    fraction_value = _float_or_none(relative_fraction)
     if (
-        isinstance(relative_fraction, bool)
-        or not isinstance(relative_fraction, (int, float))
-        or not math.isfinite(float(relative_fraction))
-        or not 0.0 < float(relative_fraction) <= 0.25
+        fraction_value is None
+        or not math.isfinite(fraction_value)
+        or not 0.0 < fraction_value <= 0.25
     ):
         raise ValueError("relative_fraction must be finite and in (0, 0.25]")
     variables = list(space["variables"])
@@ -73,7 +83,21 @@ def summarize_robustness(
 ) -> dict[str, Any]:
     if not isinstance(matrix, Mapping) or not isinstance(rows, Sequence):
         raise ValueError("matrix and rows must be structured values")
-    expected = [item["point_id"] for item in matrix.get("points", [])]
+    matrix_points = matrix.get("points")
+    matrix_fingerprint = matrix.get("matrix_fingerprint")
+    if (
+        not isinstance(matrix_points, list)
+        or not matrix_points
+        or any(
+            not isinstance(item, Mapping) or not isinstance(item.get("point_id"), str)
+            for item in matrix_points
+        )
+        or len({item["point_id"] for item in matrix_points}) != len(matrix_points)
+        or not isinstance(matrix_fingerprint, str)
+        or len(matrix_fingerprint) != 64
+    ):
+        raise ValueError("robustness matrix structure is invalid")
+    expected = [item["point_id"] for item in matrix_points]
     losses: dict[str, float] = {}
     evidence: dict[str, str] = {}
     for row in rows:
@@ -86,12 +110,8 @@ def summarize_robustness(
         point_id, raw, fingerprint = row["point_id"], row["total_loss"], row["evidence_fingerprint"]
         if point_id not in expected or point_id in losses:
             raise ValueError("robustness rows contain unknown or duplicate points")
-        if (
-            isinstance(raw, bool)
-            or not isinstance(raw, (int, float))
-            or not math.isfinite(float(raw))
-            or float(raw) < 0.0
-        ):
+        loss_value = _float_or_none(raw)
+        if loss_value is None or not math.isfinite(loss_value) or loss_value < 0.0:
             raise ValueError("robustness loss must be finite and nonnegative")
         if not isinstance(fingerprint, str) or len(fingerprint) != 64:
             raise ValueError("robustness evidence fingerprint is invalid")
@@ -100,22 +120,24 @@ def summarize_robustness(
         raise ValueError("robustness rows must exactly cover the matrix")
     threshold = None
     if maximum_total_loss is not None:
-        if (
-            isinstance(maximum_total_loss, bool)
-            or not isinstance(maximum_total_loss, (int, float))
-            or not math.isfinite(float(maximum_total_loss))
-            or float(maximum_total_loss) < 0.0
-        ):
+        threshold_value = _float_or_none(maximum_total_loss)
+        if threshold_value is None or not math.isfinite(threshold_value) or threshold_value < 0.0:
             raise ValueError("maximum_total_loss must be finite and nonnegative")
         threshold = float(maximum_total_loss)
     values = [losses[point_id] for point_id in expected]
+    try:
+        mean_total_loss = fmean(values)
+    except OverflowError as error:
+        raise ValueError("robustness mean total loss overflows the finite range") from error
+    if not math.isfinite(mean_total_loss):
+        raise ValueError("robustness mean total loss must be finite")
     body = {
         "schema_name": "research.robustness.summary",
         "schema_version": "1.0.0",
         "matrix_fingerprint": matrix["matrix_fingerprint"],
         "evidence_fingerprints": dict(sorted(evidence.items())),
         "minimum_total_loss": min(values),
-        "mean_total_loss": fmean(values),
+        "mean_total_loss": mean_total_loss,
         "maximum_total_loss": max(values),
         "required_maximum_total_loss": threshold,
         "threshold_outcome": "not_declared"
@@ -146,22 +168,30 @@ def summarize_optional_fidelity_bridge(
             "differences": {},
         }
         return {**body, "bridge_fingerprint": domain_sha256_v2(body["schema_name"], body)}
-    if not isinstance(independent, Mapping) or set(independent) != set(primary):
+    if not isinstance(independent, Mapping):
+        raise ValueError("applicable fidelity requires matching observable sets")
+    if any(not isinstance(key, str) for key in primary) or any(
+        not isinstance(key, str) for key in independent
+    ):
+        raise ValueError("fidelity observables must be finite numeric mappings")
+    if set(independent) != set(primary):
         raise ValueError("applicable fidelity requires matching observable sets")
     differences: dict[str, float] = {}
     for key in sorted(primary):
         left, right = primary[key], independent[key]
+        left_value = _float_or_none(left)
+        right_value = _float_or_none(right)
         if (
-            not isinstance(key, str)
-            or isinstance(left, bool)
-            or isinstance(right, bool)
-            or not isinstance(left, (int, float))
-            or not isinstance(right, (int, float))
-            or not math.isfinite(float(left))
-            or not math.isfinite(float(right))
+            left_value is None
+            or right_value is None
+            or not math.isfinite(left_value)
+            or not math.isfinite(right_value)
         ):
             raise ValueError("fidelity observables must be finite numeric mappings")
-        differences[key] = abs(float(left) - float(right))
+        difference = abs(left_value - right_value)
+        if not math.isfinite(difference):
+            raise ValueError("fidelity observable differences must remain finite")
+        differences[key] = difference
     thresholds = None
     outcome = "not_declared"
     if maximum_absolute_differences is not None:
@@ -171,12 +201,8 @@ def summarize_optional_fidelity_bridge(
             raise ValueError("fidelity thresholds must exactly cover compared observables")
         thresholds = {}
         for key, raw in maximum_absolute_differences.items():
-            if (
-                isinstance(raw, bool)
-                or not isinstance(raw, (int, float))
-                or not math.isfinite(float(raw))
-                or float(raw) < 0.0
-            ):
+            threshold_raw = _float_or_none(raw)
+            if threshold_raw is None or not math.isfinite(threshold_raw) or threshold_raw < 0.0:
                 raise ValueError("fidelity thresholds must be finite and nonnegative")
             thresholds[key] = float(raw)
         outcome = (

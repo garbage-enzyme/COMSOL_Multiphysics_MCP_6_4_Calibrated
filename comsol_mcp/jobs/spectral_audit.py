@@ -37,7 +37,10 @@ def _contained_file(path: Path, root: Path, name: str) -> Path:
 def _finite(value: object, name: str, *, positive: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be numeric")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be numeric") from exc
     if not math.isfinite(number) or (positive and number <= 0.0):
         qualifier = "positive and finite" if positive else "finite"
         raise ValueError(f"{name} must be {qualifier}")
@@ -128,6 +131,9 @@ def extract_spectral_audit_result(
     relative = inner_descriptor["relative_path"]
     if not isinstance(relative, str) or not relative:
         raise ValueError("inner manifest relative path is unavailable")
+    descriptor_size = inner_descriptor["size_bytes"]
+    if isinstance(descriptor_size, bool) or not isinstance(descriptor_size, int):
+        raise ValueError("inner manifest size_bytes must be an integer")
     inner_path = _contained_file(
         assigned_root / relative, assigned_root, "point audit inner manifest"
     )

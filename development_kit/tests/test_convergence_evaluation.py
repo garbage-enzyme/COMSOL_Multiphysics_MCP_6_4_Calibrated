@@ -26,6 +26,9 @@ from src.evidence.spectral_characterization import (
 )
 from src.tools.convergence_evaluation import register_convergence_evaluation_tools
 
+from comsol_mcp.evidence import branch_continuation as branch_continuation_module
+from comsol_mcp.evidence import convergence_evaluation as convergence_module
+from comsol_mcp.evidence import spectral_characterization as spectral_characterization_module
 from development_kit.tests.mcp_test_support import decode_tool_result
 
 MATERIAL_SHA256 = "d" * 64
@@ -538,6 +541,29 @@ def test_public_tool_returns_separate_ladder_and_policy_artifacts():
     assert result["filesystem_modified"] is False
 
 
+def test_public_tool_keeps_structured_errors_for_unexpected_backend_failures(monkeypatch):
+    import src.evidence.convergence_evaluation as evidence_module
+
+    monkeypatch.setattr(
+        evidence_module,
+        "evaluate_convergence",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyError("missing policy key")),
+    )
+    server = MCPServer("convergence-internal-error-test")
+    register_convergence_evaluation_tools(server)
+
+    result = server._tool_manager._tools["convergence_evaluate"].fn(
+        ladder_spec={"ladder_id": "three-mesh-ladder", "levels": _levels()},
+        convergence_policy=_policy(),
+    )
+
+    assert result["success"] is False
+    assert result["scientific_disposition"] == "internal_error"
+    assert result["reason_code"] == "convergence_evaluation_failed"
+    assert "missing policy key" not in json.dumps(result)
+    assert result["solver_started"] is False
+
+
 def test_public_tool_accepts_canonical_ladder_and_rejects_ambiguous_input():
     ladder = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
     server = MCPServer("convergence-input-test")
@@ -656,6 +682,29 @@ def _canonical_hash(value):
     ).hexdigest()
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "fixtures//model.mph",
+        "./fixtures/model.mph",
+        "fixtures/./model.mph",
+        "fixtures/model.mph/",
+        ".",
+    ],
+)
+@pytest.mark.parametrize(
+    "relative_identity",
+    [
+        convergence_module._relative_identity,
+        branch_continuation_module._relative_identity,
+        spectral_characterization_module._relative_identity,
+    ],
+)
+def test_relative_identity_rejects_noncanonical_aliases(relative_identity, text):
+    with pytest.raises(ValueError, match="canonical|traversal-free"):
+        relative_identity(text, "test.identity")
+
+
 def test_self_rehashed_malformed_level_summary_still_fails_closed():
     ladder = build_convergence_ladder(ladder_id="three-mesh-ladder", levels=_levels())
     malformed = deepcopy(ladder)
@@ -669,6 +718,28 @@ def test_self_rehashed_malformed_level_summary_still_fails_closed():
     malformed["ladder_sha256"] = _canonical_hash(ladder_body)
 
     with pytest.raises(ValueError, match="numeric"):
+        validate_convergence_ladder(malformed)
+
+
+@pytest.mark.parametrize("state", ["not_requested", "unavailable"])
+def test_validated_ladder_rejects_sensitivity_state_with_measured_rows(state):
+    levels = [
+        _fitted_level(0, 5.0e-6, None),
+        _fitted_level(1, 5.006e-6, "fitted-mesh-0"),
+    ]
+    malformed = build_convergence_ladder(ladder_id="fit-sensitive-ladder", levels=levels)
+    sensitivity = malformed["levels"][0]["fit_support_sensitivity"]
+    assert sensitivity["measurements"]
+    sensitivity["state"] = state
+    level = malformed["levels"][0]
+    level_body = dict(level)
+    level_body.pop("level_sha256")
+    level["level_sha256"] = _canonical_hash(level_body)
+    ladder_body = dict(malformed)
+    ladder_body.pop("ladder_sha256")
+    malformed["ladder_sha256"] = _canonical_hash(ladder_body)
+
+    with pytest.raises(ValueError, match="cannot carry measurements"):
         validate_convergence_ladder(malformed)
 
 

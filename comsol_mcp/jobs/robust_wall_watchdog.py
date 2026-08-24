@@ -107,14 +107,20 @@ def run(
         state = store.read_state(job_id)
         current_attempt = int(state.get("attempt", -1))
         if current_attempt != attempt:
-            _write_outcome(
-                store,
-                job_id,
-                attempt=attempt,
-                status="stale_attempt_refused",
-                fields={"observed_attempt": current_attempt},
-                clock=clock,
-            )
+            try:
+                _write_outcome(
+                    store,
+                    job_id,
+                    attempt=attempt,
+                    status="stale_attempt_refused",
+                    fields={"observed_attempt": current_attempt},
+                    clock=clock,
+                )
+            except RuntimeError:
+                # A successor attempt re-armed the artifact before this stale
+                # watchdog could record; the refusal itself remains the truth
+                # and must not escalate into a failed outcome.
+                pass
             return 0
         if state.get("status") in TERMINAL_STATES:
             _write_outcome(
@@ -130,16 +136,54 @@ def run(
         if now >= deadline_epoch:
             manager = manager_factory(store.root, reconcile_on_start=False)
             result = manager.cancel(job_id, expected_attempt=attempt)
-            outcome = "cancellation_requested" if result.get("success") else "cancellation_refused"
+            if result.get("success"):
+                outcome = "cancellation_requested"
+                fields = {
+                    "deadline_reached_at_epoch": now,
+                    "cancellation": result,
+                }
+            else:
+                # The cancel may have raced a terminal transition or a new
+                # attempt; re-read the durable state before refusing.
+                reread = store.read_state(job_id)
+                if int(reread.get("attempt", -1)) != attempt:
+                    try:
+                        _write_outcome(
+                            store,
+                            job_id,
+                            attempt=attempt,
+                            status="stale_attempt_refused",
+                            fields={"observed_attempt": int(reread.get("attempt", -1))},
+                            clock=clock,
+                        )
+                    except RuntimeError:
+                        pass
+                    return 0
+                if reread.get("status") in TERMINAL_STATES:
+                    _write_outcome(
+                        store,
+                        job_id,
+                        attempt=attempt,
+                        status="terminal_before_deadline",
+                        fields={
+                            "terminal_job_status": reread["status"],
+                            "deadline_reached_at_epoch": now,
+                            "cancellation": result,
+                        },
+                        clock=clock,
+                    )
+                    return 0
+                outcome = "cancellation_refused"
+                fields = {
+                    "deadline_reached_at_epoch": now,
+                    "cancellation": result,
+                }
             _write_outcome(
                 store,
                 job_id,
                 attempt=attempt,
                 status=outcome,
-                fields={
-                    "deadline_reached_at_epoch": now,
-                    "cancellation": result,
-                },
+                fields=fields,
                 clock=clock,
             )
             return 0 if result.get("success") else 2

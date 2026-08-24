@@ -182,7 +182,7 @@ def add_pressure_acoustics_interface(
         physics_list = component.physics()
         if tag in {str(value) for value in list(physics_list.tags())}:
             raise ValueError(f"Physics tag already exists: {tag}")
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         return {"success": False, "error": str(exc)}
 
     created = False
@@ -260,7 +260,7 @@ def add_pde_interface(
         physics_list = component.physics()
         if tag in {str(value) for value in list(physics_list.tags())}:
             raise ValueError(f"Physics tag already exists: {tag}")
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         return {"success": False, "error": str(exc)}
 
     created = False
@@ -377,7 +377,7 @@ def configure_boundaries(
                 raise ValueError(f"Physics feature tag already exists or is duplicated: {tag}")
             condition["resolved_tag"] = tag
             reserved.add(tag)
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         return {"success": False, "error": str(exc)}
 
     entity_dimension = max(int(_component_sdim(component)) - 1, 0)

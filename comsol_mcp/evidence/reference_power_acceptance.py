@@ -14,7 +14,6 @@ from comsol_mcp.durable import read_file_bytes_bounded, sha256_file_bounded
 from .contracts import canonical_sha256
 from .power_audit import normalize_declared_plane_flux
 
-
 REFERENCE_POWER_CONTRACT_SCHEMA = "comsol_mcp.h1_licensed_gate"
 REFERENCE_POWER_EXECUTION_SCHEMA = "comsol_mcp.h1_execution_spec"
 REFERENCE_POWER_SCHEMA_VERSION = "1.0.0"

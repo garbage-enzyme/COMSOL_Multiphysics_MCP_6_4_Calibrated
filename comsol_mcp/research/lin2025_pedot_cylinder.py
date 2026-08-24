@@ -96,14 +96,17 @@ def normalize_lin2025_pedot_cylinder_fixture(value: object) -> dict[str, Any]:
     states = raw["material_states"]
     if (
         not isinstance(states, list)
-        or tuple(item.get("state_id") for item in states if isinstance(item, Mapping)) != _STATES
+        or len(states) != len(_STATES)
+        or any(not isinstance(item, Mapping) for item in states)
+        or tuple(item.get("state_id") for item in states) != _STATES
     ):
         raise ValueError("material states must be ordered OX/MR")
     variables = raw["mutable_variables"]
     if (
         not isinstance(variables, list)
-        or tuple(item.get("variable_id") for item in variables if isinstance(item, Mapping))
-        != _VARIABLES
+        or len(variables) != len(_VARIABLES)
+        or any(not isinstance(item, Mapping) for item in variables)
+        or tuple(item.get("variable_id") for item in variables) != _VARIABLES
     ):
         raise ValueError("mutable variables must be ordered cylinder x/y radii")
     normalized = {
@@ -138,8 +141,10 @@ def compile_lin2025_pedot_cylinder_binding(
     if derivative_support.get("source_identity") != normalized["source_identity"]["source_sha256"]:
         raise ValueError("Lin2025 derivative source identity differs from fixture")
     variables = derivative_support.get("variables")
-    if not isinstance(variables, list) or [item.get("variable_id") for item in variables] != list(
-        _VARIABLES
+    if (
+        not isinstance(variables, list)
+        or any(not isinstance(item, Mapping) for item in variables)
+        or [item.get("variable_id") for item in variables] != list(_VARIABLES)
     ):
         raise ValueError("Lin2025 derivative variables must be ordered cylinder x/y radii")
     body = {
@@ -273,12 +278,22 @@ def compile_lin2025_pedot_shape_support(fixture: object, tree_readback: object) 
         raise ValueError("Lin2025 deformation selection exceeds the boundary count")
     radius = tree_readback["baseline_radius_um"]
     center = tree_readback["center_um"]
-    if not isinstance(radius, (int, float)) or isinstance(radius, bool) or radius <= 0:
+    if (
+        not isinstance(radius, (int, float))
+        or isinstance(radius, bool)
+        or not math.isfinite(float(radius))
+        or radius <= 0
+    ):
         raise ValueError("Lin2025 baseline radius must be positive")
     if (
         not isinstance(center, list)
         or len(center) != 2
-        or any(not isinstance(item, (int, float)) or isinstance(item, bool) for item in center)
+        or any(
+            not isinstance(item, (int, float))
+            or isinstance(item, bool)
+            or not math.isfinite(float(item))
+            for item in center
+        )
     ):
         raise ValueError("Lin2025 cylinder center must contain two numbers")
     body = {

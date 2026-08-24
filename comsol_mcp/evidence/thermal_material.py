@@ -224,6 +224,20 @@ def _crosses_boundary(lower: float, upper: float, boundaries: list[float]) -> bo
     return any(lower < boundary < upper for boundary in boundaries)
 
 
+def _table_discontinuity_crossed(model: Any, wavelength_m: float, temperature_K: float) -> bool:
+    w0, w1, _wf = _bracket(list(model.wavelengths_m), wavelength_m)
+    t0, t1, _tf = _bracket(list(model.temperatures_K), temperature_K)
+    return _crosses_boundary(
+        min(wavelength_m, model.wavelengths_m[w0]),
+        max(wavelength_m, model.wavelengths_m[w1]),
+        list(model.interpolation.wavelength_discontinuities_m),
+    ) or _crosses_boundary(
+        min(temperature_K, model.temperatures_K[t0]),
+        max(temperature_K, model.temperatures_K[t1]),
+        list(model.interpolation.temperature_discontinuities_K),
+    )
+
+
 def _interpolate_pair(left: float, right: float, fraction: float, method: str) -> float:
     if method == "nearest":
         return left if fraction < 0.5 else right
@@ -412,7 +426,6 @@ def evaluate_thermal_material(
         request.temperature_K, validity.temperature_min_K, validity.temperature_max_K
     )
     outside_fraction = max(wavelength_fraction, temperature_fraction)
-    policy = _model_policy(state.optical_model)
     base = {
         "schema_name": "comsol_mcp.thermal_material_evaluation",
         "schema_version": "1.0.0",
@@ -433,6 +446,29 @@ def evaluate_thermal_material(
         "phase_fraction": state.phase_fraction,
         "source": state.source.model_dump(mode="python"),
     }
+    model = state.optical_model
+    if model.model_kind in {"nk_table", "permittivity_table"}:
+        wavelength_fraction = _outside_fraction(
+            request.wavelength_m, model.wavelengths_m[0], model.wavelengths_m[-1]
+        )
+        temperature_fraction = _outside_fraction(
+            request.temperature_K, model.temperatures_K[0], model.temperatures_K[-1]
+        )
+        outside_fraction = max(outside_fraction, wavelength_fraction, temperature_fraction)
+        if _table_discontinuity_crossed(model, request.wavelength_m, request.temperature_K):
+            body = {
+                **base,
+                "available": False,
+                "reason_code": "declared_discontinuity_requires_explicit_state",
+                "extrapolated": False,
+                "solver_started": False,
+                "filesystem_modified": False,
+            }
+            return {
+                **body,
+                "evaluation_sha256": domain_sha256_v2("thermal_material_evaluation/1.0.0", body),
+            }
+    policy = _model_policy(model)
     if outside_fraction > 0.0 and (
         policy.mode == "none" or outside_fraction > policy.maximum_fraction_outside_domain
     ):

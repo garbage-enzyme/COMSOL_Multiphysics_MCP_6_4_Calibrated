@@ -186,13 +186,26 @@ def _submit_job(
     session_manager: Any = None,
 ) -> dict[str, Any]:
     spec = validate_job_submission(spec)
+    from comsol_mcp.jobs.manager import JobLaunchError
+
     execution_request = spec.get("execution_backend")
     if execution_request is None:
-        return manager.submit(spec)
+        try:
+            return manager.submit(spec)
+        except JobLaunchError as exc:
+            recovery = {
+                "success": False,
+                "state": "durable_job_requires_reconciliation",
+                "job_id": exc.job_id,
+                "action": "inspect_job_status_before_retrying",
+            }
+            if exc.state_record_error is not None:
+                recovery["state_record_error"] = exc.state_record_error
+            return recovery
     if spec.get("job_type") != "staged_sweep":
         raise ValueError("attached execution is currently supported only for staged_sweep jobs")
     from comsol_mcp.jobs.attached_backend import normalize_attached_execution_request
-    from comsol_mcp.jobs.manager import JobLaunchError, validate_staged_sweep_spec
+    from comsol_mcp.jobs.manager import validate_staged_sweep_spec
     from comsol_mcp.tools.shared_session import shared_session_manager
 
     request = normalize_attached_execution_request(execution_request)
@@ -214,6 +227,33 @@ def _submit_job(
         }
     expanded = dict(spec)
     expanded["execution_backend"] = handoff["execution_backend"]
+
+    def _handoff_recovery() -> dict[str, Any]:
+        recover = getattr(session_manager, "recover_attached_job_handoff", None)
+        if not callable(recover):
+            return {"success": False, "state": "attached_handoff_recovery_unavailable"}
+        try:
+            observed_recovery = recover(
+                handoff["execution_backend"],
+                profile=profile_name,
+                feature_enabled=shared_enabled,
+            )
+        except Exception as recovery_exc:
+            return {
+                "success": False,
+                "state": "attached_handoff_recovery_failed",
+                "error_type": type(recovery_exc).__name__,
+                "error": str(recovery_exc),
+            }
+        return (
+            dict(observed_recovery)
+            if isinstance(observed_recovery, dict)
+            else {
+                "success": False,
+                "state": "attached_handoff_recovery_returned_invalid_result",
+            }
+        )
+
     try:
         submitted = manager.submit(expanded)
     except Exception as exc:
@@ -227,34 +267,7 @@ def _submit_job(
             if exc.state_record_error is not None:
                 recovery["state_record_error"] = exc.state_record_error
         else:
-            recover = getattr(session_manager, "recover_attached_job_handoff", None)
-            if callable(recover):
-                try:
-                    observed_recovery = recover(
-                        handoff["execution_backend"],
-                        profile=profile_name,
-                        feature_enabled=shared_enabled,
-                    )
-                    recovery = (
-                        dict(observed_recovery)
-                        if isinstance(observed_recovery, dict)
-                        else {
-                            "success": False,
-                            "state": "attached_handoff_recovery_returned_invalid_result",
-                        }
-                    )
-                except Exception as recovery_exc:
-                    recovery = {
-                        "success": False,
-                        "state": "attached_handoff_recovery_failed",
-                        "error_type": type(recovery_exc).__name__,
-                        "error": str(recovery_exc),
-                    }
-            else:
-                recovery = {
-                    "success": False,
-                    "state": "attached_handoff_recovery_unavailable",
-                }
+            recovery = _handoff_recovery()
         return {
             "success": False,
             "state": "job_submit_failed_after_attached_handoff",
@@ -262,6 +275,15 @@ def _submit_job(
             "error": str(exc),
             "attached_handoff": _attached_handoff_summary(handoff),
             "handoff_recovery": recovery,
+        }
+    if isinstance(submitted, dict) and not submitted.get("success"):
+        # A structured failure must also reconcile the just-claimed attached
+        # session instead of leaving it locked without any handoff recovery.
+        return {
+            **submitted,
+            "state": "job_submit_failed_after_attached_handoff",
+            "attached_handoff": _attached_handoff_summary(handoff),
+            "handoff_recovery": _handoff_recovery(),
         }
     return {
         **submitted,
@@ -282,6 +304,13 @@ def _job_call(operation: str, callback, **error_fields: Any) -> dict[str, Any]:
             }
 
     return measured_call(operation, run)
+
+
+def _clamp_tail_n(n: int) -> int:
+    """Enforce the documented 1..200 tail window at the tool boundary."""
+    if isinstance(n, bool) or not isinstance(n, int):
+        raise ValueError("n must be an integer between 1 and 200")
+    return min(max(n, 1), 200)
 
 
 def register_job_tools(mcp: MCPServer) -> None:
@@ -319,9 +348,10 @@ def register_job_tools(mcp: MCPServer) -> None:
     @mcp.tool()
     def job_tail(job_id: str, n: int = 20) -> dict[str, Any]:
         """Return at most 200 trailing event and worker-log lines without solver side effects."""
+        clamped_n = _clamp_tail_n(n)
         return _job_call(
             "job_tail",
-            lambda: job_manager.tail(job_id, n),
+            lambda: job_manager.tail(job_id, clamped_n),
             job_id=job_id,
         )
 

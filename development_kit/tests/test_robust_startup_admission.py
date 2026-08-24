@@ -54,6 +54,25 @@ def test_one_byte_below_either_absolute_threshold_refuses(memory, disk, failed_c
     assert receipt["checks"][failed_check] is False
 
 
+@pytest.mark.parametrize(
+    ("field", "present_check"),
+    [
+        ("available_memory_bytes", "available_memory_present"),
+        ("runtime_free_bytes", "runtime_free_space_present"),
+    ],
+)
+def test_boolean_telemetry_is_not_a_valid_byte_count(field, present_check):
+    sample = _sample()
+    sample[field] = True
+    receipt = evaluate_robust_startup_admission(_policy(), sample)
+    assert receipt["decision"] == "refuse"
+    assert receipt["checks"][present_check] is False
+    negative = _sample()
+    negative[field] = -1
+    receipt = evaluate_robust_startup_admission(_policy(), negative)
+    assert receipt["checks"][present_check] is False
+
+
 def test_policy_rejects_per_batch_frequency_or_non_startup_sample():
     policy = _policy()
     policy["check_frequency"] = "per_batch"

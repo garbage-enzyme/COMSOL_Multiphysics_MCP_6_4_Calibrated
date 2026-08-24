@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import sys
 from typing import TypeAlias
 
 JSONScalar: TypeAlias = str | int | float | bool | None
@@ -63,6 +64,12 @@ def _normalize_scalar(value: object) -> JSONScalar:
     if isinstance(value, int):
         if _integer_serialized_bytes(value) > MAX_SCALAR_BYTES:
             raise ValueError(f"property integers may contain at most {MAX_SCALAR_BYTES} bytes")
+        digit_limit = sys.get_int_max_str_digits()
+        if _integer_decimal_digits(value) >= digit_limit:
+            raise ValueError(
+                f"property integers may contain at most {digit_limit - 1} decimal digits "
+                "so the payload stays JSON-serializable"
+            )
         return value
     if isinstance(value, float):
         if not math.isfinite(value):

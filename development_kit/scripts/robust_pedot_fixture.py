@@ -64,7 +64,22 @@ def _number(value: str | None, label: str) -> float:
     return number
 
 
-def _audit_csv(path: Path, state: str, sample_wavelengths: tuple[float, ...]) -> dict[str, Any]:
+def _same_wavelength(left: float, right: float) -> bool:
+    """Match parsed CSV wavelengths without relying on exact decimal round trips."""
+    return math.isclose(left, right, rel_tol=1e-12, abs_tol=1e-9)
+
+
+def _contains_wavelength(values: list[float], target: float) -> bool:
+    return any(_same_wavelength(item, target) for item in values)
+
+
+def _audit_csv(
+    path: Path,
+    state: str,
+    sample_wavelengths: tuple[float, ...],
+    *,
+    interpolation_method: str = "linear",
+) -> dict[str, Any]:
     real2 = _STATE_REAL_COLUMNS[state]
     imag2 = _STATE_IMAG_COLUMNS[state]
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -103,29 +118,50 @@ def _audit_csv(path: Path, state: str, sample_wavelengths: tuple[float, ...]) ->
         tensor_rows.append(
             {
                 "wavelength_nm": wavelength,
-                "xx_real": _number(
-                    row.get("epsilon1_real"), f"{state} row {index} epsilon1_real"
-                ),
+                "xx_real": _number(row.get("epsilon1_real"), f"{state} row {index} epsilon1_real"),
                 "xx_imag": comsol1,
-                "yy_real": _number(
-                    row.get("epsilon1_real"), f"{state} row {index} epsilon1_real"
-                ),
+                "yy_real": _number(row.get("epsilon1_real"), f"{state} row {index} epsilon1_real"),
                 "yy_imag": comsol1,
                 "zz_real": _number(row.get(real2), f"{state} row {index} {real2}"),
                 "zz_imag": comsol2,
             }
         )
-    if wavelengths[0] > _COMMON_MIN_NM or wavelengths[-1] < _COMMON_MAX_NM:
+    minimum_covered = wavelengths[0] <= _COMMON_MIN_NM or _same_wavelength(
+        wavelengths[0], _COMMON_MIN_NM
+    )
+    maximum_covered = wavelengths[-1] >= _COMMON_MAX_NM or _same_wavelength(
+        wavelengths[-1], _COMMON_MAX_NM
+    )
+    if not minimum_covered or not maximum_covered:
         raise ValueError(f"PEDOT {state} CSV does not cover the common no-extrapolation range")
-    if _COMMON_MIN_NM not in wavelengths or _COMMON_MAX_NM not in wavelengths:
+    if not _contains_wavelength(wavelengths, _COMMON_MIN_NM) or not _contains_wavelength(
+        wavelengths, _COMMON_MAX_NM
+    ):
         raise ValueError(f"PEDOT {state} CSV lacks exact common-range boundary rows")
-    if any(wavelength not in wavelengths for wavelength in _WAVELENGTHS_NM):
+    if any(not _contains_wavelength(wavelengths, item) for item in _WAVELENGTHS_NM):
         raise ValueError(f"PEDOT {state} CSV lacks an exact fixture wavelength row")
     samples: list[dict[str, float]] = []
     for target in sample_wavelengths:
-        if target < wavelengths[0] or target > wavelengths[-1]:
-            raise ValueError(f"PEDOT {state} sample wavelength requires forbidden extrapolation")
-        exact = next((item for item in tensor_rows if item["wavelength_nm"] == target), None)
+        if target < _COMMON_MIN_NM or target > _COMMON_MAX_NM:
+            # The mapping declares the common range with extrapolation
+            # forbidden, so samples must stay inside it even when the source
+            # CSV itself covers more.
+            raise ValueError(
+                f"PEDOT {state} sample wavelength {target} nm is outside the "
+                f"{_COMMON_MIN_NM}-{_COMMON_MAX_NM} nm mapping range"
+            )
+        if interpolation_method != "linear" and not _contains_wavelength(wavelengths, target):
+            # The audit interpolates linearly; a non-linear declared method
+            # would disagree at any non-exact wavelength. Require exact rows
+            # so both representations agree by construction.
+            raise ValueError(
+                f"PEDOT {state} sample wavelength {target} nm must match an exact "
+                f"source row when interpolation_method={interpolation_method!r}"
+            )
+        exact = next(
+            (item for item in tensor_rows if _same_wavelength(item["wavelength_nm"], target)),
+            None,
+        )
         if exact is None:
             upper_index = next(
                 index for index, item in enumerate(tensor_rows) if item["wavelength_nm"] > target
@@ -255,7 +291,9 @@ def compile_pedot_fixture(
     for state in _STATES:
         relative = f"csv/{_STATE_FILES[state]}"
         source = _source_file(root, relative)
-        audit = _audit_csv(source, state, sample_wavelengths)
+        audit = _audit_csv(
+            source, state, sample_wavelengths, interpolation_method=interpolation_method
+        )
         mapping = _mapping(
             state=state,
             source_sha256=audit["source_sha256"],

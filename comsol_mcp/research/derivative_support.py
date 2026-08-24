@@ -63,7 +63,10 @@ def _text(value: object, name: str, *, maximum: int = MAX_TEXT) -> str:
 def _finite(value: object, name: str, *, positive: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be a finite number")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be a finite number in the allowed range") from exc
     if not math.isfinite(number) or (positive and number <= 0.0):
         raise ValueError(f"{name} must be a finite number in the allowed range")
     return number
@@ -81,6 +84,13 @@ def _sha256(value: object, name: str) -> str:
     if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
         raise ValueError(f"{name} must be a SHA-256 hex digest")
     return value.lower()
+
+
+def _enum(value: object, allowed: set[str], name: str) -> str:
+    """Validate an untrusted enum leaf without assuming it is hashable."""
+    if not isinstance(value, str) or value not in allowed:
+        raise ValueError(f"{name} is unsupported")
+    return value
 
 
 def normalize_derivative_variable(value: object, *, index: int) -> dict[str, Any]:
@@ -141,9 +151,7 @@ def normalize_derivative_variable(value: object, *, index: int) -> dict[str, Any
         or not 0 <= normalized_mapping["property_index"] <= 1024
     ):
         raise ValueError(f"{name}.mapping.property_index must be a bounded nonnegative integer")
-    dependency = raw["dependency_class"]
-    if dependency not in _DEPENDENCIES:
-        raise ValueError(f"{name}.dependency_class is unsupported")
+    dependency = _enum(raw["dependency_class"], _DEPENDENCIES, f"{name}.dependency_class")
     step = _object(
         raw["step_policy"],
         {"relative_steps", "absolute_floor", "central_difference", "near_bound_mode"},
@@ -157,13 +165,16 @@ def normalize_derivative_variable(value: object, *, index: int) -> dict[str, Any
     ]
     if normalized_steps != sorted(normalized_steps, reverse=True):
         raise ValueError(f"{name}.step_policy.relative_steps must be three descending steps")
-    near_bound = step["near_bound_mode"]
-    if near_bound not in {"one_sided", "reject"}:
-        raise ValueError(f"{name}.step_policy.near_bound_mode is unsupported")
+    near_bound = _enum(
+        step["near_bound_mode"], {"one_sided", "reject"}, f"{name}.step_policy.near_bound_mode"
+    )
     if not isinstance(step["central_difference"], bool):
         raise ValueError(f"{name}.step_policy.central_difference must be boolean")
-    if raw["active_bound_semantics"] not in {"projected_zero", "one_sided"}:
-        raise ValueError(f"{name}.active_bound_semantics is unsupported")
+    active_bound = _enum(
+        raw["active_bound_semantics"],
+        {"projected_zero", "one_sided"},
+        f"{name}.active_bound_semantics",
+    )
     return {
         "variable_id": _identifier(raw["variable_id"], f"{name}.variable_id"),
         "order": index,
@@ -184,7 +195,7 @@ def normalize_derivative_variable(value: object, *, index: int) -> dict[str, Any
             "central_difference": step["central_difference"],
             "near_bound_mode": near_bound,
         },
-        "active_bound_semantics": raw["active_bound_semantics"],
+        "active_bound_semantics": active_bound,
     }
 
 
@@ -205,8 +216,7 @@ def normalize_derivative_objective(value: object) -> dict[str, Any]:
         },
         "objective",
     )
-    if raw["direction"] not in _DIRECTIONS:
-        raise ValueError("objective.direction is unsupported")
+    direction = _enum(raw["direction"], _DIRECTIONS, "objective.direction")
     paths = raw["evidence_paths"]
     if not isinstance(paths, list) or not 1 <= len(paths) <= 16:
         raise ValueError("objective.evidence_paths must be a bounded nonempty list")
@@ -216,7 +226,7 @@ def normalize_derivative_objective(value: object) -> dict[str, Any]:
     return {
         "objective_id": _identifier(raw["objective_id"], "objective.objective_id"),
         "expression": _text(raw["expression"], "objective.expression", maximum=512),
-        "direction": raw["direction"],
+        "direction": direction,
         "unit": _text(raw["unit"], "objective.unit", maximum=32),
         "wavelength_um": _finite(raw["wavelength_um"], "objective.wavelength_um", positive=True),
         "study_tag": _identifier(raw["study_tag"], "objective.study_tag"),
@@ -233,9 +243,7 @@ def normalize_derivative_constraint(value: object) -> dict[str, Any]:
         {"constraint_id", "kind", "expression", "unit", "lower", "upper", "derivative_supported"},
         "constraint",
     )
-    kind = raw["kind"]
-    if kind not in _CONSTRAINT_KINDS:
-        raise ValueError("constraint.kind is unsupported")
+    kind = _enum(raw["kind"], _CONSTRAINT_KINDS, "constraint.kind")
     derivative_supported = raw["derivative_supported"]
     if not isinstance(derivative_supported, bool):
         raise ValueError("constraint.derivative_supported must be boolean")
@@ -295,8 +303,7 @@ def normalize_derivative_support(value: object) -> dict[str, Any]:
         or raw["schema_version"] != DERIVATIVE_SUPPORT_SCHEMA_VERSION
     ):
         raise ValueError("derivative support schema identity is unsupported")
-    if raw["derivative_method"] not in _METHODS:
-        raise ValueError("derivative_method is unsupported")
+    derivative_method = _enum(raw["derivative_method"], _METHODS, "derivative_method")
     products = raw["required_products"]
     if not isinstance(products, list) or not 1 <= len(products) <= 16:
         raise ValueError("required_products must be a bounded nonempty list")
@@ -367,6 +374,7 @@ def normalize_derivative_support(value: object) -> dict[str, Any]:
     normalized_events = [_identifier(item, "nondifferentiable_events") for item in events]
     if len(normalized_events) != len(set(normalized_events)):
         raise ValueError("nondifferentiable_events must be unique")
+    support_state = _enum(raw["support_state"], _SUPPORT_STATES, "support_state")
     normalized = {
         "schema_name": DERIVATIVE_SUPPORT_SCHEMA_NAME,
         "schema_version": DERIVATIVE_SUPPORT_SCHEMA_VERSION,
@@ -378,7 +386,7 @@ def normalize_derivative_support(value: object) -> dict[str, Any]:
         "adapter_version": _text(raw["adapter_version"], "adapter_version", maximum=32),
         "source_identity": _sha256(raw["source_identity"], "source_identity"),
         "study_identity": _sha256(raw["study_identity"], "study_identity"),
-        "derivative_method": raw["derivative_method"],
+        "derivative_method": derivative_method,
         "variables": normalized_variables,
         "objective": objective,
         "constraints": sorted(normalized_constraints, key=lambda item: item["constraint_id"]),
@@ -392,10 +400,8 @@ def normalize_derivative_support(value: object) -> dict[str, Any]:
         },
         "nondifferentiable_events": sorted(normalized_events),
         "result_identity": normalized_result,
-        "support_state": raw["support_state"],
+        "support_state": support_state,
     }
-    if normalized["support_state"] not in _SUPPORT_STATES:
-        raise ValueError("support_state is unsupported")
     normalized["support_fingerprint"] = domain_sha256_v2(DERIVATIVE_SUPPORT_SCHEMA_NAME, normalized)
     if supplied is not None and supplied != normalized["support_fingerprint"]:
         raise ValueError("derivative support fingerprint is invalid")

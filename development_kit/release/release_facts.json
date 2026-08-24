@@ -39,7 +39,7 @@
     "registry_sha256": "00bb02bf3e29c441503c44dbd446dfbbb8c8893cfb8f69ee5340c8e2d4cb293b"
   },
   "identities": {
-    "catalog_sha256": "a2fbdea3efc5fe30e1c0e35cbf5652144c96dd7a1f4450859667d3999191b1e3",
+    "catalog_sha256": "e42eb34495ae10a21ea095e2f25f6eba9d898416491c26aa6c9658ef4588e952",
     "profile_tools_sha256": "335fd6b5721c592b8cefb0a17aefa914ed30252cb02bbc27ecd7032f2b9fe596",
     "feature_tools_sha256": "e37721d24bcd1ee6a949a156eaba90936bc5812b8b2f7a0f5fddc04fa928439a",
     "runtime_compatibility_sha256": "16e932bbead0e8c0f86a573b3ffba5013ebc9cecada1615d58aac6ccc492f332"

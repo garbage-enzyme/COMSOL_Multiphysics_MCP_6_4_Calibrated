@@ -48,6 +48,7 @@ if ($Alive) {
     Stop-Process -Id $Process.Id -Force -ErrorAction Stop
     $Process.WaitForExit()
 }
+if (-not $Alive) { throw "Monitor process exited during the latch window" }
 if (-not $BannerSeen) { throw "Refresh-failure monitor did not latch: $Output" }
 if ($Output -notmatch 'EXPECTED_REFRESH_FAILURE_TRIGGER status_json_corrupted' -or
     $Output -notmatch 'MONITOR REFRESH FAILED' -or
@@ -59,7 +60,7 @@ $Receipt = [ordered]@{
     status = 'pass'
     powershell_path = $PowerShellPath
     powershell_version = (& $PowerShellPath -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()')
-    monitor_alive_for_latch_window = $true
+    monitor_alive_for_latch_window = $Alive
     refresh_failure_banner_visible = $true
     stale_progress_explicitly_disclaimed = $true
     test_pid = $Process.Id

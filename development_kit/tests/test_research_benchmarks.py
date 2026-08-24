@@ -123,15 +123,26 @@ def test_optimizer_baseline_benchmark_is_exact_stable_and_multi_seed():
     second = frozen_optimizer_baseline_benchmark()
     assert first == second
     assert first["benchmark_fingerprint"] == (
-        "6059adf468ae3334dcd4b938adea995d2fcdc31ffbf1039543792dcebc879088"
+        "47ae351f4e0df84ae3df6f236d742ba4d4ceab4eb01dc024047af48799a2c7d9"
     )
     assert len(first["seeds"]) == 8
-    assert len(first["runs"]) == 24
+    assert len(first["runs"]) == 17
     assert {run["backend"] for run in first["runs"]} == {
         "deterministic_grid",
         "deterministic_latin_hypercube",
         "deterministic_random",
     }
+    # The deterministic grid consumes no seed, so it is recorded exactly
+    # once with an explicit seed-less provenance instead of being recounted
+    # as eight supposedly independent seeded runs.
+    grid_runs = [run for run in first["runs"] if run["backend"] == "deterministic_grid"]
+    assert len(grid_runs) == 1
+    assert grid_runs[0]["seed"] is None
+    assert all(
+        run["seed"] in first["seeds"]
+        for run in first["runs"]
+        if run["backend"] != "deterministic_grid"
+    )
     first["runs"][0]["best_score"]["total_loss"] = -1
     assert frozen_optimizer_baseline_benchmark() == second
 
@@ -140,9 +151,9 @@ def test_optimizer_baseline_aggregates_preserve_budget_and_do_not_claim_dominanc
     result = frozen_optimizer_baseline_benchmark()
     aggregates = result["aggregates"]
     assert aggregates["deterministic_grid"] == {
-        "run_count": 8,
-        "total_evaluations": 200,
-        "success_count": 8,
+        "run_count": 1,
+        "total_evaluations": 25,
+        "success_count": 1,
         "mean_best_total_loss": pytest.approx(0.9048000000000045),
         "median_best_total_loss": pytest.approx(0.9048000000000045),
         "minimum_best_total_loss": pytest.approx(0.9048000000000045),
@@ -190,3 +201,24 @@ def test_uncertainty_backend_review_reuses_only_declared_licensed_dependencies()
     assert set(selected["dependencies"]) <= declared & licensed
     assert review["rejected_expansion"]["decision"] == "no_new_optimizer_package"
     assert len(review["isolation_gates"]) == 5
+
+
+def test_baseline_benchmark_reports_failure_when_no_proposals_remain():
+    from development_kit.benchmarks.research_campaign import _evaluate_baseline
+
+    class ExhaustedOptimizer:
+        backend_identity = "stub-baseline"
+
+        def state(self):
+            return {"remaining_proposals": False}
+
+    result = _evaluate_baseline(
+        "exhausted_stub",
+        ExhaustedOptimizer(),
+        {"evaluation_budget": 5},
+        seed=1,
+    )
+
+    assert result["evaluation_count"] == 0
+    assert result["best_proposal"] is None
+    assert result["failure_reason_code"] == "no_proposals_available"

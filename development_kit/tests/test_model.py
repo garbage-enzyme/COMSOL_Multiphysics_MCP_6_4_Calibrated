@@ -397,3 +397,33 @@ def test_component_creation_does_not_claim_geometry_dimension_was_applied():
     assert result["requested_geometry_space_dimension"] == 3
     assert result["space_dimension_applied"] is False
     assert "space_dimension" not in result
+
+
+def test_version_bundle_backup_cleanup_failure_does_not_mask_the_publish(tmp_path, monkeypatch):
+    import pathlib
+
+    model = FakeModel()
+    model.name = lambda: "Model"
+    version = tmp_path / "Model_1.mph"
+    latest = tmp_path / "Model_latest.mph"
+    latest.write_bytes(b"previous")
+
+    original_unlink = pathlib.Path.unlink
+    stuck_backup = tmp_path / ".Model_latest.mph.token.backup"
+
+    def selective_unlink(self, missing_ok=False):
+        if self.name.endswith(".backup") and "Model_latest.mph" in self.name:
+            raise PermissionError(f"locked: {self.name}")
+        return original_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(pathlib.Path, "unlink", selective_unlink)
+
+    result = _save_model_version_bundle(model, str(version), str(latest), description=None)
+
+    assert version.read_bytes() == latest.read_bytes() == b"saved-model"
+    assert len(result["cleanup_errors"]) == 1
+    prefix = f"remove {stuck_backup.name[: -len('token.backup')]}"
+    assert result["cleanup_errors"][0].startswith(prefix)
+    assert "locked:" in result["cleanup_errors"][0]
+    backups_left = list(tmp_path.glob(".*.backup"))
+    assert len(backups_left) == 1 and backups_left[0].name.endswith(".backup")

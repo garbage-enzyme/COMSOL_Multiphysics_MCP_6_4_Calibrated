@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -108,7 +109,7 @@ def _condition_row(value: object, *, index: int, state_ids: set[str]) -> dict[st
     if state_id not in state_ids:
         raise ValueError(f"{name}.material_state_id is not declared by the table")
     role = raw["objective_role"]
-    if role not in _OBJECTIVE_ROLES:
+    if not isinstance(role, str) or role not in _OBJECTIVE_ROLES:
         raise ValueError(f"{name}.objective_role is unsupported")
     if not isinstance(raw["active"], bool):
         raise ValueError(f"{name}.active must be boolean")
@@ -153,16 +154,19 @@ def _validate_completeness(rows: list[dict[str, Any]], completeness: object) -> 
         supplied_cardinalities = completeness.pop("dimension_cardinalities")
     raw = _object(completeness, {"mode", "sparse_justification"}, "completeness")
     mode = raw["mode"]
-    if mode not in _COMPLETENESS_MODES:
+    if not isinstance(mode, str) or mode not in _COMPLETENESS_MODES:
         raise ValueError("completeness.mode is unsupported")
     coordinates = [_coordinate(row) for row in rows]
     if len(coordinates) != len(set(coordinates)):
         raise ValueError("condition coordinates must be unique")
     dimensions = [sorted({coordinate[index] for coordinate in coordinates}) for index in range(5)]
-    expected = set(itertools.product(*dimensions))
+    cardinality_product = math.prod(len(dimension) for dimension in dimensions)
     if mode == "cartesian_complete":
         if raw["sparse_justification"] is not None:
             raise ValueError("cartesian_complete tables must not declare sparse justification")
+        if cardinality_product > MAX_CONDITIONS:
+            raise ValueError("cartesian_complete table exceeds the condition limit")
+        expected = set(itertools.product(*dimensions))
         if set(coordinates) != expected:
             raise ValueError("condition table is missing Cartesian combinations")
         justification = None

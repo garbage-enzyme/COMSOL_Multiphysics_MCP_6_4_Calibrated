@@ -123,6 +123,14 @@ def normalize_gradient_record(value: object, support: object) -> dict[str, Any]:
     )
     if not set(suspect_components).issubset(expected_order):
         raise ValueError("suspect_components must reference the canonical variable order")
+    constraint_values = _constraint_values(raw["constraint_values"])
+    allowed_constraint_ids = {item["constraint_id"] for item in normalized_support["constraints"]}
+    unknown_constraints = sorted(set(constraint_values) - allowed_constraint_ids)
+    if unknown_constraints:
+        raise ValueError(
+            "constraint_values must reference derivative-support constraint ids; "
+            f"unknown={unknown_constraints}"
+        )
     method = raw["method"]
     if method != normalized_support["derivative_method"]:
         raise ValueError("gradient method differs from derivative support")
@@ -135,7 +143,7 @@ def normalize_gradient_record(value: object, support: object) -> dict[str, Any]:
         key: _sha256(item, f"identities.{key}") for key, item in identities.items()
     }
     evidence_state = raw["evidence_state"]
-    if evidence_state not in _EVIDENCE_STATES:
+    if not isinstance(evidence_state, str) or evidence_state not in _EVIDENCE_STATES:
         raise ValueError("evidence_state is unsupported")
     body = {
         "schema_name": GRADIENT_RECORD_SCHEMA_NAME,
@@ -145,7 +153,7 @@ def normalize_gradient_record(value: object, support: object) -> dict[str, Any]:
         "variable_order": variable_order,
         "physical_values": _finite_vector(raw["physical_values"], "physical_values", length=count),
         "objective_value": _finite(raw["objective_value"], "objective_value"),
-        "constraint_values": _constraint_values(raw["constraint_values"]),
+        "constraint_values": constraint_values,
         "native_gradient": _finite_vector(raw["native_gradient"], "native_gradient", length=count),
         "native_units": native_units,
         "objective_sign": objective_sign,
@@ -199,10 +207,16 @@ def normalize_native_optimizer_configuration(value: object) -> dict[str, Any]:
         fields,
         "native optimizer configuration",
     )
-    if raw["schema_name"] != NATIVE_OPTIMIZER_SCHEMA_NAME or raw["schema_version"] not in {
-        NATIVE_OPTIMIZER_LEGACY_SCHEMA_VERSION,
-        NATIVE_OPTIMIZER_SCHEMA_VERSION,
-    }:
+    if (
+        not isinstance(raw["schema_name"], str)
+        or raw["schema_name"] != NATIVE_OPTIMIZER_SCHEMA_NAME
+        or not isinstance(raw["schema_version"], str)
+        or raw["schema_version"]
+        not in {
+            NATIVE_OPTIMIZER_LEGACY_SCHEMA_VERSION,
+            NATIVE_OPTIMIZER_SCHEMA_VERSION,
+        }
+    ):
         raise ValueError("native optimizer schema identity is unsupported")
     if schema_version == NATIVE_OPTIMIZER_LEGACY_SCHEMA_VERSION:
         if raw["backend"] != "comsol_native":
@@ -256,7 +270,7 @@ def normalize_native_optimizer_configuration(value: object) -> dict[str, Any]:
             "objective_direction": "maximize",
             "max_inner_iterations": inner,
         }
-    if raw["method"] not in _OPTIMIZER_METHODS:
+    if not isinstance(raw["method"], str) or raw["method"] not in _OPTIMIZER_METHODS:
         raise ValueError("native optimizer method is unsupported")
     budget = _object(
         raw["budget"],

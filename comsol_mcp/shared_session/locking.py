@@ -28,13 +28,9 @@ MAX_REVISION_NODES = 4096
 MAX_REVISION_TEXT_CHARACTERS = 4096
 
 _MODEL_IDENTITY_FIELDS = frozenset({"tag", "label", "file_path", "unsaved"})
-_PROCESS_IDENTITY_FIELDS = frozenset(
-    {"pid", "process_create_time", "command_signature"}
-)
+_PROCESS_IDENTITY_FIELDS = frozenset({"pid", "process_create_time", "command_signature"})
 _SOURCE_IDENTITY_FIELDS = frozenset({"path", "sha256"})
-_COLLABORATION_MODES = frozenset(
-    {"interactive_inspection", "automation_exclusive"}
-)
+_COLLABORATION_MODES = frozenset({"interactive_inspection", "automation_exclusive"})
 _HEX32 = re.compile(r"^[0-9a-fA-F]{32}$")
 _HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
 _MODEL_TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -49,17 +45,13 @@ def _sha256(value: Any) -> str:
 
 
 def _exact_mapping(value: Any, fields: frozenset[str], label: str) -> dict[str, Any]:
-    if not isinstance(value, Mapping) or not all(
-        isinstance(key, str) for key in value
-    ):
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ValueError(f"{label} must be an object with string keys")
     actual = set(value)
     if actual != fields:
         missing = sorted(fields - actual)
         unknown = sorted(actual - fields)
-        raise ValueError(
-            f"{label} fields are invalid; missing={missing}, unknown={unknown}"
-        )
+        raise ValueError(f"{label} fields are invalid; missing={missing}, unknown={unknown}")
     return dict(value)
 
 
@@ -135,9 +127,7 @@ def _normalize_json_value(
         normalized = {}
         for key, item in sorted(value.items()):
             _normalize_json_value(key, f"{label}.<key>", depth + 1, remaining)
-            normalized[key] = _normalize_json_value(
-                item, f"{label}.{key}", depth + 1, remaining
-            )
+            normalized[key] = _normalize_json_value(item, f"{label}.{key}", depth + 1, remaining)
         return normalized
     raise ValueError(f"{label} must contain only bounded JSON values")
 
@@ -268,9 +258,7 @@ def _normalize_process_identity(value: Any) -> dict[str, Any]:
         "process_create_time": _positive_finite(
             raw["process_create_time"], "MCP process creation time"
         ),
-        "command_signature": _hex64(
-            raw["command_signature"], "MCP command signature"
-        ),
+        "command_signature": _hex64(raw["command_signature"], "MCP command signature"),
     }
 
 
@@ -359,9 +347,7 @@ def _normalize_lock_revision_identity(
     if body["model_identity_sha256"] != model_identity_sha256:
         raise ValueError("shared model revision belongs to a different model identity")
     revision_sha256 = _sha256(body)
-    if _hex64(value.revision_sha256, "shared model revision SHA-256") != (
-        revision_sha256
-    ):
+    if _hex64(value.revision_sha256, "shared model revision SHA-256") != (revision_sha256):
         raise ValueError("shared model revision identity does not match its fields")
     return SharedModelRevision(**body, revision_sha256=revision_sha256)
 
@@ -378,9 +364,7 @@ def build_shared_model_lock(
     immutable_source: Mapping[str, Any] | None = None,
 ) -> SharedModelLock:
     """Bind one shared model guard to exact server, session, and process state."""
-    if not isinstance(session_acquisition_id, str) or not _HEX32.fullmatch(
-        session_acquisition_id
-    ):
+    if not isinstance(session_acquisition_id, str) or not _HEX32.fullmatch(session_acquisition_id):
         raise ValueError("session acquisition ID must be exactly 32 hexadecimal characters")
     server = _normalize_lock_server_identity(attached_server)
     normalized_model = _normalize_lock_model_identity(model)
@@ -397,10 +381,9 @@ def build_shared_model_lock(
         "schema_name": SHARED_MODEL_LOCK_SCHEMA,
         "schema_version": SHARED_MODEL_LOCK_VERSION,
         "lock_id": hashlib.sha256(
-            (
-                f"{normalized_session_acquisition_id}:"
-                f"{normalized_model.identity_sha256}"
-            ).encode("ascii")
+            (f"{normalized_session_acquisition_id}:{normalized_model.identity_sha256}").encode(
+                "ascii"
+            )
         ).hexdigest()[:32],
         "attached_server": server.to_dict(),
         "session_acquisition_id": normalized_session_acquisition_id,
@@ -408,9 +391,7 @@ def build_shared_model_lock(
         "revision": normalized_revision.to_dict(),
         "collaboration_mode": collaboration_mode,
         "immutable_source": source,
-        "lock_created_at_epoch": _positive_finite(
-            lock_created_at_epoch, "lock creation time"
-        ),
+        "lock_created_at_epoch": _positive_finite(lock_created_at_epoch, "lock creation time"),
         "mcp_process": process,
     }
     return SharedModelLock(**body, lock_sha256=_sha256(body))

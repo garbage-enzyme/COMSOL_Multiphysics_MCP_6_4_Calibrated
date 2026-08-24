@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import re
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from .identity import AttachedServerIdentity
-
 
 CLEANUP_OUTCOME_SCHEMA = "comsol_mcp.cleanup_outcome"
 CLEANUP_OUTCOME_VERSION = "1.0.0"
@@ -61,9 +60,7 @@ def evaluate_attached_detach(
     external_server_termination_attempted: bool,
 ) -> CleanupOutcome:
     """Verify detach preserved the exact user-owned server and model inventory."""
-    before_inventory = _hash(
-        model_inventory_before_sha256, "model inventory before SHA-256"
-    )
+    before_inventory = _hash(model_inventory_before_sha256, "model inventory before SHA-256")
     after_inventory = (
         None
         if model_inventory_after_sha256 is None
@@ -73,9 +70,7 @@ def evaluate_attached_detach(
     released = _boolean(lease_released, "lease_released")
     listener_active = _boolean(listener_active_after, "listener_active_after")
     forbidden_actions = {
-        "model_clear_attempted": _boolean(
-            model_clear_attempted, "model_clear_attempted"
-        ),
+        "model_clear_attempted": _boolean(model_clear_attempted, "model_clear_attempted"),
         "external_server_shutdown_attempted": _boolean(
             external_server_shutdown_attempted,
             "external_server_shutdown_attempted",
@@ -142,9 +137,7 @@ def evaluate_owned_cleanup(
     process_active = _boolean(
         owned_server_process_active_after, "owned_server_process_active_after"
     )
-    listener_active = _boolean(
-        owned_listener_active_after, "owned_listener_active_after"
-    )
+    listener_active = _boolean(owned_listener_active_after, "owned_listener_active_after")
     models_present = _boolean(owned_models_present_after, "owned_models_present_after")
     violations: list[str] = []
     if not disconnected:
@@ -165,9 +158,7 @@ def evaluate_owned_cleanup(
         client_disconnected=disconnected,
         lease_released=released,
         external_resources_preserved=None,
-        owned_resources_absent=not any(
-            (process_active, listener_active, models_present)
-        ),
+        owned_resources_absent=not any((process_active, listener_active, models_present)),
         violations=tuple(violations),
     )
 

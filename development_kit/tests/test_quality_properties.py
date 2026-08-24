@@ -220,6 +220,84 @@ def test_public_schema_clamps_nullable_and_prebounded_nodes() -> None:
     assert result["properties"]["number"]["maximum"] == MAX_PUBLIC_NUMBER_MAGNITUDE
 
 
+def test_public_schema_preserves_instance_valued_keywords() -> None:
+    source = {
+        "type": "object",
+        "properties": {
+            "mode": {
+                "type": "string",
+                "default": {"type": "object", "additionalProperties": True},
+                "examples": [{"type": "object"}],
+                "enum": [{"type": "object", "additionalProperties": True}],
+            },
+        },
+    }
+
+    original = deepcopy(source)
+    result = bounded_public_schema(source)
+
+    assert source == original
+    mode = result["properties"]["mode"]
+    assert mode["maxLength"] == MAX_PUBLIC_STRING_LENGTH
+    assert mode["default"] == {"type": "object", "additionalProperties": True}
+    assert mode["examples"] == [{"type": "object"}]
+    assert mode["enum"] == [{"type": "object", "additionalProperties": True}]
+
+
+def test_public_schema_does_not_validate_instance_data_as_schema() -> None:
+    result = bounded_public_schema(
+        {
+            "type": "object",
+            "properties": {},
+            "default": {"type": "string", "maxLength": "not-a-number"},
+        }
+    )
+
+    assert result["default"] == {
+        "type": "string",
+        "maxLength": "not-a-number",
+    }
+
+
+def test_public_schema_still_descends_into_schema_bearing_keywords() -> None:
+    result = bounded_public_schema(
+        {
+            "$defs": {"inner": {"type": "object"}},
+            "type": "object",
+            "properties": {
+                "union": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "array", "items": {"type": "integer"}},
+                    ],
+                },
+            },
+        }
+    )
+
+    union = result["properties"]["union"]["anyOf"]
+    assert union[1]["maxItems"] == MAX_PUBLIC_COLLECTION_ITEMS
+    assert result["$defs"]["inner"]["maxProperties"] == MAX_PUBLIC_OBJECT_FIELDS
+
+
+def test_public_schema_descends_into_array_form_items_keyword() -> None:
+    result = bounded_public_schema(
+        {
+            "type": "object",
+            "properties": {
+                "tuple_field": {
+                    "type": "array",
+                    "items": [{"type": "string"}, {"type": "array", "items": {"type": "integer"}}],
+                },
+            },
+        }
+    )
+
+    tuple_items = result["properties"]["tuple_field"]["items"]
+    assert isinstance(tuple_items, list)
+    assert tuple_items[1]["maxItems"] == MAX_PUBLIC_COLLECTION_ITEMS
+
+
 @pytest.mark.parametrize(
     "schema",
     [
@@ -348,6 +426,15 @@ def test_frozen_dict_rejects_in_place_union() -> None:
 
     with pytest.raises(TypeError, match="cannot be mutated"):
         frozen |= {"injected": True}
+
+    assert frozen == {"stable": True}
+
+
+def test_frozen_dict_rejects_reinitialization_after_construction() -> None:
+    frozen = deep_freeze({"stable": True})
+
+    with pytest.raises(TypeError, match="cannot be mutated"):
+        frozen.__init__({"injected": True})
 
     assert frozen == {"stable": True}
 

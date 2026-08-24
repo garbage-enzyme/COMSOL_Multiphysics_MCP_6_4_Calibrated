@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).parents[2]
@@ -18,7 +18,6 @@ from comsol_mcp.compatibility import load_runtime_compatibility
 from comsol_mcp.schema_registry import get_schema_registry
 from comsol_mcp.tools.catalog import FEATURE_NAMES, PROFILE_NAMES, TOOL_METADATA
 from comsol_mcp.tools.profiles import tool_names_for_profile
-
 
 FACTS_PATH = ROOT / "development_kit" / "release" / "release_facts.json"
 
@@ -74,9 +73,16 @@ def check_release_facts(path: Path = FACTS_PATH) -> None:
     expected = build_release_facts()
     try:
         actual = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise SystemExit("committed release facts are missing or corrupt") from exc
-    if actual != expected:
+
+    def canonical(value: Any) -> str:
+        # Compare serializations, not parsed values: == treats True == 1 and
+        # 1.0 == 1, so a type-drifted committed file would pass a plain
+        # comparison even though the generator emits different JSON types.
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    if canonical(actual) != canonical(expected):
         raise SystemExit(f"release facts differ from live implementation: {path}")
 
 

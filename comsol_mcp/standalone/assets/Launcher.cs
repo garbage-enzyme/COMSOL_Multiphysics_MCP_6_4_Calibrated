@@ -108,7 +108,6 @@ internal static class ComsolMcpStandaloneLauncher
                 {
                     throw new InvalidOperationException("campaign_state_is_not_resumable");
                 }
-                RequireAttemptBudget(paths);
 
                 string attemptId = Guid.NewGuid().ToString("N");
                 WriteOwner(paths, attemptId, comsolRoot);
@@ -134,6 +133,7 @@ internal static class ComsolMcpStandaloneLauncher
                     Console.WriteLine(Json.Serialize(recovered));
                     return 0;
                 }
+                RequireAttemptBudget(paths);
 
                 for (int index = existing.Count; index < Points.Length; index++)
                 {

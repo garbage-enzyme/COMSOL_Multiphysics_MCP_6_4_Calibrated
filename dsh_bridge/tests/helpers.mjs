@@ -19,9 +19,12 @@ export function spawnFakeServer(extraEnv = {}) {
 		extraEnv,
 		stderr: () => stderrBuf,
 		close: async () => {
-			if (child.exitCode === null) child.kill();
+			// A signal-terminated child keeps exitCode null but has already
+			// fired its exit event; check signalCode too so close() cannot
+			// wait on an exit that will never fire again.
+			if (child.exitCode === null && child.signalCode === null) child.kill();
 			await new Promise((res) => {
-				if (child.exitCode !== null) return res();
+				if (child.exitCode !== null || child.signalCode !== null) return res();
 				child.once("exit", res);
 			});
 		},
