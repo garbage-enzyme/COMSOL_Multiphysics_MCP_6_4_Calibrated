@@ -1003,8 +1003,8 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert "New-Item -ItemType Directory -Force -Path D:\\comsol_pytest" in dependency_commands
     assert "--ignore development_kit/tests/test_control_plane_startup.py" in dependency_commands
     assert "test_control_plane_startup.py --basetemp" in dependency_commands
-    assert "Upload dependency test evidence" in dependency_commands
-    assert "Upload quality gate evidence" in unit_commands
+    assert "Upload dependency test evidence" in workflow
+    assert "Upload quality gate evidence" in workflow
     assert any(
         "constraints/minimum_supported_py314.txt" in str(step.get("run", ""))
         for step in dependency_steps
