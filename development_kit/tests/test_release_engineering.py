@@ -955,7 +955,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         if isinstance(step, dict)
     )
 
-    assert "python -u -m pytest -vv" in dependency_commands
+    assert "serial_test_shards.py" in dependency_commands
     assert " -n " not in dependency_commands
     assert 'os.environ.get("GITHUB_ACTIONS", "").casefold() == "true"' in quality_gate
     assert "python -m build" in unit_commands
@@ -996,8 +996,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         "current-compatible",
     ]
     assert dependency_steps[-1]["env"]["PYTHONUNBUFFERED"] == "1"
-    assert "-o faulthandler_timeout=120" in dependency_commands
-    assert "--basetemp D:\\comsol_pytest\\dependency-main" in dependency_commands
+    assert "--basetemp-root D:\\comsol_pytest\\dependency-main" in dependency_commands
     assert "New-Item -ItemType Directory -Force -Path D:\\comsol_pytest" in dependency_commands
     assert "--ignore development_kit/tests/test_control_plane_startup.py" in dependency_commands
     assert "test_control_plane_startup.py --basetemp" in dependency_commands

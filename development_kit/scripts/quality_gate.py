@@ -299,6 +299,22 @@ def _serial_pytest_command(pytest_root: Path) -> list[str]:
     ]
 
 
+def _hosted_serial_shard_command(basetemp_root: Path, coverage_root: Path) -> list[str]:
+    """Build the no-xdist hosted runner command for isolated serial shards."""
+    return [
+        sys.executable,
+        "development_kit/scripts/serial_test_shards.py",
+        "--basetemp-root",
+        str(basetemp_root),
+        "--coverage-root",
+        str(coverage_root),
+        "--shards",
+        "2",
+        "--ignore",
+        SERIAL_TEST_TARGETS[0],
+    ]
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes(), usedforsecurity=False).hexdigest()
 
@@ -605,14 +621,25 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
             stage="coverage_erase",
             environment=environment,
         )
-        _run(
-            _main_pytest_command(
-                main_pytest_root,
-                hosted_ci=os.environ.get("GITHUB_ACTIONS", "").casefold() == "true",
-            ),
-            stage="parallel_tests",
-            environment=environment,
-        )
+        hosted_ci = os.environ.get("GITHUB_ACTIONS", "").casefold() == "true"
+        if hosted_ci:
+            shard_coverage_root = run_root / "shard-coverage"
+            _run(
+                _hosted_serial_shard_command(main_pytest_root, shard_coverage_root),
+                stage="hosted_serial_shards",
+                environment=environment,
+            )
+            coverage_inputs = [
+                shard_coverage_root / ".coverage-shard-0",
+                shard_coverage_root / ".coverage-shard-1",
+            ]
+        else:
+            _run(
+                _main_pytest_command(main_pytest_root, hosted_ci=False),
+                stage="parallel_tests",
+                environment=environment,
+            )
+            coverage_inputs = [coverage_data]
         serial_coverage_data = run_root / ".coverage-serial"
         serial_environment = dict(environment)
         serial_environment["COVERAGE_FILE"] = str(serial_coverage_data)
@@ -627,12 +654,12 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
         # combine rebuilds its output from the listed inputs, so the target
         # must be distinct from the parallel-suite data being merged in.
         combined_coverage_data = run_root / ".coverage-combined"
-        combine_inputs = [str(coverage_data)]
+        combine_inputs = [str(path) for path in coverage_inputs]
         if serial_coverage_data.exists():
             combine_inputs.append(str(serial_coverage_data))
         combine_environment = dict(environment)
         combine_environment["COVERAGE_FILE"] = str(combined_coverage_data)
-        if len(combine_inputs) == 2:
+        if len(combine_inputs) >= 2:
             _run(
                 [
                     sys.executable,
