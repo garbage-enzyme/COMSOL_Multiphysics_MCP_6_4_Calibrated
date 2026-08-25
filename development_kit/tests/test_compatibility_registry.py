@@ -34,7 +34,15 @@ def _skill_file_hash(relative: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_active_runtime_matching_the_accepted_lane_is_classified_exactly():
+def test_active_runtime_matching_the_accepted_lane_is_classified_exactly(monkeypatch):
+    import comsol_mcp.evidence.compatibility_registry as registry_module
+
+    monkeypatch.setattr(registry_module.sys, "version_info", (3, 14, 6, "final", 0))
+    monkeypatch.setattr(
+        registry_module,
+        "_distribution_version",
+        lambda name: "1.3.1" if name == "MPh" else "1.7.1",
+    )
     registry = build_compatibility_registry(profile_name="core", enabled_features=())
     assert registry["schema_name"] == COMPATIBILITY_REGISTRY_SCHEMA_NAME
     assert registry["schema_version"] == COMPATIBILITY_REGISTRY_SCHEMA_VERSION
