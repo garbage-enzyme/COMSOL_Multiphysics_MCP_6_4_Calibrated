@@ -995,7 +995,10 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         "minimum-supported",
         "current-compatible",
     ]
-    assert dependency_steps[-1]["env"]["PYTHONUNBUFFERED"] == "1"
+    dependency_run_step = next(
+        step for step in dependency_steps if "PYTHONUNBUFFERED" in step.get("env", {})
+    )
+    assert dependency_run_step["env"]["PYTHONUNBUFFERED"] == "1"
     assert "--basetemp-root D:\\comsol_pytest\\dependency-main" in dependency_commands
     assert "New-Item -ItemType Directory -Force -Path D:\\comsol_pytest" in dependency_commands
     assert "--ignore development_kit/tests/test_control_plane_startup.py" in dependency_commands
