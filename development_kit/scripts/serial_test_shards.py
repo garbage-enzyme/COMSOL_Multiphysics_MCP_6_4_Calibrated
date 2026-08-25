@@ -46,7 +46,7 @@ def run_shards(
     basetemp_root.mkdir(parents=True, exist_ok=True)
     if coverage_root is not None:
         coverage_root.mkdir(parents=True, exist_ok=True)
-    processes: list[tuple[int, subprocess.Popen[bytes]]] = []
+    processes: list[tuple[int, subprocess.Popen[bytes], object]] = []
     try:
         for index, files in enumerate(shards):
             environment = dict(os.environ)
@@ -65,21 +65,40 @@ def run_shards(
                 "--cov-branch",
                 "--cov-report=",
             ]
-            processes.append((index, subprocess.Popen(command, cwd=ROOT, env=environment)))  # noqa: S603
+            log_path = basetemp_root / f"shard{index}.log"
+            log_handle = log_path.open("wb")
+            processes.append(
+                (
+                    index,
+                    subprocess.Popen(  # noqa: S603
+                        command,
+                        cwd=ROOT,
+                        env=environment,
+                        stdout=log_handle,
+                        stderr=subprocess.STDOUT,
+                    ),
+                    log_handle,
+                )
+            )
         failures: list[tuple[int, int]] = []
-        for index, process in processes:
+        for index, process, _log_handle in processes:
             returncode = process.wait()
             if returncode:
                 failures.append((index, returncode))
         if failures:
             raise SystemExit("pytest shard failures: " + ", ".join(f"{i}={c}" for i, c in failures))
     except BaseException:
-        for _index, process in processes:
+        for _index, process, _log_handle in processes:
             if process.poll() is None:
                 process.terminate()
-        for _index, process in processes:
+        for _index, process, log_handle in processes:
             process.wait()
+            log_handle.close()
         raise
+    finally:
+        for _index, _process, log_handle in processes:
+            if not log_handle.closed:
+                log_handle.close()
 
 
 def main() -> int:

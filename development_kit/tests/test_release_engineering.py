@@ -967,7 +967,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         for step in job["steps"]
         if "uses" in step
     ]
-    assert len(action_references) == 14
+    assert len(action_references) == 16
     assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for _action, revision in action_references)
     assert "# actions/checkout v7.0.0" in workflow
     assert "# actions/setup-python v6.2.0" in workflow
@@ -1000,6 +1000,8 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert "New-Item -ItemType Directory -Force -Path D:\\comsol_pytest" in dependency_commands
     assert "--ignore development_kit/tests/test_control_plane_startup.py" in dependency_commands
     assert "test_control_plane_startup.py --basetemp" in dependency_commands
+    assert "Upload dependency test evidence" in dependency_commands
+    assert "Upload quality gate evidence" in unit_commands
     assert any(
         "constraints/minimum_supported_py314.txt" in str(step.get("run", ""))
         for step in dependency_steps

@@ -52,6 +52,13 @@ jobs:
           python development_kit/scripts/serial_test_shards.py --basetemp-root D:\comsol_pytest\dependency-main --shards 2 --ignore development_kit/tests/test_control_plane_startup.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -u -m pytest -vv -o faulthandler_timeout=120 development_kit/tests/test_control_plane_startup.py --basetemp D:\comsol_pytest\dependency-serial
+      - name: Upload dependency test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dependency-test-evidence-${{ matrix.lane }}
+          path: D:\comsol_pytest
+          if-no-files-found: warn
 
   unit-and-package-py314:
     name: unit-and-package (Python 3.14, default production lane)
@@ -73,6 +80,13 @@ jobs:
         run: python -m compileall -q comsol_mcp src development_kit
       - name: Run ratcheted quality, coverage, license, and budget gates
         run: python development_kit/scripts/quality_gate.py --artifact-root "$env:RUNNER_TEMP\comsol_quality"
+      - name: Upload quality gate evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: quality-gate-evidence
+          path: ${{ runner.temp }}/comsol_quality
+          if-no-files-found: warn
       - name: Build wheel and source distribution
         run: python -m build
       - name: Probe a clean non-editable wheel install
