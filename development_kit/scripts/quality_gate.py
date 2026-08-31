@@ -36,10 +36,14 @@ LINT_TARGETS = (
     "comsol_mcp/evidence/thermal_radiation.py",
     "comsol_mcp/evidence/thermal_material.py",
     "comsol_mcp/evidence/spectral_model_comparison.py",
+    "comsol_mcp/evidence/model_identity.py",
+    "comsol_mcp/evidence/inspection",
     "comsol_mcp/native_runtime.py",
     "comsol_mcp/schema_registry.py",
     "comsol_mcp/settings_gui_handshake.py",
     "comsol_mcp/settings_gui_launcher.py",
+    "comsol_mcp/jobs/bounded_steps.py",
+    "comsol_mcp/jobs/observation.py",
     "comsol_mcp/jobs/thermo_optomechanical_replay.py",
     "comsol_mcp/jobs/thermo_optomechanical_replay_execution.py",
     "comsol_mcp/jobs/thermo_optomechanical_replay_rows.py",
@@ -60,6 +64,10 @@ LINT_TARGETS = (
     "comsol_mcp/tools/acoustics_pde.py",
     "comsol_mcp/tools/catalog.py",
     "comsol_mcp/tools/configuration.py",
+    "comsol_mcp/tools/compatibility_registry.py",
+    "comsol_mcp/tools/offline_export.py",
+    "comsol_mcp/tools/mph_inspection.py",
+    "comsol_mcp/tools/model_identity.py",
     "comsol_mcp/tools/thermal_radiation.py",
     "comsol_mcp/tools/thermal_material.py",
     "comsol_mcp/tools/geometry_selections.py",
@@ -76,6 +84,11 @@ LINT_TARGETS = (
     "development_kit/scripts/standalone_licensed_gate.py",
     "development_kit/benchmarks/research_campaign.py",
     "development_kit/tests/conftest.py",
+    "development_kit/tests/test_alpha73_public_surface.py",
+    "development_kit/tests/test_bounded_steps.py",
+    "development_kit/tests/test_compatibility_registry.py",
+    "development_kit/tests/test_offline_export.py",
+    "development_kit/tests/test_observation.py",
     "development_kit/tests/test_control_plane_startup.py",
     "development_kit/tests/test_dependency_license_gate.py",
     "development_kit/tests/test_durable_primitives.py",
@@ -123,6 +136,9 @@ LINT_TARGETS = (
 MYPY_GROUPS = (
     (
         "comsol_mcp/contracts/job_submission.py",
+        "comsol_mcp/contracts/mph_inspection.py",
+        "comsol_mcp/contracts/model_identity.py",
+        "comsol_mcp/contracts/offline_export.py",
         "comsol_mcp/contracts/simulation_configuration.py",
         "comsol_mcp/contracts/thermal_radiation.py",
         "comsol_mcp/contracts/thermal_material.py",
@@ -139,6 +155,16 @@ MYPY_GROUPS = (
         "comsol_mcp/evidence/simulation_configuration.py",
         "comsol_mcp/evidence/thermal_radiation.py",
         "comsol_mcp/evidence/thermal_material.py",
+        "comsol_mcp/evidence/inspection",
+        "comsol_mcp/evidence/model_identity.py",
+        "comsol_mcp/tools/mph_inspection.py",
+        "comsol_mcp/tools/model_identity.py",
+        "comsol_mcp/evidence/compatibility_registry.py",
+        "comsol_mcp/tools/compatibility_registry.py",
+        "comsol_mcp/evidence/offline_export.py",
+        "comsol_mcp/tools/offline_export.py",
+        "comsol_mcp/jobs/bounded_steps.py",
+        "comsol_mcp/jobs/observation.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay_execution.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay_rows.py",
@@ -175,7 +201,7 @@ MYPY_GROUPS = (
     ),
 )
 PRODUCTION_ROOTS = ("comsol_mcp", "src")
-LINT_EXCLUSIONS_SHA256 = "8befcb97a04013eef06db5f6d337dd0addca20ac626261ec4eefa2b9700c62c8"
+LINT_EXCLUSIONS_SHA256 = "2ad57c6658d4d0da9f2df0eb3256da088a1540c23631aea8327ea8fde68bc1cc"
 MYPY_EXCLUSIONS_SHA256 = "0ee71edbf253ed405fd397ce377ae5b2202e4913d6e8c5863ee01485ae64a402"
 PARALLEL_TEST_WORKERS = 4
 SERIAL_TEST_TARGETS = ("development_kit/tests/test_control_plane_startup.py",)
@@ -270,6 +296,22 @@ def _serial_pytest_command(pytest_root: Path) -> list[str]:
         "--cov=comsol_mcp",
         "--cov-branch",
         "--cov-report=",
+    ]
+
+
+def _hosted_serial_shard_command(basetemp_root: Path, coverage_root: Path) -> list[str]:
+    """Build the no-xdist hosted runner command for isolated serial shards."""
+    return [
+        sys.executable,
+        "development_kit/scripts/serial_test_shards.py",
+        "--basetemp-root",
+        str(basetemp_root),
+        "--coverage-root",
+        str(coverage_root),
+        "--shards",
+        "2",
+        "--ignore",
+        SERIAL_TEST_TARGETS[0],
     ]
 
 
@@ -579,14 +621,25 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
             stage="coverage_erase",
             environment=environment,
         )
-        _run(
-            _main_pytest_command(
-                main_pytest_root,
-                hosted_ci=os.environ.get("GITHUB_ACTIONS", "").casefold() == "true",
-            ),
-            stage="parallel_tests",
-            environment=environment,
-        )
+        hosted_ci = os.environ.get("GITHUB_ACTIONS", "").casefold() == "true"
+        if hosted_ci:
+            shard_coverage_root = run_root / "shard-coverage"
+            _run(
+                _hosted_serial_shard_command(main_pytest_root, shard_coverage_root),
+                stage="hosted_serial_shards",
+                environment=environment,
+            )
+            coverage_inputs = [
+                shard_coverage_root / ".coverage-shard-0",
+                shard_coverage_root / ".coverage-shard-1",
+            ]
+        else:
+            _run(
+                _main_pytest_command(main_pytest_root, hosted_ci=False),
+                stage="parallel_tests",
+                environment=environment,
+            )
+            coverage_inputs = [coverage_data]
         serial_coverage_data = run_root / ".coverage-serial"
         serial_environment = dict(environment)
         serial_environment["COVERAGE_FILE"] = str(serial_coverage_data)
@@ -601,12 +654,12 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
         # combine rebuilds its output from the listed inputs, so the target
         # must be distinct from the parallel-suite data being merged in.
         combined_coverage_data = run_root / ".coverage-combined"
-        combine_inputs = [str(coverage_data)]
+        combine_inputs = [str(path) for path in coverage_inputs]
         if serial_coverage_data.exists():
             combine_inputs.append(str(serial_coverage_data))
         combine_environment = dict(environment)
         combine_environment["COVERAGE_FILE"] = str(combined_coverage_data)
-        if len(combine_inputs) == 2:
+        if len(combine_inputs) >= 2:
             _run(
                 [
                     sys.executable,

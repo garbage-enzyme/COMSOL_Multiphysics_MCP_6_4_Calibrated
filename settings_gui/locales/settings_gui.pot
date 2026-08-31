@@ -1,6 +1,6 @@
 # Generated deterministic gettext template for COMSOL MCP Settings.
 msgid ""
-msgstr "Project-Id-Version: comsol-mcp alpha7.2\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: \nPlural-Forms: nplurals=2; plural=(n != 1);\n"
+msgstr "Project-Id-Version: comsol-mcp alpha7.3\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: \nPlural-Forms: nplurals=2; plural=(n != 1);\n"
 
 msgid "COMSOL MCP Settings"
 msgstr ""
@@ -165,6 +165,9 @@ msgid "For testing extra helpers that are broader or less mature. Use it only wh
 msgstr ""
 
 msgid "For old workflows that need nearly every tool. It keeps older broad path behavior and has weaker file containment. New users should not choose it."
+msgstr ""
+
+msgid "Offline model inspection for computers without COMSOL. Only solver-free read-only inspection tools are available; nothing here can start COMSOL or Java."
 msgstr ""
 
 msgid "Folder for working files and locks. Use an ASCII-only path. \nExample: %PROGRAMDATA%\\comsol_mcp\\runtime"

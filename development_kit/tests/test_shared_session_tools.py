@@ -39,7 +39,14 @@ def test_shared_feature_capabilities_and_tools_are_explicit():
     } <= set(tools)
     assert capabilities["shared_session"] == {
         "profile_independent": True,
-        "compatible_profiles": ["core", "basic_fem", "wave_optics", "experimental", "full"],
+        "compatible_profiles": [
+            "core",
+            "basic_fem",
+            "wave_optics",
+            "experimental",
+            "full",
+            "comsolless_read_only",
+        ],
         "feature_flag": SHARED_SERVER_FEATURE_ENV,
         "feature_enabled": True,
         "gate_open": True,
@@ -69,7 +76,7 @@ def test_shared_feature_capabilities_and_tools_are_explicit():
         },
         "restart_required_after_change": True,
     }
-    assert capabilities["tool_count"] == 84
+    assert capabilities["tool_count"] == 89
 
 
 def test_shared_attach_public_schema_requires_confirmation():

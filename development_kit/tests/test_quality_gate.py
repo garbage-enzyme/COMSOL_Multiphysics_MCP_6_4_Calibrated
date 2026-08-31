@@ -15,6 +15,7 @@ from development_kit.scripts import quality_gate as quality_gate_module
 from development_kit.scripts.quality_gate import (
     POLICY_PATH,
     _create_short_pytest_roots,
+    _hosted_serial_shard_command,
     _main_pytest_command,
     _serial_pytest_command,
     evaluate_coverage,
@@ -36,6 +37,14 @@ def test_hosted_quality_main_suite_is_serial_but_local_suite_keeps_four_workers(
     assert local[local.index("-n") + 1] == "4"
     assert local[local.index("--dist") + 1] == "loadscope"
     assert local[local.index("--basetemp") + 1] == str(tmp_path)
+
+
+def test_hosted_shards_are_plain_serial_pytest_processes(tmp_path: Path) -> None:
+    command = _hosted_serial_shard_command(tmp_path / "tests", tmp_path / "coverage")
+    assert any(item.endswith("serial_test_shards.py") for item in command)
+    assert command[command.index("--shards") + 1] == "2"
+    assert "-n" not in command
+    assert "--coverage-root" in command
 
 
 def test_configured_pytest_roots_remain_direct_short_siblings(monkeypatch) -> None:

@@ -955,7 +955,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         if isinstance(step, dict)
     )
 
-    assert "python -u -m pytest -vv" in dependency_commands
+    assert "serial_test_shards.py" in dependency_commands
     assert " -n " not in dependency_commands
     assert 'os.environ.get("GITHUB_ACTIONS", "").casefold() == "true"' in quality_gate
     assert "python -m build" in unit_commands
@@ -967,7 +967,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         for step in job["steps"]
         if "uses" in step
     ]
-    assert len(action_references) == 14
+    assert len(action_references) == 16
     assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for _action, revision in action_references)
     assert "# actions/checkout v7.0.0" in workflow
     assert "# actions/setup-python v6.2.0" in workflow
@@ -995,12 +995,16 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         "minimum-supported",
         "current-compatible",
     ]
-    assert dependency_steps[-1]["env"]["PYTHONUNBUFFERED"] == "1"
-    assert "-o faulthandler_timeout=120" in dependency_commands
-    assert "--basetemp D:\\comsol_pytest\\dependency-main" in dependency_commands
+    dependency_run_step = next(
+        step for step in dependency_steps if "PYTHONUNBUFFERED" in step.get("env", {})
+    )
+    assert dependency_run_step["env"]["PYTHONUNBUFFERED"] == "1"
+    assert "--basetemp-root D:\\comsol_pytest\\dependency-main" in dependency_commands
     assert "New-Item -ItemType Directory -Force -Path D:\\comsol_pytest" in dependency_commands
     assert "--ignore development_kit/tests/test_control_plane_startup.py" in dependency_commands
     assert "test_control_plane_startup.py --basetemp" in dependency_commands
+    assert "Upload dependency test evidence" in workflow
+    assert "Upload quality gate evidence" in workflow
     assert any(
         "constraints/minimum_supported_py314.txt" in str(step.get("run", ""))
         for step in dependency_steps

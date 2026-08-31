@@ -51,6 +51,10 @@ PROFILE_HELP_IDS = {
         "For old workflows that need nearly every tool. It keeps older broad path behavior and "
         "has weaker file containment. New users should not choose it."
     ),
+    "comsolless_read_only": (
+        "Offline model inspection for computers without COMSOL. Only solver-free read-only "
+        "inspection tools are available; nothing here can start COMSOL or Java."
+    ),
 }
 GUI_SCALE_HELP_ID = (
     "Size of text and controls. Following Windows is recommended. "

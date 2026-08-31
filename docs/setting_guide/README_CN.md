@@ -163,7 +163,7 @@ English (en)
 
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
-| `profile.name` | `"core"` | 可选 `core`、`basic_fem`、`wave_optics`、`experimental` 或 `full`；保存为小写。不支持的值会回落到 `core` 并报告来源。 |
+| `profile.name` | `"core"` | 可选 `core`、`basic_fem`、`wave_optics`、`experimental`、`full` 或 `comsolless_read_only`；保存为小写。不支持的值会回落到 `core` 并报告来源。 |
 
 新手在重视安全、希望减少可用操作时，可以从 `core` 开始。大多数进行常规仿真的用户应
 选择 `basic_fem`。Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性；手册
@@ -176,6 +176,7 @@ English (en)
 | `wave_optics` | 光学与超表面、场结果查看、Wave Optics 检查、单点审计和分阶段参数流程。 |
 | `experimental` | 范围更广或尚未成熟、需要仔细检查输出的额外工具。 |
 | `full` | 需要几乎全部非 feature 工具且接受较弱文件范围保护的旧流程迁移；不建议新用户使用。 |
+| `comsolless_read_only` | 未安装 COMSOL 的电脑：仅提供离线模型/证据探查工具，无法启动 COMSOL 或 Java。 |
 
 ### 运行与文件范围
 
@@ -292,6 +293,26 @@ PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数�
 不要再建立一套只靠环境变量的独立配置。
 
 ## 更新与恢复
+
+### 离线检查与证据工具（alpha7.3）
+
+所有 profile 都提供五个只读、不依赖求解器的工具。它们在 COMSOL 关闭的状态下
+检查已保存的 `.mph` 模型与离线证据，绝不导入或启动 COMSOL、Java、MPh、JPype：
+
+| 工具 | 用途 |
+| --- | --- |
+| `mph_inspect` | 对单个 `.mph` 归档做有界离线检查：声明版本、节点/可运行/求解/预览状态、参数、标签、存档点、确定性的体积分解。 |
+| `mph_diff` | 双归档的元数据/标签/参数/条目差异对比，并证明输入未被修改；零差异不是科学等价性证明。 |
+| `model_identity` | 源/派生文件的只读身份与检查点就绪状态；活动会话身份默认返回结构化"不可用"，仅在显式请求且会话已连接时读取。 |
+| `runtime_compatibility_status` | 当前 Python/MPh/JPype 身份、支持范围、profile 与技能层哈希；仅显式请求时读取已绑定 COMSOL 身份；绝不选择回退运行时。 |
+| `offline_export_validate` | 完全离线地校验导出清单及其 VTU/CSV/TXT 文件（路径、ID、顺序、单位、字节数、哈希）。 |
+
+`comsolless_read_only` profile 只暴露这五个工具，因此未安装 COMSOL 的轻量
+计算机也可以探查模型与离线证据。与其他 profile 一样，切换进入或退出该
+profile 需要重启 MCP host。
+
+这些工具只产生完整性证据，永远不能替代 FEM 校验、求解器证据或持久任务
+回执链。
 
 更新或重装 MCP package 前，先备份实际生效的可写 `settings.json`。如果使用了
 `COMSOL_MCP_SETTINGS_PATH`，应备份它指向的准确文件。安装后恢复或重新检查设置，重启

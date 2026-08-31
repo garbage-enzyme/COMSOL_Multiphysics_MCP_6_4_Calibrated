@@ -188,7 +188,7 @@ the GUI before save and by backend validation when JSON is edited directly.
 
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
-| `profile.name` | `"core"` | `core`, `basic_fem`, `wave_optics`, `experimental`, or `full`. The stored value is lower-case. Unsupported values fall back to `core` with reported provenance. |
+| `profile.name` | `"core"` | `core`, `basic_fem`, `wave_optics`, `experimental`, `full`, or `comsolless_read_only`. The stored value is lower-case. Unsupported values fall back to `core` with reported provenance. |
 
 New users can begin with the smaller `core` surface when safety is the priority.
 Most users doing ordinary simulation should choose `basic_fem`. Profiles only
@@ -203,6 +203,7 @@ independent Boolean feature gates and may be enabled together for any profile.
 | `wave_optics` | Optical and metasurface work, field review, Wave Optics checks, point audits, and staged parameters. |
 | `experimental` | Extra helpers that are broader or less mature and require careful review. |
 | `full` | Legacy migration that needs nearly every non-feature tool and accepts weaker file containment; not recommended for new users. |
+| `comsolless_read_only` | Computers without a COMSOL installation: offline model/evidence inspection tools only; nothing can start COMSOL or Java. |
 
 ### Runtime and Containment
 
@@ -326,6 +327,28 @@ New user deployments should use the GUI. Developer and agent automation may use
 the same JSON file, but must not create separate environment-only configurations.
 
 ## Update and Recovery
+
+### Offline Inspection and Evidence Tools (alpha7.3)
+
+Five read-only, solver-free tools ship in every profile. They inspect saved
+`.mph` archives and offline evidence with COMSOL closed and never import or
+start COMSOL, Java, MPh, or JPype:
+
+| Tool | Purpose |
+| --- | --- |
+| `mph_inspect` | Bounded offline inspection of one `.mph` archive: declared version, node/runnable/solved/preview state, parameters, tags, savepoints, deterministic size breakdown. |
+| `mph_diff` | Two-archive metadata/tag/parameter/entry diff with input-immutability proof; a zero diff is not a scientific equivalence proof. |
+| `model_identity` | Read-only identity for source/derived files with checkpoint readiness; live session identity is structured-unavailable unless explicitly requested from an already-connected session. |
+| `runtime_compatibility_status` | Active Python/MPh/JPype identities, supported ranges, profile, and skill-layer hashes; bound COMSOL identity only on explicit request; no fallback runtime is ever selected. |
+| `offline_export_validate` | Validates an export manifest plus its VTU/CSV/TXT files (paths, IDs, ordering, units, byte counts, hashes) entirely offline. |
+
+The `comsolless_read_only` profile exposes exactly these five tools and
+nothing else, so lightweight computers without COMSOL can probe models and
+offline evidence. Switching into or out of this profile requires an MCP host
+restart like any other profile change.
+
+These tools produce integrity evidence only. They never replace FEM
+validation, solver evidence, or the durable-job receipt chain.
 
 Before updating or reinstalling, back up the effective writable `settings.json`.
 If `COMSOL_MCP_SETTINGS_PATH` is set, back up that exact file. After installation,

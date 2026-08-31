@@ -260,7 +260,7 @@ from development_kit.tests.mcp_test_support import decode_tool_result as decode
 server = create_server('semantic-feature-subprocess', profile='core')
 tools = asyncio.run(server.list_tools())
 names = sorted(tool.name for tool in tools)
-assert len(names) == 48
+assert len(names) == 53
 assert {'semantic_search','semantic_status','semantic_worker_reset'} <= set(names)
 for name in ('chromadb','torch','sentence_transformers'):
     assert name not in sys.modules, name
@@ -278,7 +278,7 @@ print(json.dumps({'count': len(names), 'configured': status['configured']}))
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert json.loads(completed.stdout)["count"] == 48
+    assert json.loads(completed.stdout)["count"] == 53
 
 
 def test_semantic_and_other_profile_counts_match_declared_discovery(monkeypatch):
@@ -291,16 +291,18 @@ def test_semantic_and_other_profile_counts_match_declared_discovery(monkeypatch)
         "wave_optics",
         "experimental",
         "full",
+        "comsolless_read_only",
     ):
         server = create_server(f"semantic-profile-{profile}", profile=profile)
         counts[profile] = len(asyncio.run(server.list_tools()))
 
     assert counts == {
-        "core": 45,
-        "basic_fem": 107,
-        "wave_optics": 74,
-        "experimental": 99,
-        "full": 155,
+        "core": 50,
+        "basic_fem": 112,
+        "wave_optics": 79,
+        "experimental": 104,
+        "full": 160,
+        "comsolless_read_only": 5,
     }
 
 

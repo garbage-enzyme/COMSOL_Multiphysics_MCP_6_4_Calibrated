@@ -1,6 +1,6 @@
 # Generated deterministically; edit the generator, not this file.
 msgid ""
-msgstr "Project-Id-Version: comsol-mcp alpha7.2\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: zh_TW\nPlural-Forms: nplurals=1; plural=0;\n"
+msgstr "Project-Id-Version: comsol-mcp alpha7.3\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: zh_TW\nPlural-Forms: nplurals=1; plural=0;\n"
 
 msgid "COMSOL MCP Settings"
 msgstr "COMSOL MCP 設定"
@@ -166,6 +166,9 @@ msgstr "適合測試範圍更廣或尚未成熟的額外工具。只有在較安
 
 msgid "For old workflows that need nearly every tool. It keeps older broad path behavior and has weaker file containment. New users should not choose it."
 msgstr "適合需要幾乎全部工具的舊流程。它保留較寬鬆的舊路徑行為，檔案範圍保護較弱；新使用者不應選擇。"
+
+msgid "Offline model inspection for computers without COMSOL. Only solver-free read-only inspection tools are available; nothing here can start COMSOL or Java."
+msgstr "為未安裝 COMSOL 的電腦提供的離線模型檢查。僅提供求解器無關的唯讀檢查工具；此處任何功能都不會啟動 COMSOL 或 Java。"
 
 msgid "Folder for working files and locks. Use an ASCII-only path. \nExample: %PROGRAMDATA%\\comsol_mcp\\runtime"
 msgstr "存放工作檔案和鎖定資料的資料夾。路徑只能含 ASCII 字元。\n範例：%PROGRAMDATA%\\comsol_mcp\\runtime"

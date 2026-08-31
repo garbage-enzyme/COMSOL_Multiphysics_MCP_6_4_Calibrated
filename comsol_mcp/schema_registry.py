@@ -558,6 +558,52 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.tools.model",
         ),
         _entry(
+            "comsol_mcp.model_identity",
+            "1.0.0",
+            "comsol_mcp.evidence.model_identity",
+            artifact_kind="public_response",
+        ),
+        _entry(
+            "comsol_mcp.bounded_step_receipt",
+            "1.0.0",
+            "comsol_mcp.jobs.bounded_steps",
+        ),
+        _entry(
+            "comsol_mcp.compatibility_registry",
+            "1.0.0",
+            "comsol_mcp.evidence.compatibility_registry",
+            artifact_kind="public_response",
+        ),
+        _entry(
+            "comsol_mcp.offline_export_manifest",
+            "1.0.0",
+            "comsol_mcp.evidence.offline_export",
+            artifact_kind="public_response",
+        ),
+        _entry(
+            "comsol_mcp.observation_receipt",
+            "1.0.0",
+            "comsol_mcp.jobs.observation",
+        ),
+        _entry(
+            "comsol_mcp.mph_artifact_probe",
+            "1.0.0",
+            "comsol_mcp.evidence.inspection.probe",
+            artifact_kind="public_response",
+        ),
+        _entry(
+            "comsol_mcp.mph_diff",
+            "1.0.0",
+            "comsol_mcp.evidence.inspection.diff",
+            artifact_kind="public_response",
+        ),
+        _entry(
+            "comsol_mcp.mph_inspection_summary",
+            "1.0.0",
+            "comsol_mcp.evidence.inspection.summary",
+            artifact_kind="public_response",
+        ),
+        _entry(
             MATERIAL_CATALOG_SCHEMA_NAME,
             MATERIAL_CATALOG_SCHEMA_VERSION,
             "comsol_mcp.research.materials",
