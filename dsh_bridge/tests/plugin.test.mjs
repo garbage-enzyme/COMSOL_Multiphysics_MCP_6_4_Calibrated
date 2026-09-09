@@ -74,7 +74,7 @@ after(() => fakeServer.close());
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function makeCtx({ jobs } = {}) {
+function makeCtx({ jobs, agents } = {}) {
 	const registered = [];
 	const disposers = [];
 	return {
@@ -86,7 +86,11 @@ function makeCtx({ jobs } = {}) {
 				return () => {};
 			},
 		},
-		get: (key) => (key === "jobs" ? jobs : undefined),
+		get: (key) => {
+			if (key === "jobs") return jobs;
+			if (key === "agents") return agents;
+			return undefined;
+		},
 		effect: (factory) => disposers.push(factory()),
 		dispose() {
 			for (const d of disposers.splice(0)) {
@@ -295,8 +299,10 @@ test("B02a: rehydrate restores owner and does not resubmit", { timeout: 25000 },
 		}], null, 2));
 
 		const jobs = createFakeJobs();
-		const ctx = makeCtx({ jobs });
-		let submitCalls = 0;
+		// DSH requires the live registered Agent instance for jobs.start owner.
+		const liveAgent = { id: "agent-1" };
+		const agents = { get: (id) => (id === "agent-1" ? liveAgent : undefined) };
+		const ctx = makeCtx({ jobs, agents });
 		await apply(ctx, {
 			command: process.execPath,
 			args: [FIXTURE],
@@ -310,9 +316,9 @@ test("B02a: rehydrate restores owner and does not resubmit", { timeout: 25000 },
 			rehydrateMaxAttempts: 0,
 		});
 
-		// Rehydrate must start exactly one mirror with the restored owner.
+		// Rehydrate must start exactly one mirror with the restored live owner.
 		assert.equal(jobs.started.length, 1, `expected 1 rehydrated mirror, got ${jobs.started.length}`);
-		assert.equal(jobs.started[0].spec.owner, "agent-1");
+		assert.equal(jobs.started[0].spec.owner, liveAgent);
 		assert.equal(jobs.started[0].spec.label, "comsol job job-1 (staged_sweep)");
 
 		const rows = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -344,7 +350,9 @@ test("B02a: rehydrate with missing owner keeps the row and blocks recovery", { t
 		}], null, 2));
 
 		const jobs = createFakeJobs();
-		const ctx = makeCtx({ jobs });
+		// Owner key is persisted but the agent is not live — recovery must block.
+		const agents = { get: () => undefined };
+		const ctx = makeCtx({ jobs, agents });
 		await apply(ctx, {
 			command: process.execPath,
 			args: [FIXTURE],
@@ -359,12 +367,45 @@ test("B02a: rehydrate with missing owner keeps the row and blocks recovery", { t
 		});
 
 		// Must NOT invent an owner or start an unowned mirror.
-		assert.equal(jobs.started.length, 0, "must not start a mirror without a restored owner");
+		assert.equal(jobs.started.length, 0, "must not start a mirror without a live restored owner");
 		const rows = JSON.parse(readFileSync(stateFile, "utf8"));
-		assert.equal(rows.length, 1, "legacy row must be retained");
+		assert.equal(rows.length, 1, "row must be retained");
 		assert.equal(rows[0].jobId, "job-legacy");
 		assert.equal(rows[0].recoveryBlocked, true);
 		assert.match(rows[0].recoveryReason ?? "", /missing owner/i);
+		ctx.dispose();
+	} finally { rmSync(stateDir, { recursive: true, force: true }); }
+});
+
+test("B02a: rehydrate with owner key but agent not live keeps the row blocked", { timeout: 25000 }, async () => {
+	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b02await"));
+	try {
+		const stateFile = join(stateDir, "jobs.json");
+		writeFileSync(stateFile, JSON.stringify([{
+			jobId: "job-wait",
+			jobType: "staged_sweep",
+			schemaVersion: 2,
+			ownerAgentKey: "agent-1",
+		}], null, 2));
+		const jobs = createFakeJobs();
+		const agents = { get: () => undefined };
+		const ctx = makeCtx({ jobs, agents });
+		await apply(ctx, {
+			command: process.execPath,
+			args: [FIXTURE],
+			env: fakeServer.extraEnv,
+			cwd: "D:\\mcp_tests",
+			stateFile,
+			pollIntervalMs: 30,
+			reconnect: { enabled: false },
+			initTimeoutMs: 5000,
+			failOnStartupError: true,
+			rehydrateMaxAttempts: 0,
+		});
+		assert.equal(jobs.started.length, 0);
+		const rows = JSON.parse(readFileSync(stateFile, "utf8"));
+		assert.equal(rows[0].recoveryBlocked, true);
+		assert.match(rows[0].recoveryReason ?? "", /not live in the agent registry/i);
 		ctx.dispose();
 	} finally { rmSync(stateDir, { recursive: true, force: true }); }
 });

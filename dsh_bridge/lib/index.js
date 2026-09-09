@@ -260,6 +260,20 @@ export async function apply(ctx, config) {
 					logger.warn?.(`comsol-bridge: rehydrate blocked for ${rec.jobId}: missing owner identity`);
 					continue;
 				}
+				// B02a: DSH jobs.start requires the live registered Agent
+				// instance, not a string key. Resolve it from the agents
+				// registry; never invent an agent or pass the raw string.
+				const agents = ctx.get("agents");
+				const liveOwner = agents?.get?.(owner);
+				if (!liveOwner) {
+					stateStore.update(rec.jobId, {
+						recoveryBlocked: true,
+						recoveryReason: `owner "${owner}" is not live in the agent registry; waiting for that session/controller`,
+						lastObservedState: state,
+					});
+					logger.warn?.(`comsol-bridge: rehydrate waiting for live owner ${owner} of ${rec.jobId}`);
+					continue;
+				}
 				if (rec.unconfirmed || rec.recoveryBlocked) {
 					stateStore.update(rec.jobId, {
 						unconfirmed: false,
@@ -268,9 +282,9 @@ export async function apply(ctx, config) {
 						recoveryReason: null,
 					});
 				}
-				// Restore the original owner token so jobs.start routes to that
+				// Restore the original owner so jobs.start routes to that
 				// agent's controller (B02a). Failures leave the row retryable.
-				if (startMirror(rec.jobId, rec.jobType, owner)) {
+				if (startMirror(rec.jobId, rec.jobType, liveOwner)) {
 					mirrored.add(rec.jobId);
 					mirroredKeys.add(dedupeKey);
 					stateStore.update(rec.jobId, { lastObservedState: state });
