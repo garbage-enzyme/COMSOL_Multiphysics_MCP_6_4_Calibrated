@@ -19,6 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from comsol_mcp.durable import canonical_sha256_v1
+from comsol_mcp.path_policy import PathPolicy, pin_validated_reads
 
 OFFLINE_EXPORT_MANIFEST_SCHEMA_NAME = "comsol_mcp.offline_export_manifest"
 OFFLINE_EXPORT_MANIFEST_SCHEMA_VERSION = "1.0.0"
@@ -359,37 +360,93 @@ def validate_offline_export_manifest(
     max_manifest_bytes: int = 33_554_432,
     max_artifacts: int = 512,
     max_artifact_bytes: int = 17_179_869_184,
+    path_policy: PathPolicy | None = None,
 ) -> dict[str, Any]:
-    """Validate one manifest plus its artifacts entirely offline."""
+    """Validate one manifest plus its artifacts entirely offline.
+
+    B04 containment: the manifest file, the export base directory, and every
+    artifact must lie inside the configured owned artifact root. Each file is
+    held with a validated read pin for the duration of hashing so a mid-
+    validation replacement cannot swap the bytes that were checked.
+    """
     warnings: list[str] = []
     failures: list[dict[str, Any]] = []
+    policy = path_policy or PathPolicy.from_environment()
+    path_evidence: dict[str, Any] = {
+        "enforced": True,
+        "validated_input_count": 0,
+        "validated_kinds": [],
+        "root_ids": [],
+    }
 
+    def _record_path(kind: str, root_id: str) -> None:
+        path_evidence["validated_input_count"] += 1
+        if kind not in path_evidence["validated_kinds"]:
+            path_evidence["validated_kinds"].append(kind)
+        if root_id not in path_evidence["root_ids"]:
+            path_evidence["root_ids"].append(root_id)
+
+    manifest_pin = None
     if isinstance(manifest_source, (str, Path)):
-        path = Path(manifest_source)
+        try:
+            decision = policy.validate_artifact_read(str(manifest_source))
+        except ValueError as exc:
+            # A missing file under the owned root is unavailable, not an escape.
+            try:
+                root = policy.artifact_write_root.resolve(strict=False)
+                candidate = Path(manifest_source).expanduser()
+                if not candidate.is_absolute():
+                    candidate = Path.cwd() / candidate
+                resolved = candidate.resolve(strict=False)
+                under_root = resolved == root or root in resolved.parents
+            except (OSError, RuntimeError, ValueError):
+                under_root = False
+            code = "manifest_unavailable" if under_root else "manifest_outside_allowed_root"
+            rejected = _invalid_verdict([code])
+            rejected["failures"][0]["detail"] = str(exc)[:160]
+            rejected["path_evidence"] = path_evidence
+            return rejected
+        manifest_pin = decision.read_pin
+        _record_path(decision.kind, decision.root_id)
+        path = decision.normalized_path
         try:
             raw = path.read_bytes()
         except OSError:
-            return _invalid_verdict(["manifest_unavailable"])
+            rejected = _invalid_verdict(["manifest_unavailable"])
+            rejected["path_evidence"] = path_evidence
+            return rejected
         base_directory = base_directory or path.parent
         if len(raw) > max_manifest_bytes:
-            return _invalid_verdict(["manifest_too_large"])
+            rejected = _invalid_verdict(["manifest_too_large"])
+            rejected["path_evidence"] = path_evidence
+            return rejected
         try:
             payload = json.loads(raw.decode("utf-8"))
-        except UnicodeDecodeError, json.JSONDecodeError:
-            return _invalid_verdict(["manifest_not_valid_json"])
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            rejected = _invalid_verdict(["manifest_not_valid_json"])
+            rejected["path_evidence"] = path_evidence
+            return rejected
     elif isinstance(manifest_source, (bytes, bytearray)):
         if len(manifest_source) > max_manifest_bytes:
-            return _invalid_verdict(["manifest_too_large"])
+            rejected = _invalid_verdict(["manifest_too_large"])
+            rejected["path_evidence"] = path_evidence
+            return rejected
         try:
             payload = json.loads(bytes(manifest_source).decode("utf-8"))
-        except UnicodeDecodeError, json.JSONDecodeError:
-            return _invalid_verdict(["manifest_not_valid_json"])
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            rejected = _invalid_verdict(["manifest_not_valid_json"])
+            rejected["path_evidence"] = path_evidence
+            return rejected
         if base_directory is None:
-            return _invalid_verdict(["base_directory_undeclared"])
+            rejected = _invalid_verdict(["base_directory_undeclared"])
+            rejected["path_evidence"] = path_evidence
+            return rejected
     else:
         payload = manifest_source
         if base_directory is None:
-            return _invalid_verdict(["base_directory_undeclared"])
+            rejected = _invalid_verdict(["base_directory_undeclared"])
+            rejected["path_evidence"] = path_evidence
+            return rejected
 
     try:
         manifest = normalize_offline_export_manifest(payload)
@@ -407,6 +464,7 @@ def validate_offline_export_manifest(
             code = "manifest_invalid"
         rejected = _invalid_verdict([code])
         rejected["failures"][0]["detail"] = detail[:160]
+        rejected["path_evidence"] = path_evidence
         return rejected
 
     if len(manifest["artifacts"]) > max_artifacts:
@@ -421,14 +479,44 @@ def validate_offline_export_manifest(
     elif source_hash is None:
         warnings.append("model_hash_undeclared")
 
-    base = Path(base_directory).resolve()
+    try:
+        base_decision = policy.validate_artifact_read_root(str(base_directory))
+    except ValueError as exc:
+        rejected = _invalid_verdict(["base_directory_outside_allowed_root"])
+        rejected["failures"][0]["detail"] = str(exc)[:160]
+        rejected["path_evidence"] = path_evidence
+        return rejected
+    base = base_decision.normalized_path
+    _record_path(base_decision.kind, base_decision.root_id)
+
+    artifact_pins = []
     for artifact in manifest["artifacts"]:
         reasons: list[str] = []
-        target = (base / artifact["relative_path"]).resolve()
+        candidate = base / artifact["relative_path"]
         try:
-            target.relative_to(base)
-        except ValueError:
-            reasons.append("path_escape")
+            target_decision = policy.validate_artifact_read(str(candidate))
+            target = target_decision.normalized_path
+            try:
+                target.relative_to(base)
+            except ValueError:
+                reasons.append("path_escape")
+            else:
+                _record_path(target_decision.kind, target_decision.root_id)
+                if target_decision.read_pin is not None:
+                    artifact_pins.append(target_decision.read_pin)
+        except ValueError as exc:
+            # Missing files under the export base are missing, not escapes.
+            try:
+                resolved = candidate.resolve(strict=False)
+                under_base = resolved == base or base in resolved.parents
+            except (OSError, RuntimeError, ValueError):
+                under_base = False
+            if under_base and not candidate.exists():
+                reasons.append("missing_file")
+            else:
+                reasons.append("path_escape")
+            target = candidate
+            _ = exc
         if not reasons:
             if not target.is_file():
                 reasons.append("missing_file")
@@ -436,13 +524,25 @@ def validate_offline_export_manifest(
                 size = target.stat().st_size
                 if size > max_artifact_bytes:
                     reasons.append("artifact_over_declared_limit")
-                elif size != artifact["byte_count"]:
-                    reasons.append("byte_count_mismatch")
-                    digest = hashlib.sha256(target.read_bytes()).hexdigest()
-                    if digest != artifact["sha256"]:
-                        reasons.append("artifact_hash_mismatch")
                 else:
-                    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+                    # Hash under the validated read pin when available so a
+                    # concurrent path swap cannot change the checked bytes.
+                    try:
+                        if artifact_pins and artifact_pins[-1].path == target:
+                            with pin_validated_reads((artifact_pins[-1],)):
+                                digest = hashlib.sha256(target.read_bytes()).hexdigest()
+                                size_after = target.stat().st_size
+                        else:
+                            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+                            size_after = size
+                    except (OSError, RuntimeError, ValueError):
+                        reasons.append("artifact_unreadable")
+                        failures.append(
+                            {"artifact_id": artifact["artifact_id"], "reason_codes": reasons}
+                        )
+                        continue
+                    if size_after != artifact["byte_count"] or size != artifact["byte_count"]:
+                        reasons.append("byte_count_mismatch")
                     if digest != artifact["sha256"]:
                         reasons.append("artifact_hash_mismatch")
                     elif artifact["format"] in OFFLINE_READABLE_FORMATS:
@@ -464,6 +564,11 @@ def validate_offline_export_manifest(
         "failures": failures,
         "warnings": sorted(set(warnings)),
         "is_fem_validation": False,
+        "path_evidence": {
+            **path_evidence,
+            "validated_kinds": sorted(path_evidence["validated_kinds"]),
+            "root_ids": sorted(path_evidence["root_ids"]),
+        },
         "validation_sha256": "",
     }
     body = {key: value for key, value in verdict.items() if key != "validation_sha256"}

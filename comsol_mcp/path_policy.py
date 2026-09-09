@@ -568,6 +568,8 @@ _SHARED_SOURCE_READ_ARGUMENTS = {
 }
 _ARTIFACT_READ_ARGUMENTS = {
     "wave_optics_point_audit": ("air_reference_artifact_path",),
+    # B04: offline export manifest must stay inside the owned artifact root.
+    "offline_export_validate": ("manifest_path",),
 }
 _ARTIFACT_READ_ROOT_ARGUMENTS = {
     "standalone_start": ("deployment_directory",),
@@ -576,6 +578,8 @@ _ARTIFACT_READ_ROOT_ARGUMENTS = {
     "standalone_resume": ("deployment_directory",),
     "standalone_tail": ("deployment_directory",),
     "standalone_results": ("deployment_directory",),
+    # B04: base_directory is an export root, not an arbitrary caller path.
+    "offline_export_validate": ("base_directory",),
 }
 _ARTIFACT_WRITE_ARGUMENTS = {
     "model_save": (("file_path", False, True),),
@@ -598,7 +602,14 @@ _ARTIFACT_WRITE_ARGUMENTS = {
 }
 
 _ALWAYS_ENFORCED_TOOLS = frozenset(
-    {"geometry_import", "standalone_build", *_ARTIFACT_READ_ROOT_ARGUMENTS}
+    {
+        "geometry_import",
+        "standalone_build",
+        # B04: export containment must not silently inherit full-profile
+        # legacy broad-path behavior.
+        "offline_export_validate",
+        *_ARTIFACT_READ_ROOT_ARGUMENTS,
+    }
 )
 
 

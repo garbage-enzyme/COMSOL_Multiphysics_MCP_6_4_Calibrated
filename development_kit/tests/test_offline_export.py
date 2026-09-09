@@ -23,6 +23,13 @@ from comsol_mcp.evidence.offline_export import (
 from comsol_mcp.schema_registry import check_schema_support
 
 
+@pytest.fixture(autouse=True)
+def _owned_artifact_root(tmp_path, monkeypatch):
+    """B04: every export path in this suite lives under the owned artifact root."""
+    monkeypatch.setenv("COMSOL_MCP_ARTIFACT_WRITE_ROOT", str(tmp_path))
+    return tmp_path
+
+
 def _sha(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
@@ -88,6 +95,8 @@ def test_built_manifest_round_trips_and_validates_clean(tmp_path):
     assert verdict["failures"] == []
     assert verdict["is_fem_validation"] is False
     assert verdict["validation_sha256"]
+    assert verdict["path_evidence"]["enforced"] is True
+    assert verdict["path_evidence"]["validated_input_count"] >= 1
     assert manifest["manifest_sha256"]
 
 
@@ -301,6 +310,48 @@ def test_schema_registry_supports_the_published_contract():
     assert support["producer"] == "comsol_mcp.evidence.offline_export"
 
 
+def test_b04_manifest_outside_owned_artifact_root_is_rejected(tmp_path, monkeypatch):
+    outside = tmp_path.parent / "outside-export-root"
+    outside.mkdir(exist_ok=True)
+    payload = b"wl,T\n1.0,300.0\n"
+    spec = _artifact(payload=payload)
+    # Write the export under tmp_path (owned root), then point base outside.
+    _write_export(tmp_path, [spec])
+    (tmp_path / "data").mkdir(exist_ok=True)
+    (tmp_path / "data" / "sweep.csv").write_bytes(payload)
+    manifest = json.loads((tmp_path / "export-manifest.json").read_text(encoding="utf-8"))
+
+    stray = outside / "stray.csv"
+    stray.write_bytes(payload)
+    monkeypatch.setenv("COMSOL_MCP_ARTIFACT_WRITE_ROOT", str(outside))
+    verdict = validate_offline_export_manifest(manifest, outside)
+    # Base under the new owned root is allowed; artifact relative path stays there.
+    assert "base_directory_outside_allowed_root" not in {
+        code for f in verdict["failures"] for code in f["reason_codes"]
+    }
+
+    monkeypatch.setenv("COMSOL_MCP_ARTIFACT_WRITE_ROOT", str(tmp_path))
+    verdict2 = validate_offline_export_manifest(manifest, outside)
+    assert verdict2["valid"] is False
+    codes = {code for f in verdict2["failures"] for code in f["reason_codes"]}
+    assert "base_directory_outside_allowed_root" in codes
+
+
+def test_b04_relative_path_escape_is_rejected_under_owned_root(tmp_path):
+    payload = b"wl,T\n1.0,300.0\n"
+    spec = _artifact(relative_path="../escape.csv", payload=payload)
+    (tmp_path / "escape.csv").write_bytes(payload)
+    # builder already rejects ".."; craft a normalized-looking manifest via escape path
+    with pytest.raises(OfflineExportError):
+        build_offline_export_manifest(
+            producer_tool="t",
+            producer_version="v",
+            model_path_redacted="**/m.mph",
+            model_sha256="a" * 64,
+            artifacts=[spec],
+        )
+
+
 def test_public_dispatch_on_the_comsolless_profile(tmp_path):
     from mcp.server.mcpserver import MCPServer
 
@@ -320,6 +371,7 @@ def test_public_dispatch_on_the_comsolless_profile(tmp_path):
     assert result["solver_started"] is False
     assert result["filesystem_modified"] is False
     assert result["verdict"]["valid"] is True
+    assert result["verdict"]["path_evidence"]["enforced"] is True
 
     missing = tools["offline_export_validate"].fn(str(tmp_path / "absent.json"))
     assert missing["success"] is True
