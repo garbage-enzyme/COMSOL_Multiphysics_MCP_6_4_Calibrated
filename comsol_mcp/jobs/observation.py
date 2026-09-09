@@ -103,8 +103,20 @@ def verify_exact_ownership(
     *,
     create_time_tolerance_seconds: float = 1.0e-3,
 ) -> dict[str, Any]:
-    """Compare a live snapshot against the expected owned identity exactly."""
+    """Compare a live snapshot against the expected owned identity exactly.
+
+    B07: every identity field must be readable and match. A missing, null, or
+    wrongly typed observed field refuses ownership; it is never treated as a
+    match. Time tolerance must be finite and non-negative.
+    """
     expected_normalized = normalize_process_identity(expected)
+    tolerance = create_time_tolerance_seconds
+    if isinstance(tolerance, bool) or not isinstance(tolerance, (int, float)):
+        raise ObservationError("create_time_tolerance_seconds must be numeric")
+    tolerance = float(tolerance)
+    if not math.isfinite(tolerance) or tolerance < 0:
+        raise ObservationError("create_time_tolerance_seconds must be finite and non-negative")
+
     reasons: list[str] = []
     observed_pid = observed.get("pid")
     if isinstance(observed_pid, bool) or not isinstance(observed_pid, int):
@@ -122,19 +134,17 @@ def verify_exact_ownership(
             reasons.append("process_create_time_unreadable")
         else:
             time_delta = abs(float(observed_time) - expected_normalized["process_create_time"])
-            if time_delta > create_time_tolerance_seconds:
+            if time_delta > tolerance:
                 reasons.append("pid_reuse")
     observed_signature = observed.get("command_signature")
-    if (
-        isinstance(observed_signature, str)
-        and observed_signature.lower() != expected_normalized["command_signature"]
-    ):
+    if not isinstance(observed_signature, str) or not observed_signature:
+        reasons.append("command_signature_unreadable")
+    elif observed_signature.lower() != expected_normalized["command_signature"]:
         reasons.append("command_line_drift")
     observed_executable = observed.get("executable")
-    if (
-        isinstance(observed_executable, str)
-        and observed_executable != expected_normalized["executable"]
-    ):
+    if not isinstance(observed_executable, str) or not observed_executable:
+        reasons.append("executable_unreadable")
+    elif observed_executable != expected_normalized["executable"]:
         reasons.append("executable_mismatch")
     return {
         "owned": not reasons,
@@ -154,8 +164,10 @@ def classify_observer_outcome(
 
     Precedence: a verified solver terminal state wins; then a lost transport
     with unverifiable process state; then an observed exit without a declared
-    terminal row (worker failure); finally an expired deadline while nothing
-    terminal was seen (observer timeout).
+    terminal row (worker failure); then an expired deadline while nothing
+    terminal was seen (observer timeout). When none of those facts hold, the
+    observer must not invent ``solver_terminal`` — it returns
+    ``unconfirmed_running``.
     """
     if terminal_state is not None and terminal_identity_verified:
         return {"outcome": "solver_terminal", "reason_codes": ["solver_terminal"]}
@@ -165,7 +177,11 @@ def classify_observer_outcome(
         return {"outcome": "worker_failure", "reason_codes": ["worker_failure"]}
     if deadline_exceeded:
         return {"outcome": "observer_timeout", "reason_codes": ["observer_timeout"]}
-    return {"outcome": "solver_terminal", "reason_codes": ["solver_terminal"]}
+    # B06: a non-terminal input is not a solver terminal.
+    return {
+        "outcome": "unconfirmed_running",
+        "reason_codes": ["no_terminal_evidence"],
+    }
 
 
 def build_observation_receipt(
@@ -273,15 +289,29 @@ def build_observation_receipt(
     return receipt_body
 
 
-def summarize_observation(job_dir: str | Path) -> dict[str, Any]:
-    """Return the warning-only status view attached to durable job status."""
+def summarize_observation(
+    job_dir: str | Path,
+    *,
+    expected_job_id: str | None = None,
+    expected_attempt: int | None = None,
+) -> dict[str, Any]:
+    """Return the warning-only status view attached to durable job status.
+
+    B06: the on-disk receipt is not a self-declared fact. Closed shape,
+    job/attempt binding, and the stored receipt hash are verified before any
+    field is surfaced. Failures stay warning-only and never override the
+    durable job terminal state.
+    """
     path = Path(job_dir) / OBSERVATION_RECEIPT_FILENAME
-    raw = path.read_bytes()
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return {"available": False, "reason_code": "observation_receipt_unreadable"}
     if len(raw) > 262_144:
         return {"available": False, "reason_code": "observation_receipt_oversized"}
     try:
         payload = json.loads(raw.decode("utf-8"))
-    except UnicodeDecodeError, json.JSONDecodeError:
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return {"available": False, "reason_code": "observation_receipt_unreadable"}
     required = {
         "job_id",
@@ -295,16 +325,38 @@ def summarize_observation(job_dir: str | Path) -> dict[str, Any]:
     }
     if not isinstance(payload, Mapping) or not required <= set(payload):
         return {"available": False, "reason_code": "observation_receipt_shape_invalid"}
+    stored_hash = payload.get("receipt_sha256")
+    body = {key: value for key, value in payload.items() if key != "receipt_sha256"}
+    try:
+        recomputed = canonical_sha256_v1(body)
+    except (TypeError, ValueError):
+        return {"available": False, "reason_code": "observation_receipt_hash_invalid"}
+    if not isinstance(stored_hash, str) or recomputed != stored_hash.lower():
+        return {"available": False, "reason_code": "observation_receipt_hash_mismatch"}
+    if expected_job_id is not None and payload["job_id"] != expected_job_id:
+        return {"available": False, "reason_code": "observation_receipt_job_mismatch"}
+    if expected_attempt is not None and payload.get("attempt") != expected_attempt:
+        return {"available": False, "reason_code": "observation_receipt_attempt_mismatch"}
+    outcome = payload["observer_outcome"]
+    if outcome not in {
+        "solver_terminal",
+        "transport_disconnect",
+        "worker_failure",
+        "observer_timeout",
+        "unconfirmed_running",
+    }:
+        return {"available": False, "reason_code": "observation_receipt_outcome_invalid"}
     return {
         "available": True,
         "job_id": payload["job_id"],
         "attempt": payload.get("attempt"),
-        "observer_outcome": payload["observer_outcome"],
+        "observer_outcome": outcome,
         "reason_codes": payload["reason_codes"],
         "terminal_state": payload["terminal_state"],
         "cleanup_outcome": payload["cleanup_outcome"],
         "resume_disposition": payload["resume_disposition"],
-        "receipt_sha256": payload["receipt_sha256"],
+        "receipt_sha256": stored_hash,
+        "warning_only": True,
     }
 
 

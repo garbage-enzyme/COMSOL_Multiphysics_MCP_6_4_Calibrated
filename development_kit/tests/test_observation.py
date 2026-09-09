@@ -159,10 +159,9 @@ def test_observer_timeout_requires_an_expired_deadline():
         worker_exit_observed=False,
         deadline_exceeded=False,
     )
-    # Nothing happened yet: the classifier reports the still-running state as
-    # a solver-terminal-pending observation rather than inventing an outcome.
-    assert running["outcome"] == "solver_terminal"
-    assert running["reason_codes"] == ["solver_terminal"]
+    # B06: nothing terminal was observed — do not invent solver_terminal.
+    assert running["outcome"] == "unconfirmed_running"
+    assert running["reason_codes"] == ["no_terminal_evidence"]
 
 
 def test_unverified_terminal_state_is_not_trusted_as_solver_terminal():
@@ -174,6 +173,50 @@ def test_unverified_terminal_state_is_not_trusted_as_solver_terminal():
         deadline_exceeded=False,
     )
     assert outcome["reason_codes"] == ["worker_failure"]
+
+
+# ---------------------------------------------------------------------------
+# B06 / B07 hardening
+# ---------------------------------------------------------------------------
+
+
+def test_b06_summarize_rejects_tampered_hash_and_job_mismatch(tmp_path):
+    receipt = build_observation_receipt(**_receipt())
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    path = job_dir / "observation.json"
+    path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    ok = summarize_observation(job_dir, expected_job_id=receipt["job_id"], expected_attempt=1)
+    assert ok["available"] is True
+    assert ok["warning_only"] is True
+
+    bad_job = summarize_observation(job_dir, expected_job_id="other-job", expected_attempt=1)
+    assert bad_job["available"] is False
+    assert bad_job["reason_code"] == "observation_receipt_job_mismatch"
+
+    tampered = dict(receipt)
+    tampered["observer_outcome"] = "solver_terminal"
+    path.write_text(json.dumps(tampered), encoding="utf-8")
+    bad_hash = summarize_observation(job_dir)
+    assert bad_hash["available"] is False
+    assert bad_hash["reason_code"] == "observation_receipt_hash_mismatch"
+
+
+def test_b07_ownership_requires_readable_signature_and_executable():
+    identity = _identity()
+    missing_sig = verify_exact_ownership(identity, {**identity, "command_signature": None})
+    assert missing_sig["owned"] is False
+    assert "command_signature_unreadable" in missing_sig["reason_codes"]
+
+    missing_exe = verify_exact_ownership(identity, {k: v for k, v in identity.items() if k != "executable"})
+    assert missing_exe["owned"] is False
+    assert "executable_unreadable" in missing_exe["reason_codes"]
+
+    with pytest.raises(ObservationError):
+        verify_exact_ownership(identity, identity, create_time_tolerance_seconds=float("nan"))
+    with pytest.raises(ObservationError):
+        verify_exact_ownership(identity, identity, create_time_tolerance_seconds=-1.0)
 
 
 # ---------------------------------------------------------------------------
