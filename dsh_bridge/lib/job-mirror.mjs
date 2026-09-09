@@ -26,16 +26,34 @@ export function extractState(parsed) {
 	return undefined;
 }
 
-export function isTerminal(state, terminalStates) {
-	const s = String(state ?? "").toLowerCase();
-	return terminalStates.some((t) => s.includes(String(t).toLowerCase()));
+/** Normalize a server state token for exact terminal matching (B03). */
+export function normalizeState(state) {
+	return String(state ?? "").trim().toLowerCase();
 }
 
+/**
+ * Exact terminal membership (B03). Substring guessing is forbidden:
+ * `not_completed`, `cancel_requested`, `nonterminal`, and free-form
+ * sentences that merely contain a terminal word must not match.
+ */
+export function isTerminal(state, terminalStates) {
+	const s = normalizeState(state);
+	if (!s) return false;
+	return terminalStates.some((t) => normalizeState(t) === s);
+}
+
+/**
+ * Map a confirmed terminal state to a DSH job outcome (B03).
+ * Unknown terminal tokens fail closed as `failed` — never `completed`.
+ */
 export function mapOutcome(state) {
-	const s = String(state ?? "").toLowerCase();
-	if (s.includes("cancel")) return "killed";
-	if (s.includes("fail")) return "failed";
-	return "completed";
+	const s = normalizeState(state);
+	if (s === "cancelled" || s === "canceled" || s === "killed") return "killed";
+	if (s === "completed" || s === "complete" || s === "succeeded" || s === "success" || s === "done") {
+		return "completed";
+	}
+	// failed / failure / error / interrupted / terminal / anything else
+	return "failed";
 }
 
 const MIRROR_DEFAULTS = {
@@ -43,7 +61,7 @@ const MIRROR_DEFAULTS = {
 	tailLines: 20,
 	outputLimitBytes: 262144,
 	cancelConfirmTimeoutMs: 120000,
-	terminalStates: ["completed", "failed", "cancelled", "killed", "done", "terminal"],
+	terminalStates: ["completed", "failed", "cancelled", "killed", "done", "terminal", "interrupted"],
 };
 
 /**
@@ -77,18 +95,29 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, opts = {}, 
 			let pollInFlight = false;
 			let tailInFlight = false;
 
-			const finish = (status, detail) => {
+			/**
+			 * Settle the mirror. `confirmedTerminal` is true only when the
+			 * server itself reported a terminal state for this job/attempt
+			 * (B02). Unconfirmed settlements (dispose, cancel deadline,
+			 * transport loss) must not delete durable tracking records.
+			 */
+			const finish = (status, detail, { confirmedTerminal = false, lastObservedState = null } = {}) => {
 				if (settled) return;
 				settled = true;
 				if (pollTimer) clearInterval(pollTimer);
 				if (tailTimer) clearInterval(tailTimer);
 				if (cancelTimer) clearTimeout(cancelTimer);
-				const payload = { status, detail };
+				const payload = {
+					status,
+					detail,
+					confirmedTerminal,
+					lastObservedState,
+				};
 				// Resolve before invoking the hook: a throwing user hook must
 				// never leave the terminal notification pending forever.
 				resolveDone(payload);
 				try {
-					onTerminal(status, detail);
+					onTerminal(status, detail, { confirmedTerminal, lastObservedState });
 				} catch (error) {
 					log("warn", `onTerminal hook failed for ${jobId}: ${error?.message ?? error}`);
 				}
@@ -98,25 +127,39 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, opts = {}, 
 				if (settled || pollInFlight) return;
 				pollInFlight = true;
 				try {
-					if (isDisposed()) { finish("failed", "bridge disposed"); return; }
+					if (isDisposed()) {
+						finish("failed", "bridge disposed", { confirmedTerminal: false });
+						return;
+					}
 					// Enforce the cancel deadline before issuing another call:
 					// a hanging request must not delay settlement past the
 					// configured confirmation window.
 					if (cancelDeadline !== null && Date.now() > cancelDeadline) {
-						finish("killed", "cancel requested; outcome unconfirmed (server unreachable or slow)");
+						finish("killed", "cancel requested; outcome unconfirmed (server unreachable or slow)", {
+							confirmedTerminal: false,
+						});
 						return;
 					}
 					try {
 						const res = await core.callTool("job_status", { job_id: jobId }, { timeoutMs: 30000 });
-						const state = extractState(parseJson(res.text));
+						const parsed = res.structuredContent !== undefined ? res.structuredContent : parseJson(res.text);
+						const state = extractState(parsed);
 						if (state !== undefined && isTerminal(state, cfg.terminalStates)) {
-							finish(mapOutcome(state), `state=${state}`);
+							finish(mapOutcome(state), `state=${state}`, {
+								confirmedTerminal: true,
+								lastObservedState: state,
+							});
 							return;
 						}
 					} catch (e) {
-						if (isDisposed()) { finish("failed", "bridge disposed"); return; }
+						if (isDisposed()) {
+							finish("failed", "bridge disposed", { confirmedTerminal: false });
+							return;
+						}
 						if (core.budgetExhausted) {
-							finish("failed", "bridge lost contact with comsol server; job may still be running (use job_resume after recovery)");
+							finish("failed", "bridge lost contact with comsol server; job may still be running (use job_resume after recovery)", {
+								confirmedTerminal: false,
+							});
 							return;
 						}
 						log("warn", `job_status poll failed for ${jobId}: ${e.message}`);
@@ -158,7 +201,9 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, opts = {}, 
 					if (cancelTimer) clearTimeout(cancelTimer);
 					cancelTimer = setTimeout(() => {
 						if (!settled && cancelDeadline !== null && Date.now() >= cancelDeadline) {
-							finish("killed", "cancel requested; outcome unconfirmed (server unreachable or slow)");
+							finish("killed", "cancel requested; outcome unconfirmed (server unreachable or slow)", {
+								confirmedTerminal: false,
+							});
 						}
 					}, Math.max(0, cfg.cancelConfirmTimeoutMs + 5));
 					void core.callTool("job_cancel", { job_id: jobId }, { timeoutMs: 30000 }).catch(() => {});
@@ -230,10 +275,30 @@ export function createStateStore(file, logger = console) {
 		add(jobId, jobType) {
 			const rows = read();
 			if (!rows.some((r) => r.jobId === jobId)) {
-				rows.push({ jobId, jobType: jobType ?? null, at: Date.now() });
+				rows.push({
+					jobId,
+					jobType: jobType ?? null,
+					at: Date.now(),
+					// Schema v2: rehydrate identity + last unconfirmed observation.
+					schemaVersion: 2,
+					ownerSessionId: null,
+					ownerAgentKey: null,
+					attempt: null,
+					unconfirmed: false,
+					unconfirmedReason: null,
+					lastObservedState: null,
+				});
 				return write(rows);
 			}
 			return true;
+		},
+		/** Patch an existing row without dropping it (B02 unconfirmed path). */
+		update(jobId, patch) {
+			const rows = read();
+			const row = rows.find((r) => r.jobId === jobId);
+			if (!row) return false;
+			Object.assign(row, patch, { updatedAt: Date.now() });
+			return write(rows);
 		},
 		remove(jobId) {
 			return write(read().filter((r) => r.jobId !== jobId));

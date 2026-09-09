@@ -167,3 +167,39 @@ test("apply keeps failed mirror starts retryable in the state file", { timeout: 
 		assert.deepEqual(rows.map((r) => r.jobId), []);
 	} finally { rmSync(stateDir, { recursive: true, force: true }); }
 });
+
+test("B02: unconfirmed dispose keeps the durable state row", { timeout: 20000 }, async () => {
+	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b02plug"));
+	try {
+		const jobs = createFakeJobs();
+		const ctx = makeCtx({ jobs });
+		// Server never reaches terminal (FAKE_POLLS=120); dispose will settle
+		// the mirror as unconfirmed and must NOT delete the state row.
+		await apply(ctx, {
+			command: process.execPath,
+			args: [FIXTURE],
+			env: fakeServer.extraEnv,
+			cwd: "D:\\mcp_tests",
+			stateFile: join(stateDir, "jobs-c.json"),
+			pollIntervalMs: 30,
+			cancelConfirmTimeoutMs: 50,
+			reconnect: { enabled: false },
+			initTimeoutMs: 5000,
+			failOnStartupError: true,
+		});
+		const submit = ctx.registered.find((d) => d.name === "job_submit");
+		const result = await submitOnce(submit, "agent-1");
+		const jobId = JSON.parse(result.content.map((b) => b.text ?? "").join("\n")).job_id;
+		assert.equal(jobs.started.length, 1);
+
+		// Dispose while the job is still running server-side.
+		ctx.dispose();
+		await Promise.race([jobs.started[0].done, sleep(3000)]);
+
+		const rows = JSON.parse(readFileSync(join(stateDir, "jobs-c.json"), "utf8"));
+		assert.equal(rows.length, 1, "unconfirmed settle must keep the durable row");
+		assert.equal(rows[0].jobId, jobId);
+		assert.equal(rows[0].unconfirmed, true);
+		assert.match(rows[0].unconfirmedReason ?? "", /disposed|unconfirmed/i);
+	} finally { rmSync(stateDir, { recursive: true, force: true }); }
+});

@@ -14,23 +14,41 @@ const MIRROR_OPTS = { pollIntervalMs: 30, tailLines: 20, outputLimitBytes: 4096,
 // ---- pure helper branches (deterministic, no timers) ----
 
 test("isTerminal recognizes terminal states and rejects running", () => {
-	const terms = ["completed", "failed", "cancelled", "killed", "done", "terminal"];
+	const terms = ["completed", "failed", "cancelled", "killed", "done", "terminal", "interrupted"];
 	assert.equal(isTerminal("running", terms), false);
 	assert.equal(isTerminal("active", terms), false);
 	assert.equal(isTerminal("completed", terms), true);
 	assert.equal(isTerminal("failed", terms), true);
 	assert.equal(isTerminal("cancelled", terms), true);
-	assert.equal(isTerminal("job_submit_failed_after_attached_handoff", terms), true);
+	assert.equal(isTerminal("interrupted", terms), true);
 	assert.equal(isTerminal("COMPLETED", terms), true); // case-insensitive
 	assert.equal(isTerminal(undefined, terms), false);
+	assert.equal(isTerminal("", terms), false);
+	// B03: substring guessing is forbidden
+	assert.equal(isTerminal("job_submit_failed_after_attached_handoff", terms), false);
+	assert.equal(isTerminal("not_completed", terms), false);
+	assert.equal(isTerminal("nonterminal", terms), false);
+	assert.equal(isTerminal("cancel_requested", terms), false);
+	assert.equal(isTerminal("completedly wrong", terms), false);
 });
 
 test("mapOutcome classifies terminal states", () => {
 	assert.equal(mapOutcome("completed"), "completed");
+	assert.equal(mapOutcome("complete"), "completed");
+	assert.equal(mapOutcome("done"), "completed");
 	assert.equal(mapOutcome("cancelled"), "killed");
-	assert.equal(mapOutcome("cancel_requested"), "killed");
+	assert.equal(mapOutcome("canceled"), "killed");
+	assert.equal(mapOutcome("killed"), "killed");
 	assert.equal(mapOutcome("failed"), "failed");
+	assert.equal(mapOutcome("failure"), "failed");
+	assert.equal(mapOutcome("error"), "failed");
+	// B03: interrupted is a non-success terminal
+	assert.equal(mapOutcome("interrupted"), "failed");
+	// Unknown / ambiguous tokens fail closed — never completed
+	assert.equal(mapOutcome("terminal"), "failed");
+	assert.equal(mapOutcome("cancel_requested"), "failed");
 	assert.equal(mapOutcome("job_submit_failed_after_attached_handoff"), "failed");
+	assert.equal(mapOutcome(undefined), "failed");
 });
 
 test("extractState handles flat and nested shapes", () => {
@@ -277,5 +295,95 @@ test("cancel confirmation window fires even when job_status hangs", async () => 
 		sleep(3000).then(() => { throw new Error("cancel deadline never fired"); }),
 	]);
 	assert.equal(outcome.status, "killed");
+	// B02: cancel-deadline settlement is observer-unconfirmed, not a server terminal
+	assert.equal(outcome.confirmedTerminal, false);
 	assert.ok(Date.now() - started < 2500, "deadline overrun");
+});
+
+// ---- B02: unconfirmed settlements must not imply server terminal ----
+
+test("B02: dispose settlement is unconfirmed", { timeout: 10000 }, async () => {
+	const jobs = createFakeJobs();
+	const disposed = { value: false };
+	const metas = [];
+	createJobMirror({
+		jobs,
+		core: {
+			callTool: async (name) => {
+				if (name === "job_status") return { text: JSON.stringify({ state: "running" }) };
+				return { text: "[]" };
+			},
+		},
+		jobId: "job-disp",
+		opts: MIRROR_OPTS,
+		logger: quietLogger(),
+		isDisposed: () => disposed.value,
+		onTerminal: (status, detail, meta) => { metas.push({ status, detail, ...meta }); },
+	});
+	const rec = jobs.started[0];
+	disposed.value = true;
+	const outcome = await Promise.race([
+		rec.done,
+		sleep(2000).then(() => { throw new Error("dispose never settled"); }),
+	]);
+	assert.equal(outcome.status, "failed");
+	assert.equal(outcome.confirmedTerminal, false);
+	assert.equal(metas[0]?.confirmedTerminal, false);
+});
+
+test("B02: server-confirmed completed is confirmedTerminal", { timeout: 10000 }, async () => {
+	const jobs = createFakeJobs();
+	const metas = [];
+	createJobMirror({
+		jobs,
+		core: {
+			callTool: async (name) => {
+				if (name === "job_status") return { text: JSON.stringify({ state: "completed" }) };
+				return { text: "[]" };
+			},
+		},
+		jobId: "job-ok",
+		opts: MIRROR_OPTS,
+		logger: quietLogger(),
+		onTerminal: (status, detail, meta) => { metas.push({ status, detail, ...meta }); },
+	});
+	const outcome = await Promise.race([
+		jobs.started[0].done,
+		sleep(2000).then(() => { throw new Error("never settled"); }),
+	]);
+	assert.equal(outcome.status, "completed");
+	assert.equal(outcome.confirmedTerminal, true);
+	assert.equal(outcome.lastObservedState, "completed");
+	assert.equal(metas[0]?.confirmedTerminal, true);
+});
+
+test("B02: state store update annotates without dropping the row", () => {
+	const dir = mkdtempSync(join(tmpdir(), "bridge-b02-"));
+	try {
+		const file = join(dir, "jobs.json");
+		const store = createStateStore(file, quietLogger());
+		assert.equal(store.add("job-x", "staged_sweep"), true);
+		assert.equal(store.update("job-x", {
+			unconfirmed: true,
+			unconfirmedReason: "bridge disposed",
+			lastObservedState: "running",
+			mirrorStatus: "failed",
+		}), true);
+		const rows = JSON.parse(readFileSync(file, "utf8"));
+		assert.equal(rows.length, 1);
+		assert.equal(rows[0].jobId, "job-x");
+		assert.equal(rows[0].unconfirmed, true);
+		assert.equal(rows[0].unconfirmedReason, "bridge disposed");
+		assert.equal(rows[0].lastObservedState, "running");
+		assert.equal(store.update("missing", { unconfirmed: true }), false);
+	} finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("B03: interrupted maps to failed and is terminal", () => {
+	const terms = ["completed", "failed", "cancelled", "killed", "done", "terminal", "interrupted"];
+	assert.equal(isTerminal("interrupted", terms), true);
+	assert.equal(mapOutcome("interrupted"), "failed");
+	assert.equal(isTerminal("not_completed", terms), false);
+	assert.equal(isTerminal("cancel_requested", terms), false);
+	assert.equal(isTerminal("nonterminal", terms), false);
 });

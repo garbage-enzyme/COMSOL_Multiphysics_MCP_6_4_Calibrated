@@ -20,7 +20,7 @@ import { createJobMirror, createStateStore, parseJson, extractState, isTerminal 
 export const name = "comsol-bridge";
 export const inject = ["tools"];
 
-const DEFAULTS = {
+	const DEFAULTS = {
 	enabled: true,
 	jobMirrorEnabled: true,
 	command: "D:\\condaenvs\\comsol-mcp-py314\\Scripts\\comsol-mcp.exe",
@@ -35,7 +35,7 @@ const DEFAULTS = {
 	cancelConfirmTimeoutMs: 120000,
 	failOnStartupError: false,
 	reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 30000, maxAttempts: 10 },
-	terminalStates: ["completed", "failed", "cancelled", "killed", "done", "terminal"],
+	terminalStates: ["completed", "failed", "cancelled", "killed", "done", "terminal", "interrupted"],
 };
 
 export function normalizeConfig(config) {
@@ -171,7 +171,22 @@ export async function apply(ctx, config) {
 				},
 				logger,
 				isDisposed: () => connection.disposed,
-				onTerminal: () => { mirrored.delete(jobId); stateStore.remove(jobId); },
+				onTerminal: (status, detail, meta = {}) => {
+					// B02: only a server-confirmed terminal may delete the
+					// durable tracking row. Unconfirmed settlements keep the
+					// record and annotate the reason for rehydrate/retry.
+					mirrored.delete(jobId);
+					if (meta?.confirmedTerminal) {
+						stateStore.remove(jobId);
+					} else {
+						stateStore.update(jobId, {
+							unconfirmed: true,
+							unconfirmedReason: detail ?? status,
+							lastObservedState: meta?.lastObservedState ?? null,
+							mirrorStatus: status,
+						});
+					}
+				},
 			});
 		} catch (e) {
 			logger.warn?.(`comsol-bridge: mirror start failed for ${jobId}: ${e.message}`);
@@ -186,14 +201,22 @@ export async function apply(ctx, config) {
 		for (const rec of stateStore.list()) {
 			if (mirrored.has(rec.jobId)) continue;
 			try {
+				// B02/B02a: query the original job first. Never resubmit.
 				const res = await connection.callTool("job_status", { job_id: rec.jobId }, { timeoutMs: 30000 });
 				const state = extractState(
 					res.structuredContent !== undefined ? res.structuredContent : parseJson(res.text)
 				);
 				if (state === undefined) continue;
 				if (isTerminal(state, cfg.terminalStates)) { stateStore.remove(rec.jobId); continue; }
+				// Clear a prior unconfirmed flag once the job is observed running again.
+				if (rec.unconfirmed) {
+					stateStore.update(rec.jobId, { unconfirmed: false, unconfirmedReason: null });
+				}
 				// Only pin the record as mirrored once the mirror started;
 				// a failed start leaves it retryable on the next boot.
+				// Owner restoration is B02a: persist original owner identity
+				// and wait for that scope's controller rather than inventing
+				// an owner or binding an arbitrary current agent.
 				if (startMirror(rec.jobId, rec.jobType, undefined)) {
 					mirrored.add(rec.jobId);
 				}
