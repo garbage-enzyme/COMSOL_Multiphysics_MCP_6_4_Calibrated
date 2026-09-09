@@ -391,3 +391,132 @@ def test_module_never_imports_solver_dependencies():
         for line in text.splitlines():
             if line and not line[0].isspace():
                 assert not line.strip().startswith(forbidden), (relative, line)
+
+
+# ---------------------------------------------------------------------------
+# B05 / B12: limits-first and input-bound verdicts
+# ---------------------------------------------------------------------------
+
+
+def test_b05_expression_limit_rejects_before_artifact_io(tmp_path):
+    from comsol_mcp.durable import canonical_sha256_v1
+    from comsol_mcp.evidence.offline_export import build_offline_export_manifest
+
+    payload = b"wl,T\n1.0,300.0\n"
+    expressions = [f"e{i}" for i in range(5)]
+    units = ["m"] * 5
+    columns = [
+        {"expression": e, "unit": u} for e, u in zip(expressions, units, strict=True)
+    ]
+    ordering = canonical_sha256_v1(
+        [{"expression": c["expression"], "unit": c["unit"]} for c in columns]
+    )
+    spec = _artifact(payload=payload)
+    spec["expressions"] = expressions
+    spec["units"] = units
+    spec["ordering_sha256"] = ordering
+    (tmp_path / "data").mkdir(exist_ok=True)
+    (tmp_path / "data" / "sweep.csv").write_bytes(payload)
+    spec.pop("_payload", None)
+    manifest = build_offline_export_manifest(
+        producer_tool="t",
+        producer_version="v",
+        model_path_redacted="**/m.mph",
+        model_sha256="a" * 64,
+        artifacts=[spec],
+    )
+    # Delete the artifact: if limits are applied first, hashing never runs.
+    (tmp_path / "data" / "sweep.csv").unlink()
+    verdict = validate_offline_export_manifest(manifest, tmp_path, max_expressions=2)
+    assert verdict["valid"] is False
+    assert verdict["failures"][0]["reason_codes"] == ["limit_exceeded"]
+    assert "expressions exceed limit" in verdict["failures"][0]["detail"]
+    assert verdict["checked_artifacts"] == 0
+
+
+def test_b05_parameter_entry_limit_zero_allows_empty(tmp_path):
+    from comsol_mcp.durable import canonical_sha256_v1
+    from comsol_mcp.evidence.offline_export import build_offline_export_manifest
+
+    payload = b"wl,T\n1.0,300.0\n"
+    spec = _artifact(payload=payload)
+    (tmp_path / "data").mkdir(exist_ok=True)
+    (tmp_path / "data" / "sweep.csv").write_bytes(payload)
+    spec.pop("_payload", None)
+    manifest = build_offline_export_manifest(
+        producer_tool="t",
+        producer_version="v",
+        model_path_redacted="**/m.mph",
+        model_sha256="a" * 64,
+        artifacts=[spec],
+    )
+    verdict = validate_offline_export_manifest(
+        manifest, tmp_path, max_parameter_entries=0
+    )
+    assert verdict["valid"] is False
+    assert verdict["failures"][0]["reason_codes"] == ["limit_exceeded"]
+
+    spec2 = _artifact(artifact_id="csv-2", payload=payload)
+    spec2["parameter_values"] = {}
+    spec2["relative_path"] = "data/sweep2.csv"
+    spec2.pop("_payload", None)
+    (tmp_path / "data" / "sweep2.csv").write_bytes(payload)
+    cols = [
+        {"expression": e, "unit": u}
+        for e, u in zip(spec2["expressions"], spec2["units"], strict=True)
+    ]
+    spec2["ordering_sha256"] = canonical_sha256_v1(
+        [{"expression": c["expression"], "unit": c["unit"]} for c in cols]
+    )
+    manifest2 = build_offline_export_manifest(
+        producer_tool="t",
+        producer_version="v",
+        model_path_redacted="**/m.mph",
+        model_sha256="a" * 64,
+        artifacts=[spec2],
+    )
+    verdict2 = validate_offline_export_manifest(
+        manifest2, tmp_path, max_parameter_entries=0
+    )
+    assert verdict2["valid"] is True
+    assert verdict2["input_binding"]["effective_limits"]["max_parameter_entries"] == 0
+
+
+def test_b12_verdict_binds_manifest_hash_limits_and_artifact_checks(tmp_path):
+    from comsol_mcp.evidence.offline_export import build_offline_export_manifest
+
+    payload_a = b"wl,T\n1.0,300.0\n"
+    payload_b = b"wl,T\n2.0,310.0\n"
+    assert payload_a != payload_b
+    spec_a = _artifact(payload=payload_a)
+    (tmp_path / "data").mkdir(exist_ok=True)
+    (tmp_path / "data" / "sweep.csv").write_bytes(payload_a)
+    spec_a.pop("_payload", None)
+    manifest_a = build_offline_export_manifest(
+        producer_tool="t",
+        producer_version="v",
+        model_path_redacted="**/m.mph",
+        model_sha256="a" * 64,
+        artifacts=[spec_a],
+    )
+    va = validate_offline_export_manifest(manifest_a, tmp_path)
+    assert va["valid"] is True
+    assert va["input_binding"]["manifest_sha256"]
+    assert va["input_binding"]["artifact_checks"][0]["observed_sha256"] == spec_a["sha256"]
+    assert va["input_binding"]["effective_limits"]["max_expressions"] == 256
+
+    spec_b = _artifact(artifact_id="csv-b", payload=payload_b)
+    spec_b["relative_path"] = "data/sweep_b.csv"
+    spec_b.pop("_payload", None)
+    (tmp_path / "data" / "sweep_b.csv").write_bytes(payload_b)
+    manifest_b = build_offline_export_manifest(
+        producer_tool="t",
+        producer_version="v",
+        model_path_redacted="**/m.mph",
+        model_sha256="a" * 64,
+        artifacts=[spec_b],
+    )
+    vb = validate_offline_export_manifest(manifest_b, tmp_path)
+    assert vb["valid"] is True
+    assert va["input_binding"]["manifest_sha256"] != vb["input_binding"]["manifest_sha256"]
+    assert va["validation_sha256"] != vb["validation_sha256"]

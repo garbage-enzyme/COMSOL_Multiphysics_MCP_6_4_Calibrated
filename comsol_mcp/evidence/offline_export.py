@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from comsol_mcp.durable import canonical_sha256_v1
-from comsol_mcp.path_policy import PathPolicy, pin_validated_reads
+from comsol_mcp.path_policy import PathPolicy, ReadPinError, pin_validated_reads
 
 OFFLINE_EXPORT_MANIFEST_SCHEMA_NAME = "comsol_mcp.offline_export_manifest"
 OFFLINE_EXPORT_MANIFEST_SCHEMA_VERSION = "1.0.0"
@@ -352,6 +352,27 @@ def build_offline_export_manifest(
     return manifest
 
 
+def _check_count_limits(
+    artifacts: list[dict[str, Any]],
+    *,
+    max_expressions: int,
+    max_parameter_entries: int,
+    max_time_values: int,
+) -> list[str]:
+    """B05: reject count overruns before any artifact I/O."""
+    for index, artifact in enumerate(artifacts):
+        columns = artifact.get("columns") or []
+        if len(columns) > max_expressions:
+            return [f"artifact {index} expressions exceed limit {max_expressions}"]
+        parameters = artifact.get("parameter_values") or {}
+        if isinstance(parameters, Mapping) and len(parameters) > max_parameter_entries:
+            return [f"artifact {index} parameter_values exceed limit {max_parameter_entries}"]
+        time_values = artifact.get("time_values")
+        if isinstance(time_values, list) and len(time_values) > max_time_values:
+            return [f"artifact {index} time_values exceed limit {max_time_values}"]
+    return []
+
+
 def validate_offline_export_manifest(
     manifest_source: Mapping[str, Any] | bytes | str | Path,
     base_directory: str | Path | None = None,
@@ -360,6 +381,9 @@ def validate_offline_export_manifest(
     max_manifest_bytes: int = 33_554_432,
     max_artifacts: int = 512,
     max_artifact_bytes: int = 17_179_869_184,
+    max_expressions: int = 256,
+    max_parameter_entries: int = 512,
+    max_time_values: int = 65_536,
     path_policy: PathPolicy | None = None,
 ) -> dict[str, Any]:
     """Validate one manifest plus its artifacts entirely offline.
@@ -368,6 +392,10 @@ def validate_offline_export_manifest(
     artifact must lie inside the configured owned artifact root. Each file is
     held with a validated read pin for the duration of hashing so a mid-
     validation replacement cannot swap the bytes that were checked.
+
+    B05: caller limits are applied to structure/counts before artifact bytes
+    are read. B12: the verdict binds the normalized manifest hash, expected
+    model identity, effective limits, and per-artifact size/hash evidence.
     """
     warnings: list[str] = []
     failures: list[dict[str, Any]] = []
@@ -378,6 +406,14 @@ def validate_offline_export_manifest(
         "validated_kinds": [],
         "root_ids": [],
     }
+    effective_limits = {
+        "max_manifest_bytes": max_manifest_bytes,
+        "max_artifacts": max_artifacts,
+        "max_artifact_bytes": max_artifact_bytes,
+        "max_expressions": max_expressions,
+        "max_parameter_entries": max_parameter_entries,
+        "max_time_values": max_time_values,
+    }
 
     def _record_path(kind: str, root_id: str) -> None:
         path_evidence["validated_input_count"] += 1
@@ -385,6 +421,43 @@ def validate_offline_export_manifest(
             path_evidence["validated_kinds"].append(kind)
         if root_id not in path_evidence["root_ids"]:
             path_evidence["root_ids"].append(root_id)
+
+    def _finish(
+        valid: bool,
+        checked_artifacts: int,
+        failure_list: list[dict[str, Any]],
+        warning_list: list[str],
+        *,
+        manifest_sha256: str | None = None,
+        artifact_checks: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        verdict: dict[str, Any] = {
+            "schema_name": OFFLINE_EXPORT_MANIFEST_SCHEMA_NAME,
+            "schema_version": OFFLINE_EXPORT_MANIFEST_SCHEMA_VERSION,
+            "valid": valid,
+            "checked_artifacts": checked_artifacts,
+            "failures": failure_list,
+            "warnings": sorted(set(warning_list)),
+            "is_fem_validation": False,
+            "path_evidence": {
+                **path_evidence,
+                "validated_kinds": sorted(path_evidence["validated_kinds"]),
+                "root_ids": sorted(path_evidence["root_ids"]),
+            },
+            # B12: bind the verdict to the exact inputs that were checked.
+            "input_binding": {
+                "manifest_sha256": manifest_sha256,
+                "expected_model_sha256": (
+                    expected_model_sha256.lower() if expected_model_sha256 else None
+                ),
+                "effective_limits": effective_limits,
+                "artifact_checks": artifact_checks or [],
+            },
+            "validation_sha256": "",
+        }
+        body = {key: value for key, value in verdict.items() if key != "validation_sha256"}
+        verdict["validation_sha256"] = canonical_sha256_v1(body)
+        return verdict
 
     manifest_pin = None
     if isinstance(manifest_source, (str, Path)):
@@ -410,8 +483,12 @@ def validate_offline_export_manifest(
         _record_path(decision.kind, decision.root_id)
         path = decision.normalized_path
         try:
-            raw = path.read_bytes()
-        except OSError:
+            if manifest_pin is not None:
+                with pin_validated_reads((manifest_pin,)):
+                    raw = path.read_bytes()
+            else:
+                raw = path.read_bytes()
+        except (OSError, ReadPinError, RuntimeError, ValueError):
             rejected = _invalid_verdict(["manifest_unavailable"])
             rejected["path_evidence"] = path_evidence
             return rejected
@@ -427,12 +504,13 @@ def validate_offline_export_manifest(
             rejected["path_evidence"] = path_evidence
             return rejected
     elif isinstance(manifest_source, (bytes, bytearray)):
-        if len(manifest_source) > max_manifest_bytes:
+        raw = bytes(manifest_source)
+        if len(raw) > max_manifest_bytes:
             rejected = _invalid_verdict(["manifest_too_large"])
             rejected["path_evidence"] = path_evidence
             return rejected
         try:
-            payload = json.loads(bytes(manifest_source).decode("utf-8"))
+            payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             rejected = _invalid_verdict(["manifest_not_valid_json"])
             rejected["path_evidence"] = path_evidence
@@ -443,6 +521,7 @@ def validate_offline_export_manifest(
             return rejected
     else:
         payload = manifest_source
+        raw = None
         if base_directory is None:
             rejected = _invalid_verdict(["base_directory_undeclared"])
             rejected["path_evidence"] = path_evidence
@@ -467,8 +546,33 @@ def validate_offline_export_manifest(
         rejected["path_evidence"] = path_evidence
         return rejected
 
+    # B12: hash the exact bytes that were normalized.
+    if isinstance(manifest_source, (str, Path, bytes, bytearray)):
+        manifest_bytes = raw if raw is not None else json.dumps(payload, sort_keys=True).encode("utf-8")
+        manifest_digest = hashlib.sha256(manifest_bytes).hexdigest()
+    else:
+        manifest_digest = canonical_sha256_v1(manifest)
+
+    # B05: count limits before any artifact filesystem work.
     if len(manifest["artifacts"]) > max_artifacts:
         failures.append({"artifact_id": None, "reason_codes": ["too_many_artifacts"]})
+    count_errors = _check_count_limits(
+        manifest["artifacts"],
+        max_expressions=max_expressions,
+        max_parameter_entries=max_parameter_entries,
+        max_time_values=max_time_values,
+    )
+    for message in count_errors:
+        failures.append({"artifact_id": None, "reason_codes": ["limit_exceeded"], "detail": message[:160]})
+    if failures:
+        return _finish(
+            False,
+            0,
+            failures,
+            warnings,
+            manifest_sha256=manifest_digest,
+            artifact_checks=[],
+        )
 
     source_hash = manifest["source_identity"]["model_sha256"]
     if expected_model_sha256 is not None:
@@ -489,10 +593,12 @@ def validate_offline_export_manifest(
     base = base_decision.normalized_path
     _record_path(base_decision.kind, base_decision.root_id)
 
-    artifact_pins = []
+    artifact_checks: list[dict[str, Any]] = []
     for artifact in manifest["artifacts"]:
         reasons: list[str] = []
         candidate = base / artifact["relative_path"]
+        target = candidate
+        pin = None
         try:
             target_decision = policy.validate_artifact_read(str(candidate))
             target = target_decision.normalized_path
@@ -502,8 +608,7 @@ def validate_offline_export_manifest(
                 reasons.append("path_escape")
             else:
                 _record_path(target_decision.kind, target_decision.root_id)
-                if target_decision.read_pin is not None:
-                    artifact_pins.append(target_decision.read_pin)
+                pin = target_decision.read_pin
         except ValueError as exc:
             # Missing files under the export base are missing, not escapes.
             try:
@@ -515,21 +620,26 @@ def validate_offline_export_manifest(
                 reasons.append("missing_file")
             else:
                 reasons.append("path_escape")
-            target = candidate
             _ = exc
+        check_record: dict[str, Any] = {
+            "artifact_id": artifact["artifact_id"],
+            "declared_byte_count": artifact["byte_count"],
+            "declared_sha256": artifact["sha256"],
+            "observed_byte_count": None,
+            "observed_sha256": None,
+        }
         if not reasons:
             if not target.is_file():
                 reasons.append("missing_file")
             else:
                 size = target.stat().st_size
+                check_record["observed_byte_count"] = size
                 if size > max_artifact_bytes:
                     reasons.append("artifact_over_declared_limit")
                 else:
-                    # Hash under the validated read pin when available so a
-                    # concurrent path swap cannot change the checked bytes.
                     try:
-                        if artifact_pins and artifact_pins[-1].path == target:
-                            with pin_validated_reads((artifact_pins[-1],)):
+                        if pin is not None:
+                            with pin_validated_reads((pin,)):
                                 digest = hashlib.sha256(target.read_bytes()).hexdigest()
                                 size_after = target.stat().st_size
                         else:
@@ -540,7 +650,9 @@ def validate_offline_export_manifest(
                         failures.append(
                             {"artifact_id": artifact["artifact_id"], "reason_codes": reasons}
                         )
+                        artifact_checks.append(check_record)
                         continue
+                    check_record["observed_sha256"] = digest
                     if size_after != artifact["byte_count"] or size != artifact["byte_count"]:
                         reasons.append("byte_count_mismatch")
                     if digest != artifact["sha256"]:
@@ -554,26 +666,16 @@ def validate_offline_export_manifest(
                             reasons.append("text_export_not_utf8")
         if reasons:
             failures.append({"artifact_id": artifact["artifact_id"], "reason_codes": reasons})
+        artifact_checks.append(check_record)
 
-    valid = not failures
-    verdict: dict[str, Any] = {
-        "schema_name": OFFLINE_EXPORT_MANIFEST_SCHEMA_NAME,
-        "schema_version": OFFLINE_EXPORT_MANIFEST_SCHEMA_VERSION,
-        "valid": valid,
-        "checked_artifacts": len(manifest["artifacts"]),
-        "failures": failures,
-        "warnings": sorted(set(warnings)),
-        "is_fem_validation": False,
-        "path_evidence": {
-            **path_evidence,
-            "validated_kinds": sorted(path_evidence["validated_kinds"]),
-            "root_ids": sorted(path_evidence["root_ids"]),
-        },
-        "validation_sha256": "",
-    }
-    body = {key: value for key, value in verdict.items() if key != "validation_sha256"}
-    verdict["validation_sha256"] = canonical_sha256_v1(body)
-    return verdict
+    return _finish(
+        not failures,
+        len(manifest["artifacts"]),
+        failures,
+        warnings,
+        manifest_sha256=manifest_digest,
+        artifact_checks=artifact_checks,
+    )
 
 
 def _invalid_verdict(reasons: list[str]) -> dict[str, Any]:
