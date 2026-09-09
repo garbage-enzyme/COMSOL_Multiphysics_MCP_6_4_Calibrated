@@ -56,6 +56,51 @@ export function mapOutcome(state) {
 	return "failed";
 }
 
+/**
+ * Extract a durable owner identity from a DSH execute-context agent.
+ * Never serialize the live Agent object or a PID — only stable string keys.
+ * Returns null when no usable identity is present.
+ */
+export function extractOwnerIdentity(agent) {
+	if (agent == null) return null;
+	if (typeof agent === "string") {
+		const key = agent.trim();
+		if (!key) return null;
+		return { kind: "agent_key", key, sessionId: key };
+	}
+	if (typeof agent === "object") {
+		const candidates = [agent.id, agent.agentId, agent.name, agent.key, agent.slug];
+		let key = null;
+		for (const c of candidates) {
+			if (typeof c === "string" && c.trim()) { key = c.trim(); break; }
+		}
+		if (!key) return null;
+		let sessionId = null;
+		const sessionCandidates = [agent.sessionId, agent.session_id, agent.session?.id];
+		for (const c of sessionCandidates) {
+			if (typeof c === "string" && c.trim()) { sessionId = c.trim(); break; }
+		}
+		return { kind: "agent_object", key, sessionId };
+	}
+	return null;
+}
+
+/**
+ * Rebuild a DSH-compatible owner token from a persisted identity.
+ * Returns undefined when no owner can be restored — never invent one.
+ */
+export function ownerFromIdentity(record) {
+	if (!record || typeof record !== "object") return undefined;
+	const key = typeof record.ownerAgentKey === "string" ? record.ownerAgentKey.trim() : "";
+	if (!key) return undefined;
+	return key;
+}
+
+export function mirrorDedupeKey(jobId, attempt) {
+	const a = attempt == null ? "" : String(attempt);
+	return `${jobId}::${a}`;
+}
+
 const MIRROR_DEFAULTS = {
 	pollIntervalMs: 15000,
 	tailLines: 20,

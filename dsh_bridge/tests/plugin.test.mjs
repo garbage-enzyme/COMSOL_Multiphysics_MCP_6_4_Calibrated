@@ -1,9 +1,10 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { publicToolName, normalizeConfig, apply } from "../lib/index.js";
 import { extractText } from "../lib/mcp-client-core.mjs";
+import { extractOwnerIdentity, ownerFromIdentity, mirrorDedupeKey } from "../lib/job-mirror.mjs";
 import { spawnFakeServer, createFakeJobs, quietLogger, FIXTURE } from "./helpers.mjs";
 
 test("publicToolName keeps clean comsol names verbatim", () => {
@@ -201,5 +202,207 @@ test("B02: unconfirmed dispose keeps the durable state row", { timeout: 20000 },
 		assert.equal(rows[0].jobId, jobId);
 		assert.equal(rows[0].unconfirmed, true);
 		assert.match(rows[0].unconfirmedReason ?? "", /disposed|unconfirmed/i);
+	} finally { rmSync(stateDir, { recursive: true, force: true }); }
+});
+
+// ---- B02a: owner identity extraction and restore ----
+
+test("B02a: extractOwnerIdentity handles string, object, and unusable agents", () => {
+	assert.deepEqual(extractOwnerIdentity("agent-1"), { kind: "agent_key", key: "agent-1", sessionId: "agent-1" });
+	assert.deepEqual(
+		extractOwnerIdentity({ id: "a-9", sessionId: "sess-3" }),
+		{ kind: "agent_object", key: "a-9", sessionId: "sess-3" },
+	);
+	assert.deepEqual(
+		extractOwnerIdentity({ name: "n1" }),
+		{ kind: "agent_object", key: "n1", sessionId: null },
+	);
+	assert.equal(extractOwnerIdentity(null), null);
+	assert.equal(extractOwnerIdentity(undefined), null);
+	assert.equal(extractOwnerIdentity(""), null);
+	assert.equal(extractOwnerIdentity("   "), null);
+	assert.equal(extractOwnerIdentity({}), null);
+	assert.equal(extractOwnerIdentity(42), null);
+});
+
+test("B02a: ownerFromIdentity restores only persisted keys; never invents", () => {
+	assert.equal(ownerFromIdentity({ ownerAgentKey: "agent-1" }), "agent-1");
+	assert.equal(ownerFromIdentity({ ownerAgentKey: "  agent-2  " }), "agent-2");
+	assert.equal(ownerFromIdentity({ ownerAgentKey: null }), undefined);
+	assert.equal(ownerFromIdentity({}), undefined);
+	assert.equal(ownerFromIdentity(null), undefined);
+	// legacy row without owner fields
+	assert.equal(ownerFromIdentity({ jobId: "job-1", jobType: "staged_sweep" }), undefined);
+});
+
+test("B02a: mirrorDedupeKey includes attempt", () => {
+	assert.equal(mirrorDedupeKey("job-1", null), "job-1::");
+	assert.equal(mirrorDedupeKey("job-1", undefined), "job-1::");
+	assert.equal(mirrorDedupeKey("job-1", 2), "job-1::2");
+	assert.notEqual(mirrorDedupeKey("job-1", 1), mirrorDedupeKey("job-1", 2));
+});
+
+test("B02a: submit persists owner identity for rehydrate", { timeout: 20000 }, async () => {
+	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b02aown"));
+	try {
+		const jobs = createFakeJobs();
+		const ctx = makeCtx({ jobs });
+		await apply(ctx, {
+			command: process.execPath,
+			args: [FIXTURE],
+			env: fakeServer.extraEnv,
+			cwd: "D:\\mcp_tests",
+			stateFile: join(stateDir, "jobs.json"),
+			pollIntervalMs: 30,
+			cancelConfirmTimeoutMs: 50,
+			reconnect: { enabled: false },
+			initTimeoutMs: 5000,
+			failOnStartupError: true,
+			rehydrateMaxAttempts: 0,
+		});
+		const submit = ctx.registered.find((d) => d.name === "job_submit");
+		const result = await submitOnce(submit, "agent-1");
+		const jobId = JSON.parse(result.content.map((b) => b.text ?? "").join("\n")).job_id;
+		const rows = JSON.parse(readFileSync(join(stateDir, "jobs.json"), "utf8"));
+		assert.equal(rows.length, 1);
+		assert.equal(rows[0].jobId, jobId);
+		assert.equal(rows[0].ownerAgentKey, "agent-1");
+		assert.equal(rows[0].ownerKind, "agent_key");
+		assert.equal(jobs.started[0].spec.owner, "agent-1");
+		jobs.started[0].hooks.cancel();
+		ctx.dispose();
+		await Promise.race([jobs.started[0].done, sleep(2000)]);
+	} finally { rmSync(stateDir, { recursive: true, force: true }); }
+});
+
+test("B02a: rehydrate restores owner and does not resubmit", { timeout: 25000 }, async () => {
+	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b02areh"));
+	try {
+		const stateFile = join(stateDir, "jobs.json");
+		// Simulate a prior boot that submitted a job owned by agent-1.
+		writeFileSync(stateFile, JSON.stringify([{
+			jobId: "job-1",
+			jobType: "staged_sweep",
+			at: Date.now(),
+			schemaVersion: 2,
+			ownerAgentKey: "agent-1",
+			ownerSessionId: "agent-1",
+			ownerKind: "agent_key",
+			attempt: null,
+			unconfirmed: true,
+			unconfirmedReason: "bridge disposed",
+			lastObservedState: "running",
+		}], null, 2));
+
+		const jobs = createFakeJobs();
+		const ctx = makeCtx({ jobs });
+		let submitCalls = 0;
+		await apply(ctx, {
+			command: process.execPath,
+			args: [FIXTURE],
+			env: fakeServer.extraEnv,
+			cwd: "D:\\mcp_tests",
+			stateFile,
+			pollIntervalMs: 30,
+			reconnect: { enabled: false },
+			initTimeoutMs: 5000,
+			failOnStartupError: true,
+			rehydrateMaxAttempts: 0,
+		});
+
+		// Rehydrate must start exactly one mirror with the restored owner.
+		assert.equal(jobs.started.length, 1, `expected 1 rehydrated mirror, got ${jobs.started.length}`);
+		assert.equal(jobs.started[0].spec.owner, "agent-1");
+		assert.equal(jobs.started[0].spec.label, "comsol job job-1 (staged_sweep)");
+
+		const rows = JSON.parse(readFileSync(stateFile, "utf8"));
+		assert.equal(rows.length, 1);
+		assert.equal(rows[0].jobId, "job-1");
+		// recovery flags cleared once the restored mirror is running
+		assert.equal(rows[0].unconfirmed ?? false, false);
+
+		// job_submit must not have been invoked during rehydrate.
+		const submit = ctx.registered.find((d) => d.name === "job_submit");
+		assert.ok(submit);
+		// No new submit happened: state still has only the original job-1 row.
+		assert.deepEqual(JSON.parse(readFileSync(stateFile, "utf8")).map((r) => r.jobId), ["job-1"]);
+
+		ctx.dispose();
+		await Promise.race([jobs.started[0].done, sleep(2000)]);
+	} finally { rmSync(stateDir, { recursive: true, force: true }); }
+});
+
+test("B02a: rehydrate with missing owner keeps the row and blocks recovery", { timeout: 25000 }, async () => {
+	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b02aown2"));
+	try {
+		const stateFile = join(stateDir, "jobs.json");
+		// Legacy-style row without owner identity.
+		writeFileSync(stateFile, JSON.stringify([{
+			jobId: "job-legacy",
+			jobType: "staged_sweep",
+			at: Date.now(),
+		}], null, 2));
+
+		const jobs = createFakeJobs();
+		const ctx = makeCtx({ jobs });
+		await apply(ctx, {
+			command: process.execPath,
+			args: [FIXTURE],
+			env: fakeServer.extraEnv,
+			cwd: "D:\\mcp_tests",
+			stateFile,
+			pollIntervalMs: 30,
+			reconnect: { enabled: false },
+			initTimeoutMs: 5000,
+			failOnStartupError: true,
+			rehydrateMaxAttempts: 0,
+		});
+
+		// Must NOT invent an owner or start an unowned mirror.
+		assert.equal(jobs.started.length, 0, "must not start a mirror without a restored owner");
+		const rows = JSON.parse(readFileSync(stateFile, "utf8"));
+		assert.equal(rows.length, 1, "legacy row must be retained");
+		assert.equal(rows[0].jobId, "job-legacy");
+		assert.equal(rows[0].recoveryBlocked, true);
+		assert.match(rows[0].recoveryReason ?? "", /missing owner/i);
+		ctx.dispose();
+	} finally { rmSync(stateDir, { recursive: true, force: true }); }
+});
+
+test("B02a: rehydrate removes rows already terminal on the server", { timeout: 25000 }, async () => {
+	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b02aterm"));
+	try {
+		const stateFile = join(stateDir, "jobs.json");
+		writeFileSync(stateFile, JSON.stringify([{
+			jobId: "job-done",
+			jobType: "staged_sweep",
+			schemaVersion: 2,
+			ownerAgentKey: "agent-1",
+		}], null, 2));
+
+		// Fake server: FAKE_POLLS=1 means the first job_status returns completed.
+		const termServer = spawnFakeServer({ FAKE_POLLS: "1" });
+		try {
+			const jobs = createFakeJobs();
+			const ctx = makeCtx({ jobs });
+			await apply(ctx, {
+				command: process.execPath,
+				args: [FIXTURE],
+				env: termServer.extraEnv,
+				cwd: "D:\\mcp_tests",
+				stateFile,
+				pollIntervalMs: 30,
+				reconnect: { enabled: false },
+				initTimeoutMs: 5000,
+				failOnStartupError: true,
+				rehydrateMaxAttempts: 0,
+			});
+			assert.equal(jobs.started.length, 0, "terminal job must not get a new mirror");
+			const rows = JSON.parse(readFileSync(stateFile, "utf8"));
+			assert.deepEqual(rows, [], "confirmed terminal row must be removed");
+			ctx.dispose();
+		} finally {
+			await termServer.close();
+		}
 	} finally { rmSync(stateDir, { recursive: true, force: true }); }
 });

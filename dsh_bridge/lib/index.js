@@ -15,12 +15,12 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { createComsolConnection, extractText } from "./mcp-client-core.mjs";
-import { createJobMirror, createStateStore, parseJson, extractState, isTerminal } from "./job-mirror.mjs";
+import { createJobMirror, createStateStore, parseJson, extractState, isTerminal, extractOwnerIdentity, ownerFromIdentity, mirrorDedupeKey } from "./job-mirror.mjs";
 
 export const name = "comsol-bridge";
 export const inject = ["tools"];
 
-	const DEFAULTS = {
+const DEFAULTS = {
 	enabled: true,
 	jobMirrorEnabled: true,
 	command: "D:\\condaenvs\\comsol-mcp-py314\\Scripts\\comsol-mcp.exe",
@@ -36,6 +36,9 @@ export const inject = ["tools"];
 	failOnStartupError: false,
 	reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 30000, maxAttempts: 10 },
 	terminalStates: ["completed", "failed", "cancelled", "killed", "done", "terminal", "interrupted"],
+	// B02a: bounded rehydrate retries while an owner/controller comes up.
+	rehydrateMaxAttempts: 5,
+	rehydrateRetryDelayMs: 2000,
 };
 
 export function normalizeConfig(config) {
@@ -46,6 +49,12 @@ export function normalizeConfig(config) {
 	base.reconnect = { ...DEFAULTS.reconnect, ...(c.reconnect ?? {}) };
 	base.terminalStates = c.terminalStates ?? DEFAULTS.terminalStates;
 	base.stateFile = c.stateFile ?? join(base.cwd || DEFAULTS.cwd, ".dsh-comsol-bridge-jobs.json");
+	if (typeof base.rehydrateMaxAttempts !== "number" || base.rehydrateMaxAttempts < 0) {
+		base.rehydrateMaxAttempts = DEFAULTS.rehydrateMaxAttempts;
+	}
+	if (typeof base.rehydrateRetryDelayMs !== "number" || base.rehydrateRetryDelayMs < 0) {
+		base.rehydrateRetryDelayMs = DEFAULTS.rehydrateRetryDelayMs;
+	}
 	return base;
 }
 
@@ -88,7 +97,12 @@ export async function apply(ctx, config) {
 	const logger = ctx.logger ?? console;
 	const stateStore = createStateStore(cfg.stateFile, logger);
 	const mirrored = new Set();
+	// B02a: dedupe by job/attempt so restart/reconnect/ready never spawn
+	// a second poller for the same durable identity.
+	const mirroredKeys = new Set();
 	let generation = new Map();
+	let disposedPlugin = false;
+	let rehydrateTimer = null;
 
 	const connection = createComsolConnection({
 		...cfg,
@@ -134,12 +148,25 @@ export async function apply(ctx, config) {
 				const jobId = parsed?.job_id ?? parsed?.jobId;
 				if (typeof jobId === "string" && jobId && !mirrored.has(jobId)) {
 					const jobType = parsed?.job_type ?? parsed?.jobType;
+					const attempt = parsed?.attempt ?? parsed?.attempt_id ?? null;
+					const ownerIdentity = extractOwnerIdentity(exec?.agent);
 					// Mark as mirrored only after the mirror actually started;
 					// a failed start must stay retryable instead of being
 					// pinned in the mirrored set with no onTerminal cleanup.
 					stateStore.add(jobId, jobType);
-					if (startMirror(jobId, jobType, exec.agent)) {
+					if (ownerIdentity) {
+						stateStore.update(jobId, {
+							ownerAgentKey: ownerIdentity.key,
+							ownerSessionId: ownerIdentity.sessionId,
+							ownerKind: ownerIdentity.kind,
+							attempt,
+						});
+					} else if (attempt != null) {
+						stateStore.update(jobId, { attempt });
+					}
+					if (startMirror(jobId, jobType, exec?.agent)) {
 						mirrored.add(jobId);
+						mirroredKeys.add(mirrorDedupeKey(jobId, attempt));
 					} else {
 						stateStore.remove(jobId);
 					}
@@ -195,30 +222,64 @@ export async function apply(ctx, config) {
 		return true;
 	}
 
-	async function rehydrate() {
+	/**
+	 * B02a rehydrate: query the original job first (never job_submit), restore
+	 * the persisted owner identity, and wait (bounded) for that owner's
+	 * controller. Missing owner never invents one — the record is kept and
+	 * marked recovery-blocked so the user has a recovery entry point.
+	 */
+	async function rehydrateOnce() {
 		const jobs = ctx.get("jobs");
-		if (!jobs || !cfg.jobMirrorEnabled) return;
+		if (!jobs || !cfg.jobMirrorEnabled || disposedPlugin) return;
 		for (const rec of stateStore.list()) {
+			if (disposedPlugin) return;
 			if (mirrored.has(rec.jobId)) continue;
+			const dedupeKey = mirrorDedupeKey(rec.jobId, rec.attempt ?? null);
+			if (mirroredKeys.has(dedupeKey) && mirrored.has(rec.jobId)) continue;
 			try {
-				// B02/B02a: query the original job first. Never resubmit.
+				// Query the original job. Never resubmit a calculation.
 				const res = await connection.callTool("job_status", { job_id: rec.jobId }, { timeoutMs: 30000 });
 				const state = extractState(
 					res.structuredContent !== undefined ? res.structuredContent : parseJson(res.text)
 				);
 				if (state === undefined) continue;
-				if (isTerminal(state, cfg.terminalStates)) { stateStore.remove(rec.jobId); continue; }
-				// Clear a prior unconfirmed flag once the job is observed running again.
-				if (rec.unconfirmed) {
-					stateStore.update(rec.jobId, { unconfirmed: false, unconfirmedReason: null });
+				if (isTerminal(state, cfg.terminalStates)) {
+					stateStore.remove(rec.jobId);
+					mirroredKeys.delete(dedupeKey);
+					continue;
 				}
-				// Only pin the record as mirrored once the mirror started;
-				// a failed start leaves it retryable on the next boot.
-				// Owner restoration is B02a: persist original owner identity
-				// and wait for that scope's controller rather than inventing
-				// an owner or binding an arbitrary current agent.
-				if (startMirror(rec.jobId, rec.jobType, undefined)) {
+				const owner = ownerFromIdentity(rec);
+				if (owner === undefined) {
+					// Legacy row or submit without a usable agent identity.
+					// Do not bind an arbitrary current agent.
+					stateStore.update(rec.jobId, {
+						recoveryBlocked: true,
+						recoveryReason: "missing owner identity; rebind from the original session or resume via job_resume",
+						lastObservedState: state,
+					});
+					logger.warn?.(`comsol-bridge: rehydrate blocked for ${rec.jobId}: missing owner identity`);
+					continue;
+				}
+				if (rec.unconfirmed || rec.recoveryBlocked) {
+					stateStore.update(rec.jobId, {
+						unconfirmed: false,
+						unconfirmedReason: null,
+						recoveryBlocked: false,
+						recoveryReason: null,
+					});
+				}
+				// Restore the original owner token so jobs.start routes to that
+				// agent's controller (B02a). Failures leave the row retryable.
+				if (startMirror(rec.jobId, rec.jobType, owner)) {
 					mirrored.add(rec.jobId);
+					mirroredKeys.add(dedupeKey);
+					stateStore.update(rec.jobId, { lastObservedState: state });
+				} else {
+					stateStore.update(rec.jobId, {
+						recoveryBlocked: true,
+						recoveryReason: "jobs.start rejected restored owner or controller not ready",
+						lastObservedState: state,
+					});
 				}
 			} catch {
 				/* server busy or unreachable; leave the record for a later boot */
@@ -226,7 +287,34 @@ export async function apply(ctx, config) {
 		}
 	}
 
+	function scheduleRehydrateRetry(remaining) {
+		if (disposedPlugin || remaining <= 0 || !cfg.jobMirrorEnabled) return;
+		if (rehydrateTimer) return;
+		const delay = Math.max(50, cfg.rehydrateRetryDelayMs);
+		rehydrateTimer = setTimeout(() => {
+			rehydrateTimer = null;
+			if (disposedPlugin) return;
+			void rehydrateOnce()
+				.catch(() => {})
+				.then(() => {
+					const stillPending = stateStore.list().some((r) => !mirrored.has(r.jobId));
+					if (stillPending) scheduleRehydrateRetry(remaining - 1);
+				});
+		}, delay);
+	}
+
+	async function rehydrate() {
+		await rehydrateOnce();
+		const stillPending = stateStore.list().some((r) => !mirrored.has(r.jobId));
+		if (stillPending) scheduleRehydrateRetry(Math.max(0, cfg.rehydrateMaxAttempts - 1));
+	}
+
 	ctx.effect(() => () => {
+		disposedPlugin = true;
+		if (rehydrateTimer) {
+			clearTimeout(rehydrateTimer);
+			rehydrateTimer = null;
+		}
 		connection.dispose();
 		for (const d of generation.values()) d();
 		generation = new Map();
