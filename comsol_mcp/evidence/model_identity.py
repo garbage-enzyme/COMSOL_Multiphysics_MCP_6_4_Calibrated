@@ -237,7 +237,15 @@ def build_model_identity(
     derived_redacted: str | None = None
     source_redacted = _redact(path)
     source_sha256: str | None = file_sha256
-    if source_path is not None:
+    source_identity_complete = True
+    if source_path is None and expected_source_sha256 is not None:
+        # B09: a declared source expectation without a source path must not
+        # silently bind the primary file as the source.
+        failure_reasons.append("source_path_undeclared_for_expected_source_hash")
+        source_sha256 = None
+        source_identity_complete = False
+        warnings.append("source_hash_expectation_unbound")
+    elif source_path is not None:
         try:
             computed_source_hash, _source_bytes = _bounded_file_sha256(
                 Path(source_path),
@@ -248,6 +256,7 @@ def build_model_identity(
         except ModelIdentityError as exc:
             failure_reasons.append(exc.reason_code)
             source_sha256 = None
+            source_identity_complete = False
         else:
             source_redacted = _redact(source_path)
             source_sha256 = computed_source_hash
@@ -256,6 +265,7 @@ def build_model_identity(
                 and expected_source_sha256.casefold() != computed_source_hash
             ):
                 failure_reasons.append("declared_source_hash_mismatch")
+                source_identity_complete = False
             if computed_source_hash != file_sha256:
                 derived_redacted = _redact(path)
             else:
@@ -263,6 +273,7 @@ def build_model_identity(
     else:
         warnings.append("source_provenance_undeclared")
 
+    checkpoint_available = False
     checkpoint_ready = False
     checkpoint_redacted: str | None = None
     checkpoint_sha256: str | None = None
@@ -279,15 +290,17 @@ def build_model_identity(
         except ModelIdentityError as exc:
             failure_reasons.append(exc.reason_code)
         else:
+            # B09: a non-empty file is only "available"; restore requires
+            # identity verification (and, separately, a B08 journal binding).
+            checkpoint_available = checkpoint_bytes > 0
             if checkpoint_bytes == 0:
                 failure_reasons.append("checkpoint_empty")
             else:
                 checkpoint_sha256 = computed_checkpoint_hash
                 checkpoint_ready = True
-                if (
-                    expected_checkpoint_sha256 is not None
-                    and expected_checkpoint_sha256.casefold() != computed_checkpoint_hash
-                ):
+                if expected_checkpoint_sha256 is None:
+                    warnings.append("checkpoint_hash_unverified")
+                elif expected_checkpoint_sha256.casefold() != computed_checkpoint_hash:
                     failure_reasons.append("declared_checkpoint_hash_mismatch")
                     checkpoint_ready = False
     elif expected_checkpoint_sha256 is not None:
@@ -369,7 +382,16 @@ def build_model_identity(
         "preview_state": summary["preview_state"],
         "revision": revision,
         "read_only": True,
+        # B09 layered availability: available != identity_verified != restore_usable
+        "checkpoint_available": checkpoint_available,
         "checkpoint_ready": checkpoint_ready,
+        "restore_usable": bool(
+            checkpoint_ready
+            and source_identity_complete
+            and not failure_reasons
+            and expected_checkpoint_sha256 is not None
+            and expected_checkpoint_sha256.casefold() == (checkpoint_sha256 or "")
+        ),
         "checkpoint_path_redacted": checkpoint_redacted,
         "checkpoint_sha256": checkpoint_sha256,
         "shared_session": bool(session_identity["shared_session"]),

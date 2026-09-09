@@ -305,6 +305,36 @@ def test_missing_checkpoint_cases_are_typed(tmp_path):
     assert declared_only["identity_disposition"] == "pause_and_repair"
 
 
+def test_b09_expected_source_hash_without_source_path_fails_closed(tmp_path):
+    fixture = _write_valid_mph(tmp_path / "orphan.mph")
+    identity = build_model_identity(fixture, expected_source_sha256="a" * 64)
+    assert "source_path_undeclared_for_expected_source_hash" in identity["failure_reasons"]
+    assert identity["source_sha256"] is None
+    assert identity["identity_disposition"] == "pause_and_repair"
+    assert identity["restore_usable"] is False
+
+
+def test_b09_layers_available_ready_and_restore_usable(tmp_path):
+    fixture = _write_valid_mph(tmp_path / "model.mph")
+    ckpt = tmp_path / "ckpt.mph"
+    ckpt.write_bytes(_write_valid_mph(ckpt).read_bytes() if False else b"not-empty-bytes")
+    # Non-empty but no expected hash: available, not fully restore-usable.
+    identity = build_model_identity(fixture, checkpoint_path=ckpt)
+    assert identity["checkpoint_available"] is True
+    assert identity["checkpoint_ready"] is True
+    assert "checkpoint_hash_unverified" in identity["warnings"]
+    # Restore requires no failure reasons and complete source identity.
+    assert identity["restore_usable"] is False
+
+    confirmed = build_model_identity(
+        fixture,
+        checkpoint_path=ckpt,
+        expected_checkpoint_sha256=__import__("hashlib").sha256(b"not-empty-bytes").hexdigest(),
+    )
+    assert confirmed["checkpoint_ready"] is True
+    assert confirmed["restore_usable"] is True
+
+
 # ---------------------------------------------------------------------------
 # Session-identity lanes
 # ---------------------------------------------------------------------------

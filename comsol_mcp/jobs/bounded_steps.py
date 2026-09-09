@@ -312,10 +312,24 @@ def _normalize_row_payload(
 
 
 def _rebuild(row: Mapping[str, Any]) -> dict[str, Any]:
-    """Re-validate a stored row through the closed builder."""
-    return build_bounded_step_receipt(
+    """Re-validate a stored row through the closed builder.
+
+    B08: the original ``step_sha256`` must be present and must equal the
+    rebuilt hash. A missing or zero hash is never treated as valid.
+    """
+    declared = row.get("step_sha256")
+    rebuilt = build_bounded_step_receipt(
         {key: value for key, value in row.items() if key != "step_sha256"}
     )
+    if not isinstance(declared, str) or len(declared) != 64:
+        raise BoundedStepError("bounded step receipt is missing its original step_sha256")
+    if any(ch not in "0123456789abcdefABCDEF" for ch in declared):
+        raise BoundedStepError("bounded step receipt step_sha256 is not hexadecimal")
+    if declared.lower() != rebuilt["step_sha256"]:
+        raise BoundedStepError("bounded step receipt hash does not match its content")
+    if declared.lower() == "0" * 64:
+        raise BoundedStepError("bounded step receipt step_sha256 is all zeros")
+    return rebuilt
 
 
 def append_bounded_step(job_dir: str | Path, record: Mapping[str, Any]) -> dict[str, Any]:
@@ -396,8 +410,17 @@ def verify_checkpoint_usability(
     ``checkpoint_sha256``/``checkpoint_byte_size``, plus current source
     identity, model fingerprint, and revision equal to the receipt. Missing
     expectations fail closed as undeclared rather than being guessed.
+    B08: the receipt's original ``step_sha256`` must verify; a rebuilt hash
+    alone is not acceptance.
     """
-    row = _rebuild(receipt)
+    try:
+        row = _rebuild(receipt)
+    except BoundedStepError as exc:
+        return {
+            "usable": False,
+            "reason_codes": ["receipt_hash_unverified"],
+            "detail": str(exc)[:160],
+        }
     reason_codes: list[str] = []
     if row["checkpoint_sha256"] is None:
         return {
@@ -446,7 +469,10 @@ def decide_resume(
     """Classify replay intent from completed rows and a verification verdict."""
     if not rows:
         return {"decision": "restart", "reason_codes": ["no_completed_steps"]}
-    last = _rebuild(rows[-1])
+    try:
+        last = _rebuild(rows[-1])
+    except BoundedStepError:
+        return {"decision": "restart", "reason_codes": ["receipt_hash_unverified"]}
     if last["execution_status"] == "completed" and last["cleanup"] == "proven":
         return {"decision": "none_needed", "reason_codes": []}
     if checkpoint_verified is None:
