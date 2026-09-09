@@ -86,54 +86,108 @@ export function createComsolConnection(opts) {
 		for (const [id, entry] of pending) {
 			if (entry.timer) clearTimeout(entry.timer);
 			entry.cleanup?.();
-			entry.reject(new Error(reason));
+			// Transport loss is terminal for occupancy: no response can arrive.
+			entry.onTransportLost(new Error(reason));
 		}
 		pending.clear();
 	}
 
+	/**
+	 * Issue one JSON-RPC request.
+	 *
+	 * Occupancy contract (B01): the single-flight queue advances only after
+	 * the server response (or transport loss). Caller timeout/abort settles
+	 * the waiter promise only; the already-sent request keeps the connection
+	 * busy so a second tool call cannot overlap server execution. A late
+	 * response is discarded and never resolves a different waiter.
+	 */
 	function rpc(method, params, { timeoutMs = toolCallTimeoutMs, signal } = {}) {
-		return enqueue(() => new Promise((resolve, reject) => {
-			if (disposed) { reject(new Error("comsol-bridge disposed")); return; }
-			if (!child || !alive) { reject(new Error("comsol server not connected")); return; }
-			const id = ++seq;
-			const entry = { resolve, reject, timer: null, cleanup: null };
-			if (timeoutMs > 0) {
-				entry.timer = setTimeout(() => {
-					if (!pending.has(id)) return;
-					pending.delete(id);
-					reject(new Error(`comsol call ${method} timed out after ${timeoutMs}ms`));
-				}, timeoutMs);
-			}
-			if (signal) {
-				const onAbort = () => {
-					if (!pending.has(id)) return;
-					pending.delete(id);
-					if (entry.timer) clearTimeout(entry.timer);
-					reject(new Error("tool call aborted"));
-				};
-				if (signal.aborted) {
-					if (entry.timer) clearTimeout(entry.timer);
-					reject(new Error("tool call aborted"));
+		return new Promise((outerResolve, outerReject) => {
+			enqueue(() => new Promise((releaseOccupancy) => {
+				if (disposed) {
+					outerReject(new Error("comsol-bridge disposed"));
+					releaseOccupancy();
 					return;
 				}
-				signal.addEventListener("abort", onAbort, { once: true });
-				entry.cleanup = () => signal.removeEventListener("abort", onAbort);
-			}
-			pending.set(id, entry);
-			child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
-		}));
+				if (!child || !alive) {
+					outerReject(new Error("comsol server not connected"));
+					releaseOccupancy();
+					return;
+				}
+				if (signal?.aborted) {
+					// Never sent: abort before send does not occupy the connection.
+					outerReject(new Error("tool call aborted"));
+					releaseOccupancy();
+					return;
+				}
+				const id = ++seq;
+				let waiterSettled = false;
+				const settleWaiter = (kind, value) => {
+					if (waiterSettled) return;
+					waiterSettled = true;
+					if (kind === "resolve") outerResolve(value);
+					else outerReject(value);
+				};
+				const entry = {
+					timer: null,
+					cleanup: null,
+					onResult(result) {
+						settleWaiter("resolve", result);
+						releaseOccupancy();
+					},
+					onError(err) {
+						settleWaiter("reject", err);
+						releaseOccupancy();
+					},
+					onTransportLost(err) {
+						settleWaiter("reject", err);
+						releaseOccupancy();
+					},
+				};
+				if (timeoutMs > 0) {
+					entry.timer = setTimeout(() => {
+						// Waiter only: keep the pending entry so occupancy holds
+						// until the real response or transport loss.
+						settleWaiter("reject", new Error(`comsol call ${method} timed out after ${timeoutMs}ms`));
+					}, timeoutMs);
+				}
+				if (signal) {
+					const onAbort = () => {
+						settleWaiter("reject", new Error("tool call aborted"));
+					};
+					signal.addEventListener("abort", onAbort, { once: true });
+					entry.cleanup = () => signal.removeEventListener("abort", onAbort);
+					if (signal.aborted) {
+						// Abort raced the listener registration: free occupancy
+						// only if the request was never written.
+						if (entry.timer) clearTimeout(entry.timer);
+						entry.cleanup();
+						pending.delete(id);
+						settleWaiter("reject", new Error("tool call aborted"));
+						releaseOccupancy();
+						return;
+					}
+				}
+				pending.set(id, entry);
+				child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+			})).catch((err) => {
+				outerReject(err);
+			});
+		});
 	}
 
 	function onMessage(msg) {
 		if (!msg || typeof msg !== "object") return;
 		if (msg.id !== undefined && msg.id !== null) {
 			const entry = pending.get(msg.id);
+			// Unknown or already-discarded id: never attach a late response
+			// to a different waiter.
 			if (!entry) return;
 			pending.delete(msg.id);
 			if (entry.timer) clearTimeout(entry.timer);
 			entry.cleanup?.();
-			if (msg.error) entry.reject(new Error(`comsol server error ${msg.error.code ?? ""}: ${msg.error.message ?? "unknown"}`));
-			else entry.resolve(msg.result);
+			if (msg.error) entry.onError(new Error(`comsol server error ${msg.error.code ?? ""}: ${msg.error.message ?? "unknown"}`));
+			else entry.onResult(msg.result);
 			return;
 		}
 		if (msg.method === "notifications/tools/list_changed") {
