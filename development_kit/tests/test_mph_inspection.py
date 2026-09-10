@@ -544,3 +544,29 @@ def test_probe_reports_valid_invalid_and_missing_artifacts_without_raising(tmp_p
     missing = probe_mph_artifacts(tmp_path / "absent")
     assert missing["available"] is False
     assert missing["reason_code"] == "mph_probe_directory_unavailable"
+
+
+def test_b13_probe_cache_hit_and_invalidation_on_file_change(tmp_path):
+    from comsol_mcp.evidence.inspection.probe import (
+        MPH_ARTIFACT_PROBE_CACHE_FILENAME,
+        probe_mph_artifacts,
+    )
+
+    _write_valid_mph(tmp_path / "good.mph")
+    first = probe_mph_artifacts(tmp_path)
+    assert first["cache"]["status"] == "miss"
+    assert (tmp_path / MPH_ARTIFACT_PROBE_CACHE_FILENAME).is_file()
+
+    second = probe_mph_artifacts(tmp_path)
+    assert second["cache"]["status"] == "hit"
+    assert second["probes"] == first["probes"]
+    assert second["probes"][0]["summary"]["sha256"] == first["probes"][0]["summary"]["sha256"]
+
+    # Replace the artifact: cache must miss and re-probe.
+    _write_valid_mph(tmp_path / "good.mph")
+    third = probe_mph_artifacts(tmp_path)
+    assert third["cache"]["status"] == "miss"
+
+    forced = probe_mph_artifacts(tmp_path, refresh=True)
+    assert forced["cache"]["refreshed"] is True
+    assert forced["cache"]["status"] == "miss"
