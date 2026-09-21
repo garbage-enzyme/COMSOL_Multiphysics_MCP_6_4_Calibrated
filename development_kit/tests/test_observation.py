@@ -209,7 +209,9 @@ def test_b07_ownership_requires_readable_signature_and_executable():
     assert missing_sig["owned"] is False
     assert "command_signature_unreadable" in missing_sig["reason_codes"]
 
-    missing_exe = verify_exact_ownership(identity, {k: v for k, v in identity.items() if k != "executable"})
+    missing_exe = verify_exact_ownership(
+        identity, {k: v for k, v in identity.items() if k != "executable"}
+    )
     assert missing_exe["owned"] is False
     assert "executable_unreadable" in missing_exe["reason_codes"]
 

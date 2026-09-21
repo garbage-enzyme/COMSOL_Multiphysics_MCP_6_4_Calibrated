@@ -111,9 +111,9 @@ def probe_mph_artifacts(directory: str | Path, *, refresh: bool = False) -> dict
             raw = cache_path.read_bytes()
             if 0 < len(raw) <= _MPH_PROBE_CACHE_BYTES:
                 cache = json.loads(raw.decode("utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        except OSError, UnicodeDecodeError, json.JSONDecodeError:
             cache = None
-        if _cache_is_current(cache, candidates):
+        if cache is not None and _cache_is_current(cache, candidates):
             cached_probe = cache["probe"]
             return {
                 **cached_probe,

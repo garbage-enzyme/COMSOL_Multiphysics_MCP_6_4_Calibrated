@@ -594,7 +594,7 @@ def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies(
     )
     assert pyproject["build-system"]["requires"] == ["hatchling==1.31.0"]
     assert pyproject["project"]["optional-dependencies"]["manuals"] == ["pymupdf>=1.24.0,<2"]
-    assert pyproject["project"]["requires-python"] == ">=3.14,<3.15"
+    assert pyproject["project"]["requires-python"] == ">=3.14,<3.16"
     assert pyproject["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"] == [
         "/development_kit",
         "/.claude",
@@ -967,7 +967,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         for step in job["steps"]
         if "uses" in step
     ]
-    assert len(action_references) == 16
+    assert len(action_references) == 19
     assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for _action, revision in action_references)
     assert "# actions/checkout v7.0.0" in workflow
     assert "# actions/setup-python v6.2.0" in workflow
@@ -988,6 +988,23 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert upload["with"]["path"] == "dependency-drift-report.json"
     assert upload["with"]["if-no-files-found"] == "error"
     assert all("continue-on-error" not in step for job in jobs.values() for step in job["steps"])
+    preview_job = jobs["compatibility-py315"]
+    assert preview_job["runs-on"] == "windows-2025"
+    assert preview_job["env"]["RUSTUP_TOOLCHAIN"] == "1.98.1"
+    preview_commands = "\n".join(step.get("run", "") for step in preview_job["steps"])
+    assert "--find-links" in preview_commands
+    assert '"pydantic==2.13.5"' in preview_commands
+    assert "pydantic_core-2.46.5.tar.gz#sha256=" in preview_commands
+    assert "installed_stdio_probe.py" in preview_commands
+    assert "serial_test_shards.py" in preview_commands
+    assert "test_control_plane_startup.py" in preview_commands
+    assert "settings_gui/tests" in preview_commands
+    assert "-W error -W" in preview_commands
+    assert "DeprecationWarning:pymupdf:470" in preview_commands
+    assert "DeprecationWarning:pymupdf" not in gui_commands
+    assert "semantic-docs" not in preview_commands
+    assert "--ignore-requires-python" not in preview_commands
+    assert "PYO3_USE_ABI3_FORWARD_COMPATIBILITY" not in preview_commands
     assert unit_job["name"] == "unit-and-package (Python 3.14, default production lane)"
     assert dependency_job["name"] == ("dependency compatibility (${{ matrix.lane }}, Python 3.14)")
     assert dependency_job["timeout-minutes"] == 15

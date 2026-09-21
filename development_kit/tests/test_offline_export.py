@@ -405,9 +405,7 @@ def test_b05_expression_limit_rejects_before_artifact_io(tmp_path):
     payload = b"wl,T\n1.0,300.0\n"
     expressions = [f"e{i}" for i in range(5)]
     units = ["m"] * 5
-    columns = [
-        {"expression": e, "unit": u} for e, u in zip(expressions, units, strict=True)
-    ]
+    columns = [{"expression": e, "unit": u} for e, u in zip(expressions, units, strict=True)]
     ordering = canonical_sha256_v1(
         [{"expression": c["expression"], "unit": c["unit"]} for c in columns]
     )
@@ -450,9 +448,7 @@ def test_b05_parameter_entry_limit_zero_allows_empty(tmp_path):
         model_sha256="a" * 64,
         artifacts=[spec],
     )
-    verdict = validate_offline_export_manifest(
-        manifest, tmp_path, max_parameter_entries=0
-    )
+    verdict = validate_offline_export_manifest(manifest, tmp_path, max_parameter_entries=0)
     assert verdict["valid"] is False
     assert verdict["failures"][0]["reason_codes"] == ["limit_exceeded"]
 
@@ -475,9 +471,7 @@ def test_b05_parameter_entry_limit_zero_allows_empty(tmp_path):
         model_sha256="a" * 64,
         artifacts=[spec2],
     )
-    verdict2 = validate_offline_export_manifest(
-        manifest2, tmp_path, max_parameter_entries=0
-    )
+    verdict2 = validate_offline_export_manifest(manifest2, tmp_path, max_parameter_entries=0)
     assert verdict2["valid"] is True
     assert verdict2["input_binding"]["effective_limits"]["max_parameter_entries"] == 0
 

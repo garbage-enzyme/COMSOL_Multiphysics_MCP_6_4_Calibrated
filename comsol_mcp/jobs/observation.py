@@ -311,7 +311,7 @@ def summarize_observation(
         return {"available": False, "reason_code": "observation_receipt_oversized"}
     try:
         payload = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except UnicodeDecodeError, json.JSONDecodeError:
         return {"available": False, "reason_code": "observation_receipt_unreadable"}
     required = {
         "job_id",
@@ -329,7 +329,7 @@ def summarize_observation(
     body = {key: value for key, value in payload.items() if key != "receipt_sha256"}
     try:
         recomputed = canonical_sha256_v1(body)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {"available": False, "reason_code": "observation_receipt_hash_invalid"}
     if not isinstance(stored_hash, str) or recomputed != stored_hash.lower():
         return {"available": False, "reason_code": "observation_receipt_hash_mismatch"}

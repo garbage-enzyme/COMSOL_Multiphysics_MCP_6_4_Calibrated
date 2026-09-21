@@ -89,6 +89,7 @@ models are intentionally absent.
 - `dsh_bridge/tests/failures.test.mjs` — This module tests missing servers, crashes, garbage frames, unsupported versions, and cancel ambiguity.
 - `dsh_bridge/tests/helpers.mjs` — This module supplies shared harness helpers for bridge regression tests.
 - `dsh_bridge/tests/mirror.test.mjs` — This module tests terminal detection, completion, cancellation, loss of contact, and progress streams.
+- `dsh_bridge/tests/occupancy.test.mjs` — This module tests single-flight occupancy after request timeout and abort.
 - `dsh_bridge/tests/plugin.test.mjs` — This module tests tool-name normalization, config merging, and textual projection.
 
 ## Development kit entry points

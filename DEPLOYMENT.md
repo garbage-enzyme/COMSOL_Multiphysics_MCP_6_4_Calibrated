@@ -20,6 +20,11 @@ Requirements:
 - standard GIL-enabled Python 3.14 in an ASCII-only environment path;
 - COMSOL's Java runtime for the verified local configuration.
 
+Python 3.15 is a separate experimental engineering lane, not a production
+upgrade recommendation. See the [compatibility build requirements](README.md#requirements-and-installation)
+before using it: missing native wheels require source builds, and neither
+licensed COMSOL compatibility nor the `semantic-docs` extra is accepted there.
+
 Perform a non-editable install:
 
 ```powershell
