@@ -284,3 +284,44 @@ weight bytes, which proves the artifact is stable and non-degenerate, but does
 not independently prove that a third-party ONNX runtime reproduces the same
 predictions. That would require an ONNX runtime, which this project does not
 depend on.
+
+## 13. S8 bounded campaign findings — resolved against live COMSOL
+
+The full prediction-to-FEM escalation path was run on a real COMSOL 6.4.0.293
+session. Licensed receipt: `D:\mcp_tests\a75s8g03\s8_gate.json`
+(sha256 `5f77791eae32274163caeae356a51aac715e8f628dc893d74f3b6c9902cfdd14`).
+
+Three findings determined the accepted design:
+
+| Finding | Consequence |
+| --- | --- |
+| A trained COMSOL DNN function **cannot be evaluated** in a geometry-free surrogate model: `model.evaluate` fails with "Could not determine default dataset", a Point dataset cannot be created ("在这个情景中不能创建本操作"), and an `Eval` numerical node silently returns an empty array. | Screening predictions are produced by evaluating the network's own **exported ONNX artifact** with a pure-standard-library evaluator (`onnx_runtime.py`). This also proves the export is a working network rather than inert bytes. |
+| COMSOL exports PyTorch-convention ONNX: one batched input tensor named `input`, Gemm nodes carrying `transB=1` (weights stored `[out, in]`), and explicit `Mul`/`Add` input-normalization nodes. | The evaluator decodes node attributes, honours `transB`, binds the caller's ordered feature names to the single batched input, and applies the scale/bias nodes. A `transB` misreading or a mis-bound input would produce predictions unrelated to the target, so the real-artifact regression test would fail. |
+| A COMSOL result dataset **retains the parameters it was solved at**. Evaluating a stored dataset after changing parameters returns the *first* solve's value for every candidate, which looked like a successful escalation while silently reporting one number three times. | Every escalated candidate triggers its own `study.run()` before evaluation, and the gate independently verifies that each measurement reproduces the analytic target at *its own* coordinates and that all measurements are distinct. Without that check the false pass would have been reported as verified evidence. |
+
+Verified on the licensed campaign run:
+
+- Screening produced seven `predicted`-state records and no record claimed FEM
+  evidence; all seven were scored by the exported ONNX network.
+- Ranking selected a bounded top-3 and escalated the out-of-domain candidate
+  (a1=9, a2=9) regardless of rank, with reason `out_of_domain`; ranking and
+  selection are explicitly marked as not evidence.
+- Each escalated candidate received a fresh COMSOL solve. The measured values
+  were distinct and each matched its own coordinates exactly:
+  `(3.5, 4.5) → 1.648944`, `(9.0, 9.0) → 7.724506`, `(3.0, 4.0) → 1.107758`.
+- The invariant check proved no prediction was promoted without verified FEM
+  evidence and an artifact hash; `verified_requires_fresh_fem` is true and
+  `upgrades_fem_evidence` is false in both the invariant and the summary.
+- The surrogate's error was measured against those fresh FEM results and
+  reported honestly: mean absolute error 2.59 and worst 6.86, with all three
+  verified results flagged as disagreements. The two out-of-domain points
+  dominate that error, which is precisely the behaviour the escalation rule
+  exists to catch. No accuracy claim is made from the screening stage.
+- Session, lease, descendants, and listeners were all released with zero active
+  durable jobs.
+
+Frozen limitation: the verification model is a genuine solvable 1D
+coefficient-form PDE model, and the evaluated expression is the analytic target
+the surrogate was trained on. This proves the escalation, evidence-separation,
+and error-measurement machinery on real COMSOL; it is not a physical validation
+of any metasurface or device model.
