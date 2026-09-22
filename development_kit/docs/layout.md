@@ -226,6 +226,7 @@ models are intentionally absent.
 - `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
 - `development_kit/tests/test_surrogate_fields_and_splits.py` — This module tests solver-free surrogate field-schema, transform round-trip, deterministic split, and adversarial leakage contracts.
 - `development_kit/tests/test_surrogate_manifests.py` — This module tests solver-free surrogate dataset, schema, split, and transform manifest contracts.
+- `development_kit/tests/test_surrogate_registry.py` — This module tests solver-free surrogate model-card sealing, lifecycle transitions, drift detection, out-of-domain policy, and prediction-evidence separation.
 - `development_kit/tests/test_acdc_differential_coils_recipe.py` — This module tests static portability and input contracts for the differential-coil recipe.
 - `development_kit/tests/test_attached_job_backend.py` — This module tests immutable attached-job targets, handoff, worker execution, resume, cancellation, and preservation.
 - `development_kit/tests/test_async_solver.py` — This module tests asynchronous solver thread state with fake studies.
@@ -514,6 +515,7 @@ models are intentionally absent.
 - `comsol_mcp/surrogate/__init__.py` — This module exports solver-free surrogate dataset, split, schema, and transform manifests.
 - `comsol_mcp/surrogate/fields.py` — This module freezes ordered feature and target field declarations with units and bounds, and fits training-only transforms with proven round-trip inversion.
 - `comsol_mcp/surrogate/manifests.py` — This module validates closed versioned surrogate dataset, schema, leakage-group, split, and training-transform manifests with deterministic hashes.
+- `comsol_mcp/surrogate/registry.py` — This module seals immutable surrogate model cards and registry entries, enforces forward-only lifecycle transitions, detects contract drift, and evaluates out-of-domain policy without clipping.
 - `comsol_mcp/surrogate/splits.py` — This module assigns whole leakage groups to disjoint train, validation, test, and scientific-holdout splits deterministically and detects declared leakage classes.
 - `comsol_mcp/compatibility_manifest.json` — This file declares exact licensed, dependency-only, and unknown runtime compatibility.
 - `comsol_mcp/deployment_manifest.json` — This file binds deployment identity to frozen tool and profile snapshots.
