@@ -158,6 +158,8 @@ models are intentionally absent.
 - `development_kit/scripts/reference_power_gate_preflight.py` — This script validates reference-power gate inputs without starting COMSOL.
 - `development_kit/scripts/surrogate_dnn_capability_probe.py` — This repository-only licensed probe resolves the exact COMSOL 6.4 surrogate-training study-step and DNN function property, method, default, allowed-value, seed, and save/reload surface into a bounded capability receipt without generic mutation.
 - `development_kit/scripts/surrogate_dnn_licensed_gate.py` — This repository-only licensed gate applies the typed surrogate DNN adapter to real COMSOL, proving construction, full default readback, data-source argument binding, save/reload identity, duplicate refusal, mid-batch rollback, and owned cleanup.
+- `development_kit/scripts/surrogate_dnn_data_diagnostic.py` — This repository-only licensed diagnostic resolves the exact accepted DNN training-data encoding and split-mode contract by bounded experiment, because neither the reference tables nor the error messages state them.
+- `development_kit/scripts/surrogate_training_licensed_gate.py` — This repository-only licensed gate trains, tests, and continues a COMSOL-native DNN surrogate on real COMSOL, proving real losses and trained identity, seed-controlled reproducibility, continuation identity refusal, non-DNN baselines on the identical split, and owned cleanup.
 - `development_kit/scripts/release_gate.py` — This script runs compile, test, package, clean-install, and installed-discovery gates.
 - `development_kit/scripts/release_facts.py` — This script generates and checks the durable release-facts view from live implementation data.
 - `development_kit/scripts/regenerate_tool_snapshots.py` — This script regenerates frozen tool-schema, profile-name, feature-name, deployment-identity, release-facts, and support-matrix counts after a public surface change.
@@ -230,6 +232,7 @@ models are intentionally absent.
 - `development_kit/tests/test_surrogate_manifests.py` — This module tests solver-free surrogate dataset, schema, split, and transform manifest contracts.
 - `development_kit/tests/test_surrogate_registry.py` — This module tests solver-free surrogate model-card sealing, lifecycle transitions, drift detection, out-of-domain policy, and prediction-evidence separation.
 - `development_kit/tests/test_surrogate_rows.py` — This module tests solver-free surrogate row-provenance binding, ineligible-row retention, ledger summarization, and deterministic Latin-hypercube design reproducibility.
+- `development_kit/tests/test_surrogate_training_metrics.py` — This module tests solver-free surrogate physical-unit metrics, deterministic non-DNN baselines, baseline comparison, continuation identity rules, and multi-seed stability reporting.
 - `development_kit/tests/test_acdc_differential_coils_recipe.py` — This module tests static portability and input contracts for the differential-coil recipe.
 - `development_kit/tests/test_attached_job_backend.py` — This module tests immutable attached-job targets, handoff, worker execution, resume, cancellation, and preservation.
 - `development_kit/tests/test_async_solver.py` — This module tests asynchronous solver thread state with fake studies.
@@ -523,6 +526,7 @@ models are intentionally absent.
 - `comsol_mcp/surrogate/manifests.py` — This module validates closed versioned surrogate dataset, schema, leakage-group, split, and training-transform manifests with deterministic hashes.
 - `comsol_mcp/surrogate/registry.py` — This module seals immutable surrogate model cards and registry entries, enforces forward-only lifecycle transitions, detects contract drift, and evaluates out-of-domain policy without clipping.
 - `comsol_mcp/surrogate/rows.py` — This module binds each label row to its exact producing candidate, model, solver, study, solution, dataset, fidelity, and evidence identities, and builds deterministic bounded Latin-hypercube designs.
+- `comsol_mcp/surrogate/training.py` — This module computes held-out physical-unit metrics, fits deterministic non-DNN baselines, and decides continuation eligibility from exact contract identities.
 - `comsol_mcp/surrogate/splits.py` — This module assigns whole leakage groups to disjoint train, validation, test, and scientific-holdout splits deterministically and detects declared leakage classes.
 - `comsol_mcp/compatibility_manifest.json` — This file declares exact licensed, dependency-only, and unknown runtime compatibility.
 - `comsol_mcp/deployment_manifest.json` — This file binds deployment identity to frozen tool and profile snapshots.

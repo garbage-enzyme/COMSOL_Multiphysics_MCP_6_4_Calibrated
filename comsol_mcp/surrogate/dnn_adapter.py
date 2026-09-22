@@ -11,6 +11,7 @@ derived from a validated configuration, and a partial batch is rolled back.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
@@ -28,6 +29,15 @@ ALLOWED_LOSSES = frozenset({"mse", "mae"})
 ALLOWED_LAYER_TYPES = frozenset({"input", "dense"})
 ALLOWED_VALIDATION_MODES = frozenset({"random", "fraction", "last", "table"})
 ALLOWED_TEST_MODES = frozenset({"none", "random", "table"})
+
+# Split modes that let COMSOL subset the imported data internally.  The
+# authoritative group-disjoint split remains this project's own manifest: COMSOL
+# internal subsetting is used only for training-time model selection, and its
+# exact membership is not retrievable, so it must never be reported as the
+# group-disjoint split.
+COMSOL_INTERNAL_SUBSET_MODES = frozenset({"random", "fraction", "last"})
+# Split modes that require a bound COMSOL result table.
+TABLE_BOUND_MODES = frozenset({"table"})
 ALLOWED_SURROGATE_MODELS = frozenset({"none", "gp", "pce", "dnn", "lsq"})
 ALLOWED_COMPUTE_ACTIONS = frozenset({"recompute", "append"})
 ALLOWED_SEED_MODES = frozenset({"manual", "currenttime"})
@@ -302,8 +312,21 @@ def build_write_plan(
         if item not in ALLOWED_LAYER_TYPES:
             raise ValueError("derived layer type is not permitted")
 
+    # `activation` is a per-layer array whose length must match `layertype`
+    # (the COMSOL default is {"none", "tanh"} for an input+dense pair).  The
+    # input layer never has an activation, so it takes "none"; every dense layer
+    # takes the configured activation.  A single-element array raises
+    # "数组长度错误" at training time.
+    activation_per_layer = [
+        "none" if kind == "input" else training["activation"] for kind in layer_types
+    ]
+
     scalar_writes: list[dict[str, Any]] = [
-        {"property": "activation", "kind": "string_array", "value": [training["activation"]]},
+        {
+            "property": "activation",
+            "kind": "string_array",
+            "value": activation_per_layer,
+        },
         {"property": "layertype", "kind": "string_array", "value": layer_types},
         {
             "property": "outfeatures",
@@ -386,7 +409,11 @@ def build_write_plan(
     # the entry accessor.
     step_scalar_writes: list[dict[str, Any]] = [
         {"property": "surrogatemodel", "kind": "string", "value": "dnn"},
-        {"property": "activation", "kind": "string_array", "value": [training["activation"]]},
+        {
+            "property": "activation",
+            "kind": "string_array",
+            "value": activation_per_layer,
+        },
         {"property": "layertype", "kind": "string_array", "value": layer_types},
         {
             "property": "outfeatures",
@@ -712,6 +739,105 @@ def bind_data_source_and_arguments(
     }
 
 
+def _numeric_value(record: Any) -> float | None:
+    """Return the numeric value of an accessor readback record, or None."""
+    raw = record.get("value") if isinstance(record, Mapping) else record
+    if isinstance(raw, str):
+        raw = raw.strip()
+    try:
+        number = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def train_surrogate(
+    backend: SurrogateDnnBackend,
+    *,
+    continue_training: bool = False,
+    run_test: bool = False,
+) -> dict[str, Any]:
+    """Train (or continue) the DNN and optionally evaluate its held-out test loss.
+
+    The lifecycle methods live on the DNN function, not the study step.  The
+    returned evidence records the COMSOL-owned trained checksum, the reported
+    losses, and the layer configuration, so a model card can bind the exact
+    trained artifact rather than a return code.
+
+    Each loss is reported twice: as the raw accessor readback record and as a
+    plain float (``*_value``) for numeric consumers.  A loss that COMSOL reports
+    as unreadable or non-numeric yields ``None`` rather than a silent zero.
+    """
+    try:
+        dnn = backend.get_dnn_function(DNN_FUNCTION_TAG)
+    except Exception as exc:
+        # Report the same shape as every other failure so a caller never has to
+        # guess whether a missing key means "not trained" or "not attempted".
+        return {
+            "success": False,
+            "trained": False,
+            "continued": bool(continue_training),
+            "test_executed": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    prior_chksum = backend.read_property(dnn, "trained_chksum")
+    try:
+        if continue_training:
+            backend.continue_training(dnn)
+        else:
+            backend.train(dnn)
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "prior_trained_chksum": prior_chksum,
+            "trained": False,
+            "continued": bool(continue_training),
+            "test_executed": False,
+        }
+
+    trainingloss = backend.read_property(dnn, "trainingloss")
+    validationloss = backend.read_property(dnn, "validationloss")
+    result: dict[str, Any] = {
+        "success": True,
+        "continued": bool(continue_training),
+        "trained": True,
+        "prior_trained_chksum": prior_chksum,
+        "trainingloss": trainingloss,
+        "trainingloss_value": _numeric_value(trainingloss),
+        "validationloss": validationloss,
+        "validationloss_value": _numeric_value(validationloss),
+        "layerconfig": backend.read_property(dnn, "layerconfig"),
+        "trained_chksum": backend.read_property(dnn, "trained_chksum"),
+        "trained_ninput": backend.read_property(dnn, "trained_ninput"),
+        "trained_noutput": backend.read_property(dnn, "trained_noutput"),
+    }
+    if run_test:
+        try:
+            backend.run_test(dnn)
+            testloss = backend.read_property(dnn, "testloss")
+            result["testloss"] = testloss
+            result["testloss_value"] = _numeric_value(testloss)
+            result["test_executed"] = True
+        except Exception as exc:
+            result["test_executed"] = False
+            result["test_error"] = f"{type(exc).__name__}: {exc}"
+            result["success"] = False
+    else:
+        result["test_executed"] = False
+    return result
+
+
+def assert_continuation_identity_matches(
+    prior: Mapping[str, Any], current: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Refuse a continuation whose contract identities differ."""
+    from comsol_mcp.surrogate.training import assert_continuation_allowed
+
+    return assert_continuation_allowed(prior=prior, current=current)
+
+
 __all__ = [
     "ALLOWED_ACTIVATIONS",
     "ALLOWED_COMPUTE_ACTIONS",
@@ -733,8 +859,10 @@ __all__ = [
     "SURROGATE_STUDY_STEP_TYPE",
     "SurrogateDnnBackend",
     "apply_surrogate_configuration",
+    "assert_continuation_identity_matches",
     "bind_data_source_and_arguments",
     "build_dnn_configuration",
     "build_write_plan",
+    "train_surrogate",
     "validate_dnn_configuration",
 ]

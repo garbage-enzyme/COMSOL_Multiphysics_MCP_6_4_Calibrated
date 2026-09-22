@@ -173,6 +173,32 @@ def test_write_plan_layer_types_match_declared_architecture() -> None:
     assert outfeatures["value"] == [2, 32, 1]
 
 
+def test_activation_array_is_per_layer_matching_layertype() -> None:
+    """COMSOL requires len(activation) == len(layertype); a short array errors."""
+    plan = build_write_plan(_configuration(hidden_layers=[16, 8], activation="gelu"))
+    activation = next(
+        item for item in plan["scalar_writes"] if item["property"] == "activation"
+    )
+    layertype = next(item for item in plan["scalar_writes"] if item["property"] == "layertype")
+    # input, hidden, hidden, output dense
+    assert layertype["value"] == ["input", "dense", "dense", "dense"]
+    assert len(activation["value"]) == len(layertype["value"])
+    # The input layer never carries an activation.
+    assert activation["value"] == ["none", "gelu", "gelu", "gelu"]
+
+
+def test_step_activation_array_also_matches_layertype() -> None:
+    plan = build_write_plan(_configuration(hidden_layers=[4], activation="tanh"))
+    step_activation = next(
+        item for item in plan["step_scalar_writes"] if item["property"] == "activation"
+    )
+    step_layertype = next(
+        item for item in plan["step_scalar_writes"] if item["property"] == "layertype"
+    )
+    assert len(step_activation["value"]) == len(step_layertype["value"])
+    assert step_activation["value"] == ["none", "tanh", "tanh"]
+
+
 def test_write_plan_omits_momentum_for_adam_and_includes_it_for_sgd() -> None:
     adam = build_write_plan(_configuration())
     assert "momentum" not in {item["property"] for item in adam["scalar_writes"]}
@@ -336,18 +362,32 @@ class FakeBackend:
 
     def train(self, feature: Any) -> None:
         self.calls.append("train")
+        self._maybe_fail("train")
+        # A real training run publishes losses and a trained identity.
+        feature["trainingloss"] = "0.025"
+        feature["validationloss"] = "0.027"
+        feature["trained_chksum"] = "1234567890"
+        feature["trained_ninput"] = "2"
+        feature["trained_noutput"] = "1"
+        feature["layerconfig"] = "[2,16,8,1]"
 
     def continue_training(self, feature: Any) -> None:
         self.calls.append("continue_training")
+        self._maybe_fail("continue_training")
+        feature["trained_chksum"] = "9876543210"
 
     def run_test(self, feature: Any) -> None:
         self.calls.append("run_test")
+        self._maybe_fail("run_test")
+        feature["testloss"] = "0.021"
 
     def export_onnx(self, feature: Any, path: str) -> None:
         self.calls.append(f"export_onnx:{path}")
+        self._maybe_fail("export_onnx")
 
     def discard_data(self, feature: Any) -> None:
         self.calls.append("discard_data")
+        self._maybe_fail("discard_data")
 
 
 def test_apply_creates_nodes_and_reads_back_defaults() -> None:
@@ -558,6 +598,122 @@ def test_bind_data_source_requires_an_existing_dnn_function() -> None:
     )
     assert result["success"] is False
     assert result["blockers"] == ["dnn_function_absent"]
+
+
+# --------------------------------------------------------------------------
+# Training lifecycle
+# --------------------------------------------------------------------------
+
+
+def test_train_reports_real_losses_and_a_trained_identity() -> None:
+    from comsol_mcp.surrogate.dnn_adapter import train_surrogate
+
+    backend = FakeBackend()
+    backend.functions["dnn1"] = {}
+    result = train_surrogate(backend, run_test=True)
+    assert result["success"] is True
+    assert result["trained"] is True
+    assert result["continued"] is False
+    assert result["test_executed"] is True
+    # Both the raw readback record and a plain float are reported.
+    assert result["trainingloss"] == {"readable": True, "value": "0.025"}
+    assert result["trainingloss_value"] == pytest.approx(0.025)
+    assert result["validationloss_value"] == pytest.approx(0.027)
+    assert result["testloss_value"] == pytest.approx(0.021)
+    assert result["trained_chksum"]["value"] == "1234567890"
+    assert result["layerconfig"]["value"] == "[2,16,8,1]"
+    assert result["trained_ninput"]["value"] == "2"
+
+
+def test_train_without_test_does_not_evaluate_the_held_out_split() -> None:
+    from comsol_mcp.surrogate.dnn_adapter import train_surrogate
+
+    backend = FakeBackend()
+    backend.functions["dnn1"] = {}
+    result = train_surrogate(backend, run_test=False)
+    assert result["test_executed"] is False
+    assert "testloss" not in result
+    assert "run_test" not in backend.calls
+
+
+def test_continue_training_uses_the_continuation_entry_point() -> None:
+    from comsol_mcp.surrogate.dnn_adapter import train_surrogate
+
+    backend = FakeBackend()
+    backend.functions["dnn1"] = {"trained_chksum": "111"}
+    result = train_surrogate(backend, continue_training=True, run_test=False)
+    assert result["continued"] is True
+    assert result["prior_trained_chksum"]["value"] == "111"
+    assert result["trained_chksum"]["value"] == "9876543210"
+    assert "continue_training" in backend.calls
+    assert "train" not in backend.calls
+
+
+def test_train_requires_an_existing_dnn_function() -> None:
+    from comsol_mcp.surrogate.dnn_adapter import train_surrogate
+
+    result = train_surrogate(FakeBackend(), run_test=True)
+    assert result["success"] is False
+    assert result["trained"] is False
+    assert "error" in result
+
+
+def test_train_failure_is_reported_without_a_fabricated_checksum() -> None:
+    from comsol_mcp.surrogate.dnn_adapter import train_surrogate
+
+    backend = FakeBackend(fail_on="train")
+    backend.functions["dnn1"] = {}
+    result = train_surrogate(backend, run_test=True)
+    assert result["success"] is False
+    assert result["trained"] is False
+    assert "injected failure" in result["error"]
+    assert "trained_chksum" not in result
+
+
+def test_unreadable_loss_is_none_not_zero() -> None:
+    """An unreadable loss must never be silently reported as a perfect zero."""
+    from comsol_mcp.surrogate.dnn_adapter import _numeric_value
+
+    assert _numeric_value({"readable": False, "reason": "not_readable"}) is None
+    assert _numeric_value({"readable": True, "value": "not_a_number"}) is None
+    assert _numeric_value({"readable": True, "value": "0"}) == 0.0
+    assert _numeric_value(None) is None
+
+
+def test_test_failure_marks_the_result_unsuccessful() -> None:
+    from comsol_mcp.surrogate.dnn_adapter import train_surrogate
+
+    backend = FakeBackend(fail_on="run_test")
+    backend.functions["dnn1"] = {}
+    result = train_surrogate(backend, run_test=True)
+    assert result["success"] is False
+    assert result["test_executed"] is False
+    assert "injected failure" in result["test_error"]
+    # Training itself still succeeded and its identity is preserved.
+    assert result["trained"] is True
+
+
+def test_continuation_identity_helper_refuses_a_changed_build() -> None:
+    from comsol_mcp.surrogate.dnn_adapter import assert_continuation_identity_matches
+    from comsol_mcp.surrogate.training import build_continuation_identity
+
+    def _identity(build: str) -> dict:
+        return build_continuation_identity(
+            dataset_manifest_sha256="a" * 64,
+            split_manifest_sha256="b" * 64,
+            field_schema_sha256="c" * 64,
+            transforms_sha256="d" * 64,
+            architecture_sha256="e" * 64,
+            comsol_build=build,
+            objective="minimize_mse",
+            prior_checkpoint_sha256="f" * 64,
+        )
+
+    assert assert_continuation_identity_matches(_identity("6.4"), _identity("6.4"))[
+        "continuation_allowed"
+    ]
+    with pytest.raises(ValueError, match="nonidentical_continuation"):
+        assert_continuation_identity_matches(_identity("6.4"), _identity("6.5"))
 
 
 # --------------------------------------------------------------------------

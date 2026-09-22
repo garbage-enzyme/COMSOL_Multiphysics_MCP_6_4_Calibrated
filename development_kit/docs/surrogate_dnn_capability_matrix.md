@@ -196,3 +196,49 @@ written (`activation=tanh`, `layertype=input, dense, dense`,
 injected mid-batch failure rolled back every created node leaving zero tags; a
 duplicate-tag apply was refused with zero nodes created; and the owned session,
 lease, descendants, and listeners were all released.
+
+## 11. S6 training lifecycle findings — resolved against live COMSOL
+
+Training, held-out test evaluation, and continuation were run on a real
+COMSOL 6.4.0.293 session. Licensed receipts:
+`D:\mcp_tests\a75s6d01\diag.json` (data-format diagnostic) and
+`D:\mcp_tests\a75s6g09\s6_gate.json`
+(sha256 `4c2919bb0ff508467e2fe5f28fbead9805b6eb6237bff9ba29c5ddc6f36af2e9`).
+
+Four findings blocked training and were resolved by experiment rather than
+inference. Each one failed with a message that did **not** name the real cause:
+
+| Finding | Consequence |
+| --- | --- |
+| `activation` is a per-layer array whose length must equal `layertype` (the COMSOL default is `none, tanh` for an input+dense pair). A single-element array fails at training time with "数组长度错误". | The write plan emits one activation per layer: `none` for the input layer and the configured activation for every dense layer. |
+| `table` validation/test modes require a bound COMSOL result table and fail with "未选择结果表". | The gate uses COMSOL-internal subsetting (`fraction`/`random`) for training-time model selection. The authoritative group-disjoint split remains this project's own manifest, because COMSOL's internal subset membership is not retrievable and must never be reported as the group-disjoint split. |
+| A leading text header row imports cleanly but makes training fail with "读取训练数据时出错 - 线条数: 1". A headerless file trains successfully. | Dataset files are written without a header and bound positionally against COMSOL's own `col1, col2, col3` keys, with the binding mode recorded as evidence. |
+| `sourcetype` is **not** a DNN property: it is absent from the S0 enumeration and from every documented reference table. | The probe that wrote it was unproven mutation and was removed. This is the reason the S0 gate requires the live enumerated surface, not the reference tables, as authority. |
+
+Verified on the licensed training run:
+
+- `train_seed17`: training succeeded and the held-out test executed
+  independently, reporting `trainingloss=0.0262`, `validationloss=0.0275`,
+  `testloss=0.0206`, `layerconfig=[2,16,8,1]`, `trained_ninput=2`,
+  `trained_noutput=1`, and `trained_chksum=-8938453606443985335`.
+- Seed control: re-running seed 17 on a fresh model reproduced the identical
+  `trained_chksum`, and seed 29 produced a different one, so the seed provably
+  controls the trained artifact.
+- Continuation: identical contract identities permitted `continueRun`, which
+  produced a new `trained_chksum`; a changed `comsol_build` was refused as a
+  `nonidentical_continuation` that creates a new lineage.
+- Baseline: a non-DNN `constant_mean` baseline was fitted on the training split
+  only (`fit_row_count=33`) and scored on the same held-out rows, giving
+  `rmse=0.7102`; the DNN's `testloss=0.0206` beats it by 97.1% on identical
+  splits. The comparison records `accepted_on_training_loss=false`.
+- Cleanup: session, lease, descendants, and listeners were all released with
+  zero active durable jobs.
+
+One limitation is frozen: a trained checksum is a COMSOL-owned integer identity,
+so it binds the artifact but is not a content hash of the weights.
+
+A second attempt at stronger evidence was abandoned: loading COMSOL's own
+shipped `tubular_reactor_surrogate.mph` example to read a known-good
+configuration fails with "初始化物理场接口失败" because the model requires
+physics interfaces that are not licensed on this host. The accepted contract is
+therefore derived from the bounded experiment above, not from the example.
