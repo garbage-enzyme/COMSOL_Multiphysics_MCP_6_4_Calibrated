@@ -1,4 +1,4 @@
-"""Solver-free surrogate dataset, split, schema, and transform contracts."""
+"""Solver-free surrogate dataset, split, schema, transform, and row contracts."""
 
 from __future__ import annotations
 
@@ -6,11 +6,15 @@ __all__ = [
     "DEFAULT_PROPORTIONS",
     "DRIFT_IDENTITY_FIELDS",
     "ESCALATION_REQUIRED_STATES",
+    "INELIGIBLE_REASON_CODES",
     "IneligibleRow",
     "LEAKAGE_CLASSES",
+    "LHS_STRATEGY_VERSION",
     "LIFECYCLE_STATES",
     "LeakageGroup",
     "OOD_STATES",
+    "ROW_EVIDENCE_STATES",
+    "ROW_IDENTITY_FIELDS",
     "SCIENTIFIC_STATES",
     "SPLIT_NAMES",
     "STRATEGY_VERSION",
@@ -21,14 +25,17 @@ __all__ = [
     "TERMINAL_ERROR_STATES",
     "advance_registry_entry",
     "apply_transforms",
+    "assert_design_within_bounds",
     "assert_no_contract_drift",
     "assert_no_leakage",
     "assert_prediction_not_evidence",
     "assign_group_disjoint_split",
     "build_dataset_manifest",
     "build_field_schema",
+    "build_lhs_design",
     "build_model_card",
     "build_registry_entry",
+    "build_row_provenance",
     "build_schema_manifest",
     "build_training_transforms",
     "canonical_manifest_sha256",
@@ -37,12 +44,15 @@ __all__ = [
     "evaluate_ood",
     "fit_transforms",
     "invert_transforms",
+    "summarize_row_ledger",
     "validate_dataset_manifest",
     "validate_field_schema",
     "validate_fitted_transforms",
     "validate_group_disjoint_split",
+    "validate_lhs_design",
     "validate_model_card",
     "validate_registry_entry",
+    "validate_row_provenance",
     "validate_schema_manifest",
     "validate_split_plan",
     "validate_training_transforms",
@@ -91,6 +101,18 @@ from comsol_mcp.surrogate.registry import (
     validate_model_card,
     validate_registry_entry,
 )
+from comsol_mcp.surrogate.rows import (
+    INELIGIBLE_REASON_CODES,
+    ROW_EVIDENCE_STATES,
+    ROW_IDENTITY_FIELDS,
+    assert_design_within_bounds,
+    build_lhs_design,
+    build_row_provenance,
+    summarize_row_ledger,
+    validate_lhs_design,
+    validate_row_provenance,
+)
+from comsol_mcp.surrogate.rows import STRATEGY_VERSION as LHS_STRATEGY_VERSION
 from comsol_mcp.surrogate.splits import (
     DEFAULT_PROPORTIONS,
     LEAKAGE_CLASSES,

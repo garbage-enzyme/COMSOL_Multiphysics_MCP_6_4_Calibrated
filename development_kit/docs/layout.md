@@ -229,6 +229,7 @@ models are intentionally absent.
 - `development_kit/tests/test_surrogate_fields_and_splits.py` — This module tests solver-free surrogate field-schema, transform round-trip, deterministic split, and adversarial leakage contracts.
 - `development_kit/tests/test_surrogate_manifests.py` — This module tests solver-free surrogate dataset, schema, split, and transform manifest contracts.
 - `development_kit/tests/test_surrogate_registry.py` — This module tests solver-free surrogate model-card sealing, lifecycle transitions, drift detection, out-of-domain policy, and prediction-evidence separation.
+- `development_kit/tests/test_surrogate_rows.py` — This module tests solver-free surrogate row-provenance binding, ineligible-row retention, ledger summarization, and deterministic Latin-hypercube design reproducibility.
 - `development_kit/tests/test_acdc_differential_coils_recipe.py` — This module tests static portability and input contracts for the differential-coil recipe.
 - `development_kit/tests/test_attached_job_backend.py` — This module tests immutable attached-job targets, handoff, worker execution, resume, cancellation, and preservation.
 - `development_kit/tests/test_async_solver.py` — This module tests asynchronous solver thread state with fake studies.
@@ -515,12 +516,13 @@ models are intentionally absent.
 - `comsol_mcp/durable/__init__.py` — This module exports versioned canonicalization and durable filesystem primitives.
 - `comsol_mcp/durable/canonical.py` — This module preserves legacy canonical bytes and adds domain-separated identities for new schemas.
 - `comsol_mcp/durable/io.py` — This module implements bounded hashing, atomic replacement, and complete-row persistence.
-- `comsol_mcp/surrogate/__init__.py` — This module exports solver-free surrogate dataset, split, schema, and transform manifests.
+- `comsol_mcp/surrogate/__init__.py` — This module exports solver-free surrogate dataset, split, schema, transform, and row contracts.
 - `comsol_mcp/surrogate/dnn_adapter.py` — This module validates one bounded fully connected DNN configuration, derives an exact typed property-write plan, and applies it failure-atomically with full COMSOL-owned default readback.
 - `comsol_mcp/surrogate/dnn_clientapi_backend.py` — This licensed module is the ClientAPI bridge for the typed surrogate DNN adapter, converting values to explicit Java types and resolving tag lookups without exposing a generic property setter.
 - `comsol_mcp/surrogate/fields.py` — This module freezes ordered feature and target field declarations with units and bounds, and fits training-only transforms with proven round-trip inversion.
 - `comsol_mcp/surrogate/manifests.py` — This module validates closed versioned surrogate dataset, schema, leakage-group, split, and training-transform manifests with deterministic hashes.
 - `comsol_mcp/surrogate/registry.py` — This module seals immutable surrogate model cards and registry entries, enforces forward-only lifecycle transitions, detects contract drift, and evaluates out-of-domain policy without clipping.
+- `comsol_mcp/surrogate/rows.py` — This module binds each label row to its exact producing candidate, model, solver, study, solution, dataset, fidelity, and evidence identities, and builds deterministic bounded Latin-hypercube designs.
 - `comsol_mcp/surrogate/splits.py` — This module assigns whole leakage groups to disjoint train, validation, test, and scientific-holdout splits deterministically and detects declared leakage classes.
 - `comsol_mcp/compatibility_manifest.json` — This file declares exact licensed, dependency-only, and unknown runtime compatibility.
 - `comsol_mcp/deployment_manifest.json` — This file binds deployment identity to frozen tool and profile snapshots.
