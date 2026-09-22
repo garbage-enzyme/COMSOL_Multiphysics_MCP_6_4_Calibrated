@@ -367,6 +367,7 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
         "core",
         "basic_fem",
         "wave_optics",
+        "electro_chemistry",
         "experimental",
         "full",
         "comsolless_read_only",

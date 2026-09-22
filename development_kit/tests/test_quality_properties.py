@@ -955,6 +955,7 @@ def _invalid_tool_specs(case: str) -> object:
         changes = {"intended_profiles": ("unknown", "full")}
     elif case == "full_missing":
         changes = {"intended_profiles": ("core",)}
+        # Isolated module tools may omit ``full``; generic tools may not.
     elif case == "maturity":
         changes = {"maturity": "unknown"}
     elif case == "read_only_revision":

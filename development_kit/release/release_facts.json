@@ -2,7 +2,7 @@
   "schema_name": "comsol_mcp.release_facts",
   "schema_version": "1.0.0",
   "package_version": "0.7.4",
-  "tool_count": 175,
+  "tool_count": 180,
   "profiles": {
     "core": {
       "tool_count": 50
@@ -12,6 +12,9 @@
     },
     "wave_optics": {
       "tool_count": 79
+    },
+    "electro_chemistry": {
+      "tool_count": 55
     },
     "experimental": {
       "tool_count": 104
@@ -42,8 +45,8 @@
     "registry_sha256": "20546177211aa74bbf4ee167105749b410982772a0c2605734b5b8724db543c8"
   },
   "identities": {
-    "catalog_sha256": "3ad3eb9e450b9c142d69f70e9190c857336525c4a641e9a13dba937f98aaf2fe",
-    "profile_tools_sha256": "67f85f95dd94adcffc81a292727d745af001b77795c57faad8007254b2bd27b9",
+    "catalog_sha256": "6ecf15c82ed6fb8e2d3a3a8a71e6a9d3e1b0d3d8c0b74ec9f67544bd251497b1",
+    "profile_tools_sha256": "e7ea69f0d915054e0b811226abe2b00f10c0916e4728d05c10489ebe135bac99",
     "feature_tools_sha256": "e37721d24bcd1ee6a949a156eaba90936bc5812b8b2f7a0f5fddc04fa928439a",
     "runtime_compatibility_sha256": "f170db5e24a8762ee399a1c227e9420d6f5bb4ea0911142fd3eb197b88c93551"
   }

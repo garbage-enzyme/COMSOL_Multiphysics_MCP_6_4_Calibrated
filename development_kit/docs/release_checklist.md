@@ -83,3 +83,10 @@ Before a release:
 
 Hosted CI never runs licensed COMSOL integration tests. They remain explicit,
 serial, and unavailable by default.
+
+For the experimental `electro_chemistry` profile, retain the solver-free
+registry/schema/profile tests and a separate exact-version COMSOL 6.4 probe
+receipt. The probe may create and inspect bounded derived objects, but must not
+run a scientific solve unless a separate caller-owned scientific policy is
+authorized. Record module/interface findings, rollback, lease release, and
+process cleanup; do not treat upstream COMSOL 6.3 records as release evidence.

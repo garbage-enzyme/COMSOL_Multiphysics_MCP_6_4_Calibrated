@@ -43,6 +43,7 @@ def test_shared_feature_capabilities_and_tools_are_explicit():
             "core",
             "basic_fem",
             "wave_optics",
+            "electro_chemistry",
             "experimental",
             "full",
             "comsolless_read_only",

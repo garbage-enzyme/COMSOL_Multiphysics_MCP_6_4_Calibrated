@@ -161,6 +161,9 @@ msgstr ""
 msgid "For optical and metasurface work. Adds materials, field review, Wave Optics checks, point audits, and staged parameter workflows to Core."
 msgstr ""
 
+msgid "Isolated Electrochemistry Module profile. Adds electrochemistry discovery, interface creation, electrode reaction, and electrolyte tools to Core. These tools are not available in the default or Full profiles."
+msgstr ""
+
 msgid "For testing extra helpers that are broader or less mature. Use it only when a required tool is missing from the safer profiles, and check every output carefully."
 msgstr ""
 

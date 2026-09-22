@@ -157,6 +157,7 @@ models are intentionally absent.
 - `development_kit/scripts/reference_power_gate_preflight.py` — This script validates reference-power gate inputs without starting COMSOL.
 - `development_kit/scripts/release_gate.py` — This script runs compile, test, package, clean-install, and installed-discovery gates.
 - `development_kit/scripts/release_facts.py` — This script generates and checks the durable release-facts view from live implementation data.
+- `development_kit/scripts/regenerate_tool_snapshots.py` — This script regenerates frozen tool-schema, profile-name, feature-name, deployment-identity, release-facts, and support-matrix counts after a public surface change.
 - `development_kit/scripts/run_real_release_gate.py` — This script orchestrates the explicit serial licensed COMSOL release gate.
 - `development_kit/scripts/sbom_probe.py` — This script generates a deterministic CycloneDX SBOM from the locked installed runtime.
 - `development_kit/scripts/security_gate.py` — This script evaluates pip-audit findings against the exact expiring review policy.
@@ -218,6 +219,7 @@ models are intentionally absent.
 - `development_kit/tests/test_acceptance_resources.py` — This module tests caller-declared, live-bounded licensed acceptance resources.
 - `development_kit/tests/test_acoustic_duct_recipe.py` — This module tests staging, cleanup ordering, collision refusal, and sharing retries for the acoustic recipe.
 - `development_kit/tests/test_acoustics_pde.py` — This module tests bounded Acoustics and mathematical PDE interface and boundary transactions without COMSOL.
+- `development_kit/tests/test_electro_chemistry.py` — This module tests the isolated electrochemistry profile surface, rollback, and offline catalog without COMSOL.
 - `development_kit/tests/test_alpha73_public_surface.py` — This module tests the alpha7.3 public surface: frozen comsolless dispatch, cold discovery, and package boundaries.
 - `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
 - `development_kit/tests/test_acdc_differential_coils_recipe.py` — This module tests static portability and input contracts for the differential-coil recipe.
@@ -676,6 +678,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/parameters.py` — This module exposes COMSOL parameter tools.
 - `comsol_mcp/tools/periodic_mesh_audit.py` — This module exposes periodic geometry and mesh evidence tools.
 - `comsol_mcp/tools/physics.py` — This module exposes COMSOL physics and multiphysics tools.
+- `comsol_mcp/tools/electro_chemistry.py` — This module exposes the isolated Electrochemistry Module catalog, interface creation, electrode reaction, electrolyte, and inspect tools.
 - `comsol_mcp/tools/acoustics_pde.py` — This module exposes constrained Pressure Acoustics and mathematical PDE tools.
 - `comsol_mcp/tools/profiles.py` — This module resolves static profiles and filters tool registration.
 - `comsol_mcp/tools/session_status.py` — This module stores last-known session booleans without importing COMSOL or MPh.

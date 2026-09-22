@@ -43,6 +43,7 @@ _PROFILE_NAMES = frozenset(
         "core",
         "basic_fem",
         "wave_optics",
+        "electro_chemistry",
         "experimental",
         "full",
         "comsolless_read_only",

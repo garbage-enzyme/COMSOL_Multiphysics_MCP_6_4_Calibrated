@@ -110,6 +110,7 @@ def test_settings_start_is_profile_independent_and_solver_free(monkeypatch):
         "core",
         "basic_fem",
         "wave_optics",
+        "electro_chemistry",
         "experimental",
         "full",
     }

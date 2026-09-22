@@ -161,6 +161,9 @@ msgstr "推荐大多数用户选择。它覆盖常规 FEM 建模和结果导出�
 msgid "For optical and metasurface work. Adds materials, field review, Wave Optics checks, point audits, and staged parameter workflows to Core."
 msgstr "适合光学和超表面工作。在 Core 基础上增加材料、场结果查看、Wave Optics 检查、单点审计和分阶段参数流程。"
 
+msgid "Isolated Electrochemistry Module profile. Adds electrochemistry discovery, interface creation, electrode reaction, and electrolyte tools to Core. These tools are not available in the default or Full profiles."
+msgstr "隔离的电化学模块 profile。在 Core 基础上增加电化学发现、接口创建、电极反应和电解质工具。这些工具在默认或 Full profile 中不可用。"
+
 msgid "For testing extra helpers that are broader or less mature. Use it only when a required tool is missing from the safer profiles, and check every output carefully."
 msgstr "适合测试范围更广或尚未成熟的额外工具。只有在较安全的 profile 缺少所需工具时才使用，并仔细检查每项输出。"
 

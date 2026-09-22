@@ -43,7 +43,14 @@ def test_comsolless_read_only_surface_is_frozen_at_the_five_tools():
 
 
 def test_five_tools_are_present_in_every_profile():
-    for profile in ("core", "basic_fem", "wave_optics", "experimental", "full"):
+    for profile in (
+        "core",
+        "basic_fem",
+        "wave_optics",
+        "electro_chemistry",
+        "experimental",
+        "full",
+    ):
         server = create_server(f"surface-{profile}", profile=profile)
         listed = {tool.name for tool in asyncio.run(server.list_tools())}
         assert FIVE_TOOLS <= listed, profile

@@ -43,6 +43,11 @@ PROFILE_HELP_IDS = {
         "For optical and metasurface work. Adds materials, field review, Wave Optics checks, "
         "point audits, and staged parameter workflows to Core."
     ),
+    "electro_chemistry": (
+        "Isolated Electrochemistry Module profile. Adds electrochemistry discovery, "
+        "interface creation, electrode reaction, and electrolyte tools to Core. These "
+        "tools are not available in the default or Full profiles."
+    ),
     "experimental": (
         "For testing extra helpers that are broader or less mature. Use it only when a required "
         "tool is missing from the safer profiles, and check every output carefully."
