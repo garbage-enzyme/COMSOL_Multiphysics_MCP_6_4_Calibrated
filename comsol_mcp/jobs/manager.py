@@ -24,6 +24,7 @@ from .process_control import inspect_identity
 from .resource_admission import normalize_resource_policy
 from .robust_shape_optimization import expand_robust_shape_manifest
 from .spectral_characterization import normalize_spectral_characterization_job_spec
+from .surrogate_training import normalize_surrogate_training_spec
 from .store import (
     ACTIVE_STATES,
     JOB_SCHEMA_VERSION,
@@ -286,6 +287,7 @@ def _worker_module(job_type: str) -> str:
         "thermo_optomechanical_replay": "comsol_mcp.jobs.thermo_optomechanical_replay_worker",
         "adjoint_optimization": "comsol_mcp.jobs.adjoint_optimization_worker",
         "robust_shape_optimization": "comsol_mcp.jobs.robust_shape_worker",
+        "surrogate_training": "comsol_mcp.jobs.surrogate_training_worker",
     }
     try:
         return modules[job_type]
@@ -316,6 +318,8 @@ def _point_count(spec: dict[str, Any]) -> int:
                 if row["active"] and row["objective_role"] == "objective"
             ]
         )
+    if spec["job_type"] == "surrogate_training":
+        return int(spec["maximum_epochs"])
     return len(spec["parameter_values"])
 
 
@@ -360,6 +364,8 @@ class JobManager:
             spec = expand_adjoint_optimization_manifest(raw_spec)
         elif job_type == "robust_shape_optimization":
             spec = expand_robust_shape_manifest(raw_spec)
+        elif job_type == "surrogate_training":
+            spec = normalize_surrogate_training_spec(raw_spec)
         else:
             spec = validate_staged_sweep_spec(raw_spec)
         worker_module = _worker_module(spec["job_type"])
@@ -371,6 +377,7 @@ class JobManager:
             "thermo_optomechanical_replay",
             "adjoint_optimization",
             "robust_shape_optimization",
+            "surrogate_training",
         }
         if spec["job_type"] in duplicate_job_types:
             with JobLock(self.store.root / ".submit.lock"):
@@ -495,6 +502,19 @@ class JobManager:
         return None
 
     def _run_preflight(self, spec: dict[str, Any]) -> dict[str, Any]:
+        if spec.get("job_type") == "surrogate_training":
+            # A surrogate-training submission is bound to dataset and split
+            # identities rather than a single MPH source, so it must not be
+            # forced through the model-path preflight.  A caller-supplied
+            # preflight still takes precedence when one is installed.
+            if self._preflight is not None:
+                return self._preflight(
+                    model_path=None,
+                    output_path=str(self.store.root / "probe"),
+                    requested_version=None,
+                    execution_backend=None,
+                )
+            return self._preflight_surrogate_training(spec)
         model_path = (
             spec["levels"][0]["spectral_job"]["source_model_path"]
             if spec.get("job_type") == "convergence_campaign"
@@ -584,6 +604,55 @@ class JobManager:
             output_path=str(self.store.root / "probe"),
             requested_version=requested_version,
         )
+
+    def _preflight_surrogate_training(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Prove a surrogate-training submission is self-consistent and solver-free.
+
+        A surrogate submission is bound to dataset, split, schema, transform, and
+        architecture identities rather than a single MPH source.  This preflight
+        therefore checks identity binding and the declared budgets, and records
+        explicitly that no COMSOL client, lease, or solver is involved.
+        """
+        blockers: list[str] = []
+        dataset = spec.get("dataset_manifest") or {}
+        split_plan = spec.get("split_plan") or {}
+        declared = {
+            "dataset_manifest_sha256": dataset.get("manifest_sha256"),
+            "split_manifest_sha256": split_plan.get("manifest_sha256"),
+            "field_schema_sha256": (spec.get("field_schema") or {}).get("manifest_sha256"),
+            "transforms_sha256": (spec.get("transforms") or {}).get("manifest_sha256"),
+            "architecture_sha256": spec.get("architecture_sha256"),
+        }
+        for name, value in declared.items():
+            if spec.get(name) != value:
+                blockers.append(f"{name}_not_bound")
+
+        ineligible = {
+            item["row_id"] for item in (dataset.get("ineligible_rows") or [])
+        }
+        assignments = split_plan.get("assignments") or []
+        holdout = [item for item in assignments if item.get("split") == "scientific_holdout"]
+        if not assignments:
+            blockers.append("split_plan_has_no_assignments")
+        if not holdout:
+            blockers.append("scientific_holdout_is_empty")
+        if spec.get("maximum_epochs", 0) < 1:
+            blockers.append("maximum_epochs_is_not_positive")
+        if not spec.get("seeds"):
+            blockers.append("seeds_are_empty")
+        del ineligible  # retained for future eligibility enforcement
+
+        return {
+            "success": not blockers,
+            "ready": not blockers,
+            "state": "ready_for_solver_free_surrogate_worker" if not blockers else "blocked",
+            "blockers": blockers,
+            "solver_free": True,
+            "mph_imported": False,
+            "client_constructed": False,
+            "acquires_solver_lease": False,
+            "bound_identities": declared,
+        }
 
     def _launch_worker(self, job_id: str, module: str) -> dict[str, Any]:
         directory = self.store.job_dir(job_id)
@@ -979,6 +1048,7 @@ class JobManager:
             "thermo_optomechanical_replay",
             "adjoint_optimization",
             "robust_shape_optimization",
+            "surrogate_training",
         }:
             if self._preflight is None and spec.get("execution_backend") is None:
                 from comsol_mcp.tools.ownership import SolverOwnership

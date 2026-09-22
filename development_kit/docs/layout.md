@@ -397,6 +397,7 @@ models are intentionally absent.
 - `development_kit/tests/test_simulation_configuration.py` — This module tests typed configuration normalization, classified diffs, and solver-free durable-job previews.
 - `development_kit/tests/test_thermal_radiation.py` — This module tests Kirchhoff applicability, Planck/Jacobian integration, angular and polarization handling, detector kernels, and public dispatch.
 - `development_kit/tests/test_thermal_material.py` — This module tests typed material states, analytic/table models, phase boundaries, extrapolation, conversion previews, and public dispatch.
+- `development_kit/tests/test_surrogate_training_job.py` — This module tests durable surrogate-training spec binding, epoch journaling, resume without duplicates, deduplication, and solver-free preflight.
 - `development_kit/tests/test_thermo_optomechanical_replay.py` — This module tests the closed thermo-optomechanical specification, durable stage replay, result binding, save semantics, evidence validation, and cleanup.
 - `development_kit/tests/test_spectral_audit.py` — This module tests strict projection of point-audit artifacts into durable spectral rows.
 - `development_kit/tests/test_spectral_acceptance_runner.py` — This module tests the licensed spectral runner contract without starting COMSOL.
@@ -619,6 +620,8 @@ models are intentionally absent.
 - `comsol_mcp/jobs/thermo_optomechanical_replay_execution.py` — This module executes fixed COMSOL thermal, structural, moving-mesh, and optical stages against explicit result datasets.
 - `comsol_mcp/jobs/thermo_optomechanical_replay_rows.py` — This module validates and persists hash-chained thermo-optomechanical stage evidence.
 - `comsol_mcp/jobs/thermo_optomechanical_replay_runner.py` — This module runs resumable thermo-optomechanical stages and derives the policy-separated summary.
+- `comsol_mcp/jobs/surrogate_training.py` — This module normalizes and binds one bounded durable surrogate-training submission to exact dataset, split, schema, transform, and architecture identities.
+- `comsol_mcp/jobs/surrogate_training_worker.py` — This module is the injected solver-free surrogate-training worker that proves durable epoch journaling, resume without duplicate work, cancellation, and terminal receipts.
 - `comsol_mcp/jobs/thermo_optomechanical_replay_worker.py` — This worker owns one licensed COMSOL client and publishes terminal state only after cleanup.
 - `comsol_mcp/jobs/validation_collectors.py` — This module adapts validation points to physical evidence collectors.
 - `comsol_mcp/jobs/validation_matrix.py` — This module normalizes bounded durable validation-matrix specifications.
