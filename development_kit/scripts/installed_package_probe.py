@@ -345,7 +345,17 @@ def main() -> int:
     composed_schemas = asyncio.run(
         snapshot_tool_schemas(create_server("installed-full-with-features", profile=composed))
     )
-    if composed_schemas != expected_schemas:
+    # The schema snapshot is the union of every registered tool, while an
+    # isolated module profile is intentionally absent from ``full``. Compare
+    # the composed visible surface against the full profile plus feature
+    # overlays, not against the all-tools registry snapshot.
+    composed_names = set(expected_names["full"])
+    for feature in FEATURE_NAMES:
+        composed_names.update(expected_features[feature])
+    expected_composed_schemas = {
+        name: expected_schemas[name] for name in composed_names
+    }
+    if composed_schemas != expected_composed_schemas:
         raise AssertionError("installed composed feature surface differs from full schema snapshot")
 
     deployment_identity = _consistent_deployment_identity(deployment_identities)
