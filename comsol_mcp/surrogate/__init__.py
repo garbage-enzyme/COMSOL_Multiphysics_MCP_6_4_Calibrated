@@ -1,24 +1,48 @@
-"""Solver-free surrogate dataset, split, and transform manifests."""
+"""Solver-free surrogate dataset, split, schema, and transform contracts."""
 
 from __future__ import annotations
 
 __all__ = [
+    "DEFAULT_PROPORTIONS",
     "IneligibleRow",
+    "LEAKAGE_CLASSES",
     "LeakageGroup",
+    "SPLIT_NAMES",
+    "STRATEGY_VERSION",
     "SplitAssignment",
     "SurrogateDatasetManifest",
     "SurrogateSchemaManifest",
     "SurrogateTrainingTransforms",
+    "apply_transforms",
+    "assert_no_leakage",
+    "assign_group_disjoint_split",
     "build_dataset_manifest",
+    "build_field_schema",
     "build_schema_manifest",
     "build_training_transforms",
     "canonical_manifest_sha256",
+    "detect_leakage",
+    "fit_transforms",
+    "invert_transforms",
     "validate_dataset_manifest",
+    "validate_field_schema",
+    "validate_fitted_transforms",
     "validate_group_disjoint_split",
     "validate_schema_manifest",
+    "validate_split_plan",
     "validate_training_transforms",
+    "verify_transform_roundtrip",
 ]
 
+from comsol_mcp.surrogate.fields import (
+    apply_transforms,
+    build_field_schema,
+    fit_transforms,
+    invert_transforms,
+    validate_field_schema,
+    validate_fitted_transforms,
+    verify_transform_roundtrip,
+)
 from comsol_mcp.surrogate.manifests import (
     IneligibleRow,
     LeakageGroup,
@@ -34,4 +58,14 @@ from comsol_mcp.surrogate.manifests import (
     validate_group_disjoint_split,
     validate_schema_manifest,
     validate_training_transforms,
+)
+from comsol_mcp.surrogate.splits import (
+    DEFAULT_PROPORTIONS,
+    LEAKAGE_CLASSES,
+    SPLIT_NAMES,
+    STRATEGY_VERSION,
+    assert_no_leakage,
+    assign_group_disjoint_split,
+    detect_leakage,
+    validate_split_plan,
 )
