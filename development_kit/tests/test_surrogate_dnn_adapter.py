@@ -1,0 +1,594 @@
+"""Solver-free surrogate DNN configuration, write-plan, and rollback tests."""
+
+from __future__ import annotations
+
+from typing import Any, Mapping
+
+import pytest
+
+from comsol_mcp.durable.canonical import canonical_sha256_v1
+from comsol_mcp.surrogate.dnn_adapter import (
+    ALLOWED_ACTIVATIONS,
+    COMSOL_OWNED_DEFAULTS,
+    DNN_FUNCTION_TAG,
+    STUDY_STEP_TAG,
+    STUDY_TAG,
+    apply_surrogate_configuration,
+    build_dnn_configuration,
+    build_write_plan,
+    validate_dnn_configuration,
+)
+
+SOLVER_FREE_BANNED = (
+    "import mph",
+    "from mph",
+    "import jpype",
+    "from jpype",
+    "import comsol",
+    "from comsol.",
+    "onnxruntime",
+    "torch",
+    "tensorflow",
+)
+
+
+def _configuration(**overrides) -> dict:
+    kwargs = {
+        "configuration_id": "dnn-cfg-1",
+        "input_features": ["w", "h"],
+        "output_features": ["R"],
+        "hidden_layers": [16, 8],
+        "activation": "tanh",
+        "optimizer": "adam",
+        "loss": "mse",
+        "learning_rate": 1e-3,
+        "batch_size": 8,
+        "maximum_epochs": 50,
+        "seed": 17,
+        "validation_mode": "table",
+        "test_mode": "table",
+    }
+    kwargs.update(overrides)
+    return build_dnn_configuration(**kwargs)
+
+
+# --------------------------------------------------------------------------
+# Configuration contract
+# --------------------------------------------------------------------------
+
+
+def test_configuration_seals_bounded_fully_connected_architecture() -> None:
+    config = _configuration()
+    assert config["architecture"]["kind"] == "fully_connected_dense"
+    assert config["architecture"]["layer_configuration"] == [2, 16, 8, 1]
+    assert config["custom_layers_allowed"] is False
+    assert config["architecture_search_allowed"] is False
+    assert config["gpu"]["gputraining"] is False
+    assert config["determinism"]["seed"] == 17
+    validate_dnn_configuration(config)
+
+
+def test_configuration_rejects_out_of_bound_architecture() -> None:
+    with pytest.raises(ValueError, match="1-8 entries"):
+        _configuration(hidden_layers=[4] * 9)
+    with pytest.raises(ValueError, match="1..512"):
+        _configuration(hidden_layers=[1024])
+    with pytest.raises(ValueError, match="2-12 entries"):
+        _configuration(input_features=["only"])
+    with pytest.raises(ValueError, match="must not overlap"):
+        _configuration(output_features=["w"])
+
+
+def test_configuration_rejects_unsupported_choices() -> None:
+    with pytest.raises(ValueError, match="activation must be one of"):
+        _configuration(activation="swish")
+    with pytest.raises(ValueError, match="optimizer must be one of"):
+        _configuration(optimizer="lbfgs")
+    with pytest.raises(ValueError, match="loss must be one of"):
+        _configuration(loss="huber")
+    with pytest.raises(ValueError, match="validation_mode must be one of"):
+        _configuration(validation_mode="kfold")
+    with pytest.raises(ValueError, match="test_mode must be one of"):
+        _configuration(test_mode="fraction")
+
+
+def test_configuration_rejects_nonfinite_and_bad_budgets() -> None:
+    with pytest.raises(ValueError, match="learning_rate"):
+        _configuration(learning_rate=float("nan"))
+    with pytest.raises(ValueError, match="learning_rate"):
+        _configuration(learning_rate=0.0)
+    with pytest.raises(ValueError, match="batch_size"):
+        _configuration(batch_size=0)
+    with pytest.raises(ValueError, match="maximum_epochs"):
+        _configuration(maximum_epochs=0)
+    with pytest.raises(ValueError, match="seed"):
+        _configuration(seed=-1)
+
+
+def test_momentum_is_only_valid_for_sgd() -> None:
+    with pytest.raises(ValueError, match="only meaningful when optimizer is sgd"):
+        _configuration(momentum=0.9)
+    sgd = _configuration(optimizer="sgd", momentum=0.9, momentum_used=True)
+    assert sgd["training"]["momentum"] == 0.9
+
+
+def test_column_scales_reference_known_columns_only() -> None:
+    config = _configuration(column_scales={"w": "std", "R": "to01"})
+    assert config["column_scales"] == {"R": "to01", "w": "std"}
+    with pytest.raises(ValueError, match="unknown columns"):
+        _configuration(column_scales={"nope": "std"})
+    with pytest.raises(ValueError, match="must be one of"):
+        _configuration(column_scales={"w": "zscore"})
+
+
+def test_configuration_is_tamper_evident_and_deterministic() -> None:
+    config = _configuration()
+    assert _configuration()["configuration_sha256"] == config["configuration_sha256"]
+    tampered = dict(config)
+    tampered["training"] = {**config["training"], "learning_rate": 0.5}
+    with pytest.raises(ValueError):
+        validate_dnn_configuration(tampered)
+
+
+# --------------------------------------------------------------------------
+# Write plan
+# --------------------------------------------------------------------------
+
+
+def test_write_plan_uses_only_proven_properties() -> None:
+    plan = build_write_plan(_configuration())
+    written = {item["property"] for item in plan["scalar_writes"]}
+    assert {"activation", "layertype", "outfeatures", "optmethod", "loss"} <= written
+    assert {"useseed", "rndseed", "useseedvalidation", "rndseedvalidation"} <= written
+    assert {"validation", "test", "gputraining"} <= written
+    # Every write must target a property the S0 probe proved readable.
+    proven = set(COMSOL_OWNED_DEFAULTS) | {
+        "ignorenaninf",
+        "layerconfig",
+        "trained_chksum",
+        "globaldnnfunction",
+        "args",
+        "colscale",
+    }
+    assert written <= proven, f"unproven writes: {sorted(written - proven)}"
+    step_written = {item["property"] for item in plan["step_scalar_writes"]}
+    step_entries = {item["property"] for item in plan["step_entry_writes"]}
+    assert step_written <= proven, f"unproven step writes: {sorted(step_written - proven)}"
+    assert step_entries <= proven, f"unproven step entries: {sorted(step_entries - proven)}"
+    assert plan["write_count"] == (
+        len(plan["scalar_writes"])
+        + len(plan["entry_writes"])
+        + len(plan["step_scalar_writes"])
+        + len(plan["step_entry_writes"])
+    )
+
+
+def test_write_plan_layer_types_match_declared_architecture() -> None:
+    plan = build_write_plan(_configuration(hidden_layers=[32]))
+    layertype = next(item for item in plan["scalar_writes"] if item["property"] == "layertype")
+    assert layertype["value"] == ["input", "dense", "dense"]
+    outfeatures = next(
+        item for item in plan["scalar_writes"] if item["property"] == "outfeatures"
+    )
+    assert outfeatures["value"] == [2, 32, 1]
+
+
+def test_write_plan_omits_momentum_for_adam_and_includes_it_for_sgd() -> None:
+    adam = build_write_plan(_configuration())
+    assert "momentum" not in {item["property"] for item in adam["scalar_writes"]}
+    sgd = build_write_plan(_configuration(optimizer="sgd", momentum=0.9, momentum_used=True))
+    momentum = next(item for item in sgd["scalar_writes"] if item["property"] == "momentum")
+    assert momentum["value"] == 0.9
+
+
+def test_write_plan_defers_args_until_a_data_source_is_bound() -> None:
+    """COMSOL refuses `args` while no data columns exist; it must be deferred."""
+    unbound = build_write_plan(_configuration(column_scales={"w": "std"}))
+    deferred = {item["property"]: item for item in unbound["deferred_writes"]}
+    assert set(deferred) == {"args", "colscale"}
+    assert deferred["args"]["reason"] == "data_source_not_bound"
+    assert unbound["entry_writes"] == []
+    assert unbound["data_source_bound"] is False
+
+
+def test_write_plan_binds_arg_and_colscale_entries_once_data_is_bound() -> None:
+    plan = build_write_plan(
+        _configuration(column_scales={"w": "std"}), data_source_bound=True
+    )
+    entries = {item["property"]: item for item in plan["entry_writes"]}
+    assert entries["args"]["entries"] == {"w": "w", "h": "h", "R": "R"}
+    assert entries["colscale"]["entries"] == {"w": "std"}
+    # args/colscale are alternating arrays and must go through setEntry.
+    assert entries["args"]["writer"] == "setEntry"
+    assert entries["colscale"]["writer"] == "setEntry"
+    assert plan["deferred_writes"] == []
+    assert plan["data_source_bound"] is True
+
+
+def test_step_globaldnnfunction_uses_the_string_map_writer() -> None:
+    plan = build_write_plan(_configuration())
+    step_entries = {item["property"]: item for item in plan["step_entry_writes"]}
+    assert step_entries["globaldnnfunction"]["entries"] == {"1": DNN_FUNCTION_TAG}
+    assert step_entries["globaldnnfunction"]["writer"] == "stringMap"
+
+
+def test_write_plan_is_deterministic() -> None:
+    assert build_write_plan(_configuration())["plan_sha256"] == build_write_plan(
+        _configuration()
+    )["plan_sha256"]
+
+
+# --------------------------------------------------------------------------
+# Fake backend: failure atomicity
+# --------------------------------------------------------------------------
+
+
+class FakeBackend:
+    """Minimal in-memory backend implementing the typed adapter protocol."""
+
+    def __init__(self, *, fail_on: str | None = None) -> None:
+        self.studies: dict[str, dict[str, Any]] = {}
+        self.functions: dict[str, dict[str, Any]] = {}
+        self.calls: list[str] = []
+        self.fail_on = fail_on
+        self.readback = {
+            "activation": "none, tanh",
+            "layertype": "input, dense",
+            "outfeatures": "2, 16, 8, 1",
+            "optmethod": "adam",
+            "loss": "mse",
+            "lr": "0.001",
+            "batchsize": "8",
+            "epochs": "50",
+            "weightdecay": "0",
+            "useseed": "manual",
+            "rndseed": "17",
+            "useseedvalidation": "manual",
+            "rndseedvalidation": "17",
+            "validation": "table",
+            "test": "table",
+            "gputraining": "false",
+            "layerconfig": "[2,16,8,1]",
+            "trained_chksum": "",
+        }
+        self.allowed = {
+            "activation": sorted(ALLOWED_ACTIVATIONS),
+            "optmethod": ["adam", "sgd"],
+            "loss": ["mse", "mae"],
+            "validation": ["random", "fraction", "last", "table"],
+            "test": ["none", "random", "table"],
+        }
+
+    def _maybe_fail(self, stage: str) -> None:
+        if self.fail_on == stage:
+            raise RuntimeError(f"injected failure at {stage}")
+
+    def study_tags(self) -> list[str]:
+        return sorted(self.studies)
+
+    def func_tags(self) -> list[str]:
+        return sorted(self.functions)
+
+    def create_study(self, tag: str) -> Any:
+        self.calls.append(f"create_study:{tag}")
+        self._maybe_fail("create_study")
+        self.studies[tag] = {"features": {}}
+        return self.studies[tag]
+
+    def create_study_step(self, study_tag: str, step_tag: str, step_type: str) -> Any:
+        self.calls.append(f"create_study_step:{study_tag}:{step_tag}")
+        self._maybe_fail("create_study_step")
+        self.studies[study_tag]["features"][step_tag] = {"type": step_type}
+        return self.studies[study_tag]["features"][step_tag]
+
+    def create_dnn_function(self, tag: str) -> Any:
+        self.calls.append(f"create_dnn_function:{tag}")
+        self._maybe_fail("create_dnn_function")
+        self.functions[tag] = {}
+        return self.functions[tag]
+
+    def get_study_step(self, study_tag: str, step_tag: str) -> Any:
+        return self.studies[study_tag]["features"][step_tag]
+
+    def get_dnn_function(self, tag: str) -> Any:
+        return self.functions[tag]
+
+    def remove_study(self, tag: str) -> None:
+        self.calls.append(f"remove_study:{tag}")
+        self.studies.pop(tag, None)
+
+    def remove_function(self, tag: str) -> None:
+        self.calls.append(f"remove_function:{tag}")
+        self.functions.pop(tag, None)
+
+    def write_scalar(self, feature: Any, name: str, value: Any, kind: str) -> None:
+        self.calls.append(f"write:{name}")
+        self._maybe_fail(f"write:{name}")
+        feature[name] = value
+
+    def write_entries(self, feature: Any, name: str, entries: Mapping[str, str]) -> None:
+        self.calls.append(f"write_entries:{name}")
+        self._maybe_fail(f"write_entries:{name}")
+        feature[name] = dict(entries)
+
+    def write_string_map(self, feature: Any, name: str, entries: Mapping[str, str]) -> None:
+        self.calls.append(f"write_string_map:{name}")
+        self._maybe_fail(f"write_string_map:{name}")
+        feature[name] = dict(entries)
+
+    def read_property(self, feature: Any, name: str) -> dict[str, Any]:
+        if name in feature:
+            return {"readable": True, "value": feature[name]}
+        if name in self.readback:
+            return {"readable": True, "value": self.readback[name]}
+        return {"readable": False, "reason": "not_readable"}
+
+    def read_allowed_values(self, feature: Any, name: str) -> list[str] | None:
+        return self.allowed.get(name)
+
+    def bind_data_source(self, feature: Any, path: str) -> dict[str, Any]:
+        self.calls.append(f"bind_data_source:{path}")
+        self._maybe_fail("bind_data_source")
+        self.source_path = path
+        feature["source"] = "file"
+        feature["filename"] = path
+        return {"import_error": None, "column_keys": ["w", "h", "R"]}
+
+    def train(self, feature: Any) -> None:
+        self.calls.append("train")
+
+    def continue_training(self, feature: Any) -> None:
+        self.calls.append("continue_training")
+
+    def run_test(self, feature: Any) -> None:
+        self.calls.append("run_test")
+
+    def export_onnx(self, feature: Any, path: str) -> None:
+        self.calls.append(f"export_onnx:{path}")
+
+    def discard_data(self, feature: Any) -> None:
+        self.calls.append("discard_data")
+
+
+def test_apply_creates_nodes_and_reads_back_defaults() -> None:
+    backend = FakeBackend()
+    result = apply_surrogate_configuration(backend, _configuration())
+    assert result["success"] is True
+    assert result["created_nodes"] == [
+        ("study", STUDY_TAG),
+        ("study_step", STUDY_STEP_TAG),
+        ("function", DNN_FUNCTION_TAG),
+    ]
+    assert backend.studies[STUDY_TAG]["features"][STUDY_STEP_TAG]["type"] == (
+        "SurrogateModelTraining"
+    )
+    assert result["readback"]["useseed"]["value"] == "manual"
+    assert result["readback"]["rndseed"]["value"] == 17.0
+    assert result["allowed_values"]["validation"] == [
+        "random",
+        "fraction",
+        "last",
+        "table",
+    ]
+    assert result["rolled_back"] is False
+
+
+def test_apply_rolls_back_every_created_node_on_failure() -> None:
+    backend = FakeBackend(fail_on="write:optmethod")
+    result = apply_surrogate_configuration(backend, _configuration())
+    assert result["success"] is False
+    assert "injected failure at write:optmethod" in result["error"]
+    assert result["rolled_back"] is True
+    assert result["rollback_errors"] == []
+    # Nothing may survive a failed batch.
+    assert backend.studies == {}
+    assert backend.functions == {}
+
+
+def test_apply_rolls_back_when_study_step_creation_fails() -> None:
+    backend = FakeBackend(fail_on="create_study_step")
+    result = apply_surrogate_configuration(backend, _configuration())
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert backend.studies == {}
+    assert backend.functions == {}
+
+
+def test_apply_refuses_existing_tags_without_mutation() -> None:
+    backend = FakeBackend()
+    backend.studies[STUDY_TAG] = {"features": {}}
+    result = apply_surrogate_configuration(backend, _configuration())
+    assert result["success"] is False
+    assert "already exists" in result["error"]
+    assert result["created_nodes"] == []
+    assert backend.functions == {}
+
+
+def test_apply_refuses_existing_function_tag() -> None:
+    backend = FakeBackend()
+    backend.functions[DNN_FUNCTION_TAG] = {}
+    result = apply_surrogate_configuration(backend, _configuration())
+    assert result["success"] is False
+    assert "already exists" in result["error"]
+    assert backend.studies == {}
+
+
+def test_apply_rejects_tampered_configuration_before_mutation() -> None:
+    """Content changed without re-sealing the hash must be refused."""
+    backend = FakeBackend()
+    config = _configuration()
+    tampered = {k: v for k, v in config.items() if k != "configuration_sha256"}
+    tampered["training"] = {**config["training"], "learning_rate": 0.9}
+    tampered["configuration_sha256"] = config["configuration_sha256"]  # stale seal
+    with pytest.raises(ValueError, match="configuration_sha256 mismatch"):
+        apply_surrogate_configuration(backend, tampered)
+    assert backend.calls == []
+    assert backend.studies == {}
+
+
+def test_resealed_different_configuration_is_a_distinct_valid_input() -> None:
+    """A correctly re-sealed edit is a different configuration, not tampering."""
+    backend = FakeBackend()
+    config = _configuration()
+    body = {k: v for k, v in config.items() if k != "configuration_sha256"}
+    body["training"] = {**config["training"], "learning_rate": 0.9}
+    resealed = {**body, "configuration_sha256": canonical_sha256_v1(body)}
+    result = apply_surrogate_configuration(backend, resealed)
+    assert result["success"] is True
+    assert result["configuration_sha256"] == resealed["configuration_sha256"]
+    assert result["configuration_sha256"] != config["configuration_sha256"]
+
+
+def test_apply_records_step_side_binding_to_the_dnn_function() -> None:
+    backend = FakeBackend()
+    apply_surrogate_configuration(backend, _configuration())
+    step = backend.studies[STUDY_TAG]["features"][STUDY_STEP_TAG]
+    assert step["surrogatemodel"] == "dnn"
+    assert step["globaldnnfunction"] == {"1": DNN_FUNCTION_TAG}
+
+
+def test_apply_without_node_creation_writes_onto_existing_function() -> None:
+    """The deferred-write path must reuse an existing DNN function."""
+    backend = FakeBackend()
+    apply_surrogate_configuration(backend, _configuration())
+    result = apply_surrogate_configuration(
+        backend, _configuration(), create_nodes=False, data_source_bound=True
+    )
+    assert result["success"] is True
+    assert result["created_nodes"] == []
+    assert result["deferred_writes"] == []
+    # The existing function now carries the resolved args mapping.
+    assert backend.functions[DNN_FUNCTION_TAG]["args"] == {"w": "w", "h": "h", "R": "R"}
+
+
+def test_apply_without_node_creation_requires_an_existing_function() -> None:
+    backend = FakeBackend()
+    result = apply_surrogate_configuration(
+        backend, _configuration(), create_nodes=False, data_source_bound=True
+    )
+    assert result["success"] is False
+    assert "must already exist" in result["error"]
+    assert backend.studies == {}
+
+
+def test_bind_data_source_resolves_args_by_name_when_header_is_preserved() -> None:
+    from comsol_mcp.surrogate.dnn_adapter import bind_data_source_and_arguments
+
+    backend = FakeBackend()
+    apply_surrogate_configuration(backend, _configuration())
+    result = bind_data_source_and_arguments(
+        backend, _configuration(), dataset_path="D:/tmp/data.csv"
+    )
+    assert result["success"] is True
+    assert result["column_keys"] == ["w", "h", "R"]
+    assert result["binding_mode"] == "by_name"
+    assert result["bound_arguments"] == ["w", "h", "R"]
+    assert backend.functions[DNN_FUNCTION_TAG]["args"] == {"w": "w", "h": "h", "R": "R"}
+
+
+def test_bind_data_source_binds_positionally_when_comsol_renames_columns() -> None:
+    """COMSOL may derive generic col keys; binding is then positional."""
+    from comsol_mcp.surrogate.dnn_adapter import bind_data_source_and_arguments
+
+    class GenericColumnBackend(FakeBackend):
+        def bind_data_source(self, feature: Any, path: str) -> dict[str, Any]:
+            return {"import_error": None, "column_keys": ["col1", "col2", "col3"]}
+
+    backend = GenericColumnBackend()
+    apply_surrogate_configuration(backend, _configuration())
+    result = bind_data_source_and_arguments(
+        backend, _configuration(), dataset_path="D:/tmp/data.csv"
+    )
+    assert result["success"] is True
+    assert result["binding_mode"] == "by_position"
+    assert result["args_mapping"] == {"col1": "w", "col2": "h", "col3": "R"}
+
+
+def test_bind_data_source_reports_a_column_count_mismatch() -> None:
+    from comsol_mcp.surrogate.dnn_adapter import bind_data_source_and_arguments
+
+    class ShortBackend(FakeBackend):
+        def bind_data_source(self, feature: Any, path: str) -> dict[str, Any]:
+            return {"import_error": None, "column_keys": ["col1", "col2"]}
+
+    backend = ShortBackend()
+    apply_surrogate_configuration(backend, _configuration())
+    result = bind_data_source_and_arguments(
+        backend, _configuration(), dataset_path="D:/tmp/data.csv"
+    )
+    assert result["success"] is False
+    assert result["blockers"] == ["column_count_mismatch"]
+    assert result["declared_columns"] == ["w", "h", "R"]
+
+
+def test_bind_data_source_reports_import_failure_and_no_columns() -> None:
+    from comsol_mcp.surrogate.dnn_adapter import bind_data_source_and_arguments
+
+    class ImportFailBackend(FakeBackend):
+        def bind_data_source(self, feature: Any, path: str) -> dict[str, Any]:
+            return {"import_error": "RuntimeError: boom", "column_keys": []}
+
+    backend = ImportFailBackend()
+    apply_surrogate_configuration(backend, _configuration())
+    failed = bind_data_source_and_arguments(
+        backend, _configuration(), dataset_path="D:/tmp/data.csv"
+    )
+    assert failed["success"] is False
+    assert failed["blockers"] == ["data_import_failed"]
+
+    class NoColumnsBackend(FakeBackend):
+        def bind_data_source(self, feature: Any, path: str) -> dict[str, Any]:
+            return {"import_error": None, "column_keys": []}
+
+    empty = NoColumnsBackend()
+    apply_surrogate_configuration(empty, _configuration())
+    result = bind_data_source_and_arguments(
+        empty, _configuration(), dataset_path="D:/tmp/data.csv"
+    )
+    assert result["success"] is False
+    assert result["blockers"] == ["data_columns_unavailable"]
+
+
+def test_bind_data_source_requires_an_existing_dnn_function() -> None:
+    from comsol_mcp.surrogate.dnn_adapter import bind_data_source_and_arguments
+
+    backend = FakeBackend()
+    result = bind_data_source_and_arguments(
+        backend, _configuration(), dataset_path="D:/tmp/data.csv"
+    )
+    assert result["success"] is False
+    assert result["blockers"] == ["dnn_function_absent"]
+
+
+# --------------------------------------------------------------------------
+# Module boundary
+# --------------------------------------------------------------------------
+
+
+def test_dnn_adapter_module_is_solver_free() -> None:
+    """The contract/plan module must stay importable without jpype or COMSOL."""
+    import comsol_mcp.surrogate.dnn_adapter as module
+
+    source = open(module.__file__, encoding="utf-8").read().lower()
+    for banned in SOLVER_FREE_BANNED:
+        assert banned not in source, f"dnn_adapter references {banned}"
+
+
+def test_clientapi_backend_is_isolated_and_imports_lazily() -> None:
+    """The licensed bridge lives in its own module and imports jpype only inside calls."""
+    import comsol_mcp.surrogate.dnn_clientapi_backend as module
+
+    source = open(module.__file__, encoding="utf-8").read()
+    assert "jpype" in source, "the licensed bridge must be able to reach jpype"
+    # jpype must never be imported at module import time: only indented
+    # (in-function) imports are permitted, so cold discovery stays cheap.
+    for line in source.splitlines():
+        if line[:1].isspace() or not line.strip():
+            continue
+        stripped = line.strip()
+        if stripped.startswith(("import jpype", "from jpype")):
+            raise AssertionError("the licensed bridge must import jpype lazily")
+    # The solver-free module must not re-export the licensed class.
+    import comsol_mcp.surrogate.dnn_adapter as adapter
+
+    assert "ClientapiSurrogateDnnBackend" not in dir(adapter)

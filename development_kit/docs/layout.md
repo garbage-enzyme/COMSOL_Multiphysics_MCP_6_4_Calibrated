@@ -157,6 +157,7 @@ models are intentionally absent.
 - `development_kit/scripts/python_compatibility_licensed_gate.py` — This script runs the pinned Python and COMSOL compatibility regression on a licensed host.
 - `development_kit/scripts/reference_power_gate_preflight.py` — This script validates reference-power gate inputs without starting COMSOL.
 - `development_kit/scripts/surrogate_dnn_capability_probe.py` — This repository-only licensed probe resolves the exact COMSOL 6.4 surrogate-training study-step and DNN function property, method, default, allowed-value, seed, and save/reload surface into a bounded capability receipt without generic mutation.
+- `development_kit/scripts/surrogate_dnn_licensed_gate.py` — This repository-only licensed gate applies the typed surrogate DNN adapter to real COMSOL, proving construction, full default readback, data-source argument binding, save/reload identity, duplicate refusal, mid-batch rollback, and owned cleanup.
 - `development_kit/scripts/release_gate.py` — This script runs compile, test, package, clean-install, and installed-discovery gates.
 - `development_kit/scripts/release_facts.py` — This script generates and checks the durable release-facts view from live implementation data.
 - `development_kit/scripts/regenerate_tool_snapshots.py` — This script regenerates frozen tool-schema, profile-name, feature-name, deployment-identity, release-facts, and support-matrix counts after a public surface change.
@@ -224,6 +225,7 @@ models are intentionally absent.
 - `development_kit/tests/test_electro_chemistry.py` — This module tests the isolated electrochemistry profile surface, rollback, and offline catalog without COMSOL.
 - `development_kit/tests/test_alpha73_public_surface.py` — This module tests the alpha7.3 public surface: frozen comsolless dispatch, cold discovery, and package boundaries.
 - `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
+- `development_kit/tests/test_surrogate_dnn_adapter.py` — This module tests solver-free surrogate DNN configuration sealing, typed write-plan derivation, deferred argument binding, failure-atomic rollback, and the solver-free/licensed module boundary.
 - `development_kit/tests/test_surrogate_fields_and_splits.py` — This module tests solver-free surrogate field-schema, transform round-trip, deterministic split, and adversarial leakage contracts.
 - `development_kit/tests/test_surrogate_manifests.py` — This module tests solver-free surrogate dataset, schema, split, and transform manifest contracts.
 - `development_kit/tests/test_surrogate_registry.py` — This module tests solver-free surrogate model-card sealing, lifecycle transitions, drift detection, out-of-domain policy, and prediction-evidence separation.
@@ -514,6 +516,8 @@ models are intentionally absent.
 - `comsol_mcp/durable/canonical.py` — This module preserves legacy canonical bytes and adds domain-separated identities for new schemas.
 - `comsol_mcp/durable/io.py` — This module implements bounded hashing, atomic replacement, and complete-row persistence.
 - `comsol_mcp/surrogate/__init__.py` — This module exports solver-free surrogate dataset, split, schema, and transform manifests.
+- `comsol_mcp/surrogate/dnn_adapter.py` — This module validates one bounded fully connected DNN configuration, derives an exact typed property-write plan, and applies it failure-atomically with full COMSOL-owned default readback.
+- `comsol_mcp/surrogate/dnn_clientapi_backend.py` — This licensed module is the ClientAPI bridge for the typed surrogate DNN adapter, converting values to explicit Java types and resolving tag lookups without exposing a generic property setter.
 - `comsol_mcp/surrogate/fields.py` — This module freezes ordered feature and target field declarations with units and bounds, and fits training-only transforms with proven round-trip inversion.
 - `comsol_mcp/surrogate/manifests.py` — This module validates closed versioned surrogate dataset, schema, leakage-group, split, and training-transform manifests with deterministic hashes.
 - `comsol_mcp/surrogate/registry.py` — This module seals immutable surrogate model cards and registry entries, enforces forward-only lifecycle transitions, detects contract drift, and evaluates out-of-domain policy without clipping.

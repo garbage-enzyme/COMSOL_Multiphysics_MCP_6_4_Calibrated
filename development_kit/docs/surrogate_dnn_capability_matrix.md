@@ -166,3 +166,33 @@ frozen into the public contract:
    readback is authoritative.
 
 Licensed receipt: `D:\mcp_tests\a75s0p06\s0_capability.json`.
+
+## 10. S4 adapter findings — resolved against live COMSOL
+
+The typed adapter (`comsol_mcp/surrogate/dnn_adapter.py`) and its licensed
+bridge (`comsol_mcp/surrogate/dnn_clientapi_backend.py`) were applied to a real
+COMSOL 6.4.0.293 session. Licensed receipt:
+`D:\mcp_tests\a75s4g13\s4_gate.json`
+(sha256 `985a61abc59f3cc4523077b51ef6aeb9d79905ecd52ba4e46513a3312278cc34`).
+
+Findings that the reference tables did **not** state and that only the live run
+could reveal:
+
+| Finding | Consequence |
+| --- | --- |
+| JPype cannot resolve `set(String,int)` against `set(String,boolean)` for a Python `int` and raises an ambiguous-overload error. | Numeric and boolean scalars must be wrapped in explicit Java types (`JInt`, `JDouble`, `JBoolean`, `JString`). |
+| `model.java.func(tag)` returns the feature, while `model.java.func()` returns a non-callable list container. | Tag lookup must use the tag overload directly; the zero-argument form is only for `tags()`. |
+| `args` is an alternating key/value property written through `setEntry`, and COMSOL refuses it until data columns exist. | The `args` write is **deferred** with an explicit `data_source_not_bound` reason instead of being approximated, then resolved after import. |
+| `globaldnnfunction` rejects the nested-array form and accepts the flat alternating form. | Keyed string maps use a separate writer selected from the property's declared value type. |
+| COMSOL derives its own column keys (`col1, col2, col3`) and classifies them (`arg, arg, value`); the file header is not reused as the key. | Argument binding is positional when names do not match, and observed keys, declared columns, and binding mode are all recorded as evidence. |
+| A repeated `importData()` raises "Unsupported function operation" although the columns are present. | Import failure is tolerated when COMSOL still reports column keys. |
+| `getString` on a JPype Java string yields a character-iterable object. | Readback rendering is chosen from the accessor name, not by duck-typing. |
+
+Verified on the licensed run: all 17 readback properties landed exactly as
+written (`activation=tanh`, `layertype=input, dense, dense`,
+`outfeatures=2, 4, 1`, `lr=0.001`, `batchsize=8`, `epochs=3`,
+`useseed=manual`, `rndseed=17`, `validation=table`, `test=table`,
+`gputraining=off`); save/reload preserved both tags and both node types; an
+injected mid-batch failure rolled back every created node leaving zero tags; a
+duplicate-tag apply was refused with zero nodes created; and the owned session,
+lease, descendants, and listeners were all released.
