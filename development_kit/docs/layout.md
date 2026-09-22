@@ -102,6 +102,7 @@ models are intentionally absent.
 - `development_kit/docs/layout.md` — This file maps every tracked repository file to one concise purpose statement.
 - `development_kit/docs/legacy_phase_compatibility.md` — This file records the frozen compatibility allowlist for historical aliases.
 - `development_kit/docs/release_checklist.md` — This file gives the ordered dependency, package, licensed, install, and restart release checklist.
+- `development_kit/docs/surrogate_dnn_capability_matrix.md` — This file records the proven COMSOL 6.4 surrogate-training and DNN ClientAPI capability matrix, including the exact creation hierarchy, training-lifecycle methods, split and seed controls, and frozen limitations.
 
 ## Release contracts and fixtures
 
@@ -155,6 +156,7 @@ models are intentionally absent.
 - `development_kit/scripts/planning_code_gate.py` — This script verifies the exact frozen planning-code compatibility surface.
 - `development_kit/scripts/python_compatibility_licensed_gate.py` — This script runs the pinned Python and COMSOL compatibility regression on a licensed host.
 - `development_kit/scripts/reference_power_gate_preflight.py` — This script validates reference-power gate inputs without starting COMSOL.
+- `development_kit/scripts/surrogate_dnn_capability_probe.py` — This repository-only licensed probe resolves the exact COMSOL 6.4 surrogate-training study-step and DNN function property, method, default, allowed-value, seed, and save/reload surface into a bounded capability receipt without generic mutation.
 - `development_kit/scripts/release_gate.py` — This script runs compile, test, package, clean-install, and installed-discovery gates.
 - `development_kit/scripts/release_facts.py` — This script generates and checks the durable release-facts view from live implementation data.
 - `development_kit/scripts/regenerate_tool_snapshots.py` — This script regenerates frozen tool-schema, profile-name, feature-name, deployment-identity, release-facts, and support-matrix counts after a public surface change.
