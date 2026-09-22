@@ -163,7 +163,7 @@ English (en)
 
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
-| `profile.name` | `"core"` | 可选 `core`、`basic_fem`、`wave_optics`、`experimental`、`full` 或 `comsolless_read_only`；保存为小写。不支持的值会回落到 `core` 并报告来源。 |
+| `profile.name` | `"core"` | 可选 `core`、`basic_fem`、`wave_optics`、`electro_chemistry`、`experimental`、`full` 或 `comsolless_read_only`；保存为小写。不支持的值会回落到 `core` 并报告来源。 |
 
 新手在重视安全、希望减少可用操作时，可以从 `core` 开始。大多数进行常规仿真的用户应
 选择 `basic_fem`。Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性；手册
@@ -177,6 +177,7 @@ English (en)
 | `experimental` | 范围更广或尚未成熟、需要仔细检查输出的额外工具。 |
 | `full` | 需要几乎全部非 feature 工具且接受较弱文件范围保护的旧流程迁移；不建议新用户使用。 |
 | `comsolless_read_only` | 未安装 COMSOL 的电脑：仅提供离线模型/证据探查工具，无法启动 COMSOL 或 Java。 |
+| `electro_chemistry` | 隔离的电化学模块 profile：在 Core 基础上增加电化学发现、接口创建、电极反应与电解质工具；不并入默认或 `full`。 |
 
 ### 运行与文件范围
 
@@ -308,7 +309,8 @@ PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数�
 | `offline_export_validate` | 完全离线地校验导出清单及其 VTU/CSV/TXT 文件（路径、ID、顺序、单位、字节数、哈希）。 |
 
 `comsolless_read_only` profile 只暴露这五个工具，因此未安装 COMSOL 的轻量
-计算机也可以探查模型与离线证据。与其他 profile 一样，切换进入或退出该
+计算机也可以探查模型与离线证据。`electro_chemistry` profile 的电化学工具
+仅在该 profile 可见，不会并入默认或 `full`。与其他 profile 一样，切换进入或退出
 profile 需要重启 MCP host。
 
 这些工具只产生完整性证据，永远不能替代 FEM 校验、求解器证据或持久任务

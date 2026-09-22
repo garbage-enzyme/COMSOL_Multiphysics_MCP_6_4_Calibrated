@@ -13,6 +13,97 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  compatibility-py315:
+    name: Python 3.15 preview compatibility (not production)
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      RUSTUP_TOOLCHAIN: "1.98.1"
+      CARGO_BUILD_JOBS: "2"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      # actions/setup-python v6.2.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.15.0-rc.2"
+      - name: Verify source-build prerequisites
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path D:\mcp_tests\py315 | Out-Null
+          $env:JAVA_HOME = $env:JAVA_HOME_17_X64
+          "JAVA_HOME=$env:JAVA_HOME" >> $env:GITHUB_ENV
+          rustup toolchain install 1.98.1 --profile minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustc -Vv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ant -version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $compiler = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $compiler) { throw "MSVC x64 build tools are required" }
+          python -c "import sys, sysconfig; assert sys.version_info[:2] == (3, 15); assert not sysconfig.get_config_var('Py_GIL_DISABLED')"
+      - name: Build exact source dependencies
+        shell: pwsh
+        run: |
+          python -m pip --log D:\mcp_tests\py315\source-build.log wheel --no-deps --wheel-dir D:\mcp_tests\py315\wheels `
+            "https://files.pythonhosted.org/packages/48/a2/5d27e81d24eef64668bf702bfe0e091cc48388b4666f36e025243eb9d827/jpype1-1.7.1.tar.gz#sha256=3cd88838dc3d2d546f7eaeadaaff864e590010c15f2b6a44b6f37e60796a14b2" `
+            "https://files.pythonhosted.org/packages/af/f9/8a06bea35ef8daf588f707784c973a7046e0034c8d8cfb08828eeffb8b75/pydantic_core-2.46.5.tar.gz#sha256=10416c15b8839ecc4ef4d0885da76da6fd0f67333a0eb8aff6d93c4b8f2910fc" `
+            "https://files.pythonhosted.org/packages/05/8e/961c0007c59b8dd7729d542c61a4d537767a59645b82a0b521206e1e25c2/pyyaml-6.0.3.tar.gz#sha256=d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem D:\mcp_tests\py315\wheels\*.whl | Get-FileHash -Algorithm SHA256 | ConvertTo-Json | Set-Content D:\mcp_tests\py315\wheel-hashes.json
+      - name: Install preview dependencies and project
+        shell: pwsh
+        run: |
+          python -m pip install --only-binary=:all: --find-links D:\mcp_tests\py315\wheels ".[dev,manuals]" "jpype1==1.7.1" "pyyaml==6.0.3" "pydantic==2.13.5"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip freeze --all > D:\mcp_tests\py315\installed.txt
+      - name: Run preview solver-free regression and GUI tests
+        shell: pwsh
+        run: |
+          python development_kit/scripts/serial_test_shards.py --basetemp-root D:\mcp_tests\py315main --shards 2 --ignore development_kit/tests/test_control_plane_startup.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest -q development_kit/tests/test_control_plane_startup.py --basetemp D:\mcp_tests\py315serial
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # PyMuPDF 1.28.2 uses typing.ByteString during import on Python 3.15.
+          # Remove this exact third-party exception when upstream stops using it.
+          python -m pytest -q -W error -W "ignore:'typing.ByteString' and 'collections.abc.ByteString' are deprecated and slated for removal in Python 3.17:DeprecationWarning:pymupdf:470" settings_gui/tests --basetemp D:\mcp_tests\py315gui
+      - name: Build and verify an installed preview wheel
+        shell: pwsh
+        run: |
+          python -m build --outdir D:\mcp_tests\py315\dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m venv D:\mcp_tests\py315env
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $previewPython = 'D:\mcp_tests\py315env\Scripts\python.exe'
+          $wheel = (Get-ChildItem D:\mcp_tests\py315\dist\*.whl).FullName
+          & $previewPython -m pip install --only-binary=:all: --find-links D:\mcp_tests\py315\wheels $wheel "jpype1==1.7.1" "pydantic==2.13.5"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $previewPython -m pip check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Push-Location D:\mcp_tests\py315
+          try {
+            & $previewPython "$env:GITHUB_WORKSPACE\development_kit\scripts\installed_package_probe.py" --snapshot-dir "$env:GITHUB_WORKSPACE\development_kit\tests\snapshots" --output D:\mcp_tests\py315\installed-package.json
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & $previewPython "$env:GITHUB_WORKSPACE\development_kit\scripts\installed_stdio_probe.py" --command D:\mcp_tests\py315env\Scripts\comsol-mcp.exe --workdir D:\mcp_tests\py315stdio --output D:\mcp_tests\py315\installed-stdio.json
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
+      - name: Upload preview receipts and failure logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: python315-preview-evidence
+          path: |
+            D:\mcp_tests\py315
+            D:\mcp_tests\py315main\*.log
+            D:\mcp_tests\py315stdio\*.log
+          if-no-files-found: warn
+
   dependency-compatibility:
     name: dependency compatibility (${{ matrix.lane }}, Python 3.14)
     runs-on: windows-latest

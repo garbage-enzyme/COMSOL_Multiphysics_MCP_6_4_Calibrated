@@ -34,6 +34,11 @@ PROFILE_DESCRIPTIONS = {
         "discovery, visual-review contracts, Wave Optics preflight, point audit, and "
         "staged workflows."
     ),
+    "electro_chemistry": (
+        "Isolated Electrochemistry Module profile: core ownership/session tools plus "
+        "electrochemistry discovery, interface creation, electrode reaction, and "
+        "electrolyte configuration. Not merged into default or full."
+    ),
     "experimental": "Core plus explicitly risky, generic, asynchronous, and project helpers.",
     "full": (
         "Backward-compatible discovery surface with legacy broad-path behavior and "
@@ -49,6 +54,7 @@ PROFILE_MATURITY = {
     "core": "verified",
     "basic_fem": "verified",
     "wave_optics": "experimental",
+    "electro_chemistry": "experimental",
     "experimental": "experimental",
     "full": "compatibility",
     "comsolless_read_only": "verified",

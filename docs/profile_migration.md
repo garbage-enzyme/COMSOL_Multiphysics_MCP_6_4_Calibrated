@@ -10,6 +10,7 @@ independent, default-off Boolean feature gates.
 | Ownership, durable jobs, model inspection, one-point solve | `core` profile | Verified default |
 | Typed conventional FEM construction, bounded exports, and Python-free launcher control | `basic_fem` profile | Verified |
 | Periodic Wave Optics preflight, evidence audit, visual-review contracts | `wave_optics` profile | Experimental; licensed acceptance is version/model-specific |
+| Isolated Electrochemistry Module discovery, interface creation, electrode reaction, electrolyte setup | `electro_chemistry` profile | Experimental; requires Electrochemistry Module; not merged into default/full |
 | Generic or risky legacy helpers | `experimental` profile | Experimental |
 | Robust shape preview, durable submit, and evidence inspection/verification | `experimental` profile | Experimental and default-off |
 | Maximum legacy discovery compatibility | `full` profile | Compatibility only |
@@ -21,6 +22,17 @@ The three feature gates compose with every profile and with each other. Set them
 in the same shared `settings.json`, restart the MCP host, then confirm
 `active_profile`, `enabled_features`, exact tool names, schemas, and deployment
 hashes through `capabilities` and live discovery.
+
+## Electrochemistry profile
+
+Select `electro_chemistry` only when the COMSOL Electrochemistry Module is
+installed and licensed. The isolated surface currently contains catalog,
+inspection, interface creation, electrode-surface, and electrolyte tools. It
+does not silently fall back to Electrostatics, and it does not change solver,
+mesh, core, out-of-core, or resource policy. The COMSOL 6.4 probe verified
+`SecondaryCurrentDistribution`, `ElectrodeSurface.rhos`, and `Electrolyte`;
+unsupported interface/property names return explicit errors. A live API probe is
+not scientific validation of a model or result.
 
 Profiles are immutable for the lifetime of one MCP host process. Independent
 feature-gate selections are likewise startup-only; changing either kind of

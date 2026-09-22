@@ -18,6 +18,10 @@ Client 验收状态：
 - 标准 GIL 版本的 Python 3.14，环境路径只使用 ASCII 字符；
 - 已验证本机配置所需的 COMSOL Java runtime。
 
+Python 3.15 是独立的实验性工程通道，不建议因此升级生产解释器。使用前请查阅
+[兼容构建要求](README_CN.md#环境要求与安装)：缺少原生 wheel 时需要源码构建；
+该通道尚不代表 licensed COMSOL 或 `semantic-docs` extra 已验收。
+
 执行非 editable 安装：
 
 ```powershell

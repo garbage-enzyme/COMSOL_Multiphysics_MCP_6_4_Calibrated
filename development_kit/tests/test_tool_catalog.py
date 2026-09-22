@@ -52,7 +52,10 @@ def test_full_tool_schema_snapshot_is_stable():
     expected = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
 
     assert len(actual) == 175
-    assert actual == expected
+    assert set(actual) <= set(expected)
+    assert actual == {name: expected[name] for name in actual}
+    assert set(expected) == set(TOOL_METADATA)
+    assert len(expected) == 180
 
 
 def test_pre_h3_compatibility_snapshot_is_preserved():
@@ -99,7 +102,7 @@ def test_every_registered_tool_has_complete_canonical_metadata():
     expected_names = set(json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8")))
 
     assert set(TOOL_METADATA) == expected_names
-    assert len(TOOL_METADATA) == 175
+    assert len(TOOL_METADATA) == 180
     for name, metadata in TOOL_METADATA.items():
         assert metadata.name == name
         assert metadata.registrar.startswith("comsol_mcp.")
@@ -117,14 +120,24 @@ def test_every_registered_tool_has_complete_canonical_metadata():
         assert isinstance(metadata.starts_solver, bool)
         assert metadata.intended_profiles
         assert set(metadata.intended_profiles) <= set(PROFILE_NAMES)
-        assert "full" in metadata.intended_profiles
+        if name in {
+            "electro_chemistry_catalog",
+            "electro_chemistry_inspect",
+            "physics_add_electrochemistry",
+            "physics_configure_electrode_reaction",
+            "physics_set_electrolyte",
+        }:
+            assert metadata.intended_profiles == ("electro_chemistry",)
+            assert "full" not in metadata.intended_profiles
+        else:
+            assert "full" in metadata.intended_profiles
 
 
 def test_tool_specs_are_the_validated_canonical_registry():
     assert TOOL_SPECS is TOOL_METADATA
     assert validate_tool_specs() == {
         "valid": True,
-        "tool_count": 175,
+        "tool_count": 180,
         "profile_count": len(PROFILE_NAMES),
     }
     for spec in TOOL_SPECS.values():
@@ -308,6 +321,27 @@ def test_tool_spec_validation_rejects_high_impact_relationship_breaks(mutated, m
         validate_tool_specs({**TOOL_SPECS, read_only.name: mutated(read_only)})
 
 
+def test_isolated_module_tool_rejects_full_or_mixed_profiles():
+    isolated = TOOL_SPECS["electro_chemistry_catalog"]
+    with pytest.raises(
+        ValueError,
+        match="isolated module ToolSpec leaked into compatibility profile",
+    ):
+        validate_tool_specs(
+            {
+                **TOOL_SPECS,
+                isolated.name: replace(isolated, intended_profiles=("electro_chemistry", "full")),
+            }
+        )
+    with pytest.raises(ValueError, match="ToolSpec compatibility profile is missing"):
+        validate_tool_specs(
+            {
+                **TOOL_SPECS,
+                isolated.name: replace(isolated, intended_profiles=("electro_chemistry", "core")),
+            }
+        )
+
+
 def test_schema_snapshot_rejects_duplicate_registered_names():
     duplicate = SimpleNamespace(name="duplicate", input_schema={"type": "object"})
 
@@ -461,7 +495,7 @@ def test_catalog_import_cannot_start_comsol():
 import mph
 mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('Client called'))
 from src.tools.catalog import TOOL_METADATA
-assert len(TOOL_METADATA) == 175
+assert len(TOOL_METADATA) == 180
 """
     completed = subprocess.run(
         [sys.executable, "-c", code],

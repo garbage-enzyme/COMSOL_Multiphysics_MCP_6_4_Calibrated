@@ -20,6 +20,11 @@ Requirements:
 - standard GIL-enabled Python 3.14 in an ASCII-only environment path;
 - COMSOL's Java runtime for the verified local configuration.
 
+Python 3.15 is a separate experimental engineering lane, not a production
+upgrade recommendation. See the [compatibility build requirements](README.md#requirements-and-installation)
+before using it: missing native wheels require source builds, and neither
+licensed COMSOL compatibility nor the `semantic-docs` extra is accepted there.
+
 Perform a non-editable install:
 
 ```powershell
@@ -61,6 +66,9 @@ the single serialized stdio connection. Follow the versioned
 [`DeepSeek compatibility contract`](dsh_bridge/DEEPSEEK_COMPATIBILITY.md) for
 settings-change, verification, and recovery boundaries. Fake-server tests prove bridge behavior
 only; report real DSH discovery, cleanup, and licensed solves separately.
+The current recovery checks cover original-session delivery on DSH 0.1.6-alpha.2
+after explicit session persistence. Do not infer crash-proof notification
+delivery from a successful mirror or tool registration.
 
 ## 2. Configure with the Settings GUI (recommended)
 

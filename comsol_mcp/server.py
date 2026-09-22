@@ -125,15 +125,29 @@ def _preload_native_runtime() -> dict[str, str]:
 
 
 def main() -> None:
-    """Run the MCP server."""
+    """Run the MCP server.
+
+    B11: resolve the profile before any native/JVM preload so the
+    ``comsolless_read_only`` entry point stays a lightweight offline path.
+    Other profiles keep the existing main-thread native preload contract.
+    """
     logging.basicConfig(level=logging.INFO)
-    apply_java_settings()
-    native_runtime = _preload_native_runtime()
+    # Profile selection must precede heavy imports/preload.
     selection = resolve_profile()
+    offline = getattr(selection, "name", None) == "comsolless_read_only"
+    if offline:
+        native_runtime = {
+            "status": "skipped",
+            "reason": "comsolless_read_only_profile",
+        }
+    else:
+        apply_java_settings()
+        native_runtime = _preload_native_runtime()
     from .tools.capabilities import startup_capability_summary
 
     logger.info("Starting COMSOL MCP Server...")
-    logger.info("Preloaded native runtime on main thread: %s", native_runtime)
+    logger.info("Profile: %s offline=%s", getattr(selection, "name", selection), offline)
+    logger.info("Native runtime: %s", native_runtime)
     logger.info("Capabilities: %s", startup_capability_summary(selection))
 
     register_all_tools(profile=selection)

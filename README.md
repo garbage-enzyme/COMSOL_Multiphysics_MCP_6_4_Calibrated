@@ -5,7 +5,7 @@ English | [中文](README_CN.md)
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.3](https://img.shields.io/badge/release-0.7.3-blue)
+![Release: 0.7.4](https://img.shields.io/badge/release-0.7.4-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -111,7 +111,7 @@ and `capabilities` readback without starting COMSOL, then separately label any
 licensed start/solve/cleanup coverage. Treat live discovery, not a count copied
 from documentation, as the authority for the installed tool surface.
 
-Release `0.7.3` uses the MCP Python SDK `2.0.x` runtime base conservatively.
+Release `0.7.4` uses the MCP Python SDK `2.0.x` runtime base conservatively.
 Its tools, profiles, schemas, and stdio configuration remain on the accepted
 legacy-compatible application contract; the release does not opt clients into
 MCP `2026-07-28` features such as multi-round-trip requests, cache hints,
@@ -152,6 +152,9 @@ See the versioned
 installation, settings-change, verification, and recovery boundaries.
 Fake-server tests are solver-free; real DSH acceptance and licensed solves must
 be reported separately.
+Restart recovery routes offline completions to the original session; notification
+persistence follows native DSH semantics and does not guarantee delivery across
+a crash before the session is saved.
 
 ## Highlights
 
@@ -223,7 +226,8 @@ requests agent-managed or automated configuration; edit only the resolved
 writable file, validate it, and request the same restart.
 The installed `comsol-mcp-settings` command opens the GUI directly. Repository
 and source-distribution users can also run `./Open_Settings_GUI.ps1`. The script
-discovers a supported Python 3.14 interpreter, or accepts explicit
+discovers a supported standard-GIL Python 3.14/3.15 interpreter (preferring
+3.14 when using the Python launcher), or accepts explicit
 `-PythonPath` and `-SettingsPath` values. `-ValidateOnly` checks the manual
 launcher without opening the GUI or starting COMSOL. The server can report
 `agent_action_required: pause_for_user`; it cannot technically force arbitrary
@@ -651,6 +655,14 @@ client, process, or lease residue.
 - Python 3.14 (standard GIL-enabled build, not the Windows Store build)
 - MPh 1.3.1, `mcp`, `pydantic`, and `psutil>=5.9.0`
 - COMSOL's Java 21 runtime in the verified configuration
+
+Python 3.14 remains the main development and production lane. Standard Windows
+x64 Python 3.15 has a separate experimental compatibility CI lane, currently
+pinned to 3.15.0rc2. It builds JPype 1.7.1, PyYAML 6.0.3 and the exact
+Pydantic 2.13.5/core 2.46.5 pair from source where wheels are unavailable;
+MSVC/Windows SDK, a JDK with Ant, and Rust are required for those builds.
+This lane excludes the experimental `semantic-docs` extra and does not establish
+licensed COMSOL compatibility or free-threaded Python support.
 
 This project is under active development, so dependency ranges and locked
 versions may change without a long deprecation window. Before updating an

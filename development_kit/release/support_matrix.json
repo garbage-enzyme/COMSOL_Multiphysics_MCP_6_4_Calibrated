@@ -1,11 +1,24 @@
 {
-  "schema_name": "comsol_mcp.release_support_matrix",
-  "schema_version": "2.1.0",
-  "release_identity_sources": {
-    "package_version": "comsol_mcp/__init__.py",
-    "runtime_compatibility": "comsol_mcp/compatibility_manifest.json",
-    "dependency_ranges": "pyproject.toml"
-  },
+  "features": [
+    {
+      "default_enabled": false,
+      "name": "lexical_docs",
+      "support": "verified_default_off",
+      "tool_count": 2
+    },
+    {
+      "default_enabled": false,
+      "name": "semantic_docs",
+      "support": "experimental_promotion_rejected",
+      "tool_count": 3
+    },
+    {
+      "default_enabled": false,
+      "name": "shared_server",
+      "support": "experimental_default_off",
+      "tool_count": 10
+    }
+  ],
   "profiles": [
     {
       "name": "core",
@@ -36,28 +49,27 @@
       "name": "comsolless_read_only",
       "support": "verified",
       "tool_count": 5
-    }
-  ],
-  "features": [
-    {
-      "name": "lexical_docs",
-      "support": "verified_default_off",
-      "tool_count": 2,
-      "default_enabled": false
     },
     {
-      "name": "semantic_docs",
-      "support": "experimental_promotion_rejected",
-      "tool_count": 3,
-      "default_enabled": false
-    },
-    {
-      "name": "shared_server",
-      "support": "experimental_default_off",
-      "tool_count": 10,
-      "default_enabled": false
+      "name": "electro_chemistry",
+      "support": "experimental",
+      "tool_count": 55
     }
   ],
+  "real_integration": {
+    "exact_version_evidence_required": true,
+    "hosted_ci_default": false,
+    "licensed_host_required": true,
+    "pid_and_lease_cleanup_required": true,
+    "serial_only": true
+  },
+  "release_identity_sources": {
+    "dependency_ranges": "pyproject.toml",
+    "package_version": "comsol_mcp/__init__.py",
+    "runtime_compatibility": "comsol_mcp/compatibility_manifest.json"
+  },
+  "schema_name": "comsol_mcp.release_support_matrix",
+  "schema_version": "2.1.0",
   "unavailable": [
     "cross_host_or_distributed_solver_coordination",
     "automatic_visual_mode_identity",
@@ -65,12 +77,5 @@
     "semantic_docs_multilingual_production_claim",
     "standalone_without_local_licensed_comsol",
     "standalone_windows_server_or_pre_6_4_compatibility"
-  ],
-  "real_integration": {
-    "hosted_ci_default": false,
-    "licensed_host_required": true,
-    "serial_only": true,
-    "exact_version_evidence_required": true,
-    "pid_and_lease_cleanup_required": true
-  }
+  ]
 }

@@ -43,7 +43,8 @@ import json
 first = importlib.import_module({first!r})
 canonical = importlib.import_module('comsol_mcp.tools.session')
 before = {{
-    'cached': canonical.__cached__,
+    'cached_present': hasattr(canonical, '__cached__'),
+    'cached': getattr(canonical, '__cached__', None),
     'file': canonical.__file__,
     'loader_type': type(canonical.__loader__).__qualname__,
     'name': canonical.__name__,
@@ -54,7 +55,8 @@ before = {{
 }}
 second = importlib.import_module({second!r})
 after = {{
-    'cached': canonical.__cached__,
+    'cached_present': hasattr(canonical, '__cached__'),
+    'cached': getattr(canonical, '__cached__', None),
     'file': canonical.__file__,
     'loader_type': type(canonical.__loader__).__qualname__,
     'name': canonical.__name__,
@@ -86,7 +88,7 @@ print(json.dumps({{'same': first is second is canonical, 'before': before, 'afte
     assert result["after"] == result["before"]
     assert result["after"]["spec_name"] == "comsol_mcp.tools.session"
     assert result["after"]["spec_origin"].endswith("comsol_mcp\\tools\\session.py")
-    assert result["after"]["spec_cached"].endswith("session.cpython-314.pyc")
+    assert result["after"]["spec_cached"].endswith(f"session.{sys.implementation.cache_tag}.pyc")
 
 
 def test_canonical_driver_writers_and_legacy_readers_agree():

@@ -8,7 +8,7 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-$script:PythonProbe = 'import sys; from comsol_mcp.settings_gui_launcher import launch_settings_gui; ready = sys.version_info[:2] == (3, 14) and callable(launch_settings_gui); print(''COMSOL_MCP_SETTINGS_GUI_PYTHON_READY'') if ready else sys.exit(2)'
+$script:PythonProbe = 'import sys, sysconfig; from comsol_mcp.settings_gui_launcher import launch_settings_gui; ready = sys.implementation.name == ''cpython'' and sys.version_info[:2] in ((3, 14), (3, 15)) and not sysconfig.get_config_var(''Py_GIL_DISABLED'') and callable(launch_settings_gui); print(''COMSOL_MCP_SETTINGS_GUI_PYTHON_READY'') if ready else sys.exit(2)'
 $script:LaunchCode = 'import json; from comsol_mcp.settings_gui_launcher import launch_settings_gui; result = launch_settings_gui(); print(json.dumps(result, sort_keys=True, separators=('','', '':''))); raise SystemExit(0 if result.get(''success'') is True else 2)'
 $script:PythonProbeTimeoutMilliseconds = 5000
 
@@ -102,7 +102,7 @@ function Get-ComsolMcpPython {
     if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
         $requested = ConvertTo-ConsolePython -Candidate $RequestedPath
         if (-not (Test-ComsolMcpPython -Candidate $requested)) {
-            throw 'The selected Python must be CPython 3.14 and import comsol_mcp.settings_gui_launcher.'
+            throw 'The selected Python must be CPython 3.14 or 3.15 (standard GIL) and import comsol_mcp.settings_gui_launcher.'
         }
         return $requested
     }
@@ -127,14 +127,16 @@ function Get-ComsolMcpPython {
 
     $pyCommand = Get-Command 'py.exe' -ErrorAction SilentlyContinue
     if ($null -ne $pyCommand) {
-        try {
-            $pyProbe = Invoke-BoundedPython -Executable $pyCommand.Source -PrefixArguments @('-3.14') -Code 'import sys; print(sys.executable)'
-            if ($null -ne $pyProbe -and $pyProbe.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($pyProbe.Stdout)) {
-                [void]$candidates.Add($pyProbe.Stdout.Trim())
+        foreach ($version in @('-3.14', '-3.15')) {
+            try {
+                $pyProbe = Invoke-BoundedPython -Executable $pyCommand.Source -PrefixArguments @($version) -Code 'import sys; print(sys.executable)'
+                if ($null -ne $pyProbe -and $pyProbe.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($pyProbe.Stdout)) {
+                    [void]$candidates.Add($pyProbe.Stdout.Trim())
+                }
             }
-        }
-        catch {
-            # Continue through the remaining deterministic candidates.
+            catch {
+                # Continue through the remaining deterministic candidates.
+            }
         }
     }
 
@@ -150,7 +152,7 @@ function Get-ComsolMcpPython {
             return $normalized
         }
     }
-    throw 'No supported Python was found. Pass -PythonPath with a CPython 3.14 python.exe.'
+    throw 'No supported Python was found. Pass -PythonPath with a standard-GIL CPython 3.14 or 3.15 python.exe.'
 }
 
 $settingsPathWasPresent = Test-Path Env:COMSOL_MCP_SETTINGS_PATH

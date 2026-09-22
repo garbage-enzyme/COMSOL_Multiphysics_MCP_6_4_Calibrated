@@ -72,13 +72,14 @@
   },
   "release_lock": {
     "path": "constraints/release_locked_py314.txt",
-    "sha256": "ea3d25f7b97d67bf77fb27be2decc79a4858b4170b539d9e338592422e8fcca6",
+    "sha256": "7953c51a5cef6a205fa2be2051198680ff3cf453246abd15a70d29700ee5bf9e",
     "requirement_count": 45,
     "scope": "complete transitive default runtime dependencies",
     "install_mode": "pip --require-hashes followed by local wheel --no-deps"
   },
   "notes": [
-    "Python 3.14 is the only supported runtime; Python 3.15 requires a new compatibility gate.",
+    "2026-09-21 candidate lock changes only the exact httpx2/httpcore2 pair to 2.12.0 for reviewed security fixes; historical CI and licensed receipts above do not accept this candidate. Production installation is unchanged.",
+    "Python 3.14 remains the main development and production lane; Python 3.15 uses a separate experimental solver-free CI gate without semantic-docs or licensed acceptance.",
     "The standard GIL-enabled CPython ABI is required; the free-threaded ABI is not accepted.",
     "MCP SDK 2.0.0 is the conservative candidate base; MCP 2026 application features remain disabled and legacy protocol compatibility is mandatory.",
     "MPh 1.3.1 is calibrated for COMSOL Multiphysics 6.4.0.293.",

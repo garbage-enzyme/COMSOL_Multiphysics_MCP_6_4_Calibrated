@@ -188,7 +188,7 @@ the GUI before save and by backend validation when JSON is edited directly.
 
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
-| `profile.name` | `"core"` | `core`, `basic_fem`, `wave_optics`, `experimental`, `full`, or `comsolless_read_only`. The stored value is lower-case. Unsupported values fall back to `core` with reported provenance. |
+| `profile.name` | `"core"` | `core`, `basic_fem`, `wave_optics`, `electro_chemistry`, `experimental`, `full`, or `comsolless_read_only`. The stored value is lower-case. Unsupported values fall back to `core` with reported provenance. |
 
 New users can begin with the smaller `core` surface when safety is the priority.
 Most users doing ordinary simulation should choose `basic_fem`. Profiles only
@@ -204,6 +204,7 @@ independent Boolean feature gates and may be enabled together for any profile.
 | `experimental` | Extra helpers that are broader or less mature and require careful review. |
 | `full` | Legacy migration that needs nearly every non-feature tool and accepts weaker file containment; not recommended for new users. |
 | `comsolless_read_only` | Computers without a COMSOL installation: offline model/evidence inspection tools only; nothing can start COMSOL or Java. |
+| `electro_chemistry` | Isolated Electrochemistry Module profile: Core plus electrochemistry discovery, interface creation, electrode reaction, and electrolyte tools. Not merged into default or `full`. |
 
 ### Runtime and Containment
 
@@ -344,8 +345,9 @@ start COMSOL, Java, MPh, or JPype:
 
 The `comsolless_read_only` profile exposes exactly these five tools and
 nothing else, so lightweight computers without COMSOL can probe models and
-offline evidence. Switching into or out of this profile requires an MCP host
-restart like any other profile change.
+offline evidence. The `electro_chemistry` profile keeps its Electrochemistry
+Module tools isolated from `core` and `full`. Switching into or out of these
+profiles requires an MCP host restart like any other profile change.
 
 These tools produce integrity evidence only. They never replace FEM
 validation, solver evidence, or the durable-job receipt chain.

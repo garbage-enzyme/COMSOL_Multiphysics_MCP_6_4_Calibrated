@@ -429,6 +429,40 @@ def test_resume_decision_matrix():
     }
 
 
+def test_b08_missing_or_zero_step_hash_is_not_usable(tmp_path):
+    row = build_bounded_step_receipt(
+        _record(
+            checkpoint_policy="required",
+            checkpoint_path_redacted="**/ckpt.bin",
+            checkpoint_sha256="c" * 64,
+            checkpoint_byte_size=4,
+        )
+    )
+    target = tmp_path / "ckpt.bin"
+    target.write_bytes(b"data")
+    bare = {k: v for k, v in row.items() if k != "step_sha256"}
+    missing = verify_checkpoint_usability(
+        bare,
+        target,
+        current_source_file_sha256=row["source_identity"]["file_sha256"],
+        current_model_fingerprint=row["source_identity"]["model_fingerprint"],
+        current_revision=row["source_identity"]["revision"],
+    )
+    assert missing["usable"] is False
+    assert "receipt_hash_unverified" in missing["reason_codes"]
+
+    zeroed = {**row, "step_sha256": "0" * 64}
+    zero = verify_checkpoint_usability(
+        zeroed,
+        target,
+        current_source_file_sha256=row["source_identity"]["file_sha256"],
+        current_model_fingerprint=row["source_identity"]["model_fingerprint"],
+        current_revision=row["source_identity"]["revision"],
+    )
+    assert zero["usable"] is False
+    assert "receipt_hash_unverified" in zero["reason_codes"]
+
+
 # ---------------------------------------------------------------------------
 # Replay after a terminal row (new attempt continues the same journal)
 # ---------------------------------------------------------------------------

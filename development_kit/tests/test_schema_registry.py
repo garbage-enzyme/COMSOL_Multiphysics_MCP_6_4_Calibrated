@@ -194,7 +194,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert set(names) == emitted | registry_only
     assert re.fullmatch(r"[0-9a-f]{64}", registry["registry_sha256"])
     assert registry["registry_sha256"] == (
-        "84147d095a20feaa5b337d2854302bb94b784c4fd2f1b3c71df78419da609de8"
+        "20546177211aa74bbf4ee167105749b410982772a0c2605734b5b8724db543c8"
     )
     assert registry["registry_sha256"] == get_schema_registry()["registry_sha256"]
     assert check_schema_support("comsol_mcp.session_startup_state", "1.0.0")["supported"] is True

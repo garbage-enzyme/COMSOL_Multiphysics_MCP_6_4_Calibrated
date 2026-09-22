@@ -52,6 +52,9 @@ def register_offline_export_tools(mcp: MCPServer) -> None:
                 max_manifest_bytes=bounds.max_manifest_bytes,
                 max_artifacts=bounds.max_artifacts,
                 max_artifact_bytes=bounds.max_artifact_bytes,
+                max_expressions=bounds.max_expressions,
+                max_parameter_entries=bounds.max_parameter_entries,
+                max_time_values=bounds.max_time_values,
             )
         except (OfflineExportError, TypeError, ValueError, OSError) as exc:
             logger.info("Offline export validation refused: %s", exc)

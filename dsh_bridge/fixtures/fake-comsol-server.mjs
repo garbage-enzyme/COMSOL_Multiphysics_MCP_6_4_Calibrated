@@ -57,7 +57,9 @@ function handleCall(params, id) {
 	if (inFlight > maxInFlight) maxInFlight = inFlight;
 	const name = params?.name;
 	const args = params?.arguments ?? {};
-	// 10ms handling delay so overlapping requests would be observable
+	// Configurable handling delay so overlapping requests are observable.
+	// FAKE_DELAY_MS overrides the default 10ms used by most tests.
+	const delayMs = Number(process.env.FAKE_DELAY_MS ?? 10);
 	setTimeout(() => {
 		inFlight -= 1;
 		switch (name) {
@@ -101,7 +103,7 @@ function handleCall(params, id) {
 			default:
 				respondError(id, -32601, `unknown tool: ${name}`);
 		}
-	}, 10);
+	}, Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 10);
 }
 
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });

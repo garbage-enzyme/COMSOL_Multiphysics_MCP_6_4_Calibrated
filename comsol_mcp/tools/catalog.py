@@ -11,11 +11,15 @@ PROFILE_NAMES = (
     "core",
     "basic_fem",
     "wave_optics",
+    "electro_chemistry",
     "experimental",
     "full",
     "comsolless_read_only",
 )
 FEATURE_NAMES = ("lexical_docs", "semantic_docs", "shared_server")
+# Isolated module profiles own tools that must never be merged into the
+# default or compatibility ``full`` surface.
+ISOLATED_MODULE_PROFILES = frozenset({"electro_chemistry"})
 
 
 @dataclass(frozen=True)
@@ -158,6 +162,13 @@ _TOOLS_BY_REGISTRAR = {
         "physics_setup_acoustic_boundaries",
         "physics_configure_pde_boundary",
         "physics_setup_pde_boundaries",
+    ),
+    "comsol_mcp.tools.electro_chemistry.register_electrochemistry_tools": (
+        "electro_chemistry_catalog",
+        "electro_chemistry_inspect",
+        "physics_add_electrochemistry",
+        "physics_configure_electrode_reaction",
+        "physics_set_electrolyte",
     ),
     "comsol_mcp.tools.mesh.register_mesh_tools": (
         "mesh_list",
@@ -320,6 +331,7 @@ _GROUP_BY_REGISTRAR = {
     "register_geometry_selection_tools": "geometry",
     "register_physics_tools": "physics",
     "register_acoustics_pde_tools": "physics",
+    "register_electrochemistry_tools": "electro_chemistry",
     "register_mesh_tools": "mesh",
     "register_study_tools": "study",
     "register_results_tools": "results",
@@ -364,6 +376,11 @@ _EXPERIMENTAL_TOOLS = frozenset(
         "physics_interactive_setup_heat",
         "physics_setup_heat_boundaries",
         "physics_boundary_selection",
+        "electro_chemistry_catalog",
+        "electro_chemistry_inspect",
+        "physics_add_electrochemistry",
+        "physics_configure_electrode_reaction",
+        "physics_set_electrolyte",
         "study_solve_async",
         "study_get_progress",
         "study_cancel",
@@ -469,6 +486,11 @@ _SIDE_EFFECTS = {
     "physics_setup_acoustic_boundaries": "model_mutation",
     "physics_configure_pde_boundary": "model_mutation",
     "physics_setup_pde_boundaries": "model_mutation",
+    "electro_chemistry_catalog": "read_only",
+    "electro_chemistry_inspect": "read_only",
+    "physics_add_electrochemistry": "model_mutation",
+    "physics_configure_electrode_reaction": "model_mutation",
+    "physics_set_electrolyte": "model_mutation",
     "geometry_get_boundaries": "read_only",
     "mesh_create": "model_mutation",
     "mesh_sequence_create": "model_mutation",
@@ -556,6 +578,8 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "physics_get_acoustic_boundary_conditions",
         "physics_get_pde_boundary_conditions",
         "physics_get_guide",
+        "electro_chemistry_catalog",
+        "electro_chemistry_inspect",
         "physics_list",
         "physics_list_features",
         "results_evaluate",
@@ -642,6 +666,8 @@ _SOLVER_FREE_TOOLS = frozenset(
         "physics_get_guide",
         "physics_get_acoustic_boundary_conditions",
         "physics_get_pde_boundary_conditions",
+        "electro_chemistry_catalog",
+        "electro_chemistry_inspect",
         "troubleshoot",
         "modeling_best_practices",
         "mph_diff",
@@ -991,6 +1017,25 @@ _DESKTOP_SHARED_FOUNDATION = frozenset(
 )
 _SHARED_SERVER_ADDITIONS = _DESKTOP_SHARED_FOUNDATION - _CORE_TOOLS
 
+# Isolated Electrochemistry Module tools. They exist only on the
+# ``electro_chemistry`` profile and must not enter default or ``full``.
+_ELECTRO_CHEMISTRY_ADDITIONS = frozenset(
+    {
+        "electro_chemistry_catalog",
+        "electro_chemistry_inspect",
+        "physics_add_electrochemistry",
+        "physics_configure_electrode_reaction",
+        "physics_set_electrolyte",
+    }
+)
+_ELECTRO_CHEMISTRY_MUTATIONS = frozenset(
+    {
+        "physics_add_electrochemistry",
+        "physics_configure_electrode_reaction",
+        "physics_set_electrolyte",
+    }
+)
+
 
 def _build_registry() -> dict[str, ToolMetadata]:
     all_names = {name for names in _TOOLS_BY_REGISTRAR.values() for name in names}
@@ -1004,8 +1049,9 @@ def _build_registry() -> dict[str, ToolMetadata]:
         "core": _CORE_TOOLS,
         "basic_fem": _CORE_TOOLS | _BASIC_FEM_ADDITIONS,
         "wave_optics": _CORE_TOOLS | _WAVE_OPTICS_ADDITIONS,
+        "electro_chemistry": _CORE_TOOLS | _ELECTRO_CHEMISTRY_ADDITIONS,
         "experimental": _CORE_TOOLS | _EXPERIMENTAL_ADDITIONS,
-        "full": base_names,
+        "full": base_names - _ELECTRO_CHEMISTRY_ADDITIONS,
         "comsolless_read_only": {
             "mph_inspect",
             "mph_diff",
@@ -1080,6 +1126,8 @@ def _build_registry() -> dict[str, ToolMetadata]:
                     if name == "standalone_build"
                     else ("licensed_comsol_6_4",)
                     if name in {"standalone_start", "standalone_resume"}
+                    else ("comsol_electrochemistry_module",)
+                    if name in _ELECTRO_CHEMISTRY_MUTATIONS
                     else ("comsol",)
                     if name in _STARTS_SOLVER
                     else ()
@@ -1128,7 +1176,13 @@ def validate_tool_specs(
         ):
             raise ValueError(f"ToolSpec profiles are invalid for {name!r}")
         if "full" not in spec.intended_profiles:
-            raise ValueError(f"ToolSpec compatibility profile is missing for {name!r}")
+            # Isolated module tools may target only their own module profile.
+            if set(spec.intended_profiles) - ISOLATED_MODULE_PROFILES:
+                raise ValueError(f"ToolSpec compatibility profile is missing for {name!r}")
+        elif name in _ELECTRO_CHEMISTRY_ADDITIONS:
+            raise ValueError(
+                f"isolated module ToolSpec leaked into compatibility profile: {name!r}"
+            )
         if spec.feature_gate is not None and spec.feature_gate not in feature_set:
             raise ValueError(f"ToolSpec feature gate is invalid for {name!r}")
         if spec.feature_gate is not None and set(spec.intended_profiles) != profile_set:
@@ -1220,6 +1274,7 @@ async def snapshot_tool_schemas(server: Any) -> dict[str, dict[str, Any]]:
 
 __all__ = [
     "FEATURE_NAMES",
+    "ISOLATED_MODULE_PROFILES",
     "PROFILE_NAMES",
     "TOOL_METADATA",
     "TOOL_SPECS",

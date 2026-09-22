@@ -294,6 +294,17 @@ def main() -> int:
     parser.add_argument("--allow-dirty", action="store_true")
     parser.add_argument("--skip-tests", action="store_true")
     parser.add_argument("--skip-install", action="store_true")
+    parser.add_argument(
+        "--build-python",
+        type=Path,
+        default=None,
+        help="interpreter used only for isolated package building (defaults to the gate interpreter)",
+    )
+    parser.add_argument(
+        "--build-no-isolation",
+        action="store_true",
+        help="use the selected interpreter's installed build backend when the isolated index is unavailable",
+    )
     parser.add_argument("--artifact-root", type=Path, default=_default_artifact_root())
     parser.add_argument(
         "--dependency-lock",
@@ -338,7 +349,13 @@ def main() -> int:
             _run([sys.executable, "-m", "pytest", "-q", "--basetemp", str(pytest_root)])
         finally:
             shutil.rmtree(pytest_root, ignore_errors=True)
-    _run([sys.executable, "-m", "build", "--outdir", str(dist_dir)])
+    build_python = args.build_python.resolve() if args.build_python is not None else Path(sys.executable)
+    if not build_python.is_file():
+        raise SystemExit(f"build interpreter does not exist: {build_python}")
+    build_command = [str(build_python), "-m", "build", "--outdir", str(dist_dir)]
+    if args.build_no_isolation:
+        build_command.append("--no-isolation")
+    _run(build_command)
     distribution_paths = _distribution_artifacts(dist_dir)
     distributions = [_distribution_inventory(path) for path in distribution_paths]
 
@@ -434,6 +451,8 @@ def main() -> int:
             "machine": platform.machine(),
             "platform": platform.platform(),
         },
+        "build_interpreter": str(build_python),
+        "build_isolation": not args.build_no_isolation,
         "clean_tree_required": not args.allow_dirty,
         "dirty_entry_count": len(dirty),
         "compile_passed": True,

@@ -5,7 +5,7 @@
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.3](https://img.shields.io/badge/release-0.7.3-blue)
+![Release: 0.7.4](https://img.shields.io/badge/release-0.7.4-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -96,7 +96,7 @@ acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list
 `capabilities` 回读，并把 licensed start/solve/cleanup 覆盖单独标注。已安装工具界面
 以实时 discovery 为准，不以文档中复制的数量为准。
 
-`0.7.3` 继续以保守方式使用 MCP Python SDK `2.0.x` 运行基座。工具、profile、schema
+`0.7.4` 继续以保守方式使用 MCP Python SDK `2.0.x` 运行基座。工具、profile、schema
 和 stdio 配置仍保持已接受的旧协议兼容应用合同；本版本不会让 client opt in MCP
 `2026-07-28` 的 multi-round-trip request、cache hint、subscription 或 Tasks extension。
 
@@ -130,6 +130,7 @@ COMSOL Settings GUI 的 server Boolean。相同 DSH 会话中不要再配置第�
 [`DeepSeek 兼容性契约`](dsh_bridge/DEEPSEEK_COMPATIBILITY.md)。
 fake-server 测试只证明 bridge 行为，真实 DSH discovery、cleanup 和 licensed solve 必须
 单独记录。
+重启恢复会将离线完成通知路由到原会话；通知持久性遵循原生 DSH 语义，不保证会话落盘前崩溃时仍能送达。
 
 ## 主要能力
 
@@ -187,7 +188,8 @@ GUI 打开期间不要同时编辑 JSON。只有用户明确要求 agent 管理�
 `agent_edit`；只修改解析出的可写文件，验证后请求同样的重启。安装后的
 `comsol-mcp-settings` 命令可直接打开 GUI；从
 仓库或源码分发包使用时也可运行 `./Open_Settings_GUI.ps1`。该脚本会查找受支持的 Python
-3.14，也可通过 `-PythonPath` 和 `-SettingsPath` 明确指定；`-ValidateOnly` 只验证启动条件，
+3.14/3.15 标准 GIL 解释器（通过 py launcher 查找时优先 3.14），也可通过
+`-PythonPath` 和 `-SettingsPath` 明确指定；`-ValidateOnly` 只验证启动条件，
 不会打开界面或启动 COMSOL。服务器会返回 `agent_action_required: pause_for_user`，但无法从
 技术上强制任意第三方 agent 遵守暂停。
 安装入口也支持 `--settings-path` 和 `--validate-only`，即使 MCP stdio 已停止也能独立工作。
@@ -551,6 +553,12 @@ hash 不变，结束后无 client、进程或 lease 残留。
 - Python 3.14（标准 GIL 版本，不要使用 Windows Store 版本）
 - MPh 1.3.1、`mcp`、`pydantic` 和 `psutil>=5.9.0`
 - 已验证配置中使用 COMSOL 自带的 Java 21 runtime
+
+Python 3.14 仍是主开发和生产 lane。标准 Windows x64 Python 3.15 使用独立的
+实验性兼容 CI，目前固定 3.15.0rc2。缺少 wheel 时源码构建 JPype 1.7.1、
+PyYAML 6.0.3 和 Pydantic 2.13.5 所需的精确 core 2.46.5；需要 MSVC/Windows
+SDK、JDK/Ant 和 Rust。此通道排除实验性 `semantic-docs` extra，不代表已经
+通过 licensed COMSOL 验收，也不承诺 free-threaded Python 支持。
 
 本项目仍在积极开发，依赖范围与锁定版本可能随时调整，不保证较长的弃用过渡期。
 更新现有部署前，请先在隔离环境中验证 Python、COMSOL/MPh/JPype 及所需可选

@@ -97,6 +97,7 @@ class SessionManager:
                 instance._models = {}
                 instance._model_paths = {}
                 instance._model_source_identities = {}
+                instance._model_java_tags = {}
                 instance._model_revisions = {}
                 instance._model_cleanup_paths = {}
                 instance._model_removal_listeners = []
@@ -1021,7 +1022,19 @@ class SessionManager:
                     self._client_status_client = self._client
                 client_status = dict(self._client_status)
                 for name in self._models:
-                    model_info = {"name": name}
+                    # B10: label, tracking key, Java tag, and file identity
+                    # are distinct fields; equal labels never prove equal tags.
+                    model_info = {
+                        "name": name,
+                        "label": name,
+                        "tracking_key": name,
+                        "java_tag": self._model_java_tags.get(name),
+                        "identity_relation": (
+                            "session_model"
+                            if name in self._model_java_tags
+                            else "label_only"
+                        ),
+                    }
                     model_path = self._model_paths.get(name)
                     if model_path is not None:
                         model_info["file"] = model_path
@@ -1156,8 +1169,22 @@ class SessionManager:
         *,
         source_identity: Optional[dict] = None,
     ) -> str:
-        """Add a model to tracking."""
+        """Add a model to tracking.
+
+        B10: label (``model.name()``), tracking key, Java tag, and file
+        identity are cached as separate fields. Equal labels never prove
+        equal native tags or equal files.
+        """
         name = model.name()
+        java_tag = None
+        try:
+            # Prefer the native tag when MPh/ClientAPI exposes it.
+            if hasattr(model, "tag"):
+                tag_value = model.tag()
+                if isinstance(tag_value, str) and tag_value.strip():
+                    java_tag = tag_value.strip()
+        except Exception:
+            java_tag = None
         try:
             model_path = model.file() if hasattr(model, "file") else None
         except Exception:
@@ -1195,7 +1222,10 @@ class SessionManager:
                 self._cleanup_model_artifact(name)
             self._model_revisions.pop(name, None)
             self._model_source_identities.pop(name, None)
+            self._model_java_tags.pop(name, None)
             self._models[name] = model
+            if java_tag is not None:
+                self._model_java_tags[name] = java_tag
             if cleanup_path:
                 self._model_cleanup_paths[name] = str(cleanup_path)
             if self._current_model is None:

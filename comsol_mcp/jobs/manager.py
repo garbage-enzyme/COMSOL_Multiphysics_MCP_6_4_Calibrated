@@ -1067,7 +1067,7 @@ class JobManager:
             "attempt": state["attempt"],
         }
 
-    def status(self, job_id: str) -> dict[str, Any]:
+    def status(self, job_id: str, *, refresh_probe: bool = False) -> dict[str, Any]:
         # A cancellation coordinator must be able to acquire the durable lock
         # promptly.  Atomic state replacement makes this terminal observation
         # safe without taking the polling lock, and it avoids status callers
@@ -1228,11 +1228,15 @@ class JobManager:
                     "cleanup_recorded": any(row["kind"] == "cleanup" for row in rows),
                 }
             if state.get("status") in TERMINAL_STATES:
-                # Warning-only post-run probe: a failed `.mph` parse is
-                # recorded here and never changes the job disposition.
+                # B13 warning-only post-run probe: cached after first terminal
+                # scan; refresh_probe forces a re-hash. A failed `.mph` parse
+                # is recorded here and never changes the job disposition.
                 from ..evidence.inspection.probe import probe_mph_artifacts
 
-                state["mph_artifact_probe"] = probe_mph_artifacts(self.store.job_dir(job_id))
+                state["mph_artifact_probe"] = probe_mph_artifacts(
+                    self.store.job_dir(job_id),
+                    refresh=refresh_probe,
+                )
             if (self.store.job_dir(job_id) / "bounded_steps.jsonl").is_file():
                 # Warning-only bounded-step review surface: a failed journal
                 # parse is recorded here and never changes the disposition.

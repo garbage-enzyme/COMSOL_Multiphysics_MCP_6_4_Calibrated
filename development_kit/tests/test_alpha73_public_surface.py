@@ -43,7 +43,14 @@ def test_comsolless_read_only_surface_is_frozen_at_the_five_tools():
 
 
 def test_five_tools_are_present_in_every_profile():
-    for profile in ("core", "basic_fem", "wave_optics", "experimental", "full"):
+    for profile in (
+        "core",
+        "basic_fem",
+        "wave_optics",
+        "electro_chemistry",
+        "experimental",
+        "full",
+    ):
         server = create_server(f"surface-{profile}", profile=profile)
         listed = {tool.name for tool in asyncio.run(server.list_tools())}
         assert FIVE_TOOLS <= listed, profile
@@ -90,7 +97,7 @@ def _csv_manifest(tmp_path: Path) -> Path:
     }
     manifest = build_offline_export_manifest(
         producer_tool="results_export_data",
-        producer_version="0.7.3",
+        producer_version="0.7.4",
         model_path_redacted="**/model.mph",
         model_sha256="a" * 64,
         artifacts=[artifact_inputs],
@@ -102,6 +109,7 @@ def _csv_manifest(tmp_path: Path) -> Path:
 
 def test_all_five_tools_dispatch_through_a_real_server(tmp_path, monkeypatch):
     monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(tmp_path))
+    monkeypatch.setenv("COMSOL_MCP_ARTIFACT_WRITE_ROOT", str(tmp_path))
     server = create_server("dispatch-five-tools", profile="comsolless_read_only")
     decode = decode_tool_result
 
@@ -135,6 +143,7 @@ def test_all_five_tools_dispatch_through_a_real_server(tmp_path, monkeypatch):
 
 def test_dispatch_refusals_stay_solver_free(tmp_path, monkeypatch):
     monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(tmp_path))
+    monkeypatch.setenv("COMSOL_MCP_ARTIFACT_WRITE_ROOT", str(tmp_path))
     server = create_server("refusal-five-tools", profile="comsolless_read_only")
     absent = decode_tool_result(
         asyncio.run(server.call_tool("mph_inspect", {"file_path": str(tmp_path / "no.mph")}))
@@ -153,8 +162,30 @@ def test_dispatch_refusals_stay_solver_free(tmp_path, monkeypatch):
             )
         )
     )
-    assert bad["success"] is True  # validator returns a structured invalid verdict
-    assert bad["verdict"]["failures"][0]["reason_codes"] == ["manifest_unavailable"]
+    # Real dispatch rejects unavailable files at the contained-read boundary.
+    assert bad["success"] is False
+    assert bad["path_policy"]["enforced"] is True
+    assert bad["path_policy"]["accepted"] is False
+    assert "verdict" not in bad
+
+
+def test_export_dispatch_refuses_files_outside_the_owned_root(tmp_path, monkeypatch):
+    owned = tmp_path / "owned"
+    owned.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setenv("COMSOL_MCP_ARTIFACT_WRITE_ROOT", str(owned))
+    manifest = _csv_manifest(outside)
+    for profile in ("comsolless_read_only", "full"):
+        server = create_server("export-path-refusal", profile=profile)
+        result = decode_tool_result(
+            asyncio.run(
+                server.call_tool("offline_export_validate", {"manifest_path": str(manifest)})
+            )
+        )
+        assert result["success"] is False
+        assert result["path_policy"]["accepted"] is False
+        assert "verdict" not in result
 
 
 # ---------------------------------------------------------------------------
