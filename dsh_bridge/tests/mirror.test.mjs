@@ -387,3 +387,44 @@ test("B03: interrupted maps to failed and is terminal", () => {
 	assert.equal(isTerminal("cancel_requested", terms), false);
 	assert.equal(isTerminal("nonterminal", terms), false);
 });
+
+for (const reason of ["owner disposed", "jobs service disposed"]) {
+	test(`native teardown detaches supervisor without cancelling durable work: ${reason}`, { timeout: 3000 }, async () => {
+		const jobs = createFakeJobs();
+		const calls = [];
+		createJobMirror({ jobs, jobId: "durable-job", logger: quietLogger(),
+			core: { callTool: async (name) => { calls.push(name); return { structuredContent: { state: "running" } }; } },
+		});
+		jobs.started[0].hooks.cancel(reason);
+		const result = await jobs.started[0].done;
+		assert.equal(result.confirmedTerminal, false);
+		assert.equal(result.status, "failed");
+		assert.equal(calls.includes("job_cancel"), false);
+	});
+}
+
+for (const observedAttempt of [undefined, 2]) {
+	test(`attempt mismatch stays unconfirmed and cannot cancel the replacement: ${observedAttempt}`, { timeout: 3000 }, async () => {
+		const jobs = createFakeJobs();
+		const calls = [];
+		createJobMirror({ jobs, jobId: "reused-job", attempt: 1, logger: quietLogger(),
+			core: { callTool: async (name) => { calls.push(name); return { structuredContent: { state: "completed", attempt: observedAttempt } }; } },
+		});
+		const result = await jobs.started[0].done;
+		assert.equal(result.confirmedTerminal, false);
+		assert.match(result.detail, /attempt/);
+		jobs.started[0].hooks.cancel();
+		assert.equal(calls.includes("job_cancel"), false);
+	});
+}
+
+test("controller loss retains an unconfirmed observer outcome", { timeout: 3000 }, async () => {
+	const jobs = createFakeJobs();
+	createJobMirror({ jobs, jobId: "orphan-controller", logger: quietLogger(),
+		core: { callTool: async () => { throw new Error("must not contact server without a controller"); } },
+		isOwnerAvailable: () => false,
+	});
+	const result = await jobs.started[0].done;
+	assert.equal(result.confirmedTerminal, false);
+	assert.match(result.detail, /controller unavailable/);
+});

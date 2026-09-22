@@ -15,7 +15,7 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { createComsolConnection, extractText } from "./mcp-client-core.mjs";
-import { createJobMirror, createStateStore, parseJson, extractState, isTerminal, extractOwnerIdentity, ownerFromIdentity, mirrorDedupeKey } from "./job-mirror.mjs";
+import { createJobMirror, createStateStore, parseJson, extractState, extractAttempt, extractOwnerIdentity, ownerFromIdentity, mirrorDedupeKey } from "./job-mirror.mjs";
 
 export const name = "comsol-bridge";
 export const inject = ["tools"];
@@ -164,11 +164,15 @@ export async function apply(ctx, config) {
 					} else if (attempt != null) {
 						stateStore.update(jobId, { attempt });
 					}
-					if (startMirror(jobId, jobType, exec?.agent)) {
+					if (startMirror(jobId, jobType, exec?.agent, attempt)) {
 						mirrored.add(jobId);
 						mirroredKeys.add(mirrorDedupeKey(jobId, attempt));
 					} else {
-						stateStore.remove(jobId);
+						stateStore.update(jobId, {
+							recoveryBlocked: true,
+							recoveryReason: "mirror did not start; waiting for original owner/controller",
+						});
+						scheduleRehydrateRetry(cfg.rehydrateMaxAttempts);
 					}
 				}
 			}
@@ -176,7 +180,7 @@ export async function apply(ctx, config) {
 		};
 	}
 
-	function startMirror(jobId, jobType, agent) {
+	function startMirror(jobId, jobType, agent, attempt = null) {
 		const jobs = ctx.get("jobs");
 		if (!jobs) {
 			logger.warn?.(`comsol-bridge: ctx.jobs unavailable; mirror skipped for ${jobId} (load dsh-jobs-local + dsh-tool-jobs)`);
@@ -188,6 +192,7 @@ export async function apply(ctx, config) {
 				core: connection,
 				jobId,
 				jobType,
+				attempt,
 				...(agent ? { agent } : {}),
 				opts: {
 					pollIntervalMs: cfg.pollIntervalMs,
@@ -198,6 +203,7 @@ export async function apply(ctx, config) {
 				},
 				logger,
 				isDisposed: () => connection.disposed,
+				isOwnerAvailable: () => !agent || jobs.servesOwner?.(agent) !== false,
 				onTerminal: (status, detail, meta = {}) => {
 					// B02: only a server-confirmed terminal may delete the
 					// durable tracking row. Unconfirmed settlements keep the
@@ -239,15 +245,20 @@ export async function apply(ctx, config) {
 			try {
 				// Query the original job. Never resubmit a calculation.
 				const res = await connection.callTool("job_status", { job_id: rec.jobId }, { timeoutMs: 30000 });
-				const state = extractState(
-					res.structuredContent !== undefined ? res.structuredContent : parseJson(res.text)
-				);
+				const status = res.structuredContent !== undefined ? res.structuredContent : parseJson(res.text);
+				const state = extractState(status);
 				if (state === undefined) continue;
-				if (isTerminal(state, cfg.terminalStates)) {
-					stateStore.remove(rec.jobId);
-					mirroredKeys.delete(dedupeKey);
+				if (rec.attempt != null && extractAttempt(status) !== rec.attempt) {
+					stateStore.update(rec.jobId, {
+						recoveryBlocked: true,
+						recoveryReason: "server attempt differs or is unavailable; inspect job_status from the original session before recovery",
+						lastObservedState: state,
+					});
 					continue;
 				}
+				// A job may finish while DSH is offline. It still needs a
+				// mirror bound to its original owner so the native controller
+				// delivers completion; server terminal state is not delivery.
 				const owner = ownerFromIdentity(rec);
 				if (owner === undefined) {
 					// Legacy row or submit without a usable agent identity.
@@ -284,7 +295,7 @@ export async function apply(ctx, config) {
 				}
 				// Restore the original owner so jobs.start routes to that
 				// agent's controller (B02a). Failures leave the row retryable.
-				if (startMirror(rec.jobId, rec.jobType, liveOwner)) {
+				if (startMirror(rec.jobId, rec.jobType, liveOwner, rec.attempt ?? null)) {
 					mirrored.add(rec.jobId);
 					mirroredKeys.add(dedupeKey);
 					stateStore.update(rec.jobId, { lastObservedState: state });

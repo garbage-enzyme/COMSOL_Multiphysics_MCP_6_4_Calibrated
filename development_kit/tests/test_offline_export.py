@@ -66,7 +66,7 @@ def _write_export(tmp_path: Path, artifacts_spec: list[dict]) -> tuple[Path, dic
         spec.pop("_payload", None)
     manifest = build_offline_export_manifest(
         producer_tool="results_export_data",
-        producer_version="0.7.3",
+        producer_version="0.7.4",
         model_path_redacted="**/model.mph",
         model_sha256="a" * 64,
         artifacts=artifacts_spec,

@@ -70,7 +70,7 @@
 | `toolCallTimeoutMs` | `600000` | 单次工具调用超时（solve/审计放宽到 10 分钟） |
 | `cancelConfirmTimeoutMs` | `120000` | 取消后未见终态时的诚实结算时限 |
 | `reconnect` | 退避 500ms→30s，最多 10 次 | 断线重连预算 |
-| `terminalStates` | completed/failed/cancelled/killed/done/terminal | 终态子串匹配 |
+| `terminalStates` | completed/failed/cancelled/killed/done/terminal/interrupted | 去空格、忽略大小写后的精确终态匹配 |
 | `stateFile` | `<cwd>\.dsh-comsol-bridge-jobs.json` | 镜像 id 持久化（重启 rehydrate） |
 
 ## 行为
@@ -84,7 +84,13 @@
 - **两层持久化**：DSH 镜像跨回合存活、跨宿主消亡（进程内注册表）；comsol worker + SQLite
   才是真相层，跨宿主存活，`job_resume` 精确身份恢复。
 - **重启恢复**：镜像 job_id 持久化到 stateFile；插件启动时逐个 `job_status` 探测，
-  活跃的以 **unowned** 镜像重建（job_list 对调用者开放可见）。
+  绑定原会话的真实 Agent/controller 重建镜像，包括宿主离线期间完成的任务。
+  owner/controller 缺失或镜像启动失败时保留跟踪行，有界重试，不绑定其他会话、不重新提交计算。
+- **通知持久性边界**：原生完成通知入内存队列不等于会话已落盘。DSH 0.1.6-alpha.2
+  实测在显式 `sessions.flush` 后可跨重启保留；立即崩溃前未落盘的通知丢失属于原生限制，
+  本层不另加 durable acknowledgement，也不声称 exactly-once。
+- **身份与清理**：已知 attempt 与服务端不符时保留原记录并阻止恢复。DSH owner/service
+  销毁只停止监督镜像，不发送服务端取消；controller 丢失同样保留可恢复记录。
 - **断线**：指数退避重启子进程；预算耗尽后注销工具并明确报错；镜像诚实结算
   "bridge lost contact; job may still be running (use job_resume after recovery)"。
 - **fail-closed**：服务器未安装 / 崩溃 / 协议版本不支持 / 工具列表畸形 → 明确失败，

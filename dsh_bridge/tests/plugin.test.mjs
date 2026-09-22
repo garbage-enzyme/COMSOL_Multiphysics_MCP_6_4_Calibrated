@@ -166,10 +166,11 @@ test("apply keeps failed mirror starts retryable in the state file", { timeout: 
 		const text = result.content.map((b) => b.text ?? "").join("\n");
 		assert.match(JSON.parse(text).job_id, /^job-\d+$/);
 		ctx.dispose();
-		// a failed start must stay retryable: no pinned row survives
+		// Retain the server job even when the notification controller is absent.
 		let rows = [];
 		try { rows = JSON.parse(readFileSync(join(stateDir, "jobs-b.json"), "utf8")); } catch {}
-		assert.deepEqual(rows.map((r) => r.jobId), []);
+		assert.deepEqual(rows.map((r) => r.jobId), [JSON.parse(text).job_id]);
+		assert.equal(rows[0].recoveryBlocked, true);
 	} finally { rmSync(stateDir, { recursive: true, force: true }); }
 });
 
@@ -410,7 +411,8 @@ test("B02a: rehydrate with owner key but agent not live keeps the row blocked", 
 	} finally { rmSync(stateDir, { recursive: true, force: true }); }
 });
 
-test("B02a: rehydrate removes rows already terminal on the server", { timeout: 25000 }, async () => {
+for (const ownerAvailable of [true, false]) {
+test(`rehydrate preserves offline completion routing (owner available: ${ownerAvailable})`, { timeout: 25000 }, async () => {
 	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b02aterm"));
 	try {
 		const stateFile = join(stateDir, "jobs.json");
@@ -425,7 +427,8 @@ test("B02a: rehydrate removes rows already terminal on the server", { timeout: 2
 		const termServer = spawnFakeServer({ FAKE_POLLS: "1" });
 		try {
 			const jobs = createFakeJobs();
-			const ctx = makeCtx({ jobs });
+			const owner = { id: "agent-1" };
+			const ctx = makeCtx({ jobs, agents: { get: (id) => ownerAvailable && id === owner.id ? owner : undefined } });
 			await apply(ctx, {
 				command: process.execPath,
 				args: [FIXTURE],
@@ -438,12 +441,44 @@ test("B02a: rehydrate removes rows already terminal on the server", { timeout: 2
 				failOnStartupError: true,
 				rehydrateMaxAttempts: 0,
 			});
-			assert.equal(jobs.started.length, 0, "terminal job must not get a new mirror");
-			const rows = JSON.parse(readFileSync(stateFile, "utf8"));
-			assert.deepEqual(rows, [], "confirmed terminal row must be removed");
+			if (ownerAvailable) {
+				assert.equal(jobs.started.length, 1, "offline completion must reach the original controller");
+				assert.equal(jobs.started[0].spec.owner, owner);
+				const outcome = await Promise.race([jobs.started[0].done, sleep(3000)]);
+				assert.equal(outcome.status, "completed");
+				assert.deepEqual(JSON.parse(readFileSync(stateFile, "utf8")), []);
+			} else {
+				assert.equal(jobs.started.length, 0);
+				const rows = JSON.parse(readFileSync(stateFile, "utf8"));
+				assert.equal(rows.length, 1, "terminal state alone must not discard a notification");
+				assert.equal(rows[0].ownerAgentKey, owner.id);
+				assert.equal(rows[0].lastObservedState, "completed");
+				assert.equal(rows[0].recoveryBlocked, true);
+			}
 			ctx.dispose();
 		} finally {
 			await termServer.close();
 		}
 	} finally { rmSync(stateDir, { recursive: true, force: true }); }
+});
+}
+
+test("rehydrate keeps a known attempt blocked when the server cannot confirm it", { timeout: 10000 }, async () => {
+	const dir = mkdtempSync(join("D:\\mcp_tests", "battempt"));
+	const owner = { id: "owner" };
+	const jobs = createFakeJobs();
+	const ctx = makeCtx({ jobs, agents: { get: () => owner } });
+	try {
+		const stateFile = join(dir, "jobs.json");
+		writeFileSync(stateFile, JSON.stringify([{ jobId: "job-old", attempt: 1, ownerAgentKey: owner.id }]));
+		await apply(ctx, { command: process.execPath, args: [FIXTURE], env: fakeServer.extraEnv,
+			cwd: "D:\\mcp_tests", stateFile, reconnect: { enabled: false }, initTimeoutMs: 5000,
+			failOnStartupError: true, rehydrateMaxAttempts: 0,
+		});
+		assert.equal(jobs.started.length, 0);
+		const [row] = JSON.parse(readFileSync(stateFile, "utf8"));
+		assert.equal(row.attempt, 1);
+		assert.equal(row.recoveryBlocked, true);
+		assert.match(row.recoveryReason, /attempt/);
+	} finally { ctx.dispose(); rmSync(dir, { recursive: true, force: true }); }
 });

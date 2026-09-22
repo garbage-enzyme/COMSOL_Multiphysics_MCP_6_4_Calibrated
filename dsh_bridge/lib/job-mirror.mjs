@@ -14,6 +14,10 @@ export function parseJson(text) {
 	try { return JSON.parse(text); } catch { return undefined; }
 }
 
+export function extractAttempt(parsed) {
+	return parsed?.attempt ?? parsed?.attempt_id ?? parsed?.state?.attempt;
+}
+
 export function extractState(parsed) {
 	if (!parsed || typeof parsed !== "object") return undefined;
 	if (typeof parsed.state === "string") return parsed.state;
@@ -113,7 +117,7 @@ const MIRROR_DEFAULTS = {
  * Start one mirror via jobs.start(spec). `jobs` is the ctx.jobs registry
  * (or a test double). Returns nothing; hooks are owned by the registry.
  */
-export function createJobMirror({ jobs, core, jobId, jobType, agent, opts = {}, logger = console, isDisposed = () => false, onTerminal = () => {} }) {
+export function createJobMirror({ jobs, core, jobId, jobType, agent, attempt = null, opts = {}, logger = console, isDisposed = () => false, isOwnerAvailable = () => true, onTerminal = () => {} }) {
 	const cfg = { ...MIRROR_DEFAULTS, ...opts };
 	const log = (level, ...a) => {
 		try { logger?.[level]?.(...a) } catch {}
@@ -176,6 +180,10 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, opts = {}, 
 						finish("failed", "bridge disposed", { confirmedTerminal: false });
 						return;
 					}
+					if (!isOwnerAvailable()) {
+						finish("failed", "original job controller unavailable; durable job remains tracked", { confirmedTerminal: false });
+						return;
+					}
 					// Enforce the cancel deadline before issuing another call:
 					// a hanging request must not delay settlement past the
 					// configured confirmation window.
@@ -189,6 +197,10 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, opts = {}, 
 						const res = await core.callTool("job_status", { job_id: jobId }, { timeoutMs: 30000 });
 						const parsed = res.structuredContent !== undefined ? res.structuredContent : parseJson(res.text);
 						const state = extractState(parsed);
+						if (attempt != null && extractAttempt(parsed) !== attempt) {
+							finish("failed", "server attempt differs or is unavailable; durable job remains tracked", { confirmedTerminal: false, lastObservedState: state });
+							return;
+						}
 						if (state !== undefined && isTerminal(state, cfg.terminalStates)) {
 							finish(mapOutcome(state), `state=${state}`, {
 								confirmedTerminal: true,
@@ -239,7 +251,16 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, opts = {}, 
 			void tail();
 
 			return {
-				cancel: () => {
+				cancel: (reason) => {
+					if (settled) return;
+					// DSH forwards these lifecycle reasons through the public
+					// producer hook. Teardown stops this supervisor, not the
+					// independently durable server work. Explicit job_kill still
+					// requests cancellation and waits for server confirmation.
+					if (isDisposed() || reason === "owner disposed" || reason === "jobs service disposed") {
+						finish("failed", "DSH observer disposed; durable job remains tracked", { confirmedTerminal: false });
+						return;
+					}
 					cancelDeadline = Date.now() + cfg.cancelConfirmTimeoutMs;
 					// Dedicated deadline timer: settlement must not depend on a
 					// poll tick surviving a slow or unreachable server.

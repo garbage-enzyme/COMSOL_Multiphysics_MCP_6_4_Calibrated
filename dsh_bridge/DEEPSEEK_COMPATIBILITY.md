@@ -1,7 +1,7 @@
 # DeepSeek Harness compatibility contract
 
 This is the versioned compatibility note for the optional
-`@local/dsh-comsol-bridge` component in COMSOL MCP alpha7.2 (`0.7.2`). The
+`@local/dsh-comsol-bridge` component in the COMSOL MCP repository. The
 bridge is a repository-only Node.js client adapter; it is not a feature of the
 Python `comsol-mcp` server.
 
@@ -9,17 +9,29 @@ Python `comsol-mcp` server.
 
 | Component | Current identity | Evidence |
 | --- | --- | --- |
-| COMSOL MCP release line | `0.7.2` / alpha7.2 | pushed release and exact-SHA CI |
-| Production installation | `0.7.1` | intentionally unchanged; no deployment |
+| Server package baseline | `0.7.3` | Python server unchanged by bridge repair |
+| DSH acceptance host | `0.1.6-alpha.2` | real Web host, native controller and registered Agents |
 | DSH bridge package | `@local/dsh-comsol-bridge` `0.1.0` | `package.json` |
 | Node runtime | Node.js `>=20` | package engine declaration |
 | Bridge dependencies | none | package metadata and CI |
-| Bridge regression | 37/37 Node tests + smoke | solver-free fake-server lane |
+| Bridge regression | 69/69 Node tests + smoke | solver-free fake-server lane |
 
-The bridge was exercised against the installed `0.7.1` server for capabilities,
+Historically, the bridge was exercised against the installed `0.7.1` server for capabilities,
 tool registration, durable-job mirroring, progress streaming, and completion
 notification. This is transport/client evidence, not licensed COMSOL solve
 acceptance for `0.7.2`.
+
+On DSH `0.1.6-alpha.2`, running-job and offline-completion recovery passed
+with two original sessions, delayed owner registration, isolated notices and
+no resubmission, using an independent persistent fake MCP server. The harness
+explicitly called the public `sessions.flush` before the final restart.
+This verifies recovery after session persistence, not crash-proof delivery.
+Native non-COMSOL background jobs also lose an unflushed notice on abrupt
+restart, while a flushed notice survives. The accepted notification boundary
+follows native session persistence; crash-proof acknowledgement is outside it.
+Real-host negative checks also cover unavailable owners/controllers, legacy
+rows, controller delay/loss, foreign progress/cancellation access, four terminal
+outcomes, transport loss, state-write failure, stale attempts and owner disposal.
 
 ## Architecture contract
 
@@ -97,6 +109,17 @@ authorized acceptance receipt.
   process, or Java owner remains.
 - Keep server evidence and bridge state; do not rewrite receipts to match a
   DSH notification.
+- A server-terminal row found at startup still needs delivery to its original
+  live Agent/controller. Missing owners or failed mirror starts retain the row
+  for bounded retry or a later restart; never bind an arbitrary current session.
+- Native job completion and session persistence are separate boundaries. A
+  notification in memory is not proof that it survives an immediate crash.
+- A known attempt that differs from current server status blocks recovery and
+  retains its original identity. A mirror observing an attempt change settles
+  unconfirmed and must not report the replacement execution as its own result.
+- DSH `owner disposed` and `jobs service disposed` hook reasons detach the
+  supervisor without sending server cancellation. Loss of the native controller
+  also retains tracking. Explicit job cancellation remains a separate operation.
 
 ## Packaging and attribution
 
