@@ -222,6 +222,7 @@ models are intentionally absent.
 - `development_kit/tests/test_electro_chemistry.py` — This module tests the isolated electrochemistry profile surface, rollback, and offline catalog without COMSOL.
 - `development_kit/tests/test_alpha73_public_surface.py` — This module tests the alpha7.3 public surface: frozen comsolless dispatch, cold discovery, and package boundaries.
 - `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
+- `development_kit/tests/test_surrogate_manifests.py` — This module tests solver-free surrogate dataset, schema, split, and transform manifest contracts.
 - `development_kit/tests/test_acdc_differential_coils_recipe.py` — This module tests static portability and input contracts for the differential-coil recipe.
 - `development_kit/tests/test_attached_job_backend.py` — This module tests immutable attached-job targets, handoff, worker execution, resume, cancellation, and preservation.
 - `development_kit/tests/test_async_solver.py` — This module tests asynchronous solver thread state with fake studies.
@@ -507,6 +508,8 @@ models are intentionally absent.
 - `comsol_mcp/durable/__init__.py` — This module exports versioned canonicalization and durable filesystem primitives.
 - `comsol_mcp/durable/canonical.py` — This module preserves legacy canonical bytes and adds domain-separated identities for new schemas.
 - `comsol_mcp/durable/io.py` — This module implements bounded hashing, atomic replacement, and complete-row persistence.
+- `comsol_mcp/surrogate/__init__.py` — This module exports solver-free surrogate dataset, split, and transform manifests.
+- `comsol_mcp/surrogate/manifests.py` — This module validates closed versioned surrogate dataset, schema, leakage-group, split, and training-transform manifests with deterministic hashes.
 - `comsol_mcp/compatibility_manifest.json` — This file declares exact licensed, dependency-only, and unknown runtime compatibility.
 - `comsol_mcp/deployment_manifest.json` — This file binds deployment identity to frozen tool and profile snapshots.
 - `comsol_mcp/environment_identity.py` — This module reports redacted Python, platform, dependency, and optional-feature identity.
