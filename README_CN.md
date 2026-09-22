@@ -11,38 +11,6 @@
 
 > [wjc9011/COMSOL_Multiphysics_MCP](https://github.com/wjc9011/COMSOL_Multiphysics_MCP) 的维护型 Fork，已接受 **`COMSOL 6.4.0.*` release line** 和 **MPh 1.3.1 standalone/clientapi**。licensed reference 证据使用 **COMSOL 6.4.0.293**；第三位数字变化视为新的 release family，需要重新验收。
 
-## 相关论文与引用
-
-介绍 COMSOL-MCP 的论文为：
-
-> Naiyin Zhang and Junchao Wang, “COMSOL-MCP: An open-source model context
-> protocol interface for AI-assisted multiphysics simulation,” *Neurocomputing*,
-> vol. 703, article 134481, 2026.
-
-出版商页面：[ScienceDirect](https://linkinghub.elsevier.com/retrieve/pii/S0925231226018795)
-
-```bibtex
-@article{Zhang2026COMSOLMCP,
-  title   = {COMSOL-MCP: An Open-Source Model Context Protocol Interface for AI-Assisted Multiphysics Simulation},
-  author  = {Zhang, Naiyin and Wang, Junchao},
-  journal = {Neurocomputing},
-  volume  = {703},
-  pages   = {134481},
-  year    = {2026},
-  doi     = {10.1016/j.neucom.2026.134481},
-  url     = {https://doi.org/10.1016/j.neucom.2026.134481}
-}
-```
-
-介绍 COMSOL-MCP 的方法、架构、功能或评估结果时，请引用上述论文。使用或修改软件时，
-请同时引用论文和代码仓库；GitHub 的 **Cite this repository** 菜单使用
-[`CITATION.cff`](CITATION.cff) 中的元数据。为保证可复现性，请在数据/代码可用性声明中
-注明所用的精确 release 或 commit、仓库链接和访问日期。
-
-感谢 Naiyin Zhang 与 Junchao Wang 创建 COMSOL-MCP、发表相关论文，并在 upstream
-[commit `99172f8`](https://github.com/wjc9011/COMSOL_Multiphysics_MCP/commit/99172f8f43c6753c2442c406cd5c6055ea8c5bef)
-中贡献引用指引；本维护型 fork 已根据自身仓库与 release evidence 边界进行了适配。
-
 该服务器为 AI agent 提供更安全、更紧凑的 COMSOL 接口，用于模型检查、受控单点验证、可恢复的分段扫描与离线手册检索。它适配 `mph.Client()` 返回的 `model.java` clientapi 对象；该对象与上游面向的直接 `com.comsol.model.Model` API 有实质差异。
 
 ## 特色功能
@@ -637,3 +605,35 @@ MCP 客户端配置示例：
 GPL-3.0-or-later，本包不复制或分发它。感谢 Krister Svanberg 提出 MMA/GCMMA，
 并感谢 Arjen Deetman 提供本项目核验的 Python 实现；使用该执行路径时应保留其许可证
 与引用声明。
+
+## 相关论文与引用
+
+下方论文介绍的是上游 COMSOL-MCP 项目，并非本维护型 Fork；此处仅用于
+致谢和标明来源：
+
+> Naiyin Zhang and Junchao Wang, “COMSOL-MCP: An open-source model context
+> protocol interface for AI-assisted multiphysics simulation,” *Neurocomputing*,
+> vol. 703, article 134481, 2026.
+
+出版商页面：[ScienceDirect](https://linkinghub.elsevier.com/retrieve/pii/S0925231226018795)
+
+```bibtex
+@article{Zhang2026COMSOLMCP,
+  title   = {COMSOL-MCP: An Open-Source Model Context Protocol Interface for AI-Assisted Multiphysics Simulation},
+  author  = {Zhang, Naiyin and Wang, Junchao},
+  journal = {Neurocomputing},
+  volume  = {703},
+  pages   = {134481},
+  year    = {2026},
+  doi     = {10.1016/j.neucom.2026.134481},
+  url     = {https://doi.org/10.1016/j.neucom.2026.134481}
+}
+```
+
+上述论文中的方法、架构、功能和评估均指向上游项目。本 Fork 请通过 GitHub 的
+**Cite this repository** 菜单引用 [`CITATION.cff`](CITATION.cff)，并在可复现性声明中
+注明本 Fork 的精确 release 或 commit、仓库链接和访问日期。
+
+感谢 Naiyin Zhang 与 Junchao Wang 创建 COMSOL-MCP、发表相关论文，并在 upstream
+[commit `99172f8`](https://github.com/wjc9011/COMSOL_Multiphysics_MCP/commit/99172f8f43c6753c2442c406cd5c6055ea8c5bef)
+中贡献引用指引；本维护型 fork 已根据自身仓库与 release evidence 边界进行了适配。
