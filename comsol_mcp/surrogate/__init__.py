@@ -39,13 +39,29 @@ __all__ = [
     "build_schema_manifest",
     "build_training_transforms",
     "canonical_manifest_sha256",
+    "check_prediction_consistency",
+    "CONSISTENCY_STATES",
+    "compare_against_baseline",
+    "compute_metrics",
+    "CONTINUATION_IDENTITY_FIELDS",
     "detect_drift",
     "detect_leakage",
+    "evaluate_continuation",
+    "evaluate_export_availability",
     "evaluate_ood",
+    "evaluate_seed_stability",
+    "EXPORT_FORMATS",
+    "fit_baseline",
     "fit_transforms",
+    "hash_export_artifact",
+    "integrate_export_into_registry",
     "invert_transforms",
+    "METRIC_NAMES",
+    "predict_baseline",
     "summarize_row_ledger",
+    "train_surrogate",
     "validate_dataset_manifest",
+    "validate_export_manifest",
     "validate_field_schema",
     "validate_fitted_transforms",
     "validate_group_disjoint_split",
@@ -59,6 +75,16 @@ __all__ = [
     "verify_transform_roundtrip",
 ]
 
+from comsol_mcp.surrogate.export import (
+    CONSISTENCY_STATES,
+    EXPORT_FORMATS,
+    build_export_manifest,
+    check_prediction_consistency,
+    evaluate_export_availability,
+    hash_export_artifact,
+    integrate_export_into_registry,
+    validate_export_manifest,
+)
 from comsol_mcp.surrogate.fields import (
     apply_transforms,
     build_field_schema,
@@ -113,6 +139,17 @@ from comsol_mcp.surrogate.rows import (
     validate_row_provenance,
 )
 from comsol_mcp.surrogate.rows import STRATEGY_VERSION as LHS_STRATEGY_VERSION
+from comsol_mcp.surrogate.training import (
+    CONTINUATION_IDENTITY_FIELDS,
+    METRIC_NAMES,
+    compare_against_baseline,
+    compute_metrics,
+    evaluate_continuation,
+    evaluate_seed_stability,
+    fit_baseline,
+    predict_baseline,
+)
+from comsol_mcp.surrogate.dnn_adapter import train_surrogate
 from comsol_mcp.surrogate.splits import (
     DEFAULT_PROPORTIONS,
     LEAKAGE_CLASSES,

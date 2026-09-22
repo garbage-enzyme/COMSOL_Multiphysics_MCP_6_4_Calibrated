@@ -242,3 +242,45 @@ shipped `tubular_reactor_surrogate.mph` example to read a known-good
 configuration fails with "初始化物理场接口失败" because the model requires
 physics interfaces that are not licensed on this host. The accepted contract is
 therefore derived from the bounded experiment above, not from the example.
+
+## 12. S7 export findings — resolved against live COMSOL
+
+Export, artifact hashing, consistency, and registry integration were run on a
+real COMSOL 6.4.0.293 session. Licensed receipt:
+`D:\mcp_tests\a75s7g02\s7_gate.json`
+(sha256 `6bb58f1ac657e546d0796260992e7d63af5824d067b1959738299c9408a59613`).
+
+One finding corrected an assumption that had been carried since S0:
+
+| Finding | Consequence |
+| --- | --- |
+| COMSOL's DNN `export(path)` writes **ONNX protobuf regardless of the filename extension**. Exporting the same network to `model_a.onnx`, `model_b.onnx`, and `probe.txt` produced three byte-identical ONNX payloads (2105 bytes, sha256 `a417ee48…`). | There is no separate internal text export format. The invented `mph_internal` format was removed, ONNX became the single required format, and an unavailable ONNX export now **blocks** registration instead of being an acceptable omission. |
+
+Verified on the licensed export run:
+
+- The exported payload is genuine ONNX: producer `COMSOL 6.4.0.293`, operators
+  `Gemm`, `Tanh`, `Mul`, `Add`, and all six weight/bias initializers
+  (`node_Gemm.weight`, `node_Gemm.bias`, `node_Gemm_1.weight`,
+  `node_Gemm_1.bias`, `node_Gemm_2.weight`, `node_Gemm_2.bias`) for the trained
+  `2 → 16 → 8 → 1` network.
+- Export is deterministic: two exports of the same trained model hashed
+  identically, so a content hash is a stable artifact identity.
+- The export manifest binds the trained checksum
+  (`-8938453606443985335`), the architecture hash, and the artifact content hash
+  (`a417ee48…`, 2105 bytes). Because `exportfilename` is unreadable, the file's
+  content hash is the only trustworthy export evidence, and the manifest records
+  `trusted_property_filename=false`.
+- Consistency was evaluated against 64 real float32 values decoded from the
+  exported ONNX payload: agreement scored `consistent` and registered, while a
+  perturbed copy scored `inconsistent` with `violating_rows=[0]` and was refused
+  registration with escalation required.
+- An out-of-domain state registered the consistent artifact but still demanded
+  fresh FEM escalation, so a prediction never becomes FEM evidence.
+- Session, lease, descendants, and listeners were all released with zero active
+  durable jobs.
+
+Frozen limitation: consistency is checked against the exported payload's own
+weight bytes, which proves the artifact is stable and non-degenerate, but does
+not independently prove that a third-party ONNX runtime reproduces the same
+predictions. That would require an ONNX runtime, which this project does not
+depend on.
