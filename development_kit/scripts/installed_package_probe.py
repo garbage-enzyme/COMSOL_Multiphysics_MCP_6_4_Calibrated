@@ -352,9 +352,7 @@ def main() -> int:
     composed_names = set(expected_names["full"])
     for feature in FEATURE_NAMES:
         composed_names.update(expected_features[feature])
-    expected_composed_schemas = {
-        name: expected_schemas[name] for name in composed_names
-    }
+    expected_composed_schemas = {name: expected_schemas[name] for name in composed_names}
     if composed_schemas != expected_composed_schemas:
         raise AssertionError("installed composed feature surface differs from full schema snapshot")
 
