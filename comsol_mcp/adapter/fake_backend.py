@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Sequence
 
-from comsol_mcp.adapter.conversion import convert_explicitly
+from comsol_mcp.adapter.conversion import convert_explicitly, normalize_evaluation_result
 from comsol_mcp.adapter.protocol import (
     AdapterError,
     ConvertedValue,
@@ -59,6 +59,8 @@ class FakeComsolBackend:
             tag: dict(values) for tag, values in (properties or {}).items()
         }
         self._failures = dict(failures or {})
+        #: Scripted raw evaluation results, keyed by expression.
+        self._evaluations: dict[str, Any] = {}
         self._mph_version = mph_version
         self._comsol_version = comsol_version
         self._session: SessionIdentity | None = None
@@ -146,19 +148,30 @@ class FakeComsolBackend:
             raise AdapterError(
                 "node_not_found", "a node path must not be empty", operation="node_lookup"
             )
-        if path[0] not in self._properties:
+        # The fake uses the same (kind, tag) convention as the real backends so a
+        # test cannot pass against one convention and fail on COMSOL.
+        key = path[-1]
+        if key not in self._properties:
             raise AdapterError(
                 "node_not_found",
-                f"no node tagged {path[0]!r}",
+                f"no node tagged {key!r}",
                 operation="node_lookup",
             )
-        return NodeRef(tag=path[0], path=tuple(path), node_type="component")
+        return NodeRef(tag=key, path=tuple(path), node_type=path[0] if path else None)
 
     def children(self, node: NodeRef) -> Sequence[NodeRef]:
         self._record("node_children", tag=node.tag)
         self._maybe_fail("node_children")
         self._require_model("node_children")
-        return [node.child(name) for name in sorted(self._properties.get(node.tag, {}))]
+        prefix = node.path[0] if node.path else "component"
+        return [
+            NodeRef(
+                tag=name,
+                path=(*node.path, name),
+                node_type=prefix,
+            )
+            for name in sorted(self._properties.get(node.tag, {}))
+        ]
 
     # -- step 3: explicit conversion ----------------------------------------
     def convert(self, value: Any, *, form: str, target: str) -> ConvertedValue:
@@ -222,7 +235,16 @@ class FakeComsolBackend:
         self._record("model_evaluate", expression=request.expression)
         self._maybe_fail("model_evaluate")
         self._require_model("model_evaluate")
-        return convert_explicitly(0.0, form="float")
+        # Real MPh returns a numpy array even for a scalar expression, so the fake
+        # stores the scripted *shape* and runs the same normalizer the real
+        # backends use. That keeps the fake honest about the licensed behaviour
+        # instead of returning a convenient bare float.
+        value = self._evaluations.get(request.expression, 0.0)
+        return normalize_evaluation_result(value)
+
+    def set_evaluation(self, expression: str, value: Any) -> None:
+        """Script a raw evaluation result, in the shape a real lane would return."""
+        self._evaluations[expression] = value
 
     def dataset_names(self) -> Sequence[str]:
         self._record("dataset_access")

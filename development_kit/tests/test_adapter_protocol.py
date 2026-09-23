@@ -33,7 +33,9 @@ from comsol_mcp.adapter import (
     describe_protocol,
     lane_is_supported,
     make_backend,
+    normalize_evaluation_result,
     operation_is_known,
+    unwrap_backend_value,
 )
 from comsol_mcp.adapter.fake_backend import FakeComsolBackend
 from comsol_mcp.adapter.mph14_backend import (
@@ -183,6 +185,76 @@ def test_explicit_conversion_refuses_implicit_coercion(value, form) -> None:
     assert excinfo.value.reason_code == "conversion_not_representable"
 
 
+def test_a_jvm_string_proxy_is_unwrapped_for_the_backend() -> None:
+    """Licensed defect: COMSOL's `getString` returns a JPype proxy, not a `str`.
+
+    Measured on COMSOL 6.4.0.293: the study step's `plist` read back as
+    `jpype._jstring` / `java.lang.String`, so `isinstance(value, str)` was False
+    and a strict conversion reported a spurious `property_type_mismatch` (see
+    `D:\\mcp_tests\\a75s4type\\java_types.json`). Only backend-produced values are
+    unwrapped; caller input stays strictly checked.
+    """
+
+    class JavaString:
+        """Stands in for `jpype._jstring` without importing jpype."""
+
+        __module__ = "jpype._jstring"
+
+        def __init__(self, text: str) -> None:
+            self._text = text
+
+        def __str__(self) -> str:
+            return self._text
+
+    # Name the class exactly as JPype does so the unwrapper's type check matches.
+    JavaString.__name__ = "java.lang.String"
+    JavaString.__qualname__ = "java.lang.String"
+
+    proxy = JavaString("")
+    assert not isinstance(proxy, str)
+    assert unwrap_backend_value(proxy) == ""
+    assert isinstance(unwrap_backend_value(proxy), str)
+    # The unwrapped value then satisfies a strict conversion.
+    assert convert_explicitly(unwrap_backend_value(proxy), form="str").value == ""
+
+
+def test_a_jvm_numeric_proxy_is_unwrapped() -> None:
+    class JavaDouble:
+        __module__ = "jpype._jdouble"
+
+        def __init__(self, value: float) -> None:
+            self._value = value
+
+        def __float__(self) -> float:
+            return self._value
+
+    JavaDouble.__name__ = "java.lang.Double"
+    JavaDouble.__qualname__ = "java.lang.Double"
+
+    proxy = JavaDouble(2.5)
+    unwrapped = unwrap_backend_value(proxy)
+    assert unwrapped == 2.5
+    assert convert_explicitly(unwrapped, form="float").value == 2.5
+
+
+def test_unwrapping_does_not_weaken_caller_input_checks() -> None:
+    """A plain string must still be refused for a numeric form."""
+    assert unwrap_backend_value("3") == "3"
+    with pytest.raises(AdapterError) as excinfo:
+        convert_explicitly(unwrap_backend_value("3"), form="int")
+    assert excinfo.value.reason_code == "conversion_not_representable"
+    # And a Python bool must still not become an int.
+    with pytest.raises(AdapterError):
+        convert_explicitly(unwrap_backend_value(True), form="int")
+
+
+def test_an_unrecognized_value_passes_through_unchanged() -> None:
+    sentinel = object()
+    assert unwrap_backend_value(sentinel) is sentinel
+    assert unwrap_backend_value(7) == 7
+    assert unwrap_backend_value(None) is None
+
+
 def test_an_unsupported_form_is_refused() -> None:
     with pytest.raises(AdapterError, match="unsupported conversion form"):
         convert_explicitly(1, form="complex_matrix")
@@ -246,15 +318,188 @@ def test_an_unprovable_model_hash_is_reported_unknown() -> None:
 
 def test_node_lookup_resolves_and_reports_a_missing_tag() -> None:
     backend = _opened(properties={"comp1": {"L": 0.1}})
-    node = backend.find_node(["comp1"])
+    node = backend.find_node(["component", "comp1"])
     assert node.tag == "comp1"
-    assert node.path == ("comp1",)
+    assert node.path == ("component", "comp1")
     assert [child.tag for child in backend.children(node)] == ["L"]
     with pytest.raises(AdapterError) as excinfo:
-        backend.find_node(["absent"])
+        backend.find_node(["component", "absent"])
     assert excinfo.value.reason_code == "node_not_found"
     with pytest.raises(AdapterError):
         backend.find_node([])
+
+
+def test_model_identity_calls_methods_rather_than_stringifying_them() -> None:
+    """Licensed defect: on MPh 1.3.1 `Model.name`/`Model.file` are METHODS.
+
+    The first implementation used `getattr(model, "name")`, so a receipt recorded
+    `<bound method Model.name of Model('s4a_probe')>` instead of the model name.
+    The licensed gate caught it. This pins the fix.
+    """
+
+    class MethodStyleModel:
+        """Mirrors MPh's `def name(self) -> str` / `def file(self) -> Path`."""
+
+        def name(self) -> str:
+            return "s4a_probe"
+
+        def file(self) -> str:
+            return "D:/mcp_tests/a75s4lic/s4a_probe.mph"
+
+    identity = MphBackendBase()._model_identity(MethodStyleModel())  # noqa: SLF001
+    assert identity.name == "s4a_probe"
+    assert "bound method" not in identity.name
+    assert identity.file == "D:/mcp_tests/a75s4lic/s4a_probe.mph"
+    assert identity.content_sha256 is None
+
+
+def test_model_identity_still_accepts_plain_attributes() -> None:
+    """A fake or a future lane may expose attributes; both shapes must work."""
+
+    class AttributeStyleModel:
+        name = "plain"
+        file = "plain.mph"
+
+    identity = MphBackendBase()._model_identity(AttributeStyleModel())  # noqa: SLF001
+    assert identity.name == "plain"
+    assert identity.file == "plain.mph"
+
+
+def test_model_identity_reports_unknown_instead_of_stringifying_nothing() -> None:
+    class Empty:
+        name = None
+        file = None
+
+    identity = MphBackendBase()._model_identity(Empty())  # noqa: SLF001
+    assert identity.name == ""
+    assert identity.file is None
+    assert identity.content_sha256 is None
+
+
+def test_an_unsupported_node_path_shape_is_refused() -> None:
+    """The adapter addresses nodes by explicit kind-prefixed Java tags.
+
+    Licensed probes showed MPh's high-level Node view is unusable on this
+    localized COMSOL install: `components()` returns `组件 1` rather than `comp1`,
+    `Node.exists()` is False even for a created component, and
+    `Node.children()` raises `AttributeError: 'NoneType' object has no attribute
+    'tags'`. The adapter therefore uses the Java accessor chain the repository's
+    runtime jobs already use, and a caller states the node kind explicitly.
+
+    A path shape the adapter does not represent is refused with a stable code
+    rather than guessed at. Only the shape check is exercised, so no COMSOL is
+    needed.
+    """
+
+    class StubBackend(MphBackendBase):
+        def _require_model(self, operation: str) -> object:
+            return object()
+
+    backend = StubBackend()
+    for path in (("nonsense", "a"), ("component",), ("component", "a", "b", "c", "d")):
+        with pytest.raises(AdapterError) as excinfo:
+            backend.find_node(path)
+        assert excinfo.value.reason_code == "node_not_found"
+
+
+def test_declared_node_path_shapes_match_the_validator() -> None:
+    """The declared shape table and the validator must not drift apart.
+
+    `node_path_shapes()` is what a caller or a receipt reads;
+    `_shape_is_representable` is what actually gates resolution. If they disagree,
+    a documented shape would be refused or an undocumented one accepted.
+
+    The table's keys are descriptive labels (`("component","geom","feature")`),
+    while the validator dispatches on the **first element** plus the arity, so the
+    comparison is over `(path[0], arity)` pairs.
+    """
+    declared = {(kind[0], arity) for kind, arity in MphBackendBase.node_path_shapes().items()}
+    assert declared == {
+        ("component", 2),
+        ("component", 3),
+        ("component", 4),
+        ("physics", 3),
+        ("study", 2),
+        ("study", 3),
+        ("solution", 2),
+        ("dataset", 2),
+    }
+
+    kinds = {kind for kind, _ in declared} | {"nonsense"}
+    for kind in sorted(kinds):
+        for arity in range(1, 6):
+            probe = (kind, *(f"t{index}" for index in range(arity - 1)))
+            expected = (kind, arity) in declared
+            assert MphBackendBase._shape_is_representable(probe) is expected, probe  # noqa: SLF001
+
+
+def test_every_representable_node_path_shape_reaches_the_java_accessor() -> None:
+    """Each supported shape must resolve to the documented accessor chain.
+
+    A recording stub stands in for `model.java`, so the dispatch is exercised
+    without COMSOL and each shape's accessor route is pinned.
+    """
+    calls: list[str] = []
+
+    class Recording:
+        def component(self, tag: str) -> "Recording":
+            calls.append(f"component({tag})")
+            return self
+
+        def geom(self, tag: str) -> "Recording":
+            calls.append(f"geom({tag})")
+            return self
+
+        def feature(self, tag: str) -> "Recording":
+            calls.append(f"feature({tag})")
+            return self
+
+        def physics(self, tag: str) -> "Recording":
+            calls.append(f"physics({tag})")
+            return self
+
+        def study(self, tag: str) -> "Recording":
+            calls.append(f"study({tag})")
+            return self
+
+        def sol(self, tag: str) -> "Recording":
+            calls.append(f"sol({tag})")
+            return self
+
+        def result(self) -> "Recording":
+            calls.append("result()")
+            return self
+
+        def dataset(self, tag: str) -> "Recording":
+            calls.append(f"dataset({tag})")
+            return self
+
+    class StubModel:
+        java = Recording()
+
+    class StubBackend(MphBackendBase):
+        def _require_model(self, operation: str) -> object:
+            return StubModel()
+
+    backend = StubBackend()
+    expected = {
+        ("component", "comp1"): ["component(comp1)"],
+        ("component", "comp1", "geom1"): ["component(comp1)", "geom(geom1)"],
+        ("component", "comp1", "geom1", "i1"): [
+            "component(comp1)",
+            "geom(geom1)",
+            "feature(i1)",
+        ],
+        ("physics", "comp1", "c1"): ["component(comp1)", "physics(c1)"],
+        ("study", "std1"): ["study(std1)"],
+        ("study", "std1", "step1"): ["study(std1)", "feature(step1)"],
+        ("solution", "sol1"): ["sol(sol1)"],
+        ("dataset", "dset1"): ["result()", "dataset(dset1)"],
+    }
+    for path, expected_calls in expected.items():
+        calls.clear()
+        backend._java_node(path)  # noqa: SLF001
+        assert calls == expected_calls, path
 
 
 def test_child_nodes_extend_the_path_without_losing_the_parent() -> None:
@@ -337,6 +582,61 @@ def test_evaluation_and_dataset_access_return_declared_shapes() -> None:
     assert result.form == "float"
     assert backend.dataset_names() == ["study1//solution1"]
     assert backend.solution_names() == ["sol1"]
+
+
+def test_a_real_numpy_style_scalar_array_is_normalized() -> None:
+    """MPh returns a numpy array for a scalar expression, not a Python float.
+
+    This is measured licensed behaviour, not an assumption: `model.evaluate("a1")`
+    returned `array(1.5)` and `model.evaluate("1+1")` returned `array(2.)` on
+    COMSOL 6.4.0.293 (see `D:\\mcp_tests\\a75s4ev\\eval_shape.json`). The
+    normalizer must therefore duck-type a numpy-like object through `tolist`.
+    """
+
+    class NumpyLike:
+        """Stands in for a 0-d numpy array without importing numpy."""
+
+        def __init__(self, value: object) -> None:
+            self._value = value
+
+        def tolist(self) -> object:
+            return self._value
+
+    for raw, expected in ((1.5, 1.5), (2.0, 2.0), (3, 3)):
+        converted = normalize_evaluation_result(NumpyLike(raw))
+        assert converted.value == expected
+        assert converted.form == ("int" if isinstance(raw, int) else "float")
+
+    backend = _opened()
+    backend.set_evaluation("a1", NumpyLike(1.5))
+    assert backend.evaluate(EvaluationRequest(expression="a1")).value == 1.5
+
+
+def test_an_empty_evaluation_result_is_refused_not_zeroed() -> None:
+    """An undefined operator yields an empty array; substituting 0 would fabricate."""
+    with pytest.raises(AdapterError, match="produced no value"):
+        normalize_evaluation_result([])
+
+    backend = _opened()
+    backend.set_evaluation("undefined_op(1)", [])
+    with pytest.raises(AdapterError) as excinfo:
+        backend.evaluate(EvaluationRequest(expression="undefined_op(1)"))
+    assert excinfo.value.reason_code == "conversion_not_representable"
+
+
+def test_a_one_element_and_multi_element_result_are_distinguished() -> None:
+    """One element is a scalar; several are one matrix row."""
+    assert normalize_evaluation_result([7.0]).value == 7.0
+    multi = normalize_evaluation_result([1.0, 2.0, 3.0])
+    assert multi.form == "float_matrix"
+    assert multi.value == [[1.0, 2.0, 3.0]]
+    nested = normalize_evaluation_result([[1.0], [2.0]])
+    assert nested.value == [[1.0], [2.0]]
+
+
+def test_an_unrepresentable_evaluation_shape_is_refused() -> None:
+    with pytest.raises(AdapterError, match="does not represent"):
+        normalize_evaluation_result(object())
 
 
 def test_evaluation_requires_a_loaded_model() -> None:

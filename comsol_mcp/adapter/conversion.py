@@ -104,6 +104,54 @@ def to_matrix_rows(value: Any, *, form: str) -> list[list[Any]]:
     return rows
 
 
+#: Java proxy types COMSOL returns from `getString`/`getDouble`/... mapped to the
+#: Python primitive each unwraps to. Measured on COMSOL 6.4.0.293: `getString`
+#: returns a JPype `java.lang.String` proxy (`jpype._jstring`), so
+#: `isinstance(value, str)` is False even though the value prints as a string. See
+#: ``D:\\mcp_tests\\a75s4type\\java_types.json``.
+_JAVA_PROXY_KINDS: dict[str, str] = {
+    "java.lang.String": "str",
+    "java.lang.Character": "str",
+    "java.lang.Integer": "int",
+    "java.lang.Short": "int",
+    "java.lang.Long": "int",
+    "java.lang.Double": "float",
+    "java.lang.Float": "float",
+    "java.lang.Boolean": "bool",
+}
+
+
+def unwrap_backend_value(value: Any) -> Any:
+    """Unwrap a JVM proxy returned by a backend into a Python primitive.
+
+    This runs only on values the **backend** produced. Caller-supplied values are
+    still checked strictly by ``require_int`` and friends, so this does not
+    reintroduce the implicit coercion the protocol forbids: the value being
+    unwrapped is one COMSOL itself created, and its Java type name is matched
+    exactly rather than duck-typed.
+
+    Without this step a real COMSOL string read is reported as a type mismatch,
+    which is the defect the licensed gate found.
+    """
+    type_name = f"{type(value).__module__}.{type(value).__name__}"
+    short_name = type(value).__name__
+    kind = _JAVA_PROXY_KINDS.get(type_name) or _JAVA_PROXY_KINDS.get(short_name)
+    if kind is None:
+        return value
+    try:
+        if kind == "str":
+            return str(value)
+        if kind == "int":
+            return int(value)
+        if kind == "float":
+            return float(value)
+        return bool(value)
+    except TypeError, ValueError:
+        # A proxy that refuses conversion is returned unchanged, so the strict
+        # converter reports the real mismatch instead of this helper guessing.
+        return value
+
+
 def convert_explicitly(value: Any, *, form: str) -> ConvertedValue:
     """Convert one value to an explicit form and report what was produced.
 
@@ -138,15 +186,67 @@ def convert_explicitly(value: Any, *, form: str) -> ConvertedValue:
     return ConvertedValue(converted, form, source_type)
 
 
+def normalize_evaluation_result(raw: Any) -> ConvertedValue:
+    """Normalize one model-evaluation result into an explicit form.
+
+    Measured reality, not assumption: MPh returns a **numpy array** from
+    ``model.evaluate`` even for a scalar expression — ``array(1.5)`` for a
+    parameter, and an empty ``array([], dtype=float64)`` when the expression
+    cannot be evaluated (for example an operator the model does not define). See
+    ``D:\\mcp_tests\\a75s4ev\\eval_shape.json``.
+
+    The result is duck-typed through ``tolist`` rather than by importing numpy, so
+    this module stays dependency-free and the same code handles a plain Python
+    list from a fake backend.
+
+    An empty result is refused with a stable code. It means the expression
+    produced no value, and substituting ``0`` would be exactly the silent
+    fabrication this protocol exists to prevent.
+    """
+    # A JVM proxy is unwrapped first: COMSOL returns JPype objects whose Python
+    # type is not a primitive even when the value is one.
+    raw = unwrap_backend_value(raw)
+    if isinstance(raw, bool):
+        return convert_explicitly(raw, form="bool")
+    if isinstance(raw, int):
+        return convert_explicitly(raw, form="int")
+    if isinstance(raw, float):
+        return convert_explicitly(raw, form="float")
+    if isinstance(raw, str):
+        return convert_explicitly(raw, form="str")
+
+    to_list = getattr(raw, "tolist", None)
+    if callable(to_list):
+        return normalize_evaluation_result(to_list())
+
+    if isinstance(raw, Sequence):
+        if not raw:
+            raise _reject("the evaluation produced no value for this expression")
+        first = raw[0]
+        if isinstance(first, Sequence) and not isinstance(first, (str, bytes)):
+            return convert_explicitly([list(row) for row in raw], form="float_matrix")
+        if len(raw) == 1:
+            # A one-element sequence is how COMSOL reports a scalar result.
+            return normalize_evaluation_result(first)
+        # Several values are one row of a matrix, not a new vocabulary.
+        return convert_explicitly([list(raw)], form="float_matrix")
+
+    raise _reject(
+        f"the evaluation returned a shape this protocol does not represent: {type(raw).__name__}"
+    )
+
+
 __all__ = [
     "CONVERSION_FORMS",
     "MATRIX_FORMS",
     "MAX_MATRIX_ELEMENTS",
     "SCALAR_FORMS",
     "convert_explicitly",
+    "normalize_evaluation_result",
     "require_bool",
     "require_float",
     "require_int",
     "require_str",
     "to_matrix_rows",
+    "unwrap_backend_value",
 ]

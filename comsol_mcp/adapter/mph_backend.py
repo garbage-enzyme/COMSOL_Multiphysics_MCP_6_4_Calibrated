@@ -31,7 +31,11 @@ from __future__ import annotations
 
 from typing import Any, Sequence
 
-from comsol_mcp.adapter.conversion import convert_explicitly
+from comsol_mcp.adapter.conversion import (
+    convert_explicitly,
+    normalize_evaluation_result,
+    unwrap_backend_value,
+)
 from comsol_mcp.adapter.protocol import (
     REFERENCE_MPH_LANE,
     AdapterError,
@@ -189,10 +193,28 @@ class MphBackendBase:
         return self._model_identity(model)
 
     def _model_identity(self, model: Any) -> ModelIdentity:
-        name = str(getattr(model, "name", "") or "")
-        file_value = getattr(model, "file", None)
+        """Read a model's identity, calling MPh's methods rather than assuming attributes.
+
+        Measured defect this fixes: on MPh 1.3.1, ``Model.name`` and ``Model.file``
+        are **methods** (``def name(self) -> str``), not attributes. A first
+        implementation used ``getattr(model, "name")``, which returned the bound
+        method itself, so a receipt recorded
+        ``<bound method Model.name of Model('s4a_probe')>`` instead of the name.
+        The licensed gate caught it. Each accessor is therefore called when it is
+        callable, and an unreadable value is reported as unknown rather than
+        stringified.
+        """
+
+        def resolve(attribute: str) -> Any:
+            raw = getattr(model, attribute, None)
+            if raw is None:
+                return None
+            return raw() if callable(raw) else raw
+
+        name_value = resolve("name")
+        file_value = resolve("file")
         return ModelIdentity(
-            name=name,
+            name=str(name_value) if name_value else "",
             file=str(file_value) if file_value else None,
             # MPh exposes no content hash here. An unprovable identity is
             # reported as unknown rather than inferred from the path.
@@ -200,41 +222,156 @@ class MphBackendBase:
         )
 
     # -- step 2: tag/list/node lookup ---------------------------------------
-    def find_node(self, path: Sequence[str]) -> NodeRef:
+    @staticmethod
+    def node_path_shapes() -> dict[tuple[str, ...], int]:
+        """The representable node path shapes, keyed by kind with their arity.
+
+        Declared as data so a caller, a test, or a receipt can enumerate exactly
+        which node kinds the adapter addresses, instead of discovering them by
+        trial and error.
+        """
+        return {
+            ("component",): 2,
+            ("component", "geom"): 3,
+            ("component", "geom", "feature"): 4,
+            ("physics",): 3,
+            ("study",): 2,
+            ("study", "feature"): 3,
+            ("solution",): 2,
+            ("dataset",): 2,
+        }
+
+    @classmethod
+    def _shape_is_representable(cls, path: Sequence[str]) -> bool:
+        """Whether a path has a kind and arity the adapter can resolve."""
+        if len(path) < 2:
+            return False
+        if path[0] == "component":
+            return len(path) in {2, 3, 4}
+        if path[0] == "physics":
+            return len(path) == 3
+        if path[0] == "study":
+            return len(path) in {2, 3}
+        if path[0] in {"solution", "dataset"}:
+            return len(path) == 2
+        return False
+
+    def _java_node(self, path: Sequence[str]) -> Any:
+        """Resolve a node path through the Java ClientAPI accessor chain.
+
+        Measured defect this fixes: the high-level MPh ``Node`` view is unusable on
+        this localized COMSOL install. ``model.components()`` returns the localized
+        label ``组件 1`` rather than the tag ``comp1``, ``Node.exists()`` is False
+        even for a created component, and ``Node.children()`` raises
+        ``AttributeError: 'NoneType' object has no attribute 'tags'``. See
+        ``D:\\mcp_tests\\a75s4api\\node_api.json`` and
+        ``D:\\mcp_tests\\a75s4res\\resolution.json``.
+
+        The repository already resolves nested nodes through the Java accessor
+        chain used by its runtime jobs (``component(tag).geom(tag).feature(tag)``),
+        so the adapter follows that proven route and addresses nodes by **tag**,
+        which is stable and localized-label independent.
+
+        The shape is validated before the model is touched, so an unrepresentable
+        path is refused without needing a session at all.
+        """
+        if not self._shape_is_representable(path):
+            raise AdapterError(
+                "node_not_found",
+                f"unsupported node path shape: {'/'.join(path) or '<empty>'}",
+                operation="node_lookup",
+            )
         model = self._require_model("node_lookup")
+        java = model.java
+        kind = path[0]
+        try:
+            if kind == "component" and len(path) == 2:
+                return java.component(path[1])
+            if kind == "component" and len(path) == 3:
+                return java.component(path[1]).geom(path[2])
+            if kind == "component" and len(path) == 4:
+                return java.component(path[1]).geom(path[2]).feature(path[3])
+            if kind == "physics" and len(path) == 3:
+                return java.component(path[1]).physics(path[2])
+            if kind == "study" and len(path) == 2:
+                return java.study(path[1])
+            if kind == "study" and len(path) == 3:
+                return java.study(path[1]).feature(path[2])
+            if kind == "solution" and len(path) == 2:
+                return java.sol(path[1])
+            if kind == "dataset" and len(path) == 2:
+                return java.result().dataset(path[1])
+        except Exception as exc:
+            raise AdapterError(
+                "node_not_found",
+                f"no node at {'/'.join(path)}",
+                operation="node_lookup",
+            ) from exc
+        # Unreachable while `node_path_shapes()` and this dispatch agree; kept as
+        # a total-function guard so a future shape cannot silently return None.
+        raise AdapterError(
+            "node_not_found",
+            f"no accessor is defined for {'/'.join(path)}",
+            operation="node_lookup",
+        )
+
+    def find_node(self, path: Sequence[str]) -> NodeRef:
+        """Resolve a node by an explicit kind-prefixed path of Java tags.
+
+        The path is ``(kind, *tags)`` so a caller states what it is addressing
+        instead of relying on an ambiguous label walk, for example
+        ``("component", "comp1", "geom1")``.
+        """
         if not path:
             raise AdapterError(
                 "node_not_found",
                 "A node path must contain at least one tag.",
                 operation="node_lookup",
             )
-        node: Any = model
-        walked: list[str] = []
-        for tag in path:
-            walked.append(tag)
-            try:
-                node = node.java.component(tag) if len(walked) == 1 else node.child(tag)
-            except Exception as exc:
-                raise AdapterError(
-                    "node_not_found",
-                    f"no node at {'/'.join(walked)}",
-                    operation="node_lookup",
-                ) from exc
-        return NodeRef(tag=path[-1], path=tuple(path), node_type=None)
+        java = self._java_node(path)
+        node_type = None
+        try:
+            type_method = getattr(java, "getType", None)
+            if callable(type_method):
+                node_type = str(type_method())
+        except Exception:
+            # A type that cannot be read is reported unknown, not guessed.
+            node_type = None
+        return NodeRef(tag=path[-1], path=tuple(path), node_type=node_type)
 
     def children(self, node: NodeRef) -> Sequence[NodeRef]:
-        model = self._require_model("node_children")
+        """List the child tags of a resolved node.
+
+        Only node kinds with a well-defined child listing are supported, because
+        guessing a listing would invent structure the model may not have.
+        """
+        if len(node.path) != 2 or node.path[0] not in {"component", "study"}:
+            raise AdapterError(
+                "node_not_found",
+                f"children are not enumerated for {'/'.join(node.path)}",
+                operation="node_children",
+            )
+        java = self._java_node(node.path)
         try:
-            java = model.java
-            parent = java.component(node.tag) if not node.path[:-1] else None
-            tags = list(parent.features() if parent is not None else [])
+            if node.path[0] == "component":
+                tags = list(java.geom().tags())
+            else:
+                tags = list(java.feature().tags())
         except Exception as exc:
             raise AdapterError(
                 "node_not_found",
-                f"cannot list children of {node.tag}",
+                f"cannot list children of {'/'.join(node.path)}",
                 operation="node_children",
             ) from exc
-        return [node.child(str(tag)) for tag in tags]
+        prefix = node.path[0]
+        return [
+            NodeRef(
+                tag=str(tag),
+                path=(prefix, node.path[1], str(tag)),
+                node_type=None,
+            )
+            for tag in tags
+        ]
 
     # -- step 3: explicit conversion ----------------------------------------
     def convert(self, value: Any, *, form: str, target: str) -> ConvertedValue:
@@ -244,21 +381,33 @@ class MphBackendBase:
 
     # -- step 4: typed property access with rollback ------------------------
     def read_property(self, node: NodeRef, name: str, *, form: str) -> ConvertedValue:
-        model = self._require_model("property_read")
+        """Read one property and convert it explicitly.
+
+        The raw value is unwrapped first because COMSOL returns JVM proxies: a
+        measured `getString` returns `jpype._jstring` (`java.lang.String`), so
+        `isinstance(value, str)` is False and a strict conversion would report a
+        spurious type mismatch. Only backend-produced values are unwrapped;
+        caller-supplied values stay strictly checked.
+        """
         try:
-            raw = model.java.component(node.tag).getString(name)
+            java = self._java_node(node.path)
+            raw = java.getString(name)
+        except AdapterError:
+            raise
         except Exception as exc:
             raise AdapterError(
                 "property_not_found",
-                f"no property {name!r} on {node.tag}",
+                f"no property {name!r} on {'/'.join(node.path)}",
                 operation="property_read",
             ) from exc
+        unwrapped = unwrap_backend_value(raw)
         try:
-            return convert_explicitly(raw, form=form)
+            return convert_explicitly(unwrapped, form=form)
         except AdapterError as exc:
             raise AdapterError(
                 "property_type_mismatch",
-                f"property {name!r} on {node.tag} is not a {form}",
+                f"property {name!r} on {'/'.join(node.path)} is not a {form} "
+                f"(COMSOL returned {type(raw).__name__})",
                 operation="property_read",
             ) from exc
 
@@ -275,19 +424,27 @@ class MphBackendBase:
         )
 
     def apply_write(self, plan: PropertyWritePlan) -> PropertyWriteReceipt:
-        model = self._require_model("property_write")
-        component = model.java.component(plan.node.tag)
+        try:
+            java = self._java_node(plan.node.path)
+        except AdapterError as exc:
+            return PropertyWriteReceipt(
+                node=plan.node,
+                name=plan.name,
+                applied=False,
+                rolled_back=False,
+                reason_code=exc.reason_code,
+            )
         try:
             if plan.value.form == "str":
-                component.set(plan.name, plan.value.value)
+                java.set(plan.name, plan.value.value)
             elif plan.value.form == "int":
-                component.set(plan.name, str(plan.value.value))
+                java.set(plan.name, str(plan.value.value))
             elif plan.value.form == "float":
-                component.set(plan.name, repr(plan.value.value))
+                java.set(plan.name, repr(plan.value.value))
             else:
-                component.set(plan.name, plan.value.value)
+                java.set(plan.name, plan.value.value)
         except Exception as exc:
-            rolled_back = self._rollback(component, plan)
+            rolled_back = self._rollback(java, plan)
             receipt_error = self._translate(exc, "property_write")
             return PropertyWriteReceipt(
                 node=plan.node,
@@ -298,14 +455,14 @@ class MphBackendBase:
             )
         return PropertyWriteReceipt(node=plan.node, name=plan.name, applied=True, rolled_back=False)
 
-    def _rollback(self, component: Any, plan: PropertyWritePlan) -> bool:
+    def _rollback(self, java: Any, plan: PropertyWritePlan) -> bool:
         try:
             if plan.previous.form == "str":
-                component.set(plan.name, plan.previous.value)
+                java.set(plan.name, plan.previous.value)
             elif plan.previous.form == "float":
-                component.set(plan.name, repr(plan.previous.value))
+                java.set(plan.name, repr(plan.previous.value))
             else:
-                component.set(plan.name, plan.previous.value)
+                java.set(plan.name, plan.previous.value)
         except Exception:
             return False
         return True
@@ -326,14 +483,16 @@ class MphBackendBase:
             raw = model.evaluate(request.expression, **kwargs)
         except Exception as exc:
             raise self._translate(exc, "model_evaluate") from exc
-        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-            form = "int" if isinstance(raw, int) else "float"
-            return convert_explicitly(raw, form=form)
-        raise AdapterError(
-            "conversion_not_representable",
-            "the evaluation returned a shape this protocol does not represent yet",
-            operation="model_evaluate",
-        )
+        # MPh returns a numpy array even for a scalar expression, so the shape is
+        # normalized explicitly rather than assumed to be a Python scalar.
+        try:
+            return normalize_evaluation_result(raw)
+        except AdapterError as exc:
+            raise AdapterError(
+                "conversion_not_representable",
+                str(exc),
+                operation="model_evaluate",
+            ) from exc
 
     def dataset_names(self) -> Sequence[str]:
         model = self._require_model("dataset_access")

@@ -22,6 +22,8 @@ from comsol_mcp.adapter.conversion import (
     CONVERSION_FORMS,
     MAX_MATRIX_ELEMENTS,
     convert_explicitly,
+    normalize_evaluation_result,
+    unwrap_backend_value,
 )
 from comsol_mcp.adapter.protocol import (
     ADAPTER_ERROR_CODES,
@@ -106,5 +108,7 @@ __all__ = [
     "describe_protocol",
     "lane_is_supported",
     "make_backend",
+    "normalize_evaluation_result",
     "operation_is_known",
+    "unwrap_backend_value",
 ]
