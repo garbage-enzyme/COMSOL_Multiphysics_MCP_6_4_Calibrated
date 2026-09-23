@@ -393,16 +393,19 @@ suites pass with no heavy module imported.
 Frozen limitation, unchanged: `dbmodel://` remains syntax and evidence only. The
 four live Model Manager operations stay deferred to alpha7.6.
 
-## 16. S4A adapter findings — four defects only a licensed run could find
+## 16. S4A adapter findings — five defects, four of them licensed
 
 The adapter protocol was designed from measured MPh 1.3.1/1.4.0 source
-differences and 63 solver-free tests. Running it against a real solved model on
-COMSOL 6.4.0.293 then found **four defects that no solver-free test could have
-found**, because each depends on what COMSOL actually returns rather than on what
-the protocol assumed.
+differences and solver-free tests. Running it against a real solved model on
+COMSOL 6.4.0.293 found **four defects that no solver-free test could have found**,
+because each depends on what COMSOL actually returns rather than on what the
+protocol assumed. Hosted CI then found a **fifth**, and that one was a design
+error rather than an unverified assumption: the adapter had tied a capability to a
+backend class instead of to the installed MPh version.
 
 | Finding | Consequence for this repository |
 | --- | --- |
+| **The adapter assumed one "1.3 lane" when the declared range has two.** `pyproject.toml` declares `mph>=1.3.1,<1.4` and **1.3.2 is published**, so CI's eager-upgrade lane installs 1.3.2. MPh **1.3.2 already generalizes the `DoubleRowMatrix` read**, exactly as 1.4.0 does, so the 1.3.1 refusal text is absent there. | Capability is now keyed on the installed version through one shared table `MATRIX_READ_ROW_LIMIT_BY_VERSION = {"1.3.1": 2, "1.3.2": None, "1.4.0": None}`. `matrix_read_row_limit` raises on an unknown version rather than guessing; `observed_lane()` reports the installed version; `SUPPORTED_MPH_LANES` is `("1.3.1", "1.3.2")`; and `lane_capabilities()` reports 1.3.2 as generalized. The suite passes 67/67 on the 1.3.2 lane where CI failed. |
 | `model.evaluate` returns a **numpy array** even for a scalar expression: `array(1.5)` for a parameter and an empty `array([], dtype=float64)` for an expression the model cannot evaluate. | Evaluation is normalized through a duck-typed `tolist` instead of a numpy import, so it stays dependency-free and still accepts a plain list. An empty result is refused with `conversion_not_representable` rather than reported as `0`, because substituting a value the model never produced is the fabrication the protocol exists to prevent. |
 | `Model.name` and `Model.file` are **methods**, not attributes. | `getattr(model, "name")` returned the bound method, so a receipt recorded `<bound method Model.name of Model('s4a_probe')>`. Each accessor is called when callable, and an unreadable value is reported unknown rather than stringified. |
 | The high-level MPh `Node` view is unusable on this localized install: `components()` returns the label `组件 1` rather than the tag `comp1`, `Node.exists()` is False for a created component, and `Node.children()` raises `AttributeError: 'NoneType' object has no attribute 'tags'`. | The adapter resolves through the Java ClientAPI accessor chain the runtime jobs already use, addressing nodes by an explicit kind-prefixed tag path such as `("component", "comp1", "geom1")`. Representable shapes are declared as data and validated **before** the model is touched, so an unsupported shape is refused without needing a session. |

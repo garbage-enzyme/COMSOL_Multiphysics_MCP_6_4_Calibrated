@@ -41,10 +41,12 @@ from typing import Any
 
 from comsol_mcp.adapter.mph_backend import MphBackendBase
 from comsol_mcp.adapter.protocol import (
+    MATRIX_READ_ROW_LIMIT_BY_VERSION,
     AdapterError,
     ConvertedValue,
     ModelIdentity,
     NodeRef,
+    matrix_read_row_limit,
 )
 
 #: The lane this backend targets.  Declared as a module constant so a receipt can
@@ -125,14 +127,14 @@ class Mph14Backend(MphBackendBase):
             raise self._collapse_matrix_refusal(exc) from exc
 
     def matrix_row_capacity(self) -> int | None:
-        """Return this lane's ``DoubleRowMatrix`` row limit, or ``None`` if general.
+        """Return this lane's ``DoubleRowMatrix`` read limit, which is none.
 
-        1.4.0 generalizes the conversion, which is a real behavioural improvement
-        the reference lane does not have.  Returning ``None`` states "no limit"
-        rather than reusing the reference limit, so a caller cannot mistake the
-        two lanes for equivalent.
+        1.4.0 generalizes the read conversion. Note that 1.3.2 generalizes it too,
+        so this is not by itself what distinguishes 1.4 from every 1.3.x lane; the
+        `dbmodel://` load capability does. The value comes from the shared
+        version-keyed table so a lane cannot invent its own answer.
         """
-        return None
+        return matrix_read_row_limit(self.lane)
 
     def supports_dbmodel_uri(self) -> bool:
         """Whether the underlying lane can load a ``dbmodel://`` URI at all."""
@@ -142,26 +144,25 @@ class Mph14Backend(MphBackendBase):
 def lane_capabilities(lane: str) -> dict[str, Any]:
     """Return the capability difference between lanes as data.
 
-    Kept beside the backend so a receipt or parity report can record why two
-    lanes are not interchangeable, without constructing either one.
+    Kept beside the backend so a receipt or parity report can record why two lanes
+    are not interchangeable, without constructing either one. The matrix limit is
+    read from the shared version-keyed table, so 1.3.2 is reported as generalized
+    (it is) instead of being described as 1.3.1 was.
     """
-    if lane == MPH_1_4_LANE:
-        return {
-            "lane": MPH_1_4_LANE,
-            "supports_dbmodel_uri": True,
-            "double_row_matrix_row_limit": None,
-        }
-    if lane == "1.3.1":
-        return {
-            "lane": "1.3.1",
-            "supports_dbmodel_uri": False,
-            "double_row_matrix_row_limit": REFERENCE_DOUBLE_ROW_MATRIX_ROW_LIMIT,
-        }
-    raise AdapterError(
-        "adapter_unavailable",
-        f"no capability record for MPh lane {lane!r}",
-        operation="session_identity",
-    )
+    supported = set(MATRIX_READ_ROW_LIMIT_BY_VERSION)
+    if lane not in supported:
+        raise AdapterError(
+            "adapter_unavailable",
+            f"no capability record for MPh lane {lane!r}",
+            operation="session_identity",
+        )
+    return {
+        "lane": lane,
+        # Only 1.4.0 recognizes a dbmodel:// URI in Client.load; 1.3.x resolves
+        # the argument as a filesystem path in every release examined.
+        "supports_dbmodel_uri": lane == MPH_1_4_LANE,
+        "double_row_matrix_row_limit": matrix_read_row_limit(lane),
+    }
 
 
 __all__ = [

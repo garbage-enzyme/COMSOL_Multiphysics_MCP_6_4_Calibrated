@@ -49,10 +49,52 @@ from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 PROTOCOL_SCHEMA_NAME = "comsol_mcp.adapter.operation"
 PROTOCOL_SCHEMA_VERSION = "1.0.0"
 
-# The reference lane this project supports today.  A second lane is opt-in and
-# never becomes the default implicitly.
+# The reference lanes this project supports today. `pyproject.toml` declares
+# `mph>=1.3.1,<1.4`, and **1.3.2 exists on the index**, so an eager-upgrade
+# install legitimately resolves to 1.3.2. Both are reference lanes. A 1.4 lane is
+# opt-in and never becomes the default implicitly.
 REFERENCE_MPH_LANE = "1.3.1"
-SUPPORTED_MPH_LANES = (REFERENCE_MPH_LANE,)
+SUPPORTED_MPH_LANES = ("1.3.1", "1.3.2")
+
+#: Behaviour that varies across the supported `<1.4` range, keyed by version.
+#: MPh 1.3.1 limits `DoubleRowMatrix` **reads** to two rows and raises `TypeError`
+#: beyond that; 1.3.2 generalizes the same branch to any row count, exactly as
+#: 1.4.0 does (verified against both wheels). The limit is therefore a property of
+#: the *installed version*, not of a backend class: a claim tied to the class
+#: would be wrong on whichever lane happened to be installed.
+MATRIX_READ_ROW_LIMIT_BY_VERSION: Mapping[str, int | None] = {
+    "1.3.1": 2,
+    "1.3.2": None,
+    "1.4.0": None,
+}
+
+
+def matrix_read_row_limit(version: str) -> int | None:
+    """Return the `DoubleRowMatrix` read row limit for an MPh version.
+
+    ``None`` means the read is generalized. An unknown version raises rather than
+    guessing, because guessing here would silently misreport a capability.
+    """
+    if version not in MATRIX_READ_ROW_LIMIT_BY_VERSION:
+        raise AdapterError(
+            "adapter_unavailable",
+            f"no declared matrix read capability for MPh {version!r}",
+            operation="session_identity",
+        )
+    return MATRIX_READ_ROW_LIMIT_BY_VERSION[version]
+
+
+def installed_mph_version() -> str:
+    """Return the installed MPh version, or an empty string if unavailable.
+
+    Imported lazily and defensively so this stays usable with no MPh present.
+    """
+    try:
+        import mph
+    except Exception:
+        return ""
+    return str(getattr(mph, "__version__", "") or "")
+
 
 # Operations the protocol represents.  Each maps to a plan step:
 #   1 session/client and model identity
@@ -323,6 +365,8 @@ __all__ = [
     "SessionIdentity",
     "SessionRequest",
     "describe_protocol",
+    "installed_mph_version",
     "lane_is_supported",
+    "matrix_read_row_limit",
     "operation_is_known",
 ]

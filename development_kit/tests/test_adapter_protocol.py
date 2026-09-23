@@ -31,8 +31,10 @@ from comsol_mcp.adapter import (
     available_lanes,
     convert_explicitly,
     describe_protocol,
+    installed_mph_version,
     lane_is_supported,
     make_backend,
+    matrix_read_row_limit,
     normalize_evaluation_result,
     operation_is_known,
     unwrap_backend_value,
@@ -90,11 +92,16 @@ def test_protocol_declares_every_operation_and_error_code() -> None:
     assert len(OPERATIONS) == len(set(OPERATIONS))
 
 
-def test_the_reference_lane_is_the_only_supported_lane() -> None:
-    """1.4 is constructible but is not a supported compatibility claim."""
+def test_the_reference_lane_range_excludes_one_point_four() -> None:
+    """Both published `<1.4` lanes are reference lanes; 1.4 is constructible only.
+
+    1.4 is never a supported compatibility claim, but it stays selectable
+    explicitly so it can be tested in isolation.
+    """
     assert REFERENCE_MPH_LANE == "1.3.1"
-    assert SUPPORTED_MPH_LANES == ("1.3.1",)
+    assert SUPPORTED_MPH_LANES == ("1.3.1", "1.3.2")
     assert lane_is_supported("1.3.1") is True
+    assert lane_is_supported("1.3.2") is True
     assert lane_is_supported(MPH_1_4_LANE) is False
     # The lane is still selectable explicitly, so it can be tested in isolation.
     assert MPH_1_4_LANE in available_lanes()
@@ -718,19 +725,82 @@ def test_lanes_agree_on_the_same_refusal_codes() -> None:
 
 
 def test_the_quoted_matrix_refusal_matches_the_installed_reference_lane() -> None:
-    """The quoted refusal text must still exist in the installed MPh 1.3.1.
+    """The quoted refusal is version-specific and must not be assumed present.
 
-    The adapter matches on that message because MPh raises a bare ``TypeError``
-    with no code. If a future MPh changes the wording, the translation would
-    silently stop firing, so the quote is pinned to the installed source.
+    MPh removed the two-row limit on this read path in **1.3.2**, so the refusal
+    text exists in 1.3.1 only. `pyproject.toml` allows `mph>=1.3.1,<1.4` and 1.3.2
+    is published, so CI's eager-upgrade lane legitimately installs 1.3.2 where the
+    text is absent. An earlier version of this test hard-coded the 1.3.1 string and
+    failed on that lane.
+
+    The test asserts the relationship instead of a fixed string: a lane either
+    limits the read or generalizes it, and the adapter's declared capability must
+    agree with whichever is installed.
     """
     import mph
 
     node_source = (Path(mph.__file__).parent / "node.py").read_text(encoding="utf-8-sig")
-    assert REFERENCE_MATRIX_READ_REFUSAL in node_source
-    # The write path refuses more than two rows on both lanes, so its message
-    # must also still be present and is deliberately NOT translated per-lane.
+    lane_still_refuses = REFERENCE_MATRIX_READ_REFUSAL in node_source
+    generalized = "rows = [array(row) for row in value]" in node_source
+
+    assert lane_still_refuses or generalized, (
+        "neither the limited nor the generalized DoubleRowMatrix read was found in "
+        f"the installed MPh {mph.__version__}; the adapter's assumption is stale"
+    )
+    # The declared capability must match what the installed lane actually does.
+    declared = matrix_read_row_limit(mph.__version__)
+    if lane_still_refuses:
+        assert declared == REFERENCE_DOUBLE_ROW_MATRIX_ROW_LIMIT
+    else:
+        assert declared is None
+    # The write path refuses above two rows on every lane examined (1.3.1, 1.3.2,
+    # 1.4.0), so its message is deliberately NOT translated per-lane.
     assert "Will not cast object arrays with more than two rows." in node_source
+
+
+def test_the_declared_matrix_limit_matches_the_installed_lane() -> None:
+    """A capability claim must describe the lane that is actually installed."""
+    import mph
+
+    assert installed_mph_version() == mph.__version__
+    assert matrix_read_row_limit(mph.__version__) == matrix_read_row_limit(installed_mph_version())
+    # 1.3.2 generalizes the read, so claiming a limit there would be wrong.
+    assert matrix_read_row_limit("1.3.1") == REFERENCE_DOUBLE_ROW_MATRIX_ROW_LIMIT
+    assert matrix_read_row_limit("1.3.2") is None
+    assert matrix_read_row_limit("1.4.0") is None
+    with pytest.raises(AdapterError):
+        matrix_read_row_limit("1.9.9")
+
+
+def test_the_whole_declared_mph_range_is_a_supported_reference_lane() -> None:
+    """`pyproject.toml` allows `mph>=1.3.1,<1.4`, so 1.3.2 must be supported too."""
+    assert lane_is_supported("1.3.1") is True
+    assert lane_is_supported("1.3.2") is True
+    assert lane_is_supported("1.4.0") is False
+    assert lane_is_supported("1.2.9") is False
+
+
+def test_a_backend_reports_the_installed_lane_not_its_class_lane() -> None:
+    """The declared class lane must not override the observed installed version."""
+    backend = MphReferenceBackend()
+    assert backend.observed_lane() == installed_mph_version()
+    # The capability follows the installed lane, whatever the class attribute says.
+    assert backend.matrix_row_capacity() == matrix_read_row_limit(installed_mph_version())
+
+
+def test_lane_capabilities_use_the_version_table_for_every_supported_lane() -> None:
+    """1.3.2 must be reported as generalized rather than described as 1.3.1 was."""
+    legacy = lane_capabilities("1.3.1")
+    modern = lane_capabilities("1.3.2")
+    candidate = lane_capabilities(MPH_1_4_LANE)
+    assert legacy["double_row_matrix_row_limit"] == REFERENCE_DOUBLE_ROW_MATRIX_ROW_LIMIT
+    assert modern["double_row_matrix_row_limit"] is None
+    assert candidate["double_row_matrix_row_limit"] is None
+    # Only 1.4.0 is the dbmodel:// lane; 1.3.2 is not, despite the matrix parity.
+    assert legacy["supports_dbmodel_uri"] is False
+    assert modern["supports_dbmodel_uri"] is False
+    assert candidate["supports_dbmodel_uri"] is True
+    assert legacy.keys() == modern.keys() == candidate.keys()
 
 
 def test_lanes_differ_only_on_the_two_documented_capabilities() -> None:

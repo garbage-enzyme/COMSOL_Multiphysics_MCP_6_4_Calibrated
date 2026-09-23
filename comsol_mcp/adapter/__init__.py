@@ -43,7 +43,9 @@ from comsol_mcp.adapter.protocol import (
     SessionIdentity,
     SessionRequest,
     describe_protocol,
+    installed_mph_version,
     lane_is_supported,
+    matrix_read_row_limit,
     operation_is_known,
 )
 
@@ -106,8 +108,10 @@ __all__ = [
     "available_lanes",
     "convert_explicitly",
     "describe_protocol",
+    "installed_mph_version",
     "lane_is_supported",
     "make_backend",
+    "matrix_read_row_limit",
     "normalize_evaluation_result",
     "operation_is_known",
     "unwrap_backend_value",

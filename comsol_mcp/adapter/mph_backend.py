@@ -47,6 +47,8 @@ from comsol_mcp.adapter.protocol import (
     PropertyWriteReceipt,
     SessionIdentity,
     SessionRequest,
+    installed_mph_version,
+    matrix_read_row_limit,
 )
 
 
@@ -74,7 +76,10 @@ class MphBackendBase:
     says must stay project-owned.
     """
 
-    #: Overridden by each lane.
+    #: Overridden by each lane. `lane` is a class-level *intent*; the observed
+    #: version is reported by `session_identity()` and is what capability
+    #: decisions must use, because the installed version may be 1.3.2 within the
+    #: same supported range.
     lane: str = REFERENCE_MPH_LANE
     backend_name: str = "mph"
 
@@ -83,6 +88,23 @@ class MphBackendBase:
         self._mph_version: str | None = None
 
     # -- lane metadata -------------------------------------------------------
+    def observed_lane(self) -> str:
+        """Return the MPh version actually installed, or the declared lane.
+
+        Capability questions must use this rather than the class attribute: on an
+        MPh 1.3.2 install a backend declared as 1.3.1 would otherwise claim a
+        `DoubleRowMatrix` read limit that 1.3.2 does not have.
+        """
+        return installed_mph_version() or self.lane
+
+    def matrix_row_capacity(self) -> int | None:
+        """Return the installed lane's `DoubleRowMatrix` read limit, if any.
+
+        An unknown version is reported as unknown by raising, rather than by
+        reusing another version's limit.
+        """
+        return matrix_read_row_limit(self.observed_lane())
+
     def _require_client(self, operation: str) -> Any:
         if self._client is None:
             raise AdapterError(
