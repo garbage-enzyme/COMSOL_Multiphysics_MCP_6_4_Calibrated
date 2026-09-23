@@ -143,9 +143,17 @@ class SurrogateDatasetValidateInput(_ClosedModel):
     The dataset is read only far enough to bind its header, row count, and
     content hash.  It is refused rather than truncated when it exceeds a
     declared bound.
+
+    ``source_kind`` selects the source representation.  A ``file`` source is read
+    through ``dataset_path``.  A ``dbmodel`` source is a frozen Model Manager URI:
+    it is validated as syntax and evidence only, is never read, and never touches
+    the filesystem or the live Model Manager.  The two representations are
+    mutually exclusive so a local path can never be presented as a remote model.
     """
 
-    dataset_path: Annotated[str, Field(min_length=1, max_length=4096)]
+    dataset_path: Annotated[str | None, Field(min_length=1, max_length=4096)] = None
+    source_kind: Literal["file", "directory", "dbmodel"] = "file"
+    source_uri: Annotated[str | None, Field(min_length=1, max_length=MAX_URI_LENGTH)] = None
     field_schema_path: Annotated[str | None, Field(min_length=1, max_length=4096)] = None
     expected_row_count: Annotated[int | None, Field(ge=0, le=4096)] = None
     expected_feature_names: Annotated[list[str] | None, Field(max_length=64)] = None
@@ -161,6 +169,13 @@ class SurrogateDatasetValidateInput(_ClosedModel):
             raise ValueError(
                 "a name cannot be both a feature and a target: " + ", ".join(sorted(overlap))
             )
+        # Raises with the contract's own reason text when the reference is
+        # inconsistent, so dispatch can rely on one enforcement point.
+        validate_source_reference(
+            source_kind=self.source_kind,
+            source_path=self.dataset_path,
+            source_uri=self.source_uri,
+        )
         return self
 
 

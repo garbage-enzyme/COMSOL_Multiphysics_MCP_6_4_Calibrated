@@ -367,3 +367,28 @@ authority, a resource path, and an optional sha256, with traversal and non-ASCII
 refused. No live Model Manager operation is added in 0.7.5. This slice is bounded
 tooling and evidence separation; it is not model quality or scientific
 acceptance.
+
+## 15. S11 findings — making the freeze reachable, and a registry blind spot
+
+S10 shipped the `dbmodel://` contract but left it unreachable, and the registry
+reported itself complete while 20 emitted surrogate schemas were unregistered.
+Both are now closed, still without a solver.
+
+| Finding | Consequence for this repository |
+| --- | --- |
+| The `dbmodel://` contract was **unreachable through the MCP surface**: no public tool accepted a source kind, so `validate_source_reference` was exercised only by its own unit test. | `surrogate_dataset_validate` now takes `source_kind` and `source_uri`. A `dbmodel` source routes to `resolve_dbmodel_source`, which parses the URI, reports `resolution_state: unavailable`, and never reads, connects, or authenticates. The dataset path becomes optional only because the source representation is now explicit. |
+| The schema-registry completeness test scanned **only** the `"schema_name"` dict key, while the surrogate modules declare identity with `"schema"`. | The scan now accepts either spelling, and a dedicated test pins the scanner against a synthetic source using both spellings plus both `dict(...)` forms. Widening the scan exposed exactly 20 emitted-but-unregistered surrogate schemas; all 20 are now registered (`entry_count` 161 → 181) and a second test asserts every emitted surrogate schema resolves at the version it emits. |
+| Two different vocabularies share the name `source_kind`: the **source-reference** kinds (`file`/`directory`/`dbmodel`) and the dataset manifest's **provenance** kind (for example `campaign`). | An attempt to enforce `SOURCE_KINDS` inside `build_dataset_manifest` rejected three legitimate existing tests. The enforcement belongs where a caller selects a representation, so the manifest keeps provenance as a required non-empty string and both vocabularies are documented at the point of use. A test asserts provenance values such as `campaign` still round-trip. |
+| Path containment runs **before** the tool body, so a nonexistent path is refused by policy before the contract can speak. | Tests that intend to exercise the contract must point at real files, and a separate test asserts that a nonexistent path is refused by containment instead. A refused source is never read even when a readable path was supplied. |
+| The `source_uri` schema bound and the contract's `MAX_URI_LENGTH` were separate literals. | The tool signature now uses the contract constant, so a URI can never be schema-legal yet rejected as over-long for a different reason. An over-long URI is refused at the schema bound, which is the intended layering and is asserted as such. |
+
+Gate evidence for this slice, all solver-free: `dbmodel` dispatch returns
+`success: true` with `read`, `filesystem_access`, `live_model_manager_access`,
+and `upgrades_fem_evidence` all `False`; traversal, non-ASCII, wrong scheme,
+authority-only, missing-URI, `dbmodel`-with-local-path, file-with-URI, and
+unknown-kind requests are each refused with `surrogate_dataset_rejected`; a real
+file source still reports its rows, header, and identity; and the surrogate
+suites pass with no heavy module imported.
+
+Frozen limitation, unchanged: `dbmodel://` remains syntax and evidence only. The
+four live Model Manager operations stay deferred to alpha7.6.

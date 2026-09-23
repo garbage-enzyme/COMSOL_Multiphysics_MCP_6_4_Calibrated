@@ -17,8 +17,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from src.server import create_server
 
 from comsol_mcp.contracts.surrogate import (
+    MAX_URI_LENGTH,
     SOURCE_KINDS,
     SurrogateDatasetValidateInput,
     SurrogateModelInspectInput,
@@ -43,7 +45,6 @@ from comsol_mcp.evidence.surrogate_evidence import (
 from comsol_mcp.surrogate.export import build_export_manifest
 from comsol_mcp.surrogate.registry import build_model_card, build_registry_entry
 from development_kit.tests.mcp_test_support import decode_tool_result
-from src.server import create_server
 
 ROOT = Path(__file__).parents[2]
 
@@ -166,13 +167,9 @@ def test_dataset_contract_rejects_overlapping_names() -> None:
 
 def test_dataset_contract_rejects_duplicate_and_empty_names() -> None:
     with pytest.raises(ValueError, match="unique"):
-        SurrogateDatasetValidateInput(
-            dataset_path="x.csv", expected_feature_names=["a", "a"]
-        )
+        SurrogateDatasetValidateInput(dataset_path="x.csv", expected_feature_names=["a", "a"])
     with pytest.raises(ValueError, match="non-empty"):
-        SurrogateDatasetValidateInput(
-            dataset_path="x.csv", expected_feature_names=["a", ""]
-        )
+        SurrogateDatasetValidateInput(dataset_path="x.csv", expected_feature_names=["a", ""])
     with pytest.raises(ValueError, match="non-empty when declared"):
         SurrogateDatasetValidateInput(dataset_path="x.csv", expected_feature_names=[])
 
@@ -181,8 +178,7 @@ def test_document_kind_literal_is_closed() -> None:
     with pytest.raises(ValueError):
         SurrogateModelInspectInput(document_path="x", document_kind="registry")
     assert (
-        SurrogateModelInspectInput(document_path="x", document_kind="auto").document_kind
-        == "auto"
+        SurrogateModelInspectInput(document_path="x", document_kind="auto").document_kind == "auto"
     )
 
 
@@ -196,9 +192,7 @@ def test_dbmodel_uri_is_validated_as_syntax_only() -> None:
     assert components["authority"] == "library"
     assert components["resource"] == "models/coated_unit_cell"
     assert components["sha256"] is None
-    with_digest = parse_dbmodel_uri(
-        f"dbmodel://library/models/cell?sha256={'a' * 64}"
-    )
+    with_digest = parse_dbmodel_uri(f"dbmodel://library/models/cell?sha256={'a' * 64}")
     assert with_digest["sha256"] == "a" * 64
 
 
@@ -223,9 +217,7 @@ def test_dbmodel_source_cannot_declare_a_local_path() -> None:
             source_uri="dbmodel://library/cell",
         )
     with pytest.raises(ValueError, match="requires a source_uri"):
-        validate_source_reference(
-            source_kind="dbmodel", source_path=None, source_uri=None
-        )
+        validate_source_reference(source_kind="dbmodel", source_path=None, source_uri=None)
 
 
 def test_file_source_cannot_declare_a_uri() -> None:
@@ -249,9 +241,285 @@ def test_dbmodel_reference_never_claims_filesystem_or_live_access() -> None:
 def test_source_kind_set_is_frozen() -> None:
     assert SOURCE_KINDS == ("file", "directory", "dbmodel")
     with pytest.raises(ValueError, match="source_kind must be one of"):
-        validate_source_reference(
-            source_kind="network", source_path="x", source_uri=None
+        validate_source_reference(source_kind="network", source_path="x", source_uri=None)
+
+
+# ---------------------------------------------------------------------------
+# dbmodel:// dispatch and schema coverage (S11 step 3)
+#
+# The contract above existed without any way to reach it: no public tool accepted
+# a source kind, and the dataset manifest's ``source_kind`` is a different
+# vocabulary.  These tests pin the reachable path so the freeze is a behaviour
+# rather than an unexercised claim.
+# ---------------------------------------------------------------------------
+
+
+def test_dbmodel_source_is_reachable_through_public_dispatch(owned_root) -> None:
+    server = _server(owned_root)
+    result = decode_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "surrogate_dataset_validate",
+                {
+                    "source_kind": "dbmodel",
+                    "source_uri": f"dbmodel://library/models/cell?sha256={'a' * 64}",
+                },
+            )
         )
+    )
+    assert result["success"] is True
+    assert result["source_kind"] == "dbmodel"
+    assert result["document_kind"] == "dbmodel_source"
+    assert result["resolution_state"] == "unavailable"
+    assert result["components"]["authority"] == "library"
+    assert result["components"]["resource"] == "models/cell"
+    assert result["components"]["sha256"] == "a" * 64
+    # The whole point of the freeze: nothing was read, connected, or promoted.
+    assert result["read"] is False
+    assert result["filesystem_access"] is False
+    assert result["live_model_manager_access"] is False
+    assert result["upgrades_fem_evidence"] is False
+    assert result["solver_started"] is False
+    assert result["filesystem_modified"] is False
+    states = {check["check"]: check["state"] for check in result["checks"]}
+    assert states["dbmodel_uri_syntax"] == "verified"
+    assert states["local_path_absent"] == "verified"
+    assert states["live_model_manager_identity"] == "unavailable"
+    assert states["content_hash"] == "declared_by_uri"
+
+
+def test_dbmodel_source_without_a_digest_claims_no_content_identity(owned_root) -> None:
+    server = _server(owned_root)
+    result = decode_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "surrogate_dataset_validate",
+                {"source_kind": "dbmodel", "source_uri": "dbmodel://library/cell"},
+            )
+        )
+    )
+    assert result["success"] is True
+    assert result["components"]["sha256"] is None
+    states = {check["check"]: check["state"] for check in result["checks"]}
+    assert states["content_hash"] == "not_declared"
+    assert result["resolution_state"] == "unavailable"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        pytest.param(
+            {"source_kind": "dbmodel", "source_uri": "dbmodel://library/../secrets"},
+            id="traversal",
+        ),
+        pytest.param(
+            {"source_kind": "dbmodel", "source_uri": "dbmodel://library/模型"},
+            id="non_ascii",
+        ),
+        pytest.param(
+            {"source_kind": "dbmodel", "source_uri": "https://example.com/model"},
+            id="wrong_scheme",
+        ),
+        pytest.param(
+            {"source_kind": "dbmodel", "source_uri": "dbmodel://library"},
+            id="authority_only",
+        ),
+        pytest.param({"source_kind": "dbmodel"}, id="missing_uri"),
+    ],
+)
+def test_dbmodel_uri_defects_are_refused_through_dispatch(owned_root, arguments) -> None:
+    server = _server(owned_root)
+    result = decode_tool_result(
+        asyncio.run(server.call_tool("surrogate_dataset_validate", arguments))
+    )
+    assert result["success"] is False, arguments
+    assert result["reason_code"] == "surrogate_dataset_rejected"
+    assert result["solver_started"] is False
+    assert result["filesystem_modified"] is False
+
+
+def test_an_overlong_uri_is_refused_by_the_declared_schema_bound(owned_root) -> None:
+    """An over-long URI never reaches the tool body: the schema bound refuses it.
+
+    That is the intended layering rather than a gap.  The bound and the contract
+    constant are the same value, so a URI can never be schema-legal and then
+    rejected as over-long by ``parse_dbmodel_uri`` for a different reason.
+    """
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    assert MAX_URI_LENGTH == 1024
+    server = _server(owned_root)
+    with pytest.raises(ToolError, match="at most 1024 characters"):
+        asyncio.run(
+            server.call_tool(
+                "surrogate_dataset_validate",
+                {"source_kind": "dbmodel", "source_uri": "dbmodel://library/" + "a" * 2000},
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        pytest.param(
+            {
+                "source_kind": "dbmodel",
+                "source_uri": "dbmodel://library/cell",
+                "dataset_path": "cell.mph",
+            },
+            id="dbmodel_with_local_path",
+        ),
+        pytest.param(
+            {
+                "source_kind": "file",
+                "dataset_path": "data.csv",
+                "source_uri": "dbmodel://library/cell",
+            },
+            id="file_with_uri",
+        ),
+        pytest.param({"source_kind": "network", "dataset_path": "data.csv"}, id="unknown_kind"),
+        pytest.param({"source_kind": "file"}, id="file_without_path"),
+    ],
+)
+def test_source_reference_defects_are_refused_by_the_contract(owned_root, arguments) -> None:
+    """These do not depend on the file existing, so the contract is what refuses.
+
+    Path containment legitimately runs before the tool body, so a nonexistent
+    path would be refused by policy first.  Pointing at real files keeps the
+    refusal attributable to the source-reference contract under test.
+    """
+    (owned_root / "cell.mph").write_bytes(b"not a real model")
+    (owned_root / "data.csv").write_bytes(b"a,b\r\n1,2\r\n")
+    resolved = {
+        key: (str(owned_root / value) if key.endswith("_path") and value else value)
+        for key, value in arguments.items()
+    }
+    server = _server(owned_root)
+    result = decode_tool_result(
+        asyncio.run(server.call_tool("surrogate_dataset_validate", resolved))
+    )
+    assert result["success"] is False, arguments
+    assert result["reason_code"] == "surrogate_dataset_rejected", arguments
+    # A refused source is never read, even when a readable path was supplied.
+    assert result["path_policy"]["accepted"] is True, arguments
+    assert result["solver_started"] is False
+    assert result["filesystem_modified"] is False
+
+
+def test_a_nonexistent_dataset_path_is_refused_by_containment(owned_root) -> None:
+    server = _server(owned_root)
+    result = decode_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "surrogate_dataset_validate",
+                {"dataset_path": str(owned_root / "absent.csv")},
+            )
+        )
+    )
+    assert result["success"] is False
+    assert result["path_policy"]["accepted"] is False
+
+
+def test_dbmodel_dispatch_never_touches_the_filesystem(owned_root) -> None:
+    """A dbmodel request must not read a path even when one is also supplied."""
+    probe = owned_root / "must-not-be-read.csv"
+    probe.write_bytes(b"a,b\n1,2\n")
+    server = _server(owned_root)
+    result = decode_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "surrogate_dataset_validate",
+                {
+                    "source_kind": "dbmodel",
+                    "source_uri": "dbmodel://library/cell",
+                    "dataset_path": str(probe),
+                },
+            )
+        )
+    )
+    # Supplying both is refused, so the local path is never opened.
+    assert result["success"] is False
+    assert result["filesystem_modified"] is False
+
+
+def test_a_real_file_source_still_reports_rows_and_identity(owned_root) -> None:
+    data = owned_root / "real.csv"
+    data.write_bytes(b"a,b,target\r\n1,2,3\r\n4,5,6\r\n")
+    server = _server(owned_root)
+    result = decode_tool_result(
+        asyncio.run(server.call_tool("surrogate_dataset_validate", {"dataset_path": str(data)}))
+    )
+    assert result["success"] is True
+    assert result["row_count"] == 2
+    assert result["column_count"] == 3
+    assert result["header"] == ["a", "b", "target"]
+    assert result["dataset_identity"]["path_name"] == "real.csv"
+    assert result["upgrades_fem_evidence"] is False
+    assert result["path_policy"]["accepted"] is True
+
+
+def test_dataset_manifest_source_kind_is_provenance_not_a_source_reference() -> None:
+    """The dataset manifest keeps provenance values such as ``campaign``.
+
+    The two ``source_kind`` names are different vocabularies: the manifest records
+    where rows came from, while ``SOURCE_KINDS`` selects a source *reference*
+    representation.  Confusing them would reject real manifests.
+    """
+    from comsol_mcp.surrogate.manifests import build_dataset_manifest
+
+    common = {
+        "dataset_id": "ds-001",
+        "source_identity_sha256": "a" * 64,
+        "candidate_ids": ["c1"],
+        "row_ids": ["r1"],
+        "leakage_groups": [{"group_id": "g1", "row_ids": ["r1"]}],
+        "split_assignments": [{"row_id": "r1", "split": "train"}],
+    }
+    for provenance in ("campaign", "file", "dbmodel"):
+        manifest = build_dataset_manifest(source_kind=provenance, **common)
+        assert manifest["source_kind"] == provenance
+    with pytest.raises(ValueError, match="source_kind"):
+        build_dataset_manifest(source_kind="", **common)
+
+
+def test_every_emitted_surrogate_schema_is_registered() -> None:
+    """Every surrogate schema emitted in source must be registered.
+
+    The registry completeness test only scanned ``schema_name`` keys, so 20
+    surrogate schemas emitted with a ``schema`` key were invisible.  This asserts
+    the coverage those schemas now have.
+    """
+    from src.schema_registry import check_schema_support
+
+    expected = {
+        "comsol_mcp.surrogate_baseline",
+        "comsol_mcp.surrogate_campaign_spec",
+        "comsol_mcp.surrogate_campaign_summary",
+        "comsol_mcp.surrogate_continuation_identity",
+        "comsol_mcp.surrogate_dataset_manifest",
+        "comsol_mcp.surrogate_dnn_configuration",
+        "comsol_mcp.surrogate_dnn_write_plan",
+        "comsol_mcp.surrogate_export_manifest",
+        "comsol_mcp.surrogate_fem_result",
+        "comsol_mcp.surrogate_field_schema",
+        "comsol_mcp.surrogate_fitted_transforms",
+        "comsol_mcp.surrogate_lhs_design",
+        "comsol_mcp.surrogate_model_card",
+        "comsol_mcp.surrogate_onnx_model",
+        "comsol_mcp.surrogate_registry_entry",
+        "comsol_mcp.surrogate_row_provenance",
+        "comsol_mcp.surrogate_schema_manifest",
+        "comsol_mcp.surrogate_screening_record",
+        "comsol_mcp.surrogate_split_plan",
+        "comsol_mcp.surrogate_training_transforms",
+    }
+    for name in sorted(expected):
+        support = check_schema_support(name, "1.0.0")
+        assert support["supported"] is True, name
+    # The plan section 6 schema must exist under its declared emitted name.
+    assert (
+        check_schema_support("comsol_mcp.surrogate_dataset_manifest", "1.0.0")["supported"] is True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -425,9 +693,7 @@ def test_verify_without_expectations_is_not_verified(owned_root) -> None:
     # be a vacuous pass.
     assert result["verified"] is False
     assert result["checked_count"] == 0
-    assert all(
-        check["state"] == "not_checked" for check in result["checks"]
-    )
+    assert all(check["state"] == "not_checked" for check in result["checks"])
 
 
 def test_verify_marks_an_unavailable_expectation_instead_of_passing(owned_root) -> None:
@@ -469,9 +735,7 @@ def test_require_consistent_export_demands_an_export_manifest(owned_root) -> Non
 
 def test_verify_reports_undeclared_expectations_as_not_checked(owned_root) -> None:
     path = _write(owned_root / "card.json", _model_card())
-    result = verify_surrogate_document(
-        path, max_bytes=1_000_000, expected_trained_chksum="1" * 64
-    )
+    result = verify_surrogate_document(path, max_bytes=1_000_000, expected_trained_chksum="1" * 64)
     states = {check["name"]: check["state"] for check in result["checks"]}
     assert states["trained_chksum"] == "matched"
     assert states["architecture_sha256"] == "not_checked"
@@ -505,9 +769,7 @@ def test_dataset_validate_accepts_a_headered_file(owned_root) -> None:
 def test_dataset_validate_reports_a_headerless_file_honestly(owned_root) -> None:
     path = owned_root / "headerless.csv"
     path.write_bytes(b"1.0, 2.0, 3.0\r\n1.5, 2.5, 4.0\r\n")
-    result = validate_dataset_document(
-        path, max_bytes=100_000, max_rows=100, max_columns=10
-    )
+    result = validate_dataset_document(path, max_bytes=100_000, max_rows=100, max_columns=10)
     assert result["header_present"] is False
     assert result["header"] is None
     assert result["row_count"] == 2
@@ -588,9 +850,7 @@ def test_dataset_validate_refuses_empty_and_unterminated_quote(owned_root) -> No
 def test_dataset_validate_handles_quoted_fields_and_crlf(owned_root) -> None:
     path = owned_root / "quoted_ok.csv"
     path.write_bytes(b'a,b\r\n"x,y",2\r\n"he said ""hi""",3\r\n')
-    result = validate_dataset_document(
-        path, max_bytes=100_000, max_rows=10, max_columns=10
-    )
+    result = validate_dataset_document(path, max_bytes=100_000, max_rows=10, max_columns=10)
     assert result["row_count"] == 2
     assert result["column_count"] == 2
 
@@ -599,9 +859,7 @@ def test_dataset_identity_is_a_content_hash(owned_root) -> None:
     payload = b"a,b\r\n1,2\r\n"
     path = owned_root / "data.csv"
     path.write_bytes(payload)
-    result = validate_dataset_document(
-        path, max_bytes=100_000, max_rows=10, max_columns=10
-    )
+    result = validate_dataset_document(path, max_bytes=100_000, max_rows=10, max_columns=10)
     assert result["dataset_identity"]["sha256"] == hashlib.sha256(payload).hexdigest()
     assert result["dataset_identity"]["byte_count"] == len(payload)
 
@@ -646,29 +904,21 @@ def test_prediction_validate_refuses_a_fem_evidence_claim(owned_root) -> None:
             encoding="utf-8",
         )
         with pytest.raises(SurrogateEvidenceError) as excinfo:
-            validate_prediction_document(
-                path, max_bytes=100_000, max_rows=100, max_columns=10
-            )
+            validate_prediction_document(path, max_bytes=100_000, max_rows=100, max_columns=10)
         assert excinfo.value.reason_code == "surrogate_prediction_claims_fem_evidence"
 
 
 def test_prediction_validate_refuses_a_verified_state(owned_root) -> None:
     path = owned_root / "verified.json"
-    path.write_text(
-        json.dumps({"state": "verified", "predictions": [[1.0]]}), encoding="utf-8"
-    )
+    path.write_text(json.dumps({"state": "verified", "predictions": [[1.0]]}), encoding="utf-8")
     with pytest.raises(SurrogateEvidenceError) as excinfo:
-        validate_prediction_document(
-            path, max_bytes=100_000, max_rows=100, max_columns=10
-        )
+        validate_prediction_document(path, max_bytes=100_000, max_rows=100, max_columns=10)
     assert excinfo.value.reason_code == "surrogate_prediction_state_invalid"
 
 
 def test_prediction_validate_requires_fresh_fem_outside_in_domain(owned_root) -> None:
     path = owned_root / "pred.json"
-    path.write_text(
-        json.dumps({"state": "predicted", "predictions": [[1.0]]}), encoding="utf-8"
-    )
+    path.write_text(json.dumps({"state": "predicted", "predictions": [[1.0]]}), encoding="utf-8")
     for ood_state, expected in (
         ("in_domain", False),
         ("edge", True),
@@ -681,20 +931,14 @@ def test_prediction_validate_requires_fresh_fem_outside_in_domain(owned_root) ->
         assert result["escalation_required"] is expected, ood_state
         assert result["requires_fresh_fem"] is True
     # No declared state means escalation cannot be ruled out.
-    result = validate_prediction_document(
-        path, max_bytes=100_000, max_rows=100, max_columns=10
-    )
+    result = validate_prediction_document(path, max_bytes=100_000, max_rows=100, max_columns=10)
     assert result["escalation_required"] is True
 
 
 def test_prediction_validate_accepts_rows_key_and_alternate_layout(owned_root) -> None:
     path = owned_root / "rows.json"
-    path.write_text(
-        json.dumps({"rows": [[1.0, 2.0]]}), encoding="utf-8"
-    )
-    result = validate_prediction_document(
-        path, max_bytes=100_000, max_rows=100, max_columns=10
-    )
+    path.write_text(json.dumps({"rows": [[1.0, 2.0]]}), encoding="utf-8")
+    result = validate_prediction_document(path, max_bytes=100_000, max_rows=100, max_columns=10)
     assert result["row_count"] == 1
 
 
@@ -702,29 +946,19 @@ def test_prediction_validate_refuses_bad_rows(owned_root) -> None:
     missing = owned_root / "missing.json"
     missing.write_text(json.dumps({"state": "predicted"}), encoding="utf-8")
     with pytest.raises(SurrogateEvidenceError) as excinfo:
-        validate_prediction_document(
-            missing, max_bytes=100_000, max_rows=100, max_columns=10
-        )
+        validate_prediction_document(missing, max_bytes=100_000, max_rows=100, max_columns=10)
     assert excinfo.value.reason_code == "surrogate_document_field_missing"
 
     nonnumeric = owned_root / "nonnumeric.json"
-    nonnumeric.write_text(
-        json.dumps({"predictions": [["x"]]}), encoding="utf-8"
-    )
+    nonnumeric.write_text(json.dumps({"predictions": [["x"]]}), encoding="utf-8")
     with pytest.raises(SurrogateEvidenceError) as excinfo:
-        validate_prediction_document(
-            nonnumeric, max_bytes=100_000, max_rows=100, max_columns=10
-        )
+        validate_prediction_document(nonnumeric, max_bytes=100_000, max_rows=100, max_columns=10)
     assert excinfo.value.reason_code == "surrogate_document_field_invalid"
 
     nonfinite = owned_root / "nonfinite.json"
-    nonfinite.write_text(
-        json.dumps({"predictions": [[1.0, 2.0], [1.0]]}), encoding="utf-8"
-    )
+    nonfinite.write_text(json.dumps({"predictions": [[1.0, 2.0], [1.0]]}), encoding="utf-8")
     with pytest.raises(SurrogateEvidenceError) as excinfo:
-        validate_prediction_document(
-            nonfinite, max_bytes=100_000, max_rows=100, max_columns=10
-        )
+        validate_prediction_document(nonfinite, max_bytes=100_000, max_rows=100, max_columns=10)
     assert excinfo.value.reason_code == "surrogate_dataset_ragged"
 
 
@@ -903,11 +1137,7 @@ def test_dispatch_validates_real_documents(owned_root) -> None:
     assert result["path_policy"]["accepted"] is True
 
     result = decode_tool_result(
-        asyncio.run(
-            server.call_tool(
-                "surrogate_model_inspect", {"document_path": str(card_path)}
-            )
-        )
+        asyncio.run(server.call_tool("surrogate_model_inspect", {"document_path": str(card_path)}))
     )
     assert result["success"] is True
     assert result["summary"]["document_kind"] == "model_card"
@@ -1018,9 +1248,7 @@ def test_dispatch_stays_solver_free_and_reports_no_filesystem_write(owned_root) 
     card_path = _write(owned_root / "card.json", _model_card())
     before = sorted(p.name for p in owned_root.iterdir())
     result = decode_tool_result(
-        asyncio.run(
-            server.call_tool("surrogate_model_inspect", {"document_path": str(card_path)})
-        )
+        asyncio.run(server.call_tool("surrogate_model_inspect", {"document_path": str(card_path)}))
     )
     assert result["solver_started"] is False
     assert result["filesystem_modified"] is False
@@ -1113,9 +1341,7 @@ def test_new_modules_are_solver_free(module_name: str) -> None:
     for statement in statements:
         lowered = statement.lower()
         for banned in BANNED_SOURCE:
-            assert not lowered.startswith(banned), (
-                f"{module_name} imports {banned!r}"
-            )
+            assert not lowered.startswith(banned), f"{module_name} imports {banned!r}"
 
 
 def test_the_solver_free_guard_detects_a_real_import(tmp_path) -> None:
@@ -1124,9 +1350,7 @@ def test_the_solver_free_guard_detects_a_real_import(tmp_path) -> None:
     source.write_text("import mph\n", encoding="utf-8")
     statements = _import_statements(str(source))
     assert statements == ["import mph"]
-    assert any(
-        statement.lower().startswith("import mph") for statement in statements
-    )
+    assert any(statement.lower().startswith("import mph") for statement in statements)
 
 
 def test_tool_module_never_imports_mphe_or_starts_a_solver() -> None:

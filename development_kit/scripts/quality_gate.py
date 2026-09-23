@@ -139,6 +139,7 @@ LINT_TARGETS = (
     "development_kit/tests/test_standalone_acceptance_runner.py",
     "development_kit/tests/test_standalone_executable.py",
     "development_kit/tests/test_standalone_tools.py",
+    "development_kit/tests/test_surrogate_public_tools.py",
     "development_kit/tests/test_tool_catalog.py",
 )
 MYPY_GROUPS = (

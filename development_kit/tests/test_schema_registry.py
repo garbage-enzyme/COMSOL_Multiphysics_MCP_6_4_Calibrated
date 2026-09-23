@@ -14,6 +14,13 @@ from src import __version__
 
 ROOT = Path(__file__).parents[2]
 
+# Every dict key an artifact may use to declare its own schema identity.  Both
+# spellings occur in this codebase: most modules use ``schema_name``, while the
+# surrogate modules use ``schema``.  Scanning only one spelling silently hid 20
+# emitted surrogate schemas from the completeness assertion below, so the scanner
+# accepts either and the assertion compares the union.
+_SCHEMA_IDENTITY_KEYS = frozenset({"schema", "schema_name"})
+
 
 def _resolve_string(node: ast.AST, constants: dict[str, str]) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -126,7 +133,7 @@ def _emitted_schemas_in_source() -> set[str]:
                 candidates.extend(
                     value
                     for key, value in zip(node.keys, node.values, strict=True)
-                    if isinstance(key, ast.Constant) and key.value == "schema_name"
+                    if isinstance(key, ast.Constant) and key.value in _SCHEMA_IDENTITY_KEYS
                 )
             elif (
                 isinstance(node, ast.Call)
@@ -134,7 +141,9 @@ def _emitted_schemas_in_source() -> set[str]:
                 and node.func.id == "dict"
             ):
                 candidates.extend(
-                    keyword.value for keyword in node.keywords if keyword.arg == "schema_name"
+                    keyword.value
+                    for keyword in node.keywords
+                    if keyword.arg in _SCHEMA_IDENTITY_KEYS
                 )
             for candidate in candidates:
                 value = _resolve_string(candidate, constants)
@@ -162,7 +171,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert registry["producer"] == {"package": "comsol-mcp", "version": __version__}
     # These are deliberate public release snapshots. A registry change updates
     # both literals and development_kit/release/release_facts.json together.
-    assert registry["entry_count"] == len(entries) == 161
+    assert registry["entry_count"] == len(entries) == 181
     assert names == sorted(names)
     assert len(names) == len(set(names))
     emitted = _emitted_schemas_in_source()
@@ -194,10 +203,81 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert set(names) == emitted | registry_only
     assert re.fullmatch(r"[0-9a-f]{64}", registry["registry_sha256"])
     assert registry["registry_sha256"] == (
-        "07836accd3570c960e05c3780880877ef08c2ca52db813f32fb3e40fd92b65c4"
+        "390b4e2e4dadf77e2e72a6f539be813801862830009f8b5916c0e4f513e71bc1"
     )
     assert registry["registry_sha256"] == get_schema_registry()["registry_sha256"]
     assert check_schema_support("comsol_mcp.session_startup_state", "1.0.0")["supported"] is True
+
+
+def test_schema_identity_scanner_detects_both_spelling_variants() -> None:
+    """The completeness scan must not depend on one identity-key spelling.
+
+    Surrogate modules declare their identity with ``"schema"`` while most of the
+    codebase uses ``"schema_name"``.  Scanning only one spelling silently hid 20
+    emitted surrogate schemas from ``test_registry_is_complete_sorted_and_snapshot_stable``,
+    so this guards the scanner itself rather than the registry contents.
+    """
+    assert _SCHEMA_IDENTITY_KEYS == frozenset({"schema", "schema_name"})
+    source = "\n".join(
+        [
+            "def build():",
+            "    return {'schema': 'comsol_mcp.probe_a', 'schema_version': '1.0.0'}",
+            "",
+            "def other():",
+            "    return {'schema_name': 'comsol_mcp.probe_b'}",
+            "",
+            "def via_call():",
+            "    return dict(schema='comsol_mcp.probe_c')",
+            "",
+            "def via_call_long():",
+            "    return dict(schema_name='comsol_mcp.probe_d')",
+        ]
+    )
+    tree = ast.parse(source)
+    constants = _module_string_constants(tree)
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        candidates: list[ast.AST] = []
+        if isinstance(node, ast.Dict):
+            candidates.extend(
+                value
+                for key, value in zip(node.keys, node.values, strict=True)
+                if isinstance(key, ast.Constant) and key.value in _SCHEMA_IDENTITY_KEYS
+            )
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "dict"
+        ):
+            candidates.extend(
+                keyword.value for keyword in node.keywords if keyword.arg in _SCHEMA_IDENTITY_KEYS
+            )
+        for candidate in candidates:
+            value = _resolve_string(candidate, constants)
+            if value is not None:
+                found.add(value)
+    assert found == {
+        "comsol_mcp.probe_a",
+        "comsol_mcp.probe_b",
+        "comsol_mcp.probe_c",
+        "comsol_mcp.probe_d",
+    }
+
+
+def test_every_emitted_surrogate_schema_is_registered_and_resolvable() -> None:
+    """Every emitted surrogate schema must be registered at the version it emits.
+
+    This is the specific guard for the S10/S11 gap: 20 surrogate schemas were
+    emitted with ``"schema"`` identity keys and were neither registered nor
+    resolvable, while the registry reported itself complete.
+    """
+    emitted = _emitted_schemas_in_source()
+    registered = {entry["schema_name"] for entry in get_schema_registry()["entries"]}
+    surrogate = sorted(name for name in emitted if "surrogate" in name)
+    assert len(surrogate) >= 22
+    assert not [name for name in surrogate if name not in registered]
+    for name in surrogate:
+        assert check_schema_support(name, "1.0.0")["supported"] is True, name
 
 
 def test_every_entry_declares_read_write_and_non_mutating_migration_policy():

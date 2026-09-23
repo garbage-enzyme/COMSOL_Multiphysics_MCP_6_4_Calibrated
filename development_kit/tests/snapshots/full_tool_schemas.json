@@ -11558,10 +11558,17 @@
     "maxProperties": 256,
     "properties": {
       "dataset_path": {
-        "maxLength": 4096,
-        "minLength": 1,
-        "title": "Dataset Path",
-        "type": "string"
+        "anyOf": [
+          {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Dataset Path"
       },
       "expected_feature_names": {
         "anyOf": [
@@ -11634,11 +11641,27 @@
           }
         ],
         "default": null
+      },
+      "source_kind": {
+        "default": "file",
+        "maxLength": 16384,
+        "title": "Source Kind",
+        "type": "string"
+      },
+      "source_uri": {
+        "anyOf": [
+          {
+            "maxLength": 1024,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Uri"
       }
     },
-    "required": [
-      "dataset_path"
-    ],
     "title": "surrogate_dataset_validateArguments",
     "type": "object"
   },

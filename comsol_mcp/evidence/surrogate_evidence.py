@@ -22,6 +22,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from comsol_mcp.contracts.surrogate import parse_dbmodel_uri, validate_source_reference
 from comsol_mcp.durable.canonical import canonical_sha256_v1
 from comsol_mcp.durable.io import read_file_bytes_bounded
 
@@ -891,6 +892,69 @@ def build_evidence_verdict(*, checks: list[dict[str, Any]], **extra: Any) -> dic
     return {**body, "verdict_sha256": canonical_sha256_v1(body)}
 
 
+def resolve_dbmodel_source(
+    *,
+    source_uri: str,
+    source_path: str | None,
+) -> dict[str, Any]:
+    """Validate one frozen ``dbmodel://`` source without touching anything live.
+
+    This is the solver-free half of the Model Manager contract.  It resolves the
+    URI as pure syntax and reports an explicit ``unavailable`` evidence state,
+    because 0.7.5 deliberately performs no Model Manager operation.  Nothing is
+    read, connected, authenticated, or inferred: the report says what is known
+    (the parsed components) and what is not (any live identity).
+    """
+    components = parse_dbmodel_uri(source_uri)
+    reference = validate_source_reference(
+        source_kind="dbmodel",
+        source_path=source_path,
+        source_uri=source_uri,
+    )
+    return {
+        "schema_name": SURROGATE_EVIDENCE_SCHEMA_NAME,
+        "schema_version": SURROGATE_EVIDENCE_SCHEMA_VERSION,
+        "success": True,
+        "checks": [
+            {
+                "check": "dbmodel_uri_syntax",
+                "state": "verified",
+                "detail": "the URI matches dbmodel://authority/resource with an optional sha256",
+            },
+            {
+                "check": "local_path_absent",
+                "state": "verified",
+                "detail": "a dbmodel source declares no local path, so it cannot alias a file",
+            },
+            {
+                "check": "live_model_manager_identity",
+                "state": "unavailable",
+                "detail": "0.7.5 performs no Model Manager operation; identity is not resolved",
+            },
+            {
+                "check": "content_hash",
+                "state": ("declared_by_uri" if components["sha256"] else "not_declared"),
+                "detail": (
+                    "the URI declares a sha256 that was parsed as syntax only"
+                    if components["sha256"]
+                    else "the URI declares no sha256, so no content identity is claimed"
+                ),
+            },
+        ],
+        "document_kind": "dbmodel_source",
+        "source_kind": "dbmodel",
+        "read": False,
+        "filesystem_access": False,
+        "live_model_manager_access": False,
+        "components": components,
+        "source_reference": reference,
+        "resolution_state": "unavailable",
+        "upgrades_fem_evidence": False,
+        "solver_started": False,
+        "filesystem_modified": False,
+    }
+
+
 __all__ = [
     "DOCUMENT_KINDS",
     "EXPORT_MANIFEST_SCHEMA",
@@ -906,6 +970,7 @@ __all__ = [
     "inspect_surrogate_document",
     "preview_training_configuration",
     "read_bounded_document",
+    "resolve_dbmodel_source",
     "validate_dataset_document",
     "validate_export_manifest_document",
     "validate_model_card_document",

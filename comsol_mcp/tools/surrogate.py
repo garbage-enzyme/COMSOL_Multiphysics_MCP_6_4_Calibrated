@@ -25,6 +25,7 @@ from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 
 from comsol_mcp.contracts.surrogate import (
+    MAX_URI_LENGTH,
     SurrogateDatasetValidateInput,
     SurrogateModelInspectInput,
     SurrogateModelVerifyInput,
@@ -36,6 +37,7 @@ from comsol_mcp.evidence.surrogate_evidence import (
     SurrogateEvidenceError,
     inspect_surrogate_document,
     preview_training_configuration,
+    resolve_dbmodel_source,
     validate_dataset_document,
     validate_prediction_document,
     verify_surrogate_document,
@@ -63,12 +65,30 @@ def _rejection(exc: SurrogateEvidenceError | Exception, fallback: str) -> dict[s
     return {**public_error(fallback, "The surrogate request was rejected."), **SOLVER_FREE_FOOTER}
 
 
+def _required_source_path(value: str | None, field: str) -> str:
+    """Return a source path that the contract guarantees, or refuse explicitly.
+
+    The dataset contract already refuses a file/directory source without a path,
+    so this is a backstop for the type checker rather than a second policy.  It
+    raises instead of using ``assert`` so the guard survives ``python -O``, where
+    an assertion would vanish and ``None`` would reach the path reader.
+    """
+    if value is None:
+        raise SurrogateEvidenceError(
+            "surrogate_source_requires_path",
+            f"A file or directory source requires {field}.",
+        )
+    return value
+
+
 def register_surrogate_tools(mcp: MCPServer) -> None:
     """Register the bounded read-only surrogate tools in every profile."""
 
     @mcp.tool()  # type: ignore[untyped-decorator]
     def surrogate_dataset_validate(
-        dataset_path: Annotated[str, Field(min_length=1, max_length=4096)],
+        dataset_path: Annotated[str | None, Field(max_length=4096)] = None,
+        source_kind: str = "file",
+        source_uri: Annotated[str | None, Field(max_length=MAX_URI_LENGTH)] = None,
         field_schema_path: Annotated[str | None, Field(max_length=4096)] = None,
         expected_row_count: Annotated[int | None, Field(ge=0, le=4096)] = None,
         expected_feature_names: list[str] | None = None,
@@ -80,10 +100,16 @@ def register_surrogate_tools(mcp: MCPServer) -> None:
         The dataset is read only far enough to bind its header, row count, and
         SHA-256. It is refused rather than clipped when it exceeds a bound, and a
         text header is never invented for a headerless file.
+
+        ``source_kind='dbmodel'`` validates a frozen Model Manager URI as syntax
+        and evidence only: nothing is read, connected, or authenticated, and the
+        live identity is reported ``unavailable``.
         """
         try:
             request = SurrogateDatasetValidateInput(
                 dataset_path=dataset_path,
+                source_kind=source_kind,
+                source_uri=source_uri,
                 field_schema_path=field_schema_path,
                 expected_row_count=expected_row_count,
                 expected_feature_names=expected_feature_names,
@@ -91,8 +117,13 @@ def register_surrogate_tools(mcp: MCPServer) -> None:
                 limits=limits,
             )
             bounds = request.limits or SurrogateReadLimits()
+            if request.source_kind == "dbmodel":
+                return resolve_dbmodel_source(
+                    source_uri=request.source_uri or "",
+                    source_path=request.dataset_path,
+                )
             return validate_dataset_document(
-                request.dataset_path,
+                _required_source_path(request.dataset_path, "dataset_path"),
                 max_bytes=bounds.max_document_bytes,
                 max_rows=bounds.max_rows,
                 max_columns=bounds.max_columns,

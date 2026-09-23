@@ -247,6 +247,14 @@ def build_dataset_manifest(
     ineligible_rows: Sequence[Mapping[str, Any]] = (),
 ) -> SurrogateDatasetManifest:
     source_identity_sha256 = _require_hex64("source_identity_sha256", source_identity_sha256)
+    # NOTE: this ``source_kind`` is dataset *provenance* (for example
+    # ``campaign``), which is a different vocabulary from the source-*reference*
+    # kinds in ``comsol_mcp.contracts.surrogate.SOURCE_KINDS``
+    # (``file``/``directory``/``dbmodel``).  Enforcing the reference vocabulary
+    # here would reject legitimate provenance values, so provenance stays a
+    # required non-empty string and the reference vocabulary is enforced where a
+    # caller actually selects a source representation.
+    source_kind = _require_str("source_kind", source_kind)
     candidates = _require_unique("candidate_ids", [str(item) for item in candidate_ids])
     rows = _require_unique("row_ids", [str(item) for item in row_ids])
     if not rows or len(rows) > MAX_ROWS:
@@ -311,7 +319,7 @@ def build_dataset_manifest(
         "schema": "comsol_mcp.surrogate_dataset_manifest",
         "schema_version": SCHEMA_VERSION,
         "dataset_id": _require_str("dataset_id", dataset_id),
-        "source_kind": _require_str("source_kind", source_kind),
+        "source_kind": source_kind,
         "source_identity_sha256": source_identity_sha256,
         "candidate_ids": candidates,
         "row_ids": rows,
