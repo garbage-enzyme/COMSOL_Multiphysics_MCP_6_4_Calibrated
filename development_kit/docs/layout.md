@@ -358,6 +358,7 @@ models are intentionally absent.
 - `development_kit/tests/test_research_tools.py` — This module tests real dispatch for experimental solver-free campaign compilation and robustness planning.
 - `development_kit/tests/test_research_adapters.py` — This module tests exact trusted-template manifests, closed x/y mutation scope, and live-tree drift rejection.
 - `development_kit/tests/test_adjoint_adapter.py` — This module tests native adapter readback, unit canonicalization, and rollback on mutation failure.
+- `development_kit/tests/test_adapter_protocol.py` — This module solver-free tests the project-owned COMSOL adapter protocol, explicit conversion, failure-atomic rollback, error translation, and MPh 1.3.1/1.4 behavior parity.
 - `development_kit/tests/test_derivative_support.py` — This module tests strict derivative-support identities, variable mappings, objective contracts, and immutable normalization.
 - `development_kit/tests/test_gradient_contracts.py` — This module tests caller-budgeted native optimizer and exact gradient-row contracts.
 - `development_kit/tests/test_gradient_validation.py` — This module tests independent finite-difference, sign, cosine, directional, and step-sensitivity gradient checks.
@@ -513,6 +514,12 @@ models are intentionally absent.
 - `src/__init__.py` — This compatibility package aliases legacy imports to the canonical implementation modules.
 - `comsol_mcp/__init__.py` — This module defines the single authored package version.
 - `comsol_mcp/artifact_chain.py` — This module verifies bounded JSON artifact dependency chains without a solver.
+- `comsol_mcp/adapter/__init__.py` — This module exposes the project-owned COMSOL adapter seam and resolves a backend lazily so importing it never imports MPh.
+- `comsol_mcp/adapter/conversion.py` — This module performs explicit, version-neutral scalar and matrix conversion so no backend can silently coerce a value.
+- `comsol_mcp/adapter/fake_backend.py` — This module is a deterministic scripted backend that lets adapter contract and parity tests run with no COMSOL, JVM, or lease.
+- `comsol_mcp/adapter/mph14_backend.py` — This module is the isolated MPh 1.4.0 lane, recording that lane's general matrix read and `dbmodel://` load capability without enabling a live operation.
+- `comsol_mcp/adapter/mph_backend.py` — This module is the MPh 1.3.1 reference backend and the only place that constructs an MPh client for operational work.
+- `comsol_mcp/adapter/protocol.py` — This module defines the typed adapter protocol, request/result objects, stable error codes, and the operation list the six S4A steps map onto.
 - `comsol_mcp/build_identity.py` — This module derives package build identity from shipped paths and bytes.
 - `comsol_mcp/compatibility.py` — This module loads and validates the packaged runtime compatibility declaration.
 - `comsol_mcp/contracts/__init__.py` — This module exports lightweight public input contracts without solver imports.

@@ -259,6 +259,13 @@ def _entry(
 def _entries() -> list[dict[str, Any]]:
     legacy_point_audit = _LEGACY_POINT_AUDIT_SCHEMA
     entries = [
+        # S4A: the adapter protocol declares its own receipt schema.
+        _entry(
+            "comsol_mcp.adapter.operation",
+            "1.0.0",
+            "comsol_mcp.adapter.protocol",
+            artifact_kind="public_artifact",
+        ),
         _entry(
             "comsol_mcp.adjoint_optimization_manifest",
             "1.0.0",

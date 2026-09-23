@@ -43,6 +43,8 @@ LINT_TARGETS = (
     "comsol_mcp/surrogate",
     "comsol_mcp/jobs/surrogate_training.py",
     "comsol_mcp/jobs/surrogate_training_worker.py",
+    # S4A: the project-owned COMSOL adapter seam is lint-clean and stays covered.
+    "comsol_mcp/adapter",
     "comsol_mcp/native_runtime.py",
     "comsol_mcp/schema_registry.py",
     "comsol_mcp/settings_gui_handshake.py",
@@ -135,6 +137,7 @@ LINT_TARGETS = (
     "development_kit/tests/test_robust_shape_tools.py",
     "development_kit/tests/test_robust_shape_worker.py",
     "development_kit/tests/test_robust_wall_watchdog.py",
+    "development_kit/tests/test_adapter_protocol.py",
     "development_kit/tests/test_schema_registry.py",
     "development_kit/tests/test_standalone_acceptance_runner.py",
     "development_kit/tests/test_standalone_executable.py",
@@ -180,6 +183,8 @@ MYPY_GROUPS = (
         "comsol_mcp/surrogate",
         "comsol_mcp/jobs/surrogate_training.py",
         "comsol_mcp/jobs/surrogate_training_worker.py",
+        # S4A: the adapter seam is fully typed under --strict.
+        "comsol_mcp/adapter",
         "comsol_mcp/jobs/bounded_steps.py",
         "comsol_mcp/jobs/observation.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay.py",
