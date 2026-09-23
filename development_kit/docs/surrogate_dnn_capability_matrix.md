@@ -392,3 +392,40 @@ suites pass with no heavy module imported.
 
 Frozen limitation, unchanged: `dbmodel://` remains syntax and evidence only. The
 four live Model Manager operations stay deferred to alpha7.6.
+
+## 16. S4A adapter findings — four defects only a licensed run could find
+
+The adapter protocol was designed from measured MPh 1.3.1/1.4.0 source
+differences and 63 solver-free tests. Running it against a real solved model on
+COMSOL 6.4.0.293 then found **four defects that no solver-free test could have
+found**, because each depends on what COMSOL actually returns rather than on what
+the protocol assumed.
+
+| Finding | Consequence for this repository |
+| --- | --- |
+| `model.evaluate` returns a **numpy array** even for a scalar expression: `array(1.5)` for a parameter and an empty `array([], dtype=float64)` for an expression the model cannot evaluate. | Evaluation is normalized through a duck-typed `tolist` instead of a numpy import, so it stays dependency-free and still accepts a plain list. An empty result is refused with `conversion_not_representable` rather than reported as `0`, because substituting a value the model never produced is the fabrication the protocol exists to prevent. |
+| `Model.name` and `Model.file` are **methods**, not attributes. | `getattr(model, "name")` returned the bound method, so a receipt recorded `<bound method Model.name of Model('s4a_probe')>`. Each accessor is called when callable, and an unreadable value is reported unknown rather than stringified. |
+| The high-level MPh `Node` view is unusable on this localized install: `components()` returns the label `组件 1` rather than the tag `comp1`, `Node.exists()` is False for a created component, and `Node.children()` raises `AttributeError: 'NoneType' object has no attribute 'tags'`. | The adapter resolves through the Java ClientAPI accessor chain the runtime jobs already use, addressing nodes by an explicit kind-prefixed tag path such as `("component", "comp1", "geom1")`. Representable shapes are declared as data and validated **before** the model is touched, so an unsupported shape is refused without needing a session. |
+| COMSOL returns **JVM proxies**: `getString` yields a JPype `java.lang.String` (`jpype._jstring`), so `isinstance(value, str)` is False on a value that prints as a string. | Backend-produced values are unwrapped by exact Java type name before strict conversion. Caller-supplied values remain strictly checked, so this does not reintroduce the implicit coercion the protocol forbids. |
+
+Licensed evidence (receipt
+`D:\mcp_tests\a75s4lic\s4a_licensed_receipt.json`, sha256
+`a7cddfffb312105cc634128bd295bb8100ce541dda6a2f3f7ba572c33102ffb2`): a real 1D
+coefficient-form PDE model was built and solved; `evaluate("a1")` returned `1.5`
+as a float; node lookup resolved real types (`Component`, `solid`, `Interval`,
+`CoefficientFormPDE`, `Stationary`); typed property read/write with rollback was
+verified on real COMSOL state (read `''` → wrote `'1'` → restored exactly `''`);
+a write whose previous value cannot be read was refused `property_not_found`
+rather than left half-applied; four implicit coercions were refused on the
+licensed lane; unrepresentable paths and missing nodes were refused
+`node_not_found`; model identity reported `s4a_probe` with `content_sha256` null
+(unknown, not invented); and the session was released with no solver lease left
+behind.
+
+Frozen limitation, unchanged: only the MPh **1.3.1 reference lane** is installed,
+so the licensed run exercises that lane. The isolated 1.4 lane remains
+solver-free, and no MPh 1.4 compatibility is claimed. Two further facts from the
+same reconnaissance bound the deferred work: MPh 1.4.0 is the release that makes
+`Client.load` accept `dbmodel://` at all, and 1.4.0 generalizes `DoubleRowMatrix`
+**read** conversion beyond two rows while the write path refuses above two rows
+on both lanes.
