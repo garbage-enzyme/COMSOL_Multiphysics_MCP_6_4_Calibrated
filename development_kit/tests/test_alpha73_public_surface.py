@@ -97,7 +97,7 @@ def _csv_manifest(tmp_path: Path) -> Path:
     }
     manifest = build_offline_export_manifest(
         producer_tool="results_export_data",
-        producer_version="0.7.4",
+        producer_version="0.7.5",
         model_path_redacted="**/model.mph",
         model_sha256="a" * 64,
         artifacts=[artifact_inputs],
