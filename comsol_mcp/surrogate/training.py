@@ -179,9 +179,7 @@ def compute_metrics(
                     abs(forecast[index][dimension] - observed[index][dimension])
                 )
         if grouped:
-            worst_group_mae = max(
-                sum(values) / len(values) for values in grouped.values()
-            )
+            worst_group_mae = max(sum(values) / len(values) for values in grouped.values())
 
     return {
         "sample_count": count,
@@ -266,9 +264,7 @@ def fit_baseline(
     width = len(features[0])
     output_dim = len(targets[0])
 
-    means = [
-        sum(row[column] for row in targets) / count for column in range(output_dim)
-    ]
+    means = [sum(row[column] for row in targets) / count for column in range(output_dim)]
 
     if kind == "constant_mean":
         # Represent the constant model with explicit zero coefficients so a
@@ -316,15 +312,11 @@ def fit_baseline(
     return {**body, "baseline_sha256": canonical_sha256_v1(body)}
 
 
-def _solve_normal_equations(
-    matrix: list[list[float]], rhs: list[list[float]]
-) -> list[list[float]]:
+def _solve_normal_equations(matrix: list[list[float]], rhs: list[list[float]]) -> list[list[float]]:
     """Solve ``matrix * x = rhs`` by Gauss-Jordan elimination with partial pivoting."""
     size = len(matrix)
     columns = len(rhs[0])
-    augmented = [
-        [*matrix[row], *rhs[row]] for row in range(size)
-    ]
+    augmented = [[*matrix[row], *rhs[row]] for row in range(size)]
     for pivot in range(size):
         best = max(range(pivot, size), key=lambda row: abs(augmented[row][pivot]))
         if abs(augmented[best][pivot]) < 1e-14:
@@ -358,9 +350,7 @@ def predict_baseline(
         raise ValueError("baseline must not be a DNN")
     rows = _matrix(features, name="features", width=int(baseline["input_dim"]))
     intercept = [float(value) for value in baseline["intercept"]]
-    coefficients = [
-        [float(value) for value in column] for column in baseline["coefficients"]
-    ]
+    coefficients = [[float(value) for value in column] for column in baseline["coefficients"]]
     predictions: list[list[float]] = []
     for row in rows:
         output = list(intercept)
@@ -394,16 +384,10 @@ def build_continuation_identity(
         "dataset_manifest_sha256": _require_hex64(
             "dataset_manifest_sha256", dataset_manifest_sha256
         ),
-        "split_manifest_sha256": _require_hex64(
-            "split_manifest_sha256", split_manifest_sha256
-        ),
-        "field_schema_sha256": _require_hex64(
-            "field_schema_sha256", field_schema_sha256
-        ),
+        "split_manifest_sha256": _require_hex64("split_manifest_sha256", split_manifest_sha256),
+        "field_schema_sha256": _require_hex64("field_schema_sha256", field_schema_sha256),
         "transforms_sha256": _require_hex64("transforms_sha256", transforms_sha256),
-        "architecture_sha256": _require_hex64(
-            "architecture_sha256", architecture_sha256
-        ),
+        "architecture_sha256": _require_hex64("architecture_sha256", architecture_sha256),
         "comsol_build": _require_str("comsol_build", comsol_build, max_len=64),
         "objective": _require_str("objective", objective),
         "prior_checkpoint_sha256": _require_hex64(
@@ -452,9 +436,7 @@ def assert_continuation_allowed(**kwargs: Any) -> dict[str, Any]:
     """Fail closed when a continuation would cross a contract identity."""
     report = evaluate_continuation(**kwargs)
     if not report["continuation_allowed"]:
-        raise ValueError(
-            "nonidentical_continuation: " + ", ".join(report["mismatched_fields"])
-        )
+        raise ValueError("nonidentical_continuation: " + ", ".join(report["mismatched_fields"]))
     return report
 
 

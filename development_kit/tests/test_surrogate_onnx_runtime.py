@@ -485,3 +485,63 @@ def test_real_comsol_export_normalization_matches_the_reported_domain() -> None:
     bias = model["initializers"]["bias"]["values"]
     assert scale == pytest.approx([1.0 / 1.75, 1.0 / 2.5], abs=1e-6)
     assert bias == pytest.approx([-1.0 / 1.75, -2.0 / 2.5], abs=1e-6)
+
+
+# --------------------------------------------------------------------------
+# Regressions: input binding and empty-graph refusal
+# --------------------------------------------------------------------------
+
+
+def test_per_feature_inputs_bind_each_tensor_to_one_feature(tmp_path) -> None:
+    """Each per-feature tensor must carry one feature, not a bare string.
+
+    Regression: ``dict(zip(graph_inputs, names))`` bound every tensor name to a
+    string, so the consumer iterated that string's characters and evaluation
+    failed with ``KeyError: 'a'``.  The distinct tensor names here are what make
+    the per-feature branch reachable at all; reusing the feature names would
+    leave the graph input already bound and skip the binding entirely.
+    """
+    # out = in_a + in_b, declared as two single-feature graph inputs.
+    nodes = [_node("Add", ["in_a", "in_b"], ["output"])]
+    payload = _onnx(nodes, [], ["in_a", "in_b"])
+    model = load_onnx_model(_write(tmp_path, "two_inputs.onnx", payload))
+
+    assert model["graph_inputs"] == ["in_a", "in_b"]
+    predictions = evaluate_onnx_model(
+        model, input_names=["a1", "a2"], points=[[1.0, 2.0], [3.0, 4.0]]
+    )
+    assert predictions == [[3.0], [7.0]]
+
+
+def test_single_batched_input_binds_the_whole_point(tmp_path) -> None:
+    """The COMSOL layout binds one tensor named ``input`` to every feature."""
+    nodes = [_node("Identity", ["input"], ["output"])]
+    model = load_onnx_model(_write(tmp_path, "batched.onnx", _onnx(nodes, [], ["input"])))
+    predictions = evaluate_onnx_model(model, input_names=["a1", "a2"], points=[[1.0, 2.0]])
+    assert predictions == [[1.0, 2.0]]
+
+
+def test_input_count_mismatch_is_refused(tmp_path) -> None:
+    """A graph whose input count matches neither layout is refused, not guessed."""
+    nodes = [
+        _node("Identity", ["in_a"], ["hidden"]),
+        _node("Identity", ["in_b"], ["mid"]),
+        _node("Identity", ["in_c"], ["output"]),
+    ]
+    model = load_onnx_model(
+        _write(tmp_path, "three_inputs.onnx", _onnx(nodes, [], ["in_a", "in_b", "in_c"]))
+    )
+    with pytest.raises(OnnxDecodeError, match="neither"):
+        evaluate_onnx_model(model, input_names=["a1", "a2"], points=[[1.0, 2.0]])
+
+
+def test_graph_with_no_nodes_is_refused_instead_of_crashing(tmp_path) -> None:
+    """Regression: an empty node list raised ``NameError`` instead of refusing.
+
+    The output tensor name is assigned inside the node loop, so a graph with no
+    nodes left it unbound.  It must be reported as an unsupported model.
+    """
+    model = load_onnx_model(_write(tmp_path, "empty.onnx", _onnx([], [], ["input"])))
+    assert model["nodes"] == []
+    with pytest.raises(OnnxDecodeError, match="produced no output"):
+        evaluate_onnx_model(model, input_names=["a1"], points=[[1.0]])

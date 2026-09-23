@@ -580,6 +580,20 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.evidence.offline_export",
             artifact_kind="public_response",
         ),
+        # S10: the bounded public surrogate surface emits these two responses.
+        # Both are read-only validation verdicts that never upgrade FEM evidence.
+        _entry(
+            "comsol_mcp.surrogate_evidence_verdict",
+            "1.0.0",
+            "comsol_mcp.evidence.surrogate_evidence",
+            artifact_kind="public_response",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_training_preview",
+            "1.0.0",
+            "comsol_mcp.evidence.surrogate_evidence",
+            artifact_kind="public_response",
+        ),
         _entry(
             "comsol_mcp.observation_receipt",
             "1.0.0",

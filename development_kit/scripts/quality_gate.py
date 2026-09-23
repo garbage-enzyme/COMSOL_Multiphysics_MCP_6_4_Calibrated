@@ -38,6 +38,11 @@ LINT_TARGETS = (
     "comsol_mcp/evidence/spectral_model_comparison.py",
     "comsol_mcp/evidence/model_identity.py",
     "comsol_mcp/evidence/inspection",
+    # S10: the surrogate surface is lint-clean and stays covered.
+    "comsol_mcp/evidence/surrogate_evidence.py",
+    "comsol_mcp/surrogate",
+    "comsol_mcp/jobs/surrogate_training.py",
+    "comsol_mcp/jobs/surrogate_training_worker.py",
     "comsol_mcp/native_runtime.py",
     "comsol_mcp/schema_registry.py",
     "comsol_mcp/settings_gui_handshake.py",
@@ -69,6 +74,8 @@ LINT_TARGETS = (
     "comsol_mcp/tools/offline_export.py",
     "comsol_mcp/tools/mph_inspection.py",
     "comsol_mcp/tools/model_identity.py",
+    # S10: the bounded public surrogate tools are lint-clean and stay covered.
+    "comsol_mcp/tools/surrogate.py",
     "comsol_mcp/tools/thermal_radiation.py",
     "comsol_mcp/tools/thermal_material.py",
     "comsol_mcp/tools/geometry_selections.py",
@@ -145,6 +152,8 @@ MYPY_GROUPS = (
         "comsol_mcp/contracts/thermal_material.py",
         "comsol_mcp/contracts/thermo_optomechanical.py",
         "comsol_mcp/contracts/structural.py",
+        # S10: bounded public surrogate input contracts.
+        "comsol_mcp/contracts/surrogate.py",
     ),
     (
         "comsol_mcp/durable/canonical.py",
@@ -164,6 +173,12 @@ MYPY_GROUPS = (
         "comsol_mcp/tools/compatibility_registry.py",
         "comsol_mcp/evidence/offline_export.py",
         "comsol_mcp/tools/offline_export.py",
+        # S10: the surrogate surface is fully typed under --strict.
+        "comsol_mcp/evidence/surrogate_evidence.py",
+        "comsol_mcp/tools/surrogate.py",
+        "comsol_mcp/surrogate",
+        "comsol_mcp/jobs/surrogate_training.py",
+        "comsol_mcp/jobs/surrogate_training_worker.py",
         "comsol_mcp/jobs/bounded_steps.py",
         "comsol_mcp/jobs/observation.py",
         "comsol_mcp/jobs/thermo_optomechanical_replay.py",

@@ -113,13 +113,10 @@ def build_campaign_spec(
     )
     if require_fem_for_selected is not True:
         raise ValueError(
-            "require_fem_for_selected must be true: a surrogate prediction is "
-            "never evidence"
+            "require_fem_for_selected must be true: a surrogate prediction is never evidence"
         )
     if maximum_fem_escalations < top_k:
-        raise ValueError(
-            "maximum_fem_escalations must cover every selected candidate"
-        )
+        raise ValueError("maximum_fem_escalations must cover every selected candidate")
 
     body = {
         "schema": "comsol_mcp.surrogate_campaign_spec",
@@ -213,9 +210,7 @@ def build_screening_record(
     if not isinstance(features, Mapping) or not features:
         raise ValueError("features must be a non-empty mapping")
     normalized = {
-        _require_str("feature name", key, max_len=64): _require_finite(
-            f"features.{key}", value
-        )
+        _require_str("feature name", key, max_len=64): _require_finite(f"features.{key}", value)
         for key, value in features.items()
     }
     uncertainty = None
@@ -229,9 +224,7 @@ def build_screening_record(
         "schema_version": SCHEMA_VERSION,
         "candidate_id": _require_str("candidate_id", candidate_id),
         "features": dict(sorted(normalized.items())),
-        "predicted_objective": _require_finite(
-            "predicted_objective", predicted_objective
-        ),
+        "predicted_objective": _require_finite("predicted_objective", predicted_objective),
         "prediction_uncertainty": uncertainty,
         "ood_state": ood_state,
         "surrogate_registry_entry_sha256": _require_hex64(
@@ -311,8 +304,7 @@ def rank_candidates(
     forced = [
         record
         for record in validated
-        if record["ood_state"] in ("out_of_domain", "uncalibrated")
-        and record not in selected
+        if record["ood_state"] in ("out_of_domain", "uncalibrated") and record not in selected
     ]
     escalation: list[dict[str, Any]] = []
     for record in selected:
@@ -397,9 +389,8 @@ def record_fem_result(
 
     difference = abs(measured_objective - predicted_objective)
     within_absolute = difference <= absolute_tolerance
-    within_relative = (
-        predicted_objective != 0.0
-        and difference <= relative_tolerance * abs(predicted_objective)
+    within_relative = predicted_objective != 0.0 and difference <= relative_tolerance * abs(
+        predicted_objective
     )
     agrees = within_absolute or within_relative
     relative_difference = (
@@ -470,8 +461,7 @@ def summarize_campaign(
     measured_pairs = [
         (float(result["predicted_objective"]), float(result["measured_objective"]))
         for result in fem_results
-        if result.get("state") == "verified"
-        and result.get("measured_objective") is not None
+        if result.get("state") == "verified" and result.get("measured_objective") is not None
     ]
     if measured_pairs:
         errors = [abs(predicted - measured) for predicted, measured in measured_pairs]
@@ -502,8 +492,7 @@ def summarize_campaign(
         "fem_escalation_budget": validated_spec["maximum_fem_escalations"],
         "wall_time_seconds": wall_time_seconds,
         "wall_time_budget_seconds": validated_spec["wall_time_budget_seconds"],
-        "within_wall_time_budget": wall_time_seconds
-        <= validated_spec["wall_time_budget_seconds"],
+        "within_wall_time_budget": wall_time_seconds <= validated_spec["wall_time_budget_seconds"],
         "candidate_states": dict(sorted(states.items())),
         "verified_count": verified,
         "predicted_only_count": predicted_only,
@@ -535,6 +524,10 @@ def assert_no_prediction_promotion(
     verified_ids: set[str] = set()
     for result in fem_results:
         candidate_id = result.get("candidate_id")
+        # An absent or non-string id is refused explicitly rather than relying on
+        # a None-membership test, so the reported error names the real problem.
+        if not isinstance(candidate_id, str) or not candidate_id:
+            raise ValueError("each FEM result must declare a non-empty candidate_id")
         if candidate_id not in screened:
             raise ValueError(f"FEM result for unscreened candidate: {candidate_id!r}")
         if result.get("state") != "verified":
@@ -544,13 +537,9 @@ def assert_no_prediction_promotion(
                 f"candidate {candidate_id!r} is verified without verified FEM evidence"
             )
         if not result.get("fem_artifact_sha256"):
-            raise ValueError(
-                f"candidate {candidate_id!r} is verified without a FEM artifact hash"
-            )
+            raise ValueError(f"candidate {candidate_id!r} is verified without a FEM artifact hash")
         if result.get("is_fem_evidence") is not True:
-            raise ValueError(
-                f"candidate {candidate_id!r} is verified without FEM evidence flag"
-            )
+            raise ValueError(f"candidate {candidate_id!r} is verified without FEM evidence flag")
         verified_ids.add(candidate_id)
     return {
         "no_unverified_promotion": True,

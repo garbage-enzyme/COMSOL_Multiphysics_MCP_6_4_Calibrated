@@ -287,9 +287,7 @@ def validate_fitted_transforms(value: Any) -> dict[str, Any]:
     return manifest
 
 
-def apply_transforms(
-    transforms: Mapping[str, Any], row: Mapping[str, float]
-) -> dict[str, float]:
+def apply_transforms(transforms: Mapping[str, Any], row: Mapping[str, float]) -> dict[str, float]:
     """Apply frozen transforms forward."""
     validated = validate_fitted_transforms(transforms)
     output: dict[str, float] = {}
@@ -347,9 +345,7 @@ def verify_transform_roundtrip(
             delta = abs(restored[field_id] - float(original))
             allowed = absolute_tolerance + relative_tolerance * abs(float(original))
             if delta > allowed:
-                raise ValueError(
-                    f"transform round-trip failed for {field_id} at row {index}"
-                )
+                raise ValueError(f"transform round-trip failed for {field_id} at row {index}")
             if delta > worst:
                 worst, worst_field = delta, field_id
     return {

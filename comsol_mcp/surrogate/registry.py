@@ -231,9 +231,7 @@ def build_registry_entry(
     if not isinstance(artifacts, Mapping) or not artifacts:
         raise ValueError("artifacts must be a non-empty mapping")
     normalized_artifacts = {
-        _require_str("artifact name", key, max_len=128): _require_hex64(
-            f"artifacts.{key}", value
-        )
+        _require_str("artifact name", key, max_len=128): _require_hex64(f"artifacts.{key}", value)
         for key, value in artifacts.items()
     }
     body = {
@@ -284,7 +282,9 @@ def validate_registry_entry(value: Any) -> dict[str, Any]:
     return dict(value)
 
 
-def advance_registry_entry(entry: Mapping[str, Any], *, to_state: str, **evidence: Any) -> dict[str, Any]:
+def advance_registry_entry(
+    entry: Mapping[str, Any], *, to_state: str, **evidence: Any
+) -> dict[str, Any]:
     """Advance a registry entry by exactly one permitted transition.
 
     An accepted or retired entry is immutable: further transitions are refused
@@ -295,9 +295,7 @@ def advance_registry_entry(entry: Mapping[str, Any], *, to_state: str, **evidenc
         raise ValueError("accepted or retired registry entries are immutable")
     allowed = _ALLOWED_TRANSITIONS.get(current["state"], ())
     if to_state not in allowed:
-        raise ValueError(
-            f"transition {current['state']} -> {to_state} is not permitted"
-        )
+        raise ValueError(f"transition {current['state']} -> {to_state} is not permitted")
     body = {
         key: current[key]
         for key in (
@@ -320,9 +318,7 @@ def advance_registry_entry(entry: Mapping[str, Any], *, to_state: str, **evidenc
     return _finalize(body)
 
 
-def detect_drift(
-    previous: Mapping[str, Any], current: Mapping[str, Any]
-) -> dict[str, Any]:
+def detect_drift(previous: Mapping[str, Any], current: Mapping[str, Any]) -> dict[str, Any]:
     """Compare two model-card identity sets for contract drift.
 
     A material, mesh, physics, adapter, or COMSOL identity change is contract
@@ -330,11 +326,7 @@ def detect_drift(
     """
     before = validate_model_card(previous)["identities"]
     after = validate_model_card(current)["identities"]
-    changed = sorted(
-        key
-        for key in set(before) | set(after)
-        if before.get(key) != after.get(key)
-    )
+    changed = sorted(key for key in set(before) | set(after) if before.get(key) != after.get(key))
     material = [key for key in changed if key in DRIFT_IDENTITY_FIELDS]
     return {
         "drift_detected": bool(changed),
@@ -345,7 +337,9 @@ def detect_drift(
     }
 
 
-def assert_no_contract_drift(previous: Mapping[str, Any], current: Mapping[str, Any]) -> dict[str, Any]:
+def assert_no_contract_drift(
+    previous: Mapping[str, Any], current: Mapping[str, Any]
+) -> dict[str, Any]:
     """Fail closed when a continuation would cross a contract identity."""
     report = detect_drift(previous, current)
     if report["requires_new_lineage"]:
@@ -405,9 +399,7 @@ def evaluate_ood(
         worst_ratio = 0.0
         nearest = None
         for row in rows:
-            ratios = [
-                abs(point[i] - row[i]) / (upper[i] - lower[i]) for i in range(len(point))
-            ]
+            ratios = [abs(point[i] - row[i]) / (upper[i] - lower[i]) for i in range(len(point))]
             distance = max(ratios)
             if nearest is None or distance < nearest:
                 nearest = distance
@@ -438,8 +430,7 @@ def assert_prediction_not_evidence(prediction: Mapping[str, Any]) -> dict[str, A
     present = sorted(key for key in forbidden if prediction.get(key))
     if present:
         raise ValueError(
-            "a surrogate prediction cannot carry FEM evidence fields: "
-            + ", ".join(present)
+            "a surrogate prediction cannot carry FEM evidence fields: " + ", ".join(present)
         )
     disposition = prediction.get("scientific_disposition", "predicted")
     if disposition not in SCIENTIFIC_STATES:

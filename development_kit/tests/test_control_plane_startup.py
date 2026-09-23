@@ -9,9 +9,20 @@ import subprocess
 import sys
 from pathlib import Path
 
-MAX_CORE_DISCOVERY_BYTES = 64 * 1024
+MAX_CORE_DISCOVERY_BYTES = 80 * 1024
 MAX_CORE_TOOL_SCHEMA_BYTES = 16 * 1024
-# The capabilities result embeds the complete schema registry. The registry
+# The discovery payload is a per-tool cost multiplied by the core surface, so the
+# bound is only meaningful relative to the tool count. The original 64 KiB bound
+# was set when core held 50 tools (about 1.24 KiB/tool) and the profile was
+# already at 94.5% of it, leaving 3.6 KiB of headroom. alpha7.5 S10 adds the five
+# bounded solver-free surrogate tools to core, which legitimately costs 9,829 B
+# and cannot be recovered by trimming: even removing every pydantic ``title`` and
+# the shared limits object leaves 5,684 B above the old bound. Raising the bound
+# to 80 KiB keeps a real per-tool guard (about 1.45 KiB/tool at 55 tools) while
+# accommodating a public surface addition, matching the documented 80 KiB
+# capabilities bound below. Measured 2026-09-28: 70,978 B / 55 tools.
+#
+# The capabilities result also embeds the complete schema registry. The registry
 # legitimately grows with each public schema (151 entries measured at 66,692 B
 # on 2026-08-18, alpha7.2 with robust forward-shape schemas), so the bound is
 # 80 KiB to keep headroom for documented registry growth while still bounding
@@ -118,11 +129,16 @@ def test_fresh_core_discovery_is_solver_free():
 
     assert sample["heavy_modules"] == []
     assert sample["process_launch_events"] == []
-    assert sample["tool_count"] == 50
+    assert sample["tool_count"] == 55
     assert sample["create_seconds"] <= 0.75
     assert sample["core_discovery_bytes"] <= MAX_CORE_DISCOVERY_BYTES
     assert sample["largest_tool_schema_bytes"] <= MAX_CORE_TOOL_SCHEMA_BYTES
     assert sample["capabilities_response_bytes"] <= MAX_CAPABILITIES_RESPONSE_BYTES
+    # The absolute byte bound alone would let the payload grow whenever a tool is
+    # added.  This per-tool average keeps the guard meaningful as the surface
+    # changes, so a future tool that bloats discovery is caught even though the
+    # total still fits.
+    assert sample["core_discovery_bytes"] / sample["tool_count"] <= 1536
 
 
 def test_process_launch_audit_captures_a_short_lived_child():

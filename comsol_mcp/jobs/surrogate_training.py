@@ -14,7 +14,6 @@ from typing import Any, Mapping
 
 from comsol_mcp.build_identity import get_build_identity
 from comsol_mcp.compatibility import module_identity_matches
-from comsol_mcp.durable.io import read_file_bytes_bounded
 
 from .resource_admission import normalize_resource_policy
 from .store import JOB_SCHEMA_VERSION
@@ -94,9 +93,7 @@ def validate_surrogate_training_driver_identity(spec: Mapping[str, Any]) -> dict
         or any(key != "implementation" and observed[key] != expected[key] for key in expected)
         or not module_identity_matches(expected["implementation"], observed.get("implementation"))
     ):
-        raise ValueError(
-            "surrogate-training driver identity differs from the running package"
-        )
+        raise ValueError("surrogate-training driver identity differs from the running package")
     return expected
 
 
@@ -168,7 +165,14 @@ def normalize_surrogate_training_spec(value: object) -> dict[str, Any]:
     ]
     activation = _require_str("architecture.activation", architecture.get("activation"))
     if activation not in {
-        "none", "relu", "elu", "sigmoid", "tanh", "softplus", "leakyrelu", "gelu"
+        "none",
+        "relu",
+        "elu",
+        "sigmoid",
+        "tanh",
+        "softplus",
+        "leakyrelu",
+        "gelu",
     }:
         raise ValueError("unsupported activation function")
     optimizer = _require_str("architecture.optimizer", architecture.get("optimizer"))
@@ -177,18 +181,17 @@ def normalize_surrogate_training_spec(value: object) -> dict[str, Any]:
     loss = _require_str("architecture.loss", architecture.get("loss"))
     if loss not in {"mse", "mae"}:
         raise ValueError("unsupported loss function")
-    batch_size = _require_positive_int(
-        "architecture.batch_size", architecture.get("batch_size"), maximum=65536
-    )
+    # Validated for its side effect only: the value itself is carried into the
+    # normalized specification by the architecture spread below, so binding it to
+    # a local would leave an unused name behind.
+    _require_positive_int("architecture.batch_size", architecture.get("batch_size"), maximum=65536)
     learning_rate = architecture.get("learning_rate")
     if isinstance(learning_rate, bool) or not isinstance(learning_rate, (int, float)):
         raise ValueError("architecture.learning_rate must be a positive number")
     if not 0 < float(learning_rate) <= 1.0:
         raise ValueError("architecture.learning_rate must be in (0, 1]")
 
-    epochs = _require_positive_int(
-        "maximum_epochs", raw.get("maximum_epochs"), maximum=MAX_EPOCHS
-    )
+    epochs = _require_positive_int("maximum_epochs", raw.get("maximum_epochs"), maximum=MAX_EPOCHS)
 
     seeds = raw.get("seeds")
     if not isinstance(seeds, list) or not seeds:
@@ -238,7 +241,9 @@ def normalize_surrogate_training_spec(value: object) -> dict[str, Any]:
         if cf_unknown:
             raise ValueError(f"continue_from has unknown fields: {', '.join(cf_unknown)}")
         normalized_continue = {
-            "parent_job_id": _require_str("continue_from.parent_job_id", continue_from.get("parent_job_id")),
+            "parent_job_id": _require_str(
+                "continue_from.parent_job_id", continue_from.get("parent_job_id")
+            ),
             "trained_chksum": _require_hex64(
                 "continue_from.trained_chksum", continue_from.get("trained_chksum")
             ),

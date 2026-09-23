@@ -166,13 +166,9 @@ def build_dnn_configuration(
     loss = _require_choice("loss", loss, ALLOWED_LOSSES)
     validation_mode = _require_choice("validation_mode", validation_mode, ALLOWED_VALIDATION_MODES)
     test_mode = _require_choice("test_mode", test_mode, ALLOWED_TEST_MODES)
-    learning_rate = _require_number(
-        "learning_rate", learning_rate, minimum=1e-12, maximum=1.0
-    )
+    learning_rate = _require_number("learning_rate", learning_rate, minimum=1e-12, maximum=1.0)
     batch_size = _require_int("batch_size", batch_size, minimum=1, maximum=MAX_BATCH_SIZE)
-    maximum_epochs = _require_int(
-        "maximum_epochs", maximum_epochs, minimum=1, maximum=MAX_EPOCHS
-    )
+    maximum_epochs = _require_int("maximum_epochs", maximum_epochs, minimum=1, maximum=MAX_EPOCHS)
     seed = _require_int("seed", seed, minimum=0, maximum=2**31 - 1)
     weight_decay = _require_number("weight_decay", weight_decay, minimum=0.0, maximum=1.0)
     momentum = _require_number("momentum", momentum, minimum=0.0, maximum=1.0)
@@ -184,9 +180,7 @@ def build_dnn_configuration(
     scales = dict(column_scales or {})
     unknown_scales = sorted(set(scales) - set(features) - set(targets))
     if unknown_scales:
-        raise ValueError(
-            f"column_scales references unknown columns: {', '.join(unknown_scales)}"
-        )
+        raise ValueError(f"column_scales references unknown columns: {', '.join(unknown_scales)}")
     for column, kind in scales.items():
         _require_choice(f"column_scales.{column}", kind, ALLOWED_COLUMN_SCALES)
     if len(features) + len(targets) > MAX_COLUMNS:
@@ -482,9 +476,7 @@ class SurrogateDnnBackend(Protocol):
 
     def write_entries(self, feature: Any, name: str, entries: Mapping[str, str]) -> None: ...
 
-    def write_string_map(
-        self, feature: Any, name: str, entries: Mapping[str, str]
-    ) -> None: ...
+    def write_string_map(self, feature: Any, name: str, entries: Mapping[str, str]) -> None: ...
 
     def bind_data_source(self, feature: Any, path: str) -> dict[str, Any]: ...
 
@@ -702,8 +694,7 @@ def bind_data_source_and_arguments(
         return {
             "success": False,
             "error": (
-                f"data file exposes {len(columns)} columns but the schema declares "
-                f"{len(expected)}"
+                f"data file exposes {len(columns)} columns but the schema declares {len(expected)}"
             ),
             "blockers": ["column_count_mismatch"],
             "column_keys": columns,
@@ -740,13 +731,19 @@ def bind_data_source_and_arguments(
 
 
 def _numeric_value(record: Any) -> float | None:
-    """Return the numeric value of an accessor readback record, or None."""
+    """Return the numeric value of an accessor readback record, or None.
+
+    COMSOL readbacks are strings, so the conversion is guarded rather than
+    assumed: a non-numeric readback yields ``None`` instead of raising.
+    """
     raw = record.get("value") if isinstance(record, Mapping) else record
     if isinstance(raw, str):
         raw = raw.strip()
+    if isinstance(raw, bool) or not isinstance(raw, (str, int, float)):
+        return None
     try:
         number = float(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return number if math.isfinite(number) else None
 

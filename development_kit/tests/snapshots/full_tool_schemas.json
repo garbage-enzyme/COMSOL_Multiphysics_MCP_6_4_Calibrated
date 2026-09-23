@@ -11521,6 +11521,498 @@
     "title": "study_waitArguments",
     "type": "object"
   },
+  "surrogate_dataset_validate": {
+    "$defs": {
+      "SurrogateReadLimits": {
+        "additionalProperties": false,
+        "description": "Caller-overridable bounded reader limits within fixed hard caps.\n\nOnly limits this surface actually enforces are declared.  A caller-supplied\nbound that nothing applies would be worse than an absent one, because it\nwould read as a guarantee.",
+        "maxProperties": 256,
+        "properties": {
+          "max_columns": {
+            "default": 64,
+            "maximum": 256,
+            "minimum": 1,
+            "title": "Max Columns",
+            "type": "integer"
+          },
+          "max_document_bytes": {
+            "default": 4194304,
+            "maximum": 33554432,
+            "minimum": 1,
+            "title": "Max Document Bytes",
+            "type": "integer"
+          },
+          "max_rows": {
+            "default": 4096,
+            "maximum": 4096,
+            "minimum": 1,
+            "title": "Max Rows",
+            "type": "integer"
+          }
+        },
+        "title": "SurrogateReadLimits",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "dataset_path": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "title": "Dataset Path",
+        "type": "string"
+      },
+      "expected_feature_names": {
+        "anyOf": [
+          {
+            "items": {
+              "maxLength": 16384,
+              "type": "string"
+            },
+            "maxItems": 2048,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Feature Names"
+      },
+      "expected_row_count": {
+        "anyOf": [
+          {
+            "maximum": 4096,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Row Count"
+      },
+      "expected_target_names": {
+        "anyOf": [
+          {
+            "items": {
+              "maxLength": 16384,
+              "type": "string"
+            },
+            "maxItems": 2048,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Target Names"
+      },
+      "field_schema_path": {
+        "anyOf": [
+          {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Field Schema Path"
+      },
+      "limits": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SurrogateReadLimits"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "dataset_path"
+    ],
+    "title": "surrogate_dataset_validateArguments",
+    "type": "object"
+  },
+  "surrogate_model_inspect": {
+    "$defs": {
+      "SurrogateReadLimits": {
+        "additionalProperties": false,
+        "description": "Caller-overridable bounded reader limits within fixed hard caps.\n\nOnly limits this surface actually enforces are declared.  A caller-supplied\nbound that nothing applies would be worse than an absent one, because it\nwould read as a guarantee.",
+        "maxProperties": 256,
+        "properties": {
+          "max_columns": {
+            "default": 64,
+            "maximum": 256,
+            "minimum": 1,
+            "title": "Max Columns",
+            "type": "integer"
+          },
+          "max_document_bytes": {
+            "default": 4194304,
+            "maximum": 33554432,
+            "minimum": 1,
+            "title": "Max Document Bytes",
+            "type": "integer"
+          },
+          "max_rows": {
+            "default": 4096,
+            "maximum": 4096,
+            "minimum": 1,
+            "title": "Max Rows",
+            "type": "integer"
+          }
+        },
+        "title": "SurrogateReadLimits",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "document_kind": {
+        "default": "auto",
+        "maxLength": 16384,
+        "title": "Document Kind",
+        "type": "string"
+      },
+      "document_path": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "title": "Document Path",
+        "type": "string"
+      },
+      "limits": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SurrogateReadLimits"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "document_path"
+    ],
+    "title": "surrogate_model_inspectArguments",
+    "type": "object"
+  },
+  "surrogate_model_verify": {
+    "$defs": {
+      "SurrogateReadLimits": {
+        "additionalProperties": false,
+        "description": "Caller-overridable bounded reader limits within fixed hard caps.\n\nOnly limits this surface actually enforces are declared.  A caller-supplied\nbound that nothing applies would be worse than an absent one, because it\nwould read as a guarantee.",
+        "maxProperties": 256,
+        "properties": {
+          "max_columns": {
+            "default": 64,
+            "maximum": 256,
+            "minimum": 1,
+            "title": "Max Columns",
+            "type": "integer"
+          },
+          "max_document_bytes": {
+            "default": 4194304,
+            "maximum": 33554432,
+            "minimum": 1,
+            "title": "Max Document Bytes",
+            "type": "integer"
+          },
+          "max_rows": {
+            "default": 4096,
+            "maximum": 4096,
+            "minimum": 1,
+            "title": "Max Rows",
+            "type": "integer"
+          }
+        },
+        "title": "SurrogateReadLimits",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "document_path": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "title": "Document Path",
+        "type": "string"
+      },
+      "expected_architecture_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Architecture Sha256"
+      },
+      "expected_artifact_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Artifact Sha256"
+      },
+      "expected_dataset_manifest_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Dataset Manifest Sha256"
+      },
+      "expected_split_manifest_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Split Manifest Sha256"
+      },
+      "expected_trained_chksum": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Trained Chksum"
+      },
+      "limits": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SurrogateReadLimits"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "require_consistent_export": {
+        "default": false,
+        "title": "Require Consistent Export",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "document_path"
+    ],
+    "title": "surrogate_model_verifyArguments",
+    "type": "object"
+  },
+  "surrogate_prediction_validate": {
+    "$defs": {
+      "SurrogateReadLimits": {
+        "additionalProperties": false,
+        "description": "Caller-overridable bounded reader limits within fixed hard caps.\n\nOnly limits this surface actually enforces are declared.  A caller-supplied\nbound that nothing applies would be worse than an absent one, because it\nwould read as a guarantee.",
+        "maxProperties": 256,
+        "properties": {
+          "max_columns": {
+            "default": 64,
+            "maximum": 256,
+            "minimum": 1,
+            "title": "Max Columns",
+            "type": "integer"
+          },
+          "max_document_bytes": {
+            "default": 4194304,
+            "maximum": 33554432,
+            "minimum": 1,
+            "title": "Max Document Bytes",
+            "type": "integer"
+          },
+          "max_rows": {
+            "default": 4096,
+            "maximum": 4096,
+            "minimum": 1,
+            "title": "Max Rows",
+            "type": "integer"
+          }
+        },
+        "title": "SurrogateReadLimits",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "absolute_tolerance": {
+        "default": 0.0,
+        "maximum": 1e+308,
+        "minimum": 0.0,
+        "title": "Absolute Tolerance",
+        "type": "number"
+      },
+      "limits": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SurrogateReadLimits"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "ood_state": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Ood State"
+      },
+      "prediction_path": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "title": "Prediction Path",
+        "type": "string"
+      },
+      "relative_tolerance": {
+        "default": 0.0,
+        "maximum": 1e+308,
+        "minimum": 0.0,
+        "title": "Relative Tolerance",
+        "type": "number"
+      }
+    },
+    "required": [
+      "prediction_path"
+    ],
+    "title": "surrogate_prediction_validateArguments",
+    "type": "object"
+  },
+  "surrogate_training_preview": {
+    "$defs": {
+      "SurrogateReadLimits": {
+        "additionalProperties": false,
+        "description": "Caller-overridable bounded reader limits within fixed hard caps.\n\nOnly limits this surface actually enforces are declared.  A caller-supplied\nbound that nothing applies would be worse than an absent one, because it\nwould read as a guarantee.",
+        "maxProperties": 256,
+        "properties": {
+          "max_columns": {
+            "default": 64,
+            "maximum": 256,
+            "minimum": 1,
+            "title": "Max Columns",
+            "type": "integer"
+          },
+          "max_document_bytes": {
+            "default": 4194304,
+            "maximum": 33554432,
+            "minimum": 1,
+            "title": "Max Document Bytes",
+            "type": "integer"
+          },
+          "max_rows": {
+            "default": 4096,
+            "maximum": 4096,
+            "minimum": 1,
+            "title": "Max Rows",
+            "type": "integer"
+          }
+        },
+        "title": "SurrogateReadLimits",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "configuration": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "minProperties": 1,
+        "title": "Configuration",
+        "type": "object"
+      },
+      "dataset_path": {
+        "anyOf": [
+          {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Dataset Path"
+      },
+      "declared_fem_row_count": {
+        "anyOf": [
+          {
+            "maximum": 4096,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Declared Fem Row Count"
+      },
+      "limits": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SurrogateReadLimits"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "configuration"
+    ],
+    "title": "surrogate_training_previewArguments",
+    "type": "object"
+  },
   "thermal_kirchhoff_assess": {
     "$defs": {
       "KirchhoffAssessmentRequest": {

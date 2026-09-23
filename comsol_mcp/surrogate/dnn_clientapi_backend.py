@@ -12,7 +12,6 @@ from typing import Any
 
 from comsol_mcp.surrogate.dnn_adapter import DNN_FUNCTION_TYPE
 
-
 # --------------------------------------------------------------------------
 # ClientAPI backend
 # --------------------------------------------------------------------------
@@ -162,10 +161,14 @@ class ClientapiSurrogateDnnBackend:
         except Exception as exc:
             import_error = f"{type(exc).__name__}: {exc}"
         columns: list[str] = []
+        column_probe_errors: list[str] = []
         for name in ("columnKeys", "fileheaders", "columnHeaders"):
             try:
                 raw = feature.getStringArray(name)
-            except Exception:
+            except Exception as exc:
+                # A missing key is expected while probing, but the failure is
+                # recorded so a genuine accessor break is not silently hidden.
+                column_probe_errors.append(f"{name}: {type(exc).__name__}")
                 continue
             values = [str(item) for item in list(raw)]
             if values:
@@ -173,7 +176,11 @@ class ClientapiSurrogateDnnBackend:
                 break
         if columns:
             import_error = None
-        return {"import_error": import_error, "column_keys": columns}
+        return {
+            "import_error": import_error,
+            "column_keys": columns,
+            "column_probe_errors": column_probe_errors,
+        }
 
     def read_property(self, feature: Any, name: str) -> dict[str, Any]:
         """Read one property through the typed accessors, recording the one used.
@@ -183,6 +190,7 @@ class ClientapiSurrogateDnnBackend:
         Python ``str`` but is still iterable, so rendering by duck-typing would
         silently split a value into its characters.
         """
+        rejected: list[str] = []
         for accessor in (
             "getString",
             "getBoolean",
@@ -195,16 +203,25 @@ class ClientapiSurrogateDnnBackend:
         ):
             try:
                 value = getattr(feature, accessor)(name)
-            except Exception:
+            except Exception as exc:
+                # Probing tries every typed accessor, so a rejection is expected;
+                # it is still recorded so the reason a property stayed unreadable
+                # is reportable instead of vanishing.
+                rejected.append(f"{accessor}: {type(exc).__name__}")
                 continue
             if accessor in {"getString", "getBoolean", "getInt", "getDouble"}:
                 return {"readable": True, "accessor": accessor, "value": str(value)}
             try:
                 rendered: Any = [str(item) for item in list(value)]
-            except Exception:
+            except Exception as exc:
+                rejected.append(f"{accessor}.render: {type(exc).__name__}")
                 rendered = str(value)
             return {"readable": True, "accessor": accessor, "value": rendered}
-        return {"readable": False, "reason": "no typed accessor accepted the property"}
+        return {
+            "readable": False,
+            "reason": "no typed accessor accepted the property",
+            "rejected_accessors": rejected,
+        }
 
     def read_allowed_values(self, feature: Any, name: str) -> list[str] | None:
         try:
@@ -229,8 +246,6 @@ class ClientapiSurrogateDnnBackend:
 
     def discard_data(self, feature: Any) -> None:
         feature.discardData()
-
-
 
 
 __all__ = ["ClientapiSurrogateDnnBackend"]

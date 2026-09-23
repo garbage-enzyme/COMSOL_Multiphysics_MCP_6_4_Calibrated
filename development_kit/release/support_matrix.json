@@ -23,27 +23,27 @@
     {
       "name": "core",
       "support": "verified",
-      "tool_count": 50
+      "tool_count": 55
     },
     {
       "name": "basic_fem",
       "support": "verified",
-      "tool_count": 112
+      "tool_count": 117
     },
     {
       "name": "wave_optics",
       "support": "experimental",
-      "tool_count": 79
+      "tool_count": 84
     },
     {
       "name": "experimental",
       "support": "experimental",
-      "tool_count": 104
+      "tool_count": 109
     },
     {
       "name": "full",
       "support": "compatibility_only",
-      "tool_count": 160
+      "tool_count": 165
     },
     {
       "name": "comsolless_read_only",
@@ -53,7 +53,7 @@
     {
       "name": "electro_chemistry",
       "support": "experimental",
-      "tool_count": 55
+      "tool_count": 60
     }
   ],
   "real_integration": {

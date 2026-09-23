@@ -95,7 +95,8 @@ def _require_unique(name: str, values: Sequence[str]) -> list[str]:
 
 def canonical_manifest_sha256(body: Mapping[str, Any]) -> str:
     """Hash one manifest body with the durable v1 canonical encoding."""
-    return canonical_sha256_v1(dict(body))
+    digest = canonical_sha256_v1(dict(body))
+    return str(digest)
 
 
 def _finalize(body: dict[str, Any]) -> dict[str, Any]:
@@ -189,7 +190,9 @@ def build_training_transforms(
         kind = _require_str("transform.kind", item.get("kind"))
         if kind not in {"standardize", "minmax", "identity"}:
             raise ValueError("unsupported transform kind")
-        entry = {"kind": kind}
+        # Annotated explicitly: the first key holds a string while a later key
+        # holds a list, so inference from the literal would narrow the value type.
+        entry: dict[str, Any] = {"kind": kind}
         if kind in {"standardize", "minmax"}:
             entry["columns"] = _require_unique(
                 "transform.columns", [str(col) for col in item.get("columns", [])]
@@ -243,12 +246,8 @@ def build_dataset_manifest(
     split_assignments: Sequence[Mapping[str, Any]],
     ineligible_rows: Sequence[Mapping[str, Any]] = (),
 ) -> SurrogateDatasetManifest:
-    source_identity_sha256 = _require_hex64(
-        "source_identity_sha256", source_identity_sha256
-    )
-    candidates = _require_unique(
-        "candidate_ids", [str(item) for item in candidate_ids]
-    )
+    source_identity_sha256 = _require_hex64("source_identity_sha256", source_identity_sha256)
+    candidates = _require_unique("candidate_ids", [str(item) for item in candidate_ids])
     rows = _require_unique("row_ids", [str(item) for item in row_ids])
     if not rows or len(rows) > MAX_ROWS:
         raise ValueError("row_ids must contain 1-4096 entries")
@@ -306,9 +305,7 @@ def build_dataset_manifest(
         if row_id in ineligible_ids:
             raise ValueError("ineligible row_id must be unique")
         ineligible_ids.add(row_id)
-        ineligible.append(
-            {"row_id": row_id, "reason_code": reason_code, "detail": detail}
-        )
+        ineligible.append({"row_id": row_id, "reason_code": reason_code, "detail": detail})
 
     body = {
         "schema": "comsol_mcp.surrogate_dataset_manifest",
@@ -359,7 +356,7 @@ def validate_dataset_manifest(value: Any) -> SurrogateDatasetManifest:
     )
     if rebuilt != manifest:
         raise ValueError("dataset manifest content is not canonical")
-    return manifest  # type: ignore[return-value]
+    return manifest
 
 
 def validate_group_disjoint_split(manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -370,9 +367,7 @@ def validate_group_disjoint_split(manifest: Mapping[str, Any]) -> dict[str, Any]
     must not share a leakage group with any fitted split.
     """
     validated = validate_dataset_manifest(manifest)
-    row_to_split = {
-        item["row_id"]: item["split"] for item in validated["split_assignments"]
-    }
+    row_to_split = {item["row_id"]: item["split"] for item in validated["split_assignments"]}
     ineligible = {item["row_id"] for item in validated["ineligible_rows"]}
     eligible = [row for row in validated["row_ids"] if row not in ineligible]
     missing = [row for row in eligible if row not in row_to_split]
@@ -380,18 +375,14 @@ def validate_group_disjoint_split(manifest: Mapping[str, Any]) -> dict[str, Any]
         raise ValueError("eligible rows must be assigned to a split")
 
     for group in validated["leakage_groups"]:
-        splits_in_group = {
-            row_to_split[row] for row in group["row_ids"] if row in row_to_split
-        }
+        splits_in_group = {row_to_split[row] for row in group["row_ids"] if row in row_to_split}
         if len(splits_in_group) > 1:
             raise ValueError("leakage group spans multiple splits")
 
     fitted = {"train", "validation", "test"}
     holdout_groups = set()
     for group in validated["leakage_groups"]:
-        group_splits = {
-            row_to_split[row] for row in group["row_ids"] if row in row_to_split
-        }
+        group_splits = {row_to_split[row] for row in group["row_ids"] if row in row_to_split}
         if "scientific_holdout" in group_splits and group_splits & fitted:
             holdout_groups.add(group["group_id"])
     if holdout_groups:

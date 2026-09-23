@@ -76,6 +76,10 @@ def _read_fields(payload: bytes) -> list[tuple[int, int, Any]]:
         key, offset = _read_varint(payload, offset)
         field_number = key >> 3
         wire_type = key & 0x07
+        # A varint field yields an int while the fixed and length-delimited wire
+        # types yield bytes slices, so the value is typed as the union of both
+        # rather than inferred from the first branch.
+        value: int | bytes
         if wire_type == 0:
             value, offset = _read_varint(payload, offset)
         elif wire_type == 1:
@@ -123,9 +127,7 @@ def _decode_tensor(payload: bytes) -> dict[str, Any]:
     names = _field_strings(fields, 8)
     raw = [value for field, wire, value in fields if field == 9 and wire == 2]
     float_data = [
-        struct.unpack("<f", value)[0]
-        for field, wire, value in fields
-        if field == 4 and wire == 5
+        struct.unpack("<f", value)[0] for field, wire, value in fields if field == 4 and wire == 5
     ]
     data_type = data_types[0] if data_types else 1
     if data_type not in _TENSOR_DATA_TYPES:
@@ -149,9 +151,7 @@ def _decode_tensor(payload: bytes) -> dict[str, Any]:
     else:
         values = []
     if count and len(values) != count:
-        raise OnnxDecodeError(
-            f"tensor declares {count} elements but carries {len(values)}"
-        )
+        raise OnnxDecodeError(f"tensor declares {count} elements but carries {len(values)}")
     if any(not math.isfinite(value) for value in values):
         raise OnnxDecodeError("tensor carries a non-finite value")
     return {
@@ -302,9 +302,7 @@ def _dense(
     first, second = int(weight_dims[0]), int(weight_dims[1])
     rows, columns = (second, first) if trans_b else (first, second)
     if rows != len(input_vector):
-        raise OnnxDecodeError(
-            f"Gemm expects {rows} inputs but received {len(input_vector)}"
-        )
+        raise OnnxDecodeError(f"Gemm expects {rows} inputs but received {len(input_vector)}")
     if len(weights) != rows * columns:
         raise OnnxDecodeError("Gemm weight tensor size does not match its shape")
     if bias and len(bias) not in (columns, 1):
@@ -359,10 +357,15 @@ def evaluate_onnx_model(
     # that one tensor.  A graph that instead declares one tensor per feature is
     # supported too.  Anything else is refused rather than silently mis-bound.
     graph_inputs = [str(name) for name in (model.get("graph_inputs") or [])]
+    # ``binding`` maps a graph input tensor name to the caller feature names it
+    # carries.  Every value is a list: the single batched tensor carries all
+    # features, while in the per-feature layout each tensor carries exactly one.
+    # Binding a bare string here would make the consumer iterate its characters.
+    binding: dict[str, list[str]] = {}
     if len(graph_inputs) == 1:
         binding = {graph_inputs[0]: list(names)}
     elif len(graph_inputs) == len(names):
-        binding = dict(zip(graph_inputs, names))
+        binding = {tensor: [feature] for tensor, feature in zip(graph_inputs, names)}
     elif not graph_inputs:
         binding = {}
     else:
@@ -378,13 +381,16 @@ def evaluate_onnx_model(
             raise OnnxDecodeError(
                 f"points[{index}] supplies {len(point)} values for {len(names)} inputs"
             )
-        bound_values: dict[str, float] = {
-            name: float(value) for name, value in zip(names, point)
-        }
+        bound_values: dict[str, float] = {name: float(value) for name, value in zip(names, point)}
         values: dict[str, list[float]] = {name: [value] for name, value in bound_values.items()}
+        # Assigned inside the loop below.  It is initialized so an empty graph is
+        # refused as an unsupported model instead of raising ``NameError``.
+        target: str | None = None
         for node in nodes:
             op = node["op_type"]
             inputs = node["inputs"]
+            # ``target`` is pre-declared above the loop purely so an empty graph
+            # cannot raise ``NameError``; it is reassigned here each iteration.
             target = node["outputs"][0] if node["outputs"] else None
             if target is None:
                 raise OnnxDecodeError(f"node {node['name']!r} produces no output")
@@ -441,9 +447,7 @@ def evaluate_onnx_model(
             elif op == "Tanh":
                 values[target] = [math.tanh(item) for item in resolved[0]]
             elif op == "Sigmoid":
-                values[target] = [
-                    1.0 / (1.0 + math.exp(-item)) for item in resolved[0]
-                ]
+                values[target] = [1.0 / (1.0 + math.exp(-item)) for item in resolved[0]]
             elif op == "Relu":
                 values[target] = [max(0.0, item) for item in resolved[0]]
             elif op == "Identity":
@@ -451,7 +455,9 @@ def evaluate_onnx_model(
             else:
                 raise OnnxDecodeError(f"unsupported operator {op!r}")
 
-        final = values.get(target)
+        # The guard inside the loop already refuses a node without an output, but
+        # narrowing does not survive the loop, so the lookup is guarded again here.
+        final = values.get(target) if target is not None else None
         if final is None:
             raise OnnxDecodeError("graph produced no output")
         if any(not math.isfinite(item) for item in final):

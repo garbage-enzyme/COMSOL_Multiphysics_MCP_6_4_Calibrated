@@ -112,23 +112,17 @@ def build_row_provenance(
     with an explicit reason and excluded from fitting.
     """
     if evidence_state not in ROW_EVIDENCE_STATES:
-        raise ValueError(
-            f"evidence_state must be one of: {', '.join(ROW_EVIDENCE_STATES)}"
-        )
+        raise ValueError(f"evidence_state must be one of: {', '.join(ROW_EVIDENCE_STATES)}")
     if not isinstance(features, Mapping) or not features:
         raise ValueError("features must be a non-empty mapping")
     if not isinstance(targets, Mapping) or not targets:
         raise ValueError("targets must be a non-empty mapping")
     normalized_features = {
-        _require_str("feature name", key, max_len=64): _require_finite(
-            f"features.{key}", value
-        )
+        _require_str("feature name", key, max_len=64): _require_finite(f"features.{key}", value)
         for key, value in features.items()
     }
     normalized_targets = {
-        _require_str("target name", key, max_len=64): _require_finite(
-            f"targets.{key}", value
-        )
+        _require_str("target name", key, max_len=64): _require_finite(f"targets.{key}", value)
         for key, value in targets.items()
     }
 
@@ -139,21 +133,15 @@ def build_row_provenance(
             )
     elif evidence_state != "verified":
         # A non-verified row is never silently eligible.
-        raise ValueError(
-            "a non-verified row requires an explicit ineligible_reason"
-        )
+        raise ValueError("a non-verified row requires an explicit ineligible_reason")
 
     body = {
         "schema": "comsol_mcp.surrogate_row_provenance",
         "schema_version": SCHEMA_VERSION,
         "row_id": _require_str("row_id", row_id),
         "candidate_id": _require_str("candidate_id", candidate_id),
-        "source_model_sha256": _require_hex64(
-            "source_model_sha256", source_model_sha256
-        ),
-        "solver_identity_sha256": _require_hex64(
-            "solver_identity_sha256", solver_identity_sha256
-        ),
+        "source_model_sha256": _require_hex64("source_model_sha256", source_model_sha256),
+        "solver_identity_sha256": _require_hex64("solver_identity_sha256", solver_identity_sha256),
         "study_identity": _require_str("study_identity", study_identity),
         "solution_identity": _require_str("solution_identity", solution_identity),
         "dataset_identity": _require_str("dataset_identity", dataset_identity),
@@ -239,9 +227,7 @@ def summarize_row_ledger(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "ineligible_reasons": dict(sorted(reasons.items())),
         "leakage_group_count": len(groups),
         "failed_rows_retained": True,
-        "ledger_sha256": canonical_sha256_v1(
-            [row["row_sha256"] for row in validated]
-        ),
+        "ledger_sha256": canonical_sha256_v1([row["row_sha256"] for row in validated]),
     }
 
 

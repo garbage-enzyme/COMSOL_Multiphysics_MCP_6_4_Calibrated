@@ -325,3 +325,45 @@ coefficient-form PDE model, and the evaluated expression is the analytic target
 the surrogate was trained on. This proves the escalation, evidence-separation,
 and error-measurement machinery on real COMSOL; it is not a physical validation
 of any metasurface or device model.
+
+## 14. S10 public surface findings — resolved without a solver
+
+The S10 surface exposes five bounded solver-free tools:
+`surrogate_dataset_validate`, `surrogate_training_preview`,
+`surrogate_model_inspect`, `surrogate_model_verify`, and
+`surrogate_prediction_validate`. Training and evaluation remain inside durable
+jobs, and no tool here starts COMSOL, acquires a solver lease, or imports MPh,
+JPype, ONNX, or a numerical stack.
+
+| Finding | Consequence for this repository |
+| --- | --- |
+| Contained-path enforcement is driven by **per-tool flat argument-name tables** in `path_policy.py`, not by type annotations or by walking a request object. | A path nested inside a request object would silently bypass containment. Every surrogate path is therefore a top-level string argument, and all five tools are listed in both `_ARTIFACT_READ_ARGUMENTS` and `_ALWAYS_ENFORCED_TOOLS` so they cannot inherit the full profile's legacy broad-path behaviour. |
+| A surrogate model card carries its identities **nested** under `identities` and seals itself with `entry_sha256`; a registry entry maps artifact names to hashes; an export manifest lists artifacts and seals with `manifest_sha256`. | The evidence layer resolves identities from either layout and collects artifact hashes from both shapes. An expectation the document cannot satisfy is reported `unavailable`, never as satisfied, so verification cannot pass vacuously. |
+| `evaluate_onnx_model` bound each per-feature graph input to a **bare string** (`dict(zip(graph_inputs, names))`), so the consumer iterated the string's characters and failed with `KeyError: 'a'`. | A real latent defect in already-committed S7 code. The COMSOL single-batched layout masked it entirely. Fixed to bind a one-element list per tensor, with a regression test whose tensor names deliberately differ from the feature names so the branch is reachable. |
+| A decoded graph with **no nodes** raised `NameError` because the output tensor name was assigned inside the node loop. | Also fixed: an empty graph is now refused as an unsupported model ("graph produced no output") instead of crashing with an internal error. |
+| The frozen quality-target exclusion digests cover only the modules that were registered as targets. | The S1–S8 surrogate modules had never been added to the lint/type target lists, so the inventory test failed on a clean tree. Every surrogate module plus the new S10 modules are now lint- and `--strict` mypy-clean and registered, and the recomputed exclusion digests equal the frozen literals exactly — proving the classification was restored rather than rubber-stamped. |
+
+Gate evidence, all solver-free:
+
+- Real dispatch through `create_server` for all five tools, with
+  `path_policy.accepted = true` inside the owned artifact root.
+- Cold discovery in a fresh interpreter registers exactly the five surrogate
+  tools and loads none of `mph`, `jpype`, `torch`, `tensorflow`, `onnx`,
+  `numpy`, or any solver/session module.
+- A path outside the owned artifact root is refused with
+  `path_policy.accepted = false` and `enforced = true`.
+- `solver_started` and `filesystem_modified` are `False` on every response, and
+  inspection never rewrites the document it reads.
+- Each document is validated by re-deriving its canonical hash, so a tampered
+  document is refused with `surrogate_document_hash_mismatch`.
+- A prediction row set carrying any FEM evidence field is refused, and every
+  verdict restates that the result remains a prediction requiring a fresh FEM
+  run.
+- The frozen `comsolless_read_only` surface remains exactly its five predecessor
+  tools; the surrogate tools are added to every other profile and to `core`.
+
+Frozen limitation: `dbmodel://` is validated as syntax and evidence only — an
+authority, a resource path, and an optional sha256, with traversal and non-ASCII
+refused. No live Model Manager operation is added in 0.7.5. This slice is bounded
+tooling and evidence separation; it is not model quality or scientific
+acceptance.

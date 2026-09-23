@@ -33,6 +33,7 @@ __all__ = [
     "assert_no_prediction_promotion",
     "build_campaign_spec",
     "build_dataset_manifest",
+    "build_export_manifest",
     "build_field_schema",
     "build_lhs_design",
     "build_model_card",
@@ -52,6 +53,7 @@ __all__ = [
     "detect_leakage",
     "evaluate_continuation",
     "evaluate_export_availability",
+    "evaluate_onnx_model",
     "evaluate_ood",
     "evaluate_seed_stability",
     "EXPORT_FORMATS",
@@ -60,6 +62,7 @@ __all__ = [
     "hash_export_artifact",
     "integrate_export_into_registry",
     "invert_transforms",
+    "load_onnx_model",
     "MAX_CANDIDATES",
     "MAX_FEM_ESCALATIONS",
     "MAX_TOP_K",
@@ -89,12 +92,6 @@ __all__ = [
     "verify_transform_roundtrip",
 ]
 
-from comsol_mcp.surrogate.onnx_runtime import (
-    OnnxDecodeError,
-    evaluate_onnx_model,
-    load_onnx_model,
-)
-
 from comsol_mcp.surrogate.campaign import (
     CANDIDATE_STATES,
     MAX_CANDIDATES,
@@ -110,7 +107,7 @@ from comsol_mcp.surrogate.campaign import (
     validate_campaign_spec,
     validate_screening_record,
 )
-
+from comsol_mcp.surrogate.dnn_adapter import train_surrogate
 from comsol_mcp.surrogate.export import (
     CONSISTENCY_STATES,
     EXPORT_FORMATS,
@@ -146,6 +143,11 @@ from comsol_mcp.surrogate.manifests import (
     validate_schema_manifest,
     validate_training_transforms,
 )
+from comsol_mcp.surrogate.onnx_runtime import (
+    OnnxDecodeError,
+    evaluate_onnx_model,
+    load_onnx_model,
+)
 from comsol_mcp.surrogate.registry import (
     DRIFT_IDENTITY_FIELDS,
     ESCALATION_REQUIRED_STATES,
@@ -175,17 +177,6 @@ from comsol_mcp.surrogate.rows import (
     validate_row_provenance,
 )
 from comsol_mcp.surrogate.rows import STRATEGY_VERSION as LHS_STRATEGY_VERSION
-from comsol_mcp.surrogate.training import (
-    CONTINUATION_IDENTITY_FIELDS,
-    METRIC_NAMES,
-    compare_against_baseline,
-    compute_metrics,
-    evaluate_continuation,
-    evaluate_seed_stability,
-    fit_baseline,
-    predict_baseline,
-)
-from comsol_mcp.surrogate.dnn_adapter import train_surrogate
 from comsol_mcp.surrogate.splits import (
     DEFAULT_PROPORTIONS,
     LEAKAGE_CLASSES,
@@ -195,4 +186,14 @@ from comsol_mcp.surrogate.splits import (
     assign_group_disjoint_split,
     detect_leakage,
     validate_split_plan,
+)
+from comsol_mcp.surrogate.training import (
+    CONTINUATION_IDENTITY_FIELDS,
+    METRIC_NAMES,
+    compare_against_baseline,
+    compute_metrics,
+    evaluate_continuation,
+    evaluate_seed_stability,
+    fit_baseline,
+    predict_baseline,
 )

@@ -57,7 +57,9 @@ def _require_finite(name: str, value: Any) -> float:
     return number
 
 
-def _matrix(rows: Sequence[Sequence[float]], *, name: str, width: int | None = None) -> list[list[float]]:
+def _matrix(
+    rows: Sequence[Sequence[float]], *, name: str, width: int | None = None
+) -> list[list[float]]:
     if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)) or not rows:
         raise ValueError(f"{name} must be a non-empty sequence")
     if len(rows) > MAX_ROWS:
@@ -138,7 +140,9 @@ def build_export_manifest(
     for index, artifact in enumerate(artifacts):
         if not isinstance(artifact, Mapping):
             raise ValueError(f"artifacts[{index}] must be a mapping")
-        record = {
+        # Annotated so the numeric comparison below is checked as an int rather
+        # than against an inferred ``object``.
+        record: dict[str, Any] = {
             "export_format": _require_str(
                 f"artifacts[{index}].export_format", artifact.get("export_format"), max_len=32
             ),

@@ -207,9 +207,7 @@ def detect_leakage(
         split = assignments[group_id]
         for row_id in members:
             if row_id in row_split and row_split[row_id] != split:
-                findings.append(
-                    {"leakage_class": "cross_split_group", "subject": str(row_id)}
-                )
+                findings.append({"leakage_class": "cross_split_group", "subject": str(row_id)})
             row_split[row_id] = split
             row_groups.setdefault(row_id, []).append(str(group_id))
 

@@ -319,6 +319,7 @@ models are intentionally absent.
 - `development_kit/tests/test_ownership.py` — This module tests solver ownership, leases, and collision detection.
 - `development_kit/tests/test_parameters.py` — This module tests parameter tools without a COMSOL client.
 - `development_kit/tests/test_path_policy.py` — This module tests configured model-read and owned-artifact path containment.
+- `development_kit/tests/test_surrogate_public_tools.py` — This module solver-free tests the five bounded public surrogate tools: typed contracts, the frozen `dbmodel://` source kind, document verification, dataset shape, evidence separation, real dispatch, cold discovery, and path containment.
 - `development_kit/tests/test_parallel_plate_capacitor_recipe.py` — This module tests the standalone capacitor recipe without starting COMSOL.
 - `development_kit/tests/test_periodic_mesh_audit.py` — This module tests periodic mesh evidence and clone-only smoke logic.
 - `development_kit/tests/test_physics.py` — This module tests physics helpers without a COMSOL client.
@@ -524,6 +525,7 @@ models are intentionally absent.
 - `comsol_mcp/contracts/thermo_optomechanical.py` — This module defines the closed durable thermal-to-optical replay input contract.
 - `comsol_mcp/contracts/offline_export.py` — This module defines bounded offline export-validation input contracts.
 - `comsol_mcp/contracts/structural.py` — This module applies shared public schema and runtime structural limits.
+- `comsol_mcp/contracts/surrogate.py` — This module defines closed solver-free input contracts for the five bounded public surrogate tools, including the frozen `dbmodel://` URI source kind.
 - `comsol_mcp/durable/__init__.py` — This module exports versioned canonicalization and durable filesystem primitives.
 - `comsol_mcp/durable/canonical.py` — This module preserves legacy canonical bytes and adds domain-separated identities for new schemas.
 - `comsol_mcp/durable/io.py` — This module implements bounded hashing, atomic replacement, and complete-row persistence.
@@ -599,6 +601,7 @@ models are intentionally absent.
 - `comsol_mcp/evidence/reference_power_gate.py` — This module evaluates reference-power receipts and artifact accounting.
 - `comsol_mcp/evidence/spectral_characterization.py` — This module validates and characterizes provenance-bound spectra without a solver.
 - `comsol_mcp/evidence/spectral_model_comparison.py` — This module compares bounded scalar line-shape fits on identical spectral evidence without assigning a physical mechanism.
+- `comsol_mcp/evidence/surrogate_evidence.py` — This module validates surrogate datasets, documents, and predictions by re-deriving their canonical hashes without a solver or any FEM-evidence upgrade.
 - `comsol_mcp/evidence/simulation_configuration.py` — This module normalizes declared simulation units and classifies provenance-bound configuration differences.
 - `comsol_mcp/evidence/thermal_radiation.py` — This module evaluates exact-channel Kirchhoff applicability and bounded channel-resolved thermal radiation.
 - `comsol_mcp/evidence/thermal_material.py` — This module validates and evaluates provenance-bound temperature/state material ledgers.
@@ -714,6 +717,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/physics.py` — This module exposes COMSOL physics and multiphysics tools.
 - `comsol_mcp/tools/electro_chemistry.py` — This module exposes the isolated Electrochemistry Module catalog, interface creation, electrode reaction, electrolyte, and inspect tools.
 - `comsol_mcp/tools/acoustics_pde.py` — This module exposes constrained Pressure Acoustics and mathematical PDE tools.
+- `comsol_mcp/tools/surrogate.py` — This module exposes the five bounded solver-free surrogate tools that validate datasets, preview configurations, inspect and verify documents, and validate predictions without promoting them to FEM evidence.
 - `comsol_mcp/tools/profiles.py` — This module resolves static profiles and filters tool registration.
 - `comsol_mcp/tools/session_status.py` — This module stores last-known session booleans without importing COMSOL or MPh.
 - `comsol_mcp/tools/properties.py` — This module exposes constrained clientapi property access.
