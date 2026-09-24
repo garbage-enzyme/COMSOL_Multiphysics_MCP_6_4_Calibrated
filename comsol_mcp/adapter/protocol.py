@@ -113,11 +113,46 @@ OPERATIONS = (
     "convert_value",
     "property_read",
     "property_write",
+    "java_typed_write",
+    "dnn_feature_run",
+    "dnn_feature_export",
     "model_load",
     "model_save",
     "model_evaluate",
     "dataset_access",
     "solution_access",
+)
+
+#: The Java write kinds the protocol represents.  This is a **closed** set: a
+#: caller must name the exact Java type it intends, and there is deliberately no
+#: generic "set this Java object" operation.  A narrow closed vocabulary is what
+#: keeps the adapter from becoming the property escape hatch the plan forbids.
+#:
+#: ``string_entry`` is the odd one out: it is the alternating key/value form the
+#: ClientAPI reference directs callers to for properties such as ``args``, and it
+#: is applied through ``setEntry`` rather than ``set``.  ``string_matrix`` is the
+#: nested ``[[Ljava.lang.String;`` form some other properties declare instead.
+JAVA_WRITE_KINDS = (
+    "string",
+    "boolean",
+    "int",
+    "double",
+    "string_array",
+    "string_matrix",
+    "int_array",
+    "double_array",
+    "string_entry",
+)
+
+#: The DNN feature lifecycle methods the protocol represents.  Closed for the
+#: same reason as :data:`JAVA_WRITE_KINDS`: a free-form method name would be a
+#: command channel, and the plan forbids that.
+DNN_FEATURE_METHODS = (
+    "run",
+    "continueRun",
+    "runTest",
+    "discardData",
+    "importData",
 )
 
 # Error taxonomy.  A backend translates its own exceptions into exactly one of
@@ -147,12 +182,25 @@ class AdapterError(RuntimeError):
     retry has to ask for one.
     """
 
-    def __init__(self, reason_code: str, message: str, *, operation: str = "") -> None:
+    def __init__(
+        self,
+        reason_code: str,
+        message: str,
+        *,
+        operation: str = "",
+        rejected: Sequence[str] = (),
+    ) -> None:
         if reason_code not in ADAPTER_ERROR_CODES:
             raise ValueError(f"unknown adapter reason code: {reason_code}")
         super().__init__(message)
         self.reason_code = reason_code
         self.operation = operation
+        #: Structured detail for failures that are themselves a probe result, such
+        #: as every typed accessor rejecting a property read. Carried as data so a
+        #: caller can report *why* something was unreadable without parsing the
+        #: message; deliberately left out of ``as_dict`` so the error schema that
+        #: receipts record does not change shape.
+        self.rejected: tuple[str, ...] = tuple(rejected)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -257,6 +305,70 @@ class PropertyWriteReceipt:
 
 
 @dataclass(frozen=True)
+class ResolvedNode:
+    """An already-resolved backend node handle.
+
+    The licensed gates construct a model themselves and then hold raw Java
+    feature objects, so the adapter must be able to operate on a handle that is
+    already resolved rather than re-walking a path it cannot see.  Wrapping it in
+    this type keeps that case explicit and keeps ``java_typed_write`` from
+    accepting a bare ``Any``, which would be the generic escape hatch the plan
+    forbids.
+    """
+
+    handle: Any
+    label: str = "<resolved>"
+
+    @property
+    def path(self) -> tuple[str, ...]:
+        return (self.label,)
+
+
+@dataclass(frozen=True)
+class JavaTypedWrite:
+    """One property write with the exact Java type the caller intends.
+
+    ``kind`` must come from :data:`JAVA_WRITE_KINDS`.  Naming the Java type
+    explicitly is required because JPype cannot disambiguate ``set(String, int)``
+    from ``set(String, boolean)`` and raises an ambiguous-overload error instead
+    of choosing; the adapter therefore performs the wrapping rather than leaving
+    it to each caller.
+    """
+
+    node: NodeRef | ResolvedNode
+    name: str
+    value: Any
+    kind: str
+
+    def __post_init__(self) -> None:
+        if self.kind not in JAVA_WRITE_KINDS:
+            raise AdapterError(
+                "conversion_not_representable",
+                f"unsupported Java write kind: {self.kind}",
+                operation="java_typed_write",
+            )
+
+
+@dataclass(frozen=True)
+class JavaTypedRead:
+    """One property read, recording which typed accessor produced the value.
+
+    The accessor name is kept because it decides the rendering: a JPype Java
+    string is not a Python ``str`` but is still iterable, so rendering by
+    duck-typing would silently split a value into its characters.
+    """
+
+    node: NodeRef | ResolvedNode
+    name: str
+    accessor: str
+    value: Any
+    #: Accessors that were tried and rejected, in the order they were tried. Kept
+    #: on the result so a caller that reports "unreadable" can also report *why*,
+    #: instead of the reason vanishing at the seam.
+    rejected: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class EvaluationRequest:
     """One bounded model evaluation request."""
 
@@ -319,6 +431,87 @@ class ComsolAdapter(Protocol):
     def dataset_names(self) -> Sequence[str]: ...
 
     def solution_names(self) -> Sequence[str]: ...
+
+    # -- step 6: typed Java property access and DNN feature operations -------
+    def java_typed_write(self, request: JavaTypedWrite) -> None:
+        """Write one property with an explicitly named Java type.
+
+        This replaces per-caller JPype coercion: the adapter owns the wrapping,
+        so no caller needs to import jpype or guess an overload.
+        """
+        ...
+
+    def java_typed_read(self, node: NodeRef, name: str) -> JavaTypedRead:
+        """Read one property through the typed accessors, recording which one won."""
+        ...
+
+    def run_feature(self, node: NodeRef, *, method: str) -> None:
+        """Invoke one named lifecycle method on a resolved feature.
+
+        ``method`` must come from :data:`DNN_FEATURE_METHODS`; there is no
+        generic "call this method" form.
+        """
+        ...
+
+    def export_feature(self, node: NodeRef, path: str) -> None:
+        """Export one resolved feature to a path."""
+        ...
+
+    # -- step 2 continued: container tags and node lifecycle -----------------
+    # Feature-driven callers (the DNN bridge) need to enumerate and create the
+    # containers they operate on. That is ordinary tag/list/node work, so it
+    # belongs to step 2 and reports the step-2 operations rather than adding a
+    # new operation name to the frozen protocol surface.
+    def attach_client(self, model: Any) -> None:
+        """Adopt an already-created client that the caller owns.
+
+        MPh forbids a second client in one process, so a caller that already
+        built one hands it over instead of having the adapter open another.
+        Ownership does not transfer: the adapter must not close or clear a
+        client it merely adopted.
+        """
+        ...
+
+    def container_tags(self, kind: str) -> Sequence[str]:
+        """List the child tags of one enumerable top-level container.
+
+        The set of containers is closed; an unknown ``kind`` is refused rather
+        than guessed at.
+        """
+        ...
+
+    def create_node(
+        self,
+        kind: str,
+        tag: str,
+        *,
+        parent_tag: str | None = None,
+        feature_type: str | None = None,
+    ) -> NodeRef:
+        """Create one node of a declared kind and return its reference.
+
+        The representable creations are a closed set, so this cannot become a
+        general "create anything" command channel.
+        """
+        ...
+
+    def remove_node(self, kind: str, tag: str) -> None:
+        """Remove one node of a declared kind."""
+        ...
+
+    def read_allowed_values(self, node: NodeRef, name: str) -> list[str] | None:
+        """Read an enumerated property's allowed values, or ``None`` if absent."""
+        ...
+
+    def java_value_type(self, node: NodeRef, name: str) -> str | None:
+        """Read a property's declared Java value type, or ``None`` if unreadable.
+
+        Some ClientAPI properties accept a nested ``[[Ljava.lang.String;`` value
+        and reject the alternating key/value form, while others do the opposite.
+        The declared type is therefore *measured* through this read rather than
+        assumed by the caller; an unreadable type is reported as unknown.
+        """
+        ...
 
 
 def operation_is_known(operation: str) -> bool:

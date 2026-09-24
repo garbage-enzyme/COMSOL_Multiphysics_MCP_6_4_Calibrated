@@ -19,6 +19,8 @@ import pytest
 
 from comsol_mcp.adapter import (
     ADAPTER_ERROR_CODES,
+    DNN_FEATURE_METHODS,
+    JAVA_WRITE_KINDS,
     OPERATIONS,
     REFERENCE_MPH_LANE,
     SUPPORTED_MPH_LANES,
@@ -26,7 +28,10 @@ from comsol_mcp.adapter import (
     ComsolAdapter,
     ConvertedValue,
     EvaluationRequest,
+    JavaTypedWrite,
     PropertyWritePlan,
+    ResolvedNode,
+    SessionIdentity,
     SessionRequest,
     available_lanes,
     convert_explicitly,
@@ -428,6 +433,8 @@ def test_declared_node_path_shapes_match_the_validator() -> None:
         ("physics", 3),
         ("study", 2),
         ("study", 3),
+        ("function", 2),
+        ("function", 3),
         ("solution", 2),
         ("dataset", 2),
     }
@@ -469,6 +476,10 @@ def test_every_representable_node_path_shape_reaches_the_java_accessor() -> None
             calls.append(f"study({tag})")
             return self
 
+        def func(self, tag: str) -> "Recording":
+            calls.append(f"func({tag})")
+            return self
+
         def sol(self, tag: str) -> "Recording":
             calls.append(f"sol({tag})")
             return self
@@ -500,6 +511,8 @@ def test_every_representable_node_path_shape_reaches_the_java_accessor() -> None
         ("physics", "comp1", "c1"): ["component(comp1)", "physics(c1)"],
         ("study", "std1"): ["study(std1)"],
         ("study", "std1", "step1"): ["study(std1)", "feature(step1)"],
+        ("function", "dnn1"): ["func(dnn1)"],
+        ("function", "dnn1", "feat1"): ["func(dnn1)", "feature(feat1)"],
         ("solution", "sol1"): ["sol(sol1)"],
         ("dataset", "dset1"): ["result()", "dataset(dset1)"],
     }
@@ -873,3 +886,362 @@ def test_an_unrelated_failure_is_not_reported_as_a_matrix_difference() -> None:
     lane = Mph14Backend()
     original = AdapterError("node_not_found", "no node", operation="node_lookup")
     assert lane._collapse_matrix_refusal(original) is original  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# Typed Java access and feature lifecycle (step 6)
+# ---------------------------------------------------------------------------
+
+#: The stub below stands in for one resolved ClientAPI feature. It records the
+#: exact call the adapter made, so "the adapter owns Java typing" is proven by
+#: observable calls rather than by the absence of a string in the source.
+_FEATURE_SCALAR_NAMES = ("layertype",)
+
+
+class _StubFeature:
+    """A recording stand-in for a resolved ClientAPI feature object."""
+
+    def __init__(self) -> None:
+        self.writes: list[tuple[str, str]] = []
+        self.entries: list[tuple[str, str, str]] = []
+        self.calls: list[str] = []
+        self.strings: dict[str, str] = {}
+        self.string_arrays: dict[str, list[str]] = {}
+        self.declared_types: dict[str, str] = {}
+        self.allowed: dict[str, list[str]] = {}
+        self.value_type_fails = False
+
+    # writes
+    def set(self, name: str, value: object) -> None:
+        self.writes.append((name, type(value).__name__))
+
+    def setEntry(self, name: str, key: str, value: str) -> None:
+        self.entries.append((name, key, value))
+
+    # reads
+    def getValueType(self, name: str) -> str:
+        if self.value_type_fails:
+            raise RuntimeError("no such property")
+        return self.declared_types.get(name, "double")
+
+    def getString(self, name: str) -> str:
+        if name not in self.strings:
+            raise RuntimeError("not a string property")
+        return self.strings[name]
+
+    def getStringArray(self, name: str) -> list[str]:
+        if name not in self.string_arrays:
+            raise RuntimeError("not a string-array property")
+        return self.string_arrays[name]
+
+    def getAllowedPropertyValues(self, name: str) -> list[str]:
+        if name not in self.allowed:
+            raise RuntimeError("not an enumerated property")
+        return self.allowed[name]
+
+    # lifecycle
+    def run(self) -> None:
+        self.calls.append("run")
+
+    def continueRun(self) -> None:
+        self.calls.append("continueRun")
+
+    def runTest(self) -> None:
+        self.calls.append("runTest")
+
+    def discardData(self) -> None:
+        self.calls.append("discardData")
+
+    def importData(self) -> None:
+        self.calls.append("importData")
+
+    def export(self, path: str) -> None:
+        self.calls.append(f"export({path})")
+
+
+class _StubContainer:
+    """A recording stand-in for the ``study()``/``func()`` container accessor."""
+
+    def __init__(self, tags: list[str]) -> None:
+        self._tags = tags
+        self.tags_reads = 0
+        #: The step list a study exposes through ``feature()``, built on demand so
+        #: constructing a container cannot recurse into constructing another.
+        self._steps: _StubContainer | None = None
+
+    def tags(self) -> list[str]:
+        self.tags_reads += 1
+        return list(self._tags)
+
+    def create(self, tag: str, *extra: str) -> None:
+        del extra
+        self._tags.append(tag)
+
+    def remove(self, tag: str) -> None:
+        if tag in self._tags:
+            self._tags.remove(tag)
+
+    def feature(self, tag: str | None = None) -> "_StubContainer":
+        del tag
+        if self._steps is None:
+            self._steps = _StubContainer([])
+        return self._steps
+
+
+class _StubJava:
+    """A recording stand-in for ``model.java`` covering the step-6 containers."""
+
+    def __init__(self) -> None:
+        self.study_container = _StubContainer(["std1"])
+        self.func_container = _StubContainer([])
+
+    def study(self, tag: str | None = None) -> _StubContainer:
+        del tag
+        return self.study_container
+
+    def func(self, tag: str | None = None) -> _StubContainer:
+        del tag
+        return self.func_container
+
+
+class _Step6Backend(MphBackendBase):
+    """A backend whose model is a recording stub, so no COMSOL is needed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.java = _StubJava()
+
+    def _require_model(self, operation: str) -> object:
+        del operation
+        return type("Model", (), {"java": self.java})()
+
+
+def _handle(feature: _StubFeature) -> ResolvedNode:
+    return ResolvedNode(handle=feature, label="dnn1")
+
+
+def test_an_unnamed_java_write_kind_is_refused() -> None:
+    """A write must name its Java type, and the vocabulary is closed."""
+    assert "string_matrix" in JAVA_WRITE_KINDS
+    assert "string_entry" in JAVA_WRITE_KINDS
+    assert len(JAVA_WRITE_KINDS) == len(set(JAVA_WRITE_KINDS))
+    # There is deliberately no generic "set this object" kind.
+    for generic in ("object", "any", "auto", "python"):
+        assert generic not in JAVA_WRITE_KINDS
+    with pytest.raises(AdapterError) as excinfo:
+        JavaTypedWrite(node=_handle(_StubFeature()), name="L", value=1, kind="nonsense")
+    assert excinfo.value.reason_code == "conversion_not_representable"
+
+
+def test_a_string_entry_write_uses_set_entry_and_requires_a_mapping() -> None:
+    """Alternating key/value properties go through ``setEntry``, one pair at a time."""
+    backend = _Step6Backend()
+    feature = _StubFeature()
+    backend.java_typed_write(
+        JavaTypedWrite(
+            node=_handle(feature),
+            name="globaldnnfunction",
+            value={"1": "dnn1", "2": "dnn2"},
+            kind="string_entry",
+        )
+    )
+    assert feature.entries == [
+        ("globaldnnfunction", "1", "dnn1"),
+        ("globaldnnfunction", "2", "dnn2"),
+    ]
+    assert feature.writes == []
+    with pytest.raises(AdapterError) as excinfo:
+        backend.java_typed_write(
+            JavaTypedWrite(
+                node=_handle(feature), name="args", value=["1", "a"], kind="string_entry"
+            )
+        )
+    assert excinfo.value.reason_code == "conversion_not_representable"
+
+
+def test_a_typed_read_reports_the_accessor_and_the_rejections() -> None:
+    """The winning accessor is recorded, and an unreadable property says why."""
+    backend = _Step6Backend()
+    feature = _StubFeature()
+    feature.strings["trainingloss"] = "0.025"
+    feature.string_arrays["activation"] = ["tanh", "relu"]
+
+    scalar = backend.java_typed_read(_handle(feature), "trainingloss")
+    assert scalar.accessor == "getString"
+    assert scalar.value == "0.025"
+    assert scalar.rejected == ("getString",) or scalar.rejected == ()
+    array = backend.java_typed_read(_handle(feature), "activation")
+    assert array.accessor == "getStringArray"
+    assert array.value == ["tanh", "relu"]
+
+    with pytest.raises(AdapterError) as excinfo:
+        backend.java_typed_read(_handle(feature), "absent")
+    assert excinfo.value.reason_code == "property_not_found"
+    # The rejection list is structured data, so a caller can report it without
+    # parsing the message.
+    assert any(item.startswith("getString:") for item in excinfo.value.rejected)
+
+
+def test_a_feature_method_outside_the_vocabulary_is_refused() -> None:
+    """There is no generic "call this method" form on the adapter."""
+    assert DNN_FEATURE_METHODS == ("run", "continueRun", "runTest", "discardData", "importData")
+    backend = _Step6Backend()
+    feature = _StubFeature()
+    for method in DNN_FEATURE_METHODS:
+        backend.run_feature(_handle(feature), method=method)
+    assert feature.calls == list(DNN_FEATURE_METHODS)
+    with pytest.raises(AdapterError) as excinfo:
+        backend.run_feature(_handle(feature), method="delete")
+    assert excinfo.value.reason_code == "conversion_not_representable"
+
+
+def test_an_unresolvable_handle_is_refused_rather_than_treated_as_java() -> None:
+    """An arbitrary object must not become an untyped Java escape hatch."""
+    backend = _Step6Backend()
+    with pytest.raises(AdapterError) as excinfo:
+        backend.export_feature(_StubFeature(), "model.onnx")  # type: ignore[arg-type]
+    assert excinfo.value.reason_code == "node_not_found"
+    assert "ResolvedNode" in str(excinfo.value)
+
+
+def test_an_exported_feature_records_its_path() -> None:
+    backend = _Step6Backend()
+    feature = _StubFeature()
+    backend.export_feature(_handle(feature), "model.onnx")
+    assert feature.calls == ["export(model.onnx)"]
+
+
+def test_a_declared_value_type_is_measured_and_unknown_is_reported() -> None:
+    """Property form is measured, and an unreadable type stays unknown."""
+    backend = _Step6Backend()
+    feature = _StubFeature()
+    feature.declared_types["globaldnnfunction"] = "[[Ljava.lang.String;"
+    assert backend.java_value_type(_handle(feature), "globaldnnfunction") == "[[Ljava.lang.String;"
+    feature.value_type_fails = True
+    assert backend.java_value_type(_handle(feature), "globaldnnfunction") is None
+    assert backend.read_allowed_values(_handle(feature), "loss") is None
+    feature.value_type_fails = False
+    feature.allowed["loss"] = ["mse", "mae"]
+    assert backend.read_allowed_values(_handle(feature), "loss") == ["mse", "mae"]
+
+
+def test_container_tags_and_node_lifecycle_use_declared_accessors() -> None:
+    """Only the declared containers are enumerable, creatable, or removable."""
+    backend = _Step6Backend()
+    assert backend.container_tags("study") == ["std1"]
+    assert backend.container_tags("function") == []
+
+    created = backend.create_node("study", "std2")
+    assert created.path == ("study", "std2")
+    assert backend.container_tags("study") == ["std1", "std2"]
+    step = backend.create_node("study_step", "step1", parent_tag="std1", feature_type="StudyStep")
+    assert step.path == ("study", "std1", "step1")
+    function = backend.create_node("function", "dnn1", feature_type="DnnFunction")
+    assert function.path == ("function", "dnn1")
+    assert backend.container_tags("function") == ["dnn1"]
+
+    backend.remove_node("study", "std2")
+    backend.remove_node("function", "dnn1")
+    assert backend.container_tags("study") == ["std1"]
+    assert backend.container_tags("function") == []
+
+    for call in (
+        lambda: backend.container_tags("dataset"),
+        lambda: backend.create_node("dataset", "d1"),
+        lambda: backend.remove_node("dataset", "d1"),
+    ):
+        with pytest.raises(AdapterError) as excinfo:
+            call()
+        assert excinfo.value.reason_code == "node_not_found"
+    # A function or step without a declared type is refused, not guessed.
+    for call in (
+        lambda: backend.create_node("function", "dnn1"),
+        lambda: backend.create_node("study_step", "step1"),
+    ):
+        with pytest.raises(AdapterError) as excinfo:
+            call()
+        assert excinfo.value.reason_code == "conversion_not_representable"
+
+
+def test_every_registered_backend_and_the_fake_satisfy_the_extended_protocol() -> None:
+    """The Protocol grew in step 6; every implementation must have kept up."""
+    members = (
+        "open_session",
+        "close_session",
+        "session_identity",
+        "load_model",
+        "save_model",
+        "find_node",
+        "children",
+        "convert",
+        "read_property",
+        "plan_write",
+        "apply_write",
+        "evaluate",
+        "dataset_names",
+        "solution_names",
+        "java_typed_write",
+        "java_typed_read",
+        "run_feature",
+        "export_feature",
+        "attach_client",
+        "container_tags",
+        "create_node",
+        "remove_node",
+        "read_allowed_values",
+        "java_value_type",
+    )
+    backends = [FakeComsolBackend(), *(make_backend(lane) for lane in available_lanes())]
+    for backend in backends:
+        missing = [name for name in members if not callable(getattr(backend, name, None))]
+        assert missing == [], f"{type(backend).__name__} is missing {missing}"
+        assert isinstance(backend, ComsolAdapter)
+
+
+def test_an_adopted_client_is_released_rather_than_cleared() -> None:
+    """Ownership does not transfer, so closing must not clear someone else's client."""
+    clients: list[object] = []
+
+    class Client:
+        def __init__(self) -> None:
+            self.cleared = False
+
+        def clear(self) -> None:
+            self.cleared = True
+
+    class Model:
+        def __init__(self, client: object) -> None:
+            self.client = client
+
+    backend = FakeComsolBackend()
+    adopted = Client()
+    clients.append(adopted)
+    with pytest.raises(AdapterError) as excinfo:
+        backend.attach_client(Model(None))
+    assert excinfo.value.reason_code == "adapter_unavailable"
+    backend.attach_client(Model(adopted))
+    assert backend.attached is True
+    backend.close_session()
+    assert adopted.cleared is False
+
+    # A session the backend opened itself is still cleaned up by the backend.
+    owned_client = Client()
+    clients.append(owned_client)
+
+    class OpenedBackend(FakeComsolBackend):
+        def open_session(self, request: SessionRequest) -> SessionIdentity:
+            self._client = owned_client
+            self._session = SessionIdentity(
+                mph_version=self._mph_version,
+                comsol_version=self._comsol_version,
+                host=None,
+                port=None,
+                standalone=True,
+            )
+            return self._session
+
+    opened = OpenedBackend()
+    opened.open_session(SessionRequest(cores=1))
+    opened.close_session()
+    assert owned_client.cleared is True
+    assert opened.cleared_clients == [owned_client]

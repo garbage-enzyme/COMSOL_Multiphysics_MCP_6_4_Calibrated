@@ -17,9 +17,13 @@ from typing import Any, Sequence
 
 from comsol_mcp.adapter.conversion import convert_explicitly, normalize_evaluation_result
 from comsol_mcp.adapter.protocol import (
+    DNN_FEATURE_METHODS,
+    JAVA_WRITE_KINDS,
     AdapterError,
     ConvertedValue,
     EvaluationRequest,
+    JavaTypedRead,
+    JavaTypedWrite,
     ModelIdentity,
     NodeRef,
     PropertyWritePlan,
@@ -69,6 +73,25 @@ class FakeComsolBackend:
         #: Every property write that was actually applied, in order, so a test
         #: can prove a failed write was rolled back rather than merely reported.
         self.applied_writes: list[tuple[str, str, Any]] = []
+        #: Scripted ``{kind: [tags]}`` container content, for ``container_tags``.
+        self._containers: dict[str, list[str]] = {}
+        #: Scripted ``{(tag, name): (accessor, value)}`` typed Java reads.
+        self._java_values: dict[tuple[str, str], tuple[str, Any]] = {}
+        #: Scripted ``{(tag, name): declared_type}`` results for ``java_value_type``.
+        self._java_types: dict[tuple[str, str], str] = {}
+        #: Scripted ``{(tag, name): [allowed]}`` results for ``read_allowed_values``.
+        self._allowed_values: dict[tuple[str, str], list[str]] = {}
+        #: Every typed Java write the backend was asked to perform, in order.
+        self.java_writes: list[tuple[str, str, str, Any]] = []
+        #: Every feature lifecycle call the backend was asked to perform, in order.
+        self.feature_calls: list[tuple[str, str]] = []
+        #: Every export the backend was asked to perform, in order.
+        self.exports: list[tuple[str, str]] = []
+        self.attached = False
+        self._client: Any = None
+        #: Clients this backend actually cleared, so a test can prove an adopted
+        #: client was released rather than cleared.
+        self.cleared_clients: list[Any] = []
 
     # -- test helpers --------------------------------------------------------
     def _record(self, operation: str, **detail: Any) -> None:
@@ -110,7 +133,20 @@ class FakeComsolBackend:
     def close_session(self) -> None:
         self._record("session_close")
         self._maybe_fail("session_close")
+        client = self._client
+        attached = self.attached
+        self._client = None
+        self.attached = False
         self._session = None
+        if attached:
+            # An adopted client belongs to its creator, so it is dropped without
+            # being cleared; the fake records that so the ownership rule is
+            # assertable rather than implied.
+            return
+        clear = getattr(client, "clear", None)
+        if callable(clear):
+            clear()
+            self.cleared_clients.append(client)
 
     def session_identity(self) -> SessionIdentity | None:
         return self._session
@@ -257,6 +293,191 @@ class FakeComsolBackend:
         self._maybe_fail("solution_access")
         self._require_model("solution_access")
         return ["sol1"]
+
+    # -- step 6: typed Java access and feature operations -------------------
+    def attach_client(self, model: Any) -> None:
+        """Adopt a caller-owned client, exactly as the MPh backend does.
+
+        The fake records the adoption and opens a synthetic session so node
+        operations after an attach behave as they do on a real adopted client.
+        Ownership stays with the caller: ``close_session`` must not clear it.
+        """
+        self._record("session_open", attach=True, model=type(model).__name__)
+        self._maybe_fail("session_open")
+        client = getattr(model, "client", None)
+        if client is None:
+            raise AdapterError(
+                "adapter_unavailable",
+                "the supplied object does not expose a client",
+                operation="session_open",
+            )
+        self._client = client
+        self.attached = True
+        if self._session is None:
+            self._session = SessionIdentity(
+                mph_version=self._mph_version,
+                comsol_version=self._comsol_version,
+                host=None,
+                port=None,
+                standalone=True,
+            )
+
+    @staticmethod
+    def _tag_of(node: Any) -> str:
+        """Address a node by tag, accepting both reference forms."""
+        tag = getattr(node, "tag", None)
+        if not isinstance(tag, str):
+            tag = getattr(node, "label", None)
+        if not isinstance(tag, str):
+            raise AdapterError(
+                "node_not_found",
+                f"the fake cannot address a {type(node).__name__}",
+                operation="node_lookup",
+            )
+        return tag
+
+    def container_tags(self, kind: str) -> Sequence[str]:
+        self._record("node_children", kind=kind)
+        self._maybe_fail("node_children")
+        self._require_model("node_children")
+        if kind not in self._containers:
+            raise AdapterError(
+                "node_not_found",
+                f"the fake does not enumerate {kind!r} tags",
+                operation="node_children",
+            )
+        return list(self._containers[kind])
+
+    def set_container(self, kind: str, tags: Sequence[str]) -> None:
+        """Script one enumerable container's content."""
+        self._containers[kind] = [str(tag) for tag in tags]
+
+    def create_node(
+        self,
+        kind: str,
+        tag: str,
+        *,
+        parent_tag: str | None = None,
+        feature_type: str | None = None,
+    ) -> NodeRef:
+        self._record("node_lookup", phase="create", kind=kind, tag=tag)
+        self._maybe_fail("node_lookup")
+        self._require_model("node_lookup")
+        if kind not in {"study", "function", "study_step"}:
+            raise AdapterError(
+                "node_not_found",
+                f"the fake does not create {kind!r} nodes",
+                operation="node_lookup",
+            )
+        if kind in {"function", "study_step"} and feature_type is None:
+            raise AdapterError(
+                "conversion_not_representable",
+                f"creating a {kind} requires an explicit feature type",
+                operation="node_lookup",
+            )
+        path: tuple[str, ...]
+        if kind == "study_step":
+            if parent_tag is None:
+                raise AdapterError(
+                    "conversion_not_representable",
+                    "creating a study step requires a parent study",
+                    operation="node_lookup",
+                )
+            path = ("study", parent_tag, tag)
+        else:
+            path = (kind, tag)
+            self._containers.setdefault(kind, []).append(tag)
+        self._properties.setdefault(tag, {})
+        return NodeRef(tag=tag, path=path, node_type=feature_type)
+
+    def remove_node(self, kind: str, tag: str) -> None:
+        self._record("node_lookup", phase="remove", kind=kind, tag=tag)
+        self._maybe_fail("node_lookup")
+        self._require_model("node_lookup")
+        if kind not in {"study", "function"}:
+            raise AdapterError(
+                "node_not_found",
+                f"the fake does not remove {kind!r} nodes",
+                operation="node_lookup",
+            )
+        # COMSOL's ``remove`` is tolerant of an absent tag; the fake matches that
+        # so a rollback of an already-removed node is not reported as a failure.
+        if tag in self._containers.get(kind, []):
+            self._containers[kind].remove(tag)
+        self._properties.pop(tag, None)
+
+    def java_typed_write(self, request: JavaTypedWrite) -> None:
+        self._record("java_typed_write", name=request.name, kind=request.kind)
+        self._maybe_fail("java_typed_write")
+        if request.kind not in JAVA_WRITE_KINDS:
+            raise AdapterError(
+                "conversion_not_representable",
+                f"unsupported Java write kind: {request.kind}",
+                operation="java_typed_write",
+            )
+        if request.kind == "string_entry" and not isinstance(request.value, dict):
+            raise AdapterError(
+                "conversion_not_representable",
+                "string_entry requires a mapping of key to value",
+                operation="java_typed_write",
+            )
+        tag = self._tag_of(request.node)
+        self.java_writes.append((tag, request.name, request.kind, request.value))
+        self._java_values[(tag, request.name)] = ("set", request.value)
+
+    def java_typed_read(self, node: Any, name: str) -> JavaTypedRead:
+        self._record("property_read", name=name, kind="java_typed")
+        self._maybe_fail("property_read")
+        tag = self._tag_of(node)
+        scripted = self._java_values.get((tag, name))
+        if scripted is None:
+            raise AdapterError(
+                "property_not_found",
+                f"no typed accessor accepted {name!r} on {tag}",
+                operation="property_read",
+                rejected=("getString: JException", "getDouble: JException"),
+            )
+        accessor, value = scripted
+        return JavaTypedRead(node=node, name=name, accessor=accessor, value=value, rejected=())
+
+    def set_java_value(self, tag: str, name: str, accessor: str, value: Any) -> None:
+        """Script one typed Java read result."""
+        self._java_values[(tag, name)] = (accessor, value)
+
+    def set_java_type(self, tag: str, name: str, declared_type: str) -> None:
+        """Script one property's declared Java value type."""
+        self._java_types[(tag, name)] = declared_type
+
+    def java_value_type(self, node: Any, name: str) -> str | None:
+        self._record("property_read", name=name, kind="value_type")
+        self._maybe_fail("property_read")
+        return self._java_types.get((self._tag_of(node), name))
+
+    def read_allowed_values(self, node: Any, name: str) -> list[str] | None:
+        self._record("property_read", name=name, kind="allowed_values")
+        self._maybe_fail("property_read")
+        allowed = self._allowed_values.get((self._tag_of(node), name))
+        return None if allowed is None else list(allowed)
+
+    def set_allowed_values(self, tag: str, name: str, allowed: Sequence[str]) -> None:
+        """Script one enumerated property's allowed values."""
+        self._allowed_values[(tag, name)] = [str(item) for item in allowed]
+
+    def run_feature(self, node: Any, *, method: str) -> None:
+        self._record("dnn_feature_run", method=method)
+        self._maybe_fail("dnn_feature_run")
+        if method not in DNN_FEATURE_METHODS:
+            raise AdapterError(
+                "conversion_not_representable",
+                f"unsupported feature method: {method}",
+                operation="dnn_feature_run",
+            )
+        self.feature_calls.append((self._tag_of(node), method))
+
+    def export_feature(self, node: Any, path: str) -> None:
+        self._record("dnn_feature_export", path=path)
+        self._maybe_fail("dnn_feature_export")
+        self.exports.append((self._tag_of(node), str(path)))
 
 
 __all__ = ["FakeComsolBackend"]

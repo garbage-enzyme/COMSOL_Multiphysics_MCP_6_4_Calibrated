@@ -167,18 +167,14 @@ def test_write_plan_layer_types_match_declared_architecture() -> None:
     plan = build_write_plan(_configuration(hidden_layers=[32]))
     layertype = next(item for item in plan["scalar_writes"] if item["property"] == "layertype")
     assert layertype["value"] == ["input", "dense", "dense"]
-    outfeatures = next(
-        item for item in plan["scalar_writes"] if item["property"] == "outfeatures"
-    )
+    outfeatures = next(item for item in plan["scalar_writes"] if item["property"] == "outfeatures")
     assert outfeatures["value"] == [2, 32, 1]
 
 
 def test_activation_array_is_per_layer_matching_layertype() -> None:
     """COMSOL requires len(activation) == len(layertype); a short array errors."""
     plan = build_write_plan(_configuration(hidden_layers=[16, 8], activation="gelu"))
-    activation = next(
-        item for item in plan["scalar_writes"] if item["property"] == "activation"
-    )
+    activation = next(item for item in plan["scalar_writes"] if item["property"] == "activation")
     layertype = next(item for item in plan["scalar_writes"] if item["property"] == "layertype")
     # input, hidden, hidden, output dense
     assert layertype["value"] == ["input", "dense", "dense", "dense"]
@@ -218,9 +214,7 @@ def test_write_plan_defers_args_until_a_data_source_is_bound() -> None:
 
 
 def test_write_plan_binds_arg_and_colscale_entries_once_data_is_bound() -> None:
-    plan = build_write_plan(
-        _configuration(column_scales={"w": "std"}), data_source_bound=True
-    )
+    plan = build_write_plan(_configuration(column_scales={"w": "std"}), data_source_bound=True)
     entries = {item["property"]: item for item in plan["entry_writes"]}
     assert entries["args"]["entries"] == {"w": "w", "h": "h", "R": "R"}
     assert entries["colscale"]["entries"] == {"w": "std"}
@@ -239,9 +233,10 @@ def test_step_globaldnnfunction_uses_the_string_map_writer() -> None:
 
 
 def test_write_plan_is_deterministic() -> None:
-    assert build_write_plan(_configuration())["plan_sha256"] == build_write_plan(
-        _configuration()
-    )["plan_sha256"]
+    assert (
+        build_write_plan(_configuration())["plan_sha256"]
+        == build_write_plan(_configuration())["plan_sha256"]
+    )
 
 
 # --------------------------------------------------------------------------
@@ -582,9 +577,7 @@ def test_bind_data_source_reports_import_failure_and_no_columns() -> None:
 
     empty = NoColumnsBackend()
     apply_surrogate_configuration(empty, _configuration())
-    result = bind_data_source_and_arguments(
-        empty, _configuration(), dataset_path="D:/tmp/data.csv"
-    )
+    result = bind_data_source_and_arguments(empty, _configuration(), dataset_path="D:/tmp/data.csv")
     assert result["success"] is False
     assert result["blockers"] == ["data_columns_unavailable"]
 
@@ -730,21 +723,201 @@ def test_dnn_adapter_module_is_solver_free() -> None:
         assert banned not in source, f"dnn_adapter references {banned}"
 
 
-def test_clientapi_backend_is_isolated_and_imports_lazily() -> None:
-    """The licensed bridge lives in its own module and imports jpype only inside calls."""
+def test_clientapi_backend_owns_no_java_typing_of_its_own() -> None:
+    """The licensed bridge must not reach Java directly any more.
+
+    S4A step 6 moved every Java typing rule -- jpype wrapping, accessor probing,
+    node resolution -- behind ``comsol_mcp.adapter``.  A jpype reference
+    reappearing here, or an attribute read of ``model.java``, would mean the seam
+    was bypassed again, so both are asserted structurally (by AST) rather than by
+    substring search, which a docstring could satisfy by accident.
+    """
+    import ast
+
     import comsol_mcp.surrogate.dnn_clientapi_backend as module
 
     source = open(module.__file__, encoding="utf-8").read()
-    assert "jpype" in source, "the licensed bridge must be able to reach jpype"
-    # jpype must never be imported at module import time: only indented
-    # (in-function) imports are permitted, so cold discovery stays cheap.
-    for line in source.splitlines():
-        if line[:1].isspace() or not line.strip():
-            continue
-        stripped = line.strip()
-        if stripped.startswith(("import jpype", "from jpype")):
-            raise AssertionError("the licensed bridge must import jpype lazily")
+    tree = ast.parse(source)
+    java_attribute_reads = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == "java"
+    ]
+    assert java_attribute_reads == [], "the licensed bridge must not read model.java"
+    jpype_imports = [
+        node.lineno
+        for node in ast.walk(tree)
+        if (
+            isinstance(node, ast.Import)
+            and any(alias.name.split(".")[0] == "jpype" for alias in node.names)
+        )
+        or (isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "jpype")
+    ]
+    assert jpype_imports == [], "Java wrapping belongs to the adapter, not the bridge"
+    # The bridge must actually use the seam rather than merely avoid Java.
+    assert "from comsol_mcp.adapter import" in source
     # The solver-free module must not re-export the licensed class.
     import comsol_mcp.surrogate.dnn_adapter as adapter
 
     assert "ClientapiSurrogateDnnBackend" not in dir(adapter)
+
+
+def _adapter_backed_bridge() -> tuple[Any, Any]:
+    """Return a bridge whose adapter is the deterministic fake, with a model open."""
+    from comsol_mcp.adapter.fake_backend import FakeComsolBackend
+    from comsol_mcp.adapter.protocol import SessionRequest
+    from comsol_mcp.surrogate.dnn_clientapi_backend import ClientapiSurrogateDnnBackend
+
+    adapter = FakeComsolBackend()
+    adapter.open_session(SessionRequest(cores=1))
+    adapter.load_model("derived.mph")
+    adapter.set_container("study", [])
+    adapter.set_container("function", [])
+    return ClientapiSurrogateDnnBackend(adapter=adapter), adapter
+
+
+def test_clientapi_backend_routes_every_java_operation_through_the_adapter() -> None:
+    """Each bridge operation must land on the adapter, not on a Java object.
+
+    The fake records typed writes, feature calls, and exports separately from the
+    operation log, so this proves the migration is real: a bridge that still
+    touched Java would leave those records empty.
+    """
+    from comsol_mcp.adapter import OPERATIONS
+
+    bridge, adapter = _adapter_backed_bridge()
+
+    assert bridge.create_study("std1").path == ("study", "std1")
+    assert bridge.create_dnn_function(DNN_FUNCTION_TAG).path == ("function", DNN_FUNCTION_TAG)
+    assert bridge.create_study_step("std1", "step1", "StudyStep").path == (
+        "study",
+        "std1",
+        "step1",
+    )
+    assert bridge.study_tags() == ["std1"]
+    assert bridge.func_tags() == [DNN_FUNCTION_TAG]
+
+    dnn = bridge.get_dnn_function(DNN_FUNCTION_TAG)
+    assert dnn.path == ("function", DNN_FUNCTION_TAG)
+
+    bridge.write_scalar(dnn, "loss", "mse", "string")
+    bridge.write_entries(dnn, "args", {"w": "1", "h": "2"})
+    assert adapter.java_writes == [
+        (DNN_FUNCTION_TAG, "loss", "string", "mse"),
+        (DNN_FUNCTION_TAG, "args", "string_entry", {"w": "1", "h": "2"}),
+    ]
+
+    # ``globaldnnfunction`` accepts the nested form when the property declares it
+    # and the alternating flat form otherwise; the bridge measures the declared
+    # type through the adapter instead of assuming one.
+    adapter.set_java_type(DNN_FUNCTION_TAG, "globaldnnfunction", "[[Ljava.lang.String;")
+    bridge.write_string_map(dnn, "globaldnnfunction", {"1": DNN_FUNCTION_TAG})
+    adapter._java_types.pop((DNN_FUNCTION_TAG, "globaldnnfunction"))
+    bridge.write_string_map(dnn, "globaldnnfunction", {"1": DNN_FUNCTION_TAG})
+    assert [row[2:] for row in adapter.java_writes[2:]] == [
+        ("string_matrix", [["1"], [DNN_FUNCTION_TAG]]),
+        ("string_array", ["1", DNN_FUNCTION_TAG]),
+    ]
+
+    bridge.train(dnn)
+    bridge.continue_training(dnn)
+    bridge.run_test(dnn)
+    bridge.discard_data(dnn)
+    bridge.export_onnx(dnn, "model.onnx")
+    assert adapter.feature_calls == [
+        (DNN_FUNCTION_TAG, "run"),
+        (DNN_FUNCTION_TAG, "continueRun"),
+        (DNN_FUNCTION_TAG, "runTest"),
+        (DNN_FUNCTION_TAG, "discardData"),
+    ]
+    assert adapter.exports == [(DNN_FUNCTION_TAG, "model.onnx")]
+
+    adapter.set_java_value(DNN_FUNCTION_TAG, "trainingloss", "getString", "0.025")
+    adapter.set_java_value(DNN_FUNCTION_TAG, "activation", "getStringArray", ["tanh", "relu"])
+    assert bridge.read_property(dnn, "trainingloss") == {
+        "readable": True,
+        "accessor": "getString",
+        "value": "0.025",
+    }
+    assert bridge.read_property(dnn, "activation") == {
+        "readable": True,
+        "accessor": "getStringArray",
+        "value": ["tanh", "relu"],
+    }
+    unreadable = bridge.read_property(dnn, "absent")
+    assert unreadable == {
+        "readable": False,
+        "reason": "no typed accessor accepted the property",
+        "rejected_accessors": ["getString: JException", "getDouble: JException"],
+    }
+    adapter.set_allowed_values(DNN_FUNCTION_TAG, "loss", ["mse", "mae"])
+    assert bridge.read_allowed_values(dnn, "loss") == ["mse", "mae"]
+    assert bridge.read_allowed_values(dnn, "absent") is None
+
+    bridge.remove_function(DNN_FUNCTION_TAG)
+    bridge.remove_study("std1")
+    assert bridge.study_tags() == []
+    assert bridge.func_tags() == []
+
+    for operation, _ in adapter.calls:
+        assert operation in OPERATIONS, f"{operation} is not a declared operation"
+
+
+def test_clientapi_backend_accepts_the_raw_feature_handle_the_gates_hold() -> None:
+    """The licensed gates resolve features themselves and pass the Java object.
+
+    Such a handle cannot be re-walked by path, so the bridge presents it as an
+    already-resolved node.  It must still be addressed by tag and must still be
+    routed through the adapter.
+    """
+
+    class RawFeature:
+        """Stands in for the JPype feature object a licensed gate holds."""
+
+    bridge, adapter = _adapter_backed_bridge()
+    raw = RawFeature()
+    bridge.write_scalar(raw, "loss", "mse", "string")
+    bridge.train(raw)
+    bridge.export_onnx(raw, "raw.onnx")
+    assert adapter.java_writes == [("RawFeature", "loss", "string", "mse")]
+    assert adapter.feature_calls == [("RawFeature", "run")]
+    assert adapter.exports == [("RawFeature", "raw.onnx")]
+
+
+def test_clientapi_backend_attaches_an_existing_model_without_owning_it() -> None:
+    """MPh forbids a second client, so the bridge adopts the caller's model.
+
+    Adoption must not transfer ownership: closing the adapter has to drop the
+    reference without clearing a client the caller created.
+    """
+
+    class Client:
+        def __init__(self) -> None:
+            self.cleared = False
+
+        def clear(self) -> None:
+            self.cleared = True
+
+    class Model:
+        def __init__(self) -> None:
+            self.client = Client()
+
+    from comsol_mcp.adapter.fake_backend import FakeComsolBackend
+    from comsol_mcp.surrogate.dnn_clientapi_backend import ClientapiSurrogateDnnBackend
+
+    adapter = FakeComsolBackend()
+    model = Model()
+    bridge = ClientapiSurrogateDnnBackend(model, adapter=adapter)
+    assert bridge.model is model
+    assert adapter.attached is True
+    adapter.close_session()
+    assert model.client.cleared is False
+
+
+def test_clientapi_backend_requires_a_model_or_an_adapter() -> None:
+    from comsol_mcp.adapter import AdapterError
+    from comsol_mcp.surrogate.dnn_clientapi_backend import ClientapiSurrogateDnnBackend
+
+    with pytest.raises(AdapterError) as excinfo:
+        ClientapiSurrogateDnnBackend()
+    assert excinfo.value.reason_code == "adapter_unavailable"

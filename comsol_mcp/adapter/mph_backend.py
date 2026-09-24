@@ -29,7 +29,7 @@ module cannot start a JVM or create a solver connection.
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from comsol_mcp.adapter.conversion import (
     convert_explicitly,
@@ -37,14 +37,19 @@ from comsol_mcp.adapter.conversion import (
     unwrap_backend_value,
 )
 from comsol_mcp.adapter.protocol import (
+    DNN_FEATURE_METHODS,
+    JAVA_WRITE_KINDS,
     REFERENCE_MPH_LANE,
     AdapterError,
     ConvertedValue,
     EvaluationRequest,
+    JavaTypedRead,
+    JavaTypedWrite,
     ModelIdentity,
     NodeRef,
     PropertyWritePlan,
     PropertyWriteReceipt,
+    ResolvedNode,
     SessionIdentity,
     SessionRequest,
     installed_mph_version,
@@ -86,6 +91,10 @@ class MphBackendBase:
     def __init__(self) -> None:
         self._client: Any = None
         self._mph_version: str | None = None
+        #: True when the client was adopted from a caller rather than opened
+        #: here. Initialized up front so a capability read cannot depend on
+        #: whether ``attach_client`` has run yet.
+        self._attached: bool = False
 
     # -- lane metadata -------------------------------------------------------
     def observed_lane(self) -> str:
@@ -167,8 +176,15 @@ class MphBackendBase:
 
     def close_session(self) -> None:
         client = self._client
+        attached = self._attached
         self._client = None
+        self._attached = False
         if client is None:
+            return
+        if attached:
+            # An adopted client belongs to its creator. Dropping the reference is
+            # the whole of this backend's cleanup; calling ``clear`` here would
+            # mutate a resource the adapter never owned.
             return
         # Clearing the wrapper is the project's cleanup step; MPh's own
         # disconnect semantics differ between lanes, so the project performs the
@@ -261,6 +277,10 @@ class MphBackendBase:
             ("study", "feature"): 3,
             ("solution",): 2,
             ("dataset",): 2,
+            # Step 6: the DNN surface addresses the function container and one
+            # function feature inside it.
+            ("function",): 2,
+            ("function", "feature"): 3,
         }
 
     @classmethod
@@ -274,9 +294,30 @@ class MphBackendBase:
             return len(path) == 3
         if path[0] == "study":
             return len(path) in {2, 3}
+        if path[0] == "function":
+            return len(path) in {2, 3}
         if path[0] in {"solution", "dataset"}:
             return len(path) == 2
         return False
+
+    def _resolve_handle(self, target: Any) -> Any:
+        """Return the Java object for a node reference or an already-resolved handle.
+
+        ``ResolvedNode`` exists because the licensed gates build a model and then
+        hold raw Java feature objects. Re-walking a path is impossible for such a
+        handle, so it is passed through unchanged; a ``NodeRef`` is resolved
+        through the accessor chain. Any other type is refused rather than being
+        treated as a Java object, which would be an untyped escape hatch.
+        """
+        if isinstance(target, ResolvedNode):
+            return target.handle
+        if isinstance(target, NodeRef):
+            return self._java_node(target.path)
+        raise AdapterError(
+            "node_not_found",
+            f"expected a NodeRef or ResolvedNode, got {type(target).__name__}",
+            operation="node_lookup",
+        )
 
     def _java_node(self, path: Sequence[str]) -> Any:
         """Resolve a node path through the Java ClientAPI accessor chain.
@@ -323,6 +364,10 @@ class MphBackendBase:
                 return java.sol(path[1])
             if kind == "dataset" and len(path) == 2:
                 return java.result().dataset(path[1])
+            if kind == "function" and len(path) == 2:
+                return java.func(path[1])
+            if kind == "function" and len(path) == 3:
+                return java.func(path[1]).feature(path[2])
         except Exception as exc:
             raise AdapterError(
                 "node_not_found",
@@ -537,6 +582,307 @@ class MphBackendBase:
                 "solution names could not be read",
                 operation="solution_access",
             ) from exc
+
+    # -- step 6: typed Java property access and DNN feature operations -------
+    @staticmethod
+    def _coerce_java(value: Any, kind: str) -> Any:
+        """Wrap a Python value in the exact Java type the caller declared.
+
+        Lifted from the DNN bridge so the coercion lives in one place: JPype
+        cannot disambiguate ``set(String, int)`` from ``set(String, boolean)``
+        when handed a bare Python ``int``, and raises an ambiguous-overload error
+        rather than choosing. A caller therefore names the Java type and this
+        method performs the wrapping.
+
+        ``jpype`` is imported here, inside the call, so importing the adapter
+        never imports jpype and never starts a JVM.
+        """
+        import jpype
+
+        if kind == "string":
+            return jpype.JString(str(value))
+        if kind == "boolean":
+            return jpype.JBoolean(bool(value))
+        if kind == "int":
+            return jpype.JInt(int(value))
+        if kind == "double":
+            return jpype.JDouble(float(value))
+        if kind == "string_array":
+            return jpype.JArray(jpype.JString)([str(item) for item in value])
+        if kind == "string_matrix":
+            # The nested ``[[Ljava.lang.String;`` form: a Java array of Java
+            # string arrays, which is what properties declaring that type accept.
+            rows = [[str(item) for item in row] for row in value]
+            return jpype.JArray(jpype.JArray(jpype.JString))(rows)
+        if kind == "int_array":
+            return jpype.JArray(jpype.JInt)([int(item) for item in value])
+        if kind == "double_array":
+            return jpype.JArray(jpype.JDouble)([float(item) for item in value])
+        raise AdapterError(
+            "conversion_not_representable",
+            f"unsupported Java write kind: {kind}",
+            operation="java_typed_write",
+        )
+
+    def java_typed_write(self, request: JavaTypedWrite) -> None:
+        """Write one property with the caller's declared Java type."""
+        if request.kind not in JAVA_WRITE_KINDS:
+            raise AdapterError(
+                "conversion_not_representable",
+                f"unsupported Java write kind: {request.kind}",
+                operation="java_typed_write",
+            )
+        java = self._resolve_handle(request.node)
+        if request.kind == "string_entry":
+            # Alternating key/value properties are written through setEntry: the
+            # ClientAPI reference directs callers to setEntry for them, and a
+            # nested Java array passed to set() fails with "Unable to convert".
+            if not isinstance(request.value, Mapping):
+                raise AdapterError(
+                    "conversion_not_representable",
+                    "string_entry requires a mapping of key to value",
+                    operation="java_typed_write",
+                )
+            try:
+                for key, item in request.value.items():
+                    java.setEntry(request.name, str(key), str(item))
+            except Exception as exc:
+                raise self._translate(exc, "java_typed_write") from exc
+            return
+        try:
+            java.set(request.name, self._coerce_java(request.value, request.kind))
+        except Exception as exc:
+            raise self._translate(exc, "java_typed_write") from exc
+
+    def java_typed_read(self, node: Any, name: str) -> JavaTypedRead:
+        """Read one property through the typed accessors, recording which won."""
+        java = self._resolve_handle(node)
+        rejected: list[str] = []
+        for accessor in (
+            "getString",
+            "getBoolean",
+            "getInt",
+            "getDouble",
+            "getStringArray",
+            "getStringMatrix",
+            "getDoubleArray",
+            "getDoubleMatrix",
+        ):
+            try:
+                raw = getattr(java, accessor)(name)
+            except Exception as exc:
+                # Probing tries every typed accessor, so a rejection is expected;
+                # it is recorded so an unreadable property stays reportable.
+                rejected.append(f"{accessor}: {type(exc).__name__}")
+                continue
+            if accessor in {"getString", "getBoolean", "getInt", "getDouble"}:
+                return JavaTypedRead(
+                    node=node,
+                    name=name,
+                    accessor=accessor,
+                    value=unwrap_backend_value(raw),
+                    rejected=tuple(rejected),
+                )
+            try:
+                rendered: Any = [str(item) for item in list(raw)]
+            except Exception as exc:
+                rejected.append(f"{accessor}.render: {type(exc).__name__}")
+                rendered = str(raw)
+            return JavaTypedRead(
+                node=node,
+                name=name,
+                accessor=accessor,
+                value=rendered,
+                rejected=tuple(rejected),
+            )
+        raise AdapterError(
+            "property_not_found",
+            f"no typed accessor accepted {name!r} on {'/'.join(node.path)} "
+            f"(rejected: {', '.join(rejected)})",
+            operation="property_read",
+            rejected=tuple(rejected),
+        )
+
+    def run_feature(self, node: Any, *, method: str) -> None:
+        """Invoke one declared lifecycle method on a resolved feature."""
+        if method not in DNN_FEATURE_METHODS:
+            raise AdapterError(
+                "conversion_not_representable",
+                f"unsupported feature method: {method}",
+                operation="dnn_feature_run",
+            )
+        java = self._resolve_handle(node)
+        try:
+            getattr(java, method)()
+        except Exception as exc:
+            raise self._translate(exc, "dnn_feature_run") from exc
+
+    def export_feature(self, node: Any, path: str) -> None:
+        java = self._resolve_handle(node)
+        try:
+            java.export(str(path))
+        except Exception as exc:
+            raise self._translate(exc, "dnn_feature_export") from exc
+
+    # -- container enumeration and node creation (plan step 6) --------------
+    def attach_client(self, model: Any) -> None:
+        """Adopt an already-created client that the caller owns.
+
+        The licensed gates create their own ``mph.Client`` and then need the
+        adapter's operations on it. MPh forbids a second client in one process, so
+        the existing client is taken over rather than opened again. Ownership
+        stays with the caller: this only records the reference, and
+        ``close_session`` on an attached client drops it without clearing a client
+        the caller created, because closing it would be a hidden resource change.
+        """
+        if model is None:
+            raise AdapterError(
+                "adapter_unavailable",
+                "attach_client requires a model",
+                operation="session_open",
+            )
+        client = getattr(model, "client", None)
+        if client is None:
+            raise AdapterError(
+                "adapter_unavailable",
+                "the supplied object does not expose an MPh client",
+                operation="session_open",
+            )
+        self._client = client
+        self._attached = True
+        self._mph_version = installed_mph_version() or self._mph_version
+
+    def container_tags(self, kind: str) -> Sequence[str]:
+        """List the child tags of a top-level container the adapter enumerates.
+
+        Only containers with a well-defined tag listing are supported; anything
+        else is refused rather than guessed.
+        """
+        accessors = {
+            "study": ("study",),
+            "function": ("func",),
+            "component": ("component",),
+        }
+        names = accessors.get(kind)
+        if names is None:
+            raise AdapterError(
+                "node_not_found",
+                f"the adapter does not enumerate {kind!r} tags",
+                operation="node_children",
+            )
+        model = self._require_model("node_children")
+        for name in names:
+            accessor = getattr(model.java, name, None)
+            if not callable(accessor):
+                continue
+            try:
+                # The ClientAPI container is overloaded: the zero-argument form
+                # returns the tag list, while the tag form returns the feature
+                # itself. Enumeration therefore calls it with no argument.
+                container = accessor()
+                return [str(tag) for tag in list(container.tags())]
+            except Exception as exc:
+                raise self._translate(exc, "node_children") from exc
+        raise AdapterError(
+            "node_not_found",
+            f"the model exposes no {kind!r} container",
+            operation="node_children",
+        )
+
+    def create_node(
+        self,
+        kind: str,
+        tag: str,
+        *,
+        parent_tag: str | None = None,
+        feature_type: str | None = None,
+    ) -> NodeRef:
+        """Create one node of a declared kind and return its reference.
+
+        The representable creations are a closed set, so this cannot become a
+        general "create anything" command channel.
+        """
+        model = self._require_model("node_lookup")
+        java = model.java
+        try:
+            if kind == "study":
+                java.study().create(tag)
+                return NodeRef(tag=tag, path=("study", tag), node_type=None)
+            if kind == "function":
+                if feature_type is None:
+                    raise AdapterError(
+                        "conversion_not_representable",
+                        "creating a function requires an explicit feature type",
+                        operation="node_lookup",
+                    )
+                java.func().create(tag, feature_type)
+                return NodeRef(tag=tag, path=("function", tag), node_type=feature_type)
+            if kind == "study_step":
+                if parent_tag is None or feature_type is None:
+                    raise AdapterError(
+                        "conversion_not_representable",
+                        "creating a study step requires a parent study and a step type",
+                        operation="node_lookup",
+                    )
+                java.study(parent_tag).feature().create(tag, feature_type)
+                return NodeRef(tag=tag, path=("study", parent_tag, tag), node_type=feature_type)
+        except AdapterError:
+            raise
+        except Exception as exc:
+            raise self._translate(exc, "node_lookup") from exc
+        raise AdapterError(
+            "node_not_found",
+            f"the adapter does not create {kind!r} nodes",
+            operation="node_lookup",
+        )
+
+    def remove_node(self, kind: str, tag: str) -> None:
+        """Remove one node of a declared kind."""
+        model = self._require_model("node_lookup")
+        java = model.java
+        try:
+            if kind == "study":
+                java.study().remove(tag)
+                return
+            if kind == "function":
+                java.func().remove(tag)
+                return
+        except Exception as exc:
+            raise self._translate(exc, "node_lookup") from exc
+        raise AdapterError(
+            "node_not_found",
+            f"the adapter does not remove {kind!r} nodes",
+            operation="node_lookup",
+        )
+
+    def read_allowed_values(self, node: Any, name: str) -> list[str] | None:
+        """Read the allowed values of an enumerated property, if it exposes them."""
+        java = self._resolve_handle(node)
+        try:
+            raw = java.getAllowedPropertyValues(name)
+        except Exception:
+            return None
+        if raw is None:
+            return None
+        return [str(item) for item in list(raw)]
+
+    def java_value_type(self, node: Any, name: str) -> str | None:
+        """Read a property's declared Java value type, or ``None`` if unreadable.
+
+        Measured need: some ClientAPI properties accept only the nested
+        ``[[Ljava.lang.String;`` form and reject the alternating key/value form,
+        while others do the opposite. A caller that has to pick one therefore
+        reads the declared type here instead of assuming, and an unreadable type
+        is reported unknown rather than guessed.
+        """
+        java = self._resolve_handle(node)
+        try:
+            raw = java.getValueType(name)
+        except Exception:
+            return None
+        if raw is None:
+            return None
+        return str(raw)
 
     # -- error translation ---------------------------------------------------
     def _translate(self, exc: BaseException, operation: str) -> AdapterError:

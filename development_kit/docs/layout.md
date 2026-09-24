@@ -233,7 +233,7 @@ models are intentionally absent.
 - `development_kit/tests/test_alpha73_public_surface.py` — This module tests the alpha7.3 public surface: frozen comsolless dispatch, cold discovery, and package boundaries.
 - `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
 - `development_kit/tests/test_surrogate_campaign.py` — This module tests solver-free bounded campaign specification, prediction-only screening, ranking escalation rules, fresh-FEM promotion, and the no-prediction-promotion invariant.
-- `development_kit/tests/test_surrogate_dnn_adapter.py` — This module tests solver-free surrogate DNN configuration sealing, typed write-plan derivation, deferred argument binding, failure-atomic rollback, and the solver-free/licensed module boundary.
+- `development_kit/tests/test_surrogate_dnn_adapter.py` — This module tests solver-free surrogate DNN configuration sealing, typed write-plan derivation, deferred argument binding, failure-atomic rollback, and the solver-free/licensed module boundary, including a structural check that the licensed bridge reaches Java only through the adapter.
 - `development_kit/tests/test_surrogate_export.py` — This module tests solver-free surrogate export-artifact content hashing, sealed export manifests, prediction-consistency tolerances, and out-of-domain registry integration.
 - `development_kit/tests/test_surrogate_fields_and_splits.py` — This module tests solver-free surrogate field-schema, transform round-trip, deterministic split, and adversarial leakage contracts.
 - `development_kit/tests/test_surrogate_manifests.py` — This module tests solver-free surrogate dataset, schema, split, and transform manifest contracts.
@@ -358,7 +358,8 @@ models are intentionally absent.
 - `development_kit/tests/test_research_tools.py` — This module tests real dispatch for experimental solver-free campaign compilation and robustness planning.
 - `development_kit/tests/test_research_adapters.py` — This module tests exact trusted-template manifests, closed x/y mutation scope, and live-tree drift rejection.
 - `development_kit/tests/test_adjoint_adapter.py` — This module tests native adapter readback, unit canonicalization, and rollback on mutation failure.
-- `development_kit/tests/test_adapter_protocol.py` — This module solver-free tests the project-owned COMSOL adapter protocol, explicit conversion, failure-atomic rollback, error translation, and MPh 1.3.1/1.4 behavior parity.
+- `development_kit/tests/test_adapter_protocol.py` — This module solver-free tests the project-owned COMSOL adapter protocol, explicit conversion, failure-atomic rollback, error translation, the step-6 typed Java and feature-lifecycle surface, and MPh 1.3.1/1.4 behavior parity.
+- `development_kit/tests/test_adapter_migration_inventory.py` — This module enforces the S4A direct-call inventory: every measured module needs a declared disposition, a migrated module must measure no direct site, and each ledger rule is exercised against a synthetic tree so a rule that never fires cannot pass unnoticed.
 - `development_kit/tests/test_derivative_support.py` — This module tests strict derivative-support identities, variable mappings, objective contracts, and immutable normalization.
 - `development_kit/tests/test_gradient_contracts.py` — This module tests caller-budgeted native optimizer and exact gradient-row contracts.
 - `development_kit/tests/test_gradient_validation.py` — This module tests independent finite-difference, sign, cosine, directional, and step-sensitivity gradient checks.
@@ -516,10 +517,11 @@ models are intentionally absent.
 - `comsol_mcp/artifact_chain.py` — This module verifies bounded JSON artifact dependency chains without a solver.
 - `comsol_mcp/adapter/__init__.py` — This module exposes the project-owned COMSOL adapter seam and resolves a backend lazily so importing it never imports MPh.
 - `comsol_mcp/adapter/conversion.py` — This module performs explicit, version-neutral scalar and matrix conversion so no backend can silently coerce a value.
-- `comsol_mcp/adapter/fake_backend.py` — This module is a deterministic scripted backend that lets adapter contract and parity tests run with no COMSOL, JVM, or lease.
+- `comsol_mcp/adapter/fake_backend.py` — This module is a deterministic scripted backend that lets adapter contract and parity tests run with no COMSOL, JVM, or lease; it implements the whole protocol, including the step-6 typed Java access and container/node lifecycle operations.
+- `comsol_mcp/adapter/migration_inventory.py` — This module holds the executable S4A direct-call inventory: the AST-grounded measures of a direct MPh/ClientAPI site, the declared per-module disposition ledger, and the checker that fails when the declaration and a fresh scan of the tree disagree.
 - `comsol_mcp/adapter/mph14_backend.py` — This module is the isolated MPh 1.4.0 lane, recording that lane's general matrix read and `dbmodel://` load capability without enabling a live operation.
-- `comsol_mcp/adapter/mph_backend.py` — This module is the MPh 1.3.1 reference backend and the only place that constructs an MPh client for operational work.
-- `comsol_mcp/adapter/protocol.py` — This module defines the typed adapter protocol, request/result objects, stable error codes, and the operation list the six S4A steps map onto.
+- `comsol_mcp/adapter/mph_backend.py` — This module is the MPh 1.3.1 reference backend and the only place that constructs an MPh client for operational work; it also owns the closed Java write-kind vocabulary, the typed accessor probe, and the enumerable-container and node-lifecycle operations the DNN bridge depends on.
+- `comsol_mcp/adapter/protocol.py` — This module defines the typed adapter protocol, request/result objects, stable error codes, the closed `JAVA_WRITE_KINDS` and `DNN_FEATURE_METHODS` vocabularies, the already-resolved node handle, and the operation list the six S4A steps map onto.
 - `comsol_mcp/build_identity.py` — This module derives package build identity from shipped paths and bytes.
 - `comsol_mcp/compatibility.py` — This module loads and validates the packaged runtime compatibility declaration.
 - `comsol_mcp/contracts/__init__.py` — This module exports lightweight public input contracts without solver imports.
@@ -539,7 +541,7 @@ models are intentionally absent.
 - `comsol_mcp/surrogate/__init__.py` — This module exports solver-free surrogate dataset, split, schema, transform, and row contracts.
 - `comsol_mcp/surrogate/campaign.py` — This module plans and adjudicates a bounded screening campaign in which a surrogate ranks candidates while only a fresh verified FEM run may promote a candidate to evidence.
 - `comsol_mcp/surrogate/dnn_adapter.py` — This module validates one bounded fully connected DNN configuration, derives an exact typed property-write plan, and applies it failure-atomically with full COMSOL-owned default readback.
-- `comsol_mcp/surrogate/dnn_clientapi_backend.py` — This licensed module is the ClientAPI bridge for the typed surrogate DNN adapter, converting values to explicit Java types and resolving tag lookups without exposing a generic property setter.
+- `comsol_mcp/surrogate/dnn_clientapi_backend.py` — This licensed module is the ClientAPI bridge for the typed surrogate DNN adapter; since the S4A step-6 migration it owns no Java typing rule of its own and routes node resolution, typed reads and writes, the feature lifecycle, and export through the project adapter, presenting a caller-resolved Java feature as an already-resolved node.
 - `comsol_mcp/surrogate/export.py` — This module hashes exported surrogate artifacts by content, binds them into a sealed export manifest, checks re-imported prediction consistency within a declared tolerance, and routes the result through the out-of-domain and registry decisions.
 - `comsol_mcp/surrogate/fields.py` — This module freezes ordered feature and target field declarations with units and bounds, and fits training-only transforms with proven round-trip inversion.
 - `comsol_mcp/surrogate/manifests.py` — This module validates closed versioned surrogate dataset, schema, leakage-group, split, and training-transform manifests with deterministic hashes.
