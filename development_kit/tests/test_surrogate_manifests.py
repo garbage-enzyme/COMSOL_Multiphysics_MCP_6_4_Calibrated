@@ -34,9 +34,10 @@ def test_schema_manifest_roundtrip_and_hash_stability() -> None:
         target_names=["qoi"],
     )
     assert again["manifest_sha256"] == manifest["manifest_sha256"]
-    assert canonical_manifest_sha256(
-        {k: v for k, v in manifest.items() if k != "manifest_sha256"}
-    ) == manifest["manifest_sha256"]
+    assert (
+        canonical_manifest_sha256({k: v for k, v in manifest.items() if k != "manifest_sha256"})
+        == manifest["manifest_sha256"]
+    )
 
 
 def test_schema_manifest_rejects_out_of_bound_inputs() -> None:
@@ -137,9 +138,67 @@ def test_group_disjoint_split_allows_unassigned_ineligible_rows() -> None:
     assert summary["split_counts"]["scientific_holdout"] == 0
 
 
+def test_group_disjoint_split_rejects_an_eligible_row_in_no_group() -> None:
+    """Regression: a row outside every leakage group must not certify as disjoint.
+
+    The group loop iterates over *groups*, so a row belonging to none of them was
+    never examined and the verdict still claimed `group_disjoint: True`. Such a
+    row has unknown leakage structure, so the claim was vacuous for it.
+    """
+    kwargs = _dataset_kwargs()
+    # r3 is a declared row, eligible, and assigned to a split, but no leakage
+    # group covers it: g2 (which held it) is removed while r3 stays in row_ids.
+    kwargs["leakage_groups"] = [
+        {"group_id": "g1", "row_ids": ["r1", "r2"]},
+        {"group_id": "g3", "row_ids": ["r4"]},
+    ]
+    kwargs["row_ids"] = ["r1", "r2", "r3", "r4"]
+    kwargs["split_assignments"] = [
+        {"row_id": "r1", "split": "train"},
+        {"row_id": "r2", "split": "train"},
+        {"row_id": "r3", "split": "validation"},
+        {"row_id": "r4", "split": "test"},
+    ]
+    kwargs["ineligible_rows"] = []
+    manifest = build_dataset_manifest(**kwargs)
+    with pytest.raises(ValueError, match="must belong to a leakage group"):
+        validate_group_disjoint_split(manifest)
+
+
+def test_group_disjoint_split_still_allows_an_ungrouped_ineligible_row() -> None:
+    """The new rule must not block a row that is legitimately out of scope.
+
+    An ineligible row is never fitted, so it needs no leakage group; only
+    eligible assigned rows must be grouped.
+    """
+    kwargs = _dataset_kwargs()
+    kwargs["leakage_groups"] = [{"group_id": "g1", "row_ids": ["r1", "r2"]}]
+    kwargs["split_assignments"] = [
+        {"row_id": "r1", "split": "train"},
+        {"row_id": "r2", "split": "train"},
+    ]
+    kwargs["ineligible_rows"] = [
+        {"row_id": "r3", "reason_code": "fem_failed", "detail": "solver error"},
+        {"row_id": "r4", "reason_code": "label_missing", "detail": "QoI absent"},
+        {"row_id": "r5", "reason_code": "label_missing", "detail": "QoI absent"},
+    ]
+    summary = validate_group_disjoint_split(build_dataset_manifest(**kwargs))
+    assert summary["group_disjoint"] is True
+    assert summary["ineligible_count"] == 3
+
+
 def test_module_is_solver_free() -> None:
     import comsol_mcp.surrogate.manifests as mod
 
     source = open(mod.__file__, encoding="utf-8").read()
-    for banned in ("import mph", "from mph", "import jpype", "from jpype", "import java", "from java", "import comsol", "from comsol."):
+    for banned in (
+        "import mph",
+        "from mph",
+        "import jpype",
+        "from jpype",
+        "import java",
+        "from java",
+        "import comsol",
+        "from comsol.",
+    ):
         assert banned not in source

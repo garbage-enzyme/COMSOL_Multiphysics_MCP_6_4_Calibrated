@@ -148,6 +148,37 @@ def normalize_surrogate_training_spec(value: object) -> dict[str, Any]:
     if dataset_groups != split_groups:
         raise ValueError("dataset leakage groups must match the split plan exactly")
 
+    # Comparing the group *IDs* alone is not enough: the same IDs could be bound
+    # to different splits in the two documents, so a group the dataset calls
+    # "train" could be "scientific_holdout" in the plan. That is exactly the
+    # duplication a leakage check exists to prevent, so the split each group is
+    # assigned to must agree as well.
+    #
+    # The dataset manifest assigns per row, the split plan assigns per group, so
+    # each group's dataset-side split is derived from its member rows. A group
+    # whose rows disagree with each other is already refused by
+    # validate_group_disjoint_split, and is re-checked here because this
+    # specification is the durable identity a resumed job depends on.
+    plan_group_split = {item["group_id"]: item["split"] for item in split_plan["assignments"]}
+    row_split = {item["row_id"]: item["split"] for item in dataset["split_assignments"]}
+    for group in dataset["leakage_groups"]:
+        group_id = group["group_id"]
+        member_splits = {row_split[row_id] for row_id in group["row_ids"] if row_id in row_split}
+        if len(member_splits) > 1:
+            raise ValueError(
+                "dataset leakage groups must match the split plan exactly: "
+                f"group {group_id} spans multiple splits in the dataset manifest"
+            )
+        if not member_splits:
+            continue
+        dataset_split = member_splits.pop()
+        if dataset_split != plan_group_split[group_id]:
+            raise ValueError(
+                "dataset leakage groups must match the split plan exactly: "
+                f"group {group_id} is {dataset_split} in the dataset manifest but "
+                f"{plan_group_split[group_id]} in the split plan"
+            )
+
     architecture = raw.get("architecture")
     if not isinstance(architecture, Mapping):
         raise ValueError("architecture must be a mapping")

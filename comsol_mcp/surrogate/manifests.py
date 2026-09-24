@@ -373,6 +373,13 @@ def validate_group_disjoint_split(manifest: Mapping[str, Any]) -> dict[str, Any]
     Ineligible rows may remain unassigned. Assigned eligible rows must be
     covered exactly once. A scientific holdout is optional but, when present,
     must not share a leakage group with any fitted split.
+
+    Every eligible assigned row must also belong to a leakage group. Without
+    that requirement the group-disjointness claim is vacuous for such a row: the
+    check below iterates over *groups*, so a row in no group is never examined
+    and the verdict `group_disjoint: True` would be reported for data whose
+    leakage structure is unknown. A row that cannot be grouped is not proven
+    disjoint, so it is refused rather than silently certified.
     """
     validated = validate_dataset_manifest(manifest)
     row_to_split = {item["row_id"]: item["split"] for item in validated["split_assignments"]}
@@ -381,6 +388,15 @@ def validate_group_disjoint_split(manifest: Mapping[str, Any]) -> dict[str, Any]
     missing = [row for row in eligible if row not in row_to_split]
     if missing:
         raise ValueError("eligible rows must be assigned to a split")
+
+    grouped = {row_id for group in validated["leakage_groups"] for row_id in group["row_ids"]}
+    ungrouped = sorted(row for row in eligible if row in row_to_split and row not in grouped)
+    if ungrouped:
+        preview = ", ".join(ungrouped[:5])
+        suffix = "" if len(ungrouped) <= 5 else f" (+{len(ungrouped) - 5} more)"
+        raise ValueError(
+            f"eligible assigned rows must belong to a leakage group: {preview}{suffix}"
+        )
 
     for group in validated["leakage_groups"]:
         splits_in_group = {row_to_split[row] for row in group["row_ids"] if row in row_to_split}

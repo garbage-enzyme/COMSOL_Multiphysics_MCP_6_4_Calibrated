@@ -19,21 +19,23 @@ SOURCE_SHA = "a" * 64
 
 def _documents() -> dict:
     groups = [f"g{index}" for index in range(10)]
-    split_plan = assign_group_disjoint_split(
-        group_ids=groups, seed=17, holdout_group_ids=["g0"]
-    )
+    split_plan = assign_group_disjoint_split(group_ids=groups, seed=17, holdout_group_ids=["g0"])
     row_ids = [f"row-{group}" for group in groups]
+    # The dataset manifest's per-row split assignments must agree with the split
+    # plan's per-group assignments. This fixture previously assigned every row to
+    # "train" while its own split plan placed g0 in scientific_holdout and others
+    # in validation/test, so the two documents contradicted each other and the
+    # spec check did not notice. The assignment is now derived from the plan.
+    group_split = {item["group_id"]: item["split"] for item in split_plan["assignments"]}
     dataset = build_dataset_manifest(
         dataset_id="ds-001",
         source_kind="campaign",
         source_identity_sha256=SOURCE_SHA,
         candidate_ids=[f"cand-{group}" for group in groups],
         row_ids=row_ids,
-        leakage_groups=[
-            {"group_id": group, "row_ids": [f"row-{group}"]} for group in groups
-        ],
+        leakage_groups=[{"group_id": group, "row_ids": [f"row-{group}"]} for group in groups],
         split_assignments=[
-            {"row_id": f"row-{group}", "split": "train"} for group in groups
+            {"row_id": f"row-{group}", "split": group_split[group]} for group in groups
         ],
     )
     schema = build_field_schema(
@@ -130,18 +132,97 @@ def test_spec_rejects_unknown_fields_and_bad_architecture() -> None:
 
 
 def test_spec_rejects_mismatched_leakage_groups() -> None:
-    docs = _documents()
     smaller = build_dataset_manifest(
         dataset_id="ds-002",
         source_kind="campaign",
         source_identity_sha256=SOURCE_SHA,
         candidate_ids=["c1", "c2"],
         row_ids=["r1", "r2"],
-        leakage_groups=[{"group_id": "g1", "row_ids": ["r1"]}, {"group_id": "g2", "row_ids": ["r2"]}],
-        split_assignments=[{"row_id": "r1", "split": "train"}, {"row_id": "r2", "split": "test"}],
+        leakage_groups=[
+            {"group_id": "g1", "row_ids": ["r1"]},
+            {"group_id": "g2", "row_ids": ["r2"]},
+        ],
+        split_assignments=[
+            {"row_id": "r1", "split": "train"},
+            {"row_id": "r2", "split": "test"},
+        ],
     )
     with pytest.raises(ValueError, match="must match the split plan exactly"):
         normalize_surrogate_training_spec(_spec(dataset_manifest=smaller))
+
+
+def test_spec_rejects_the_same_group_ids_bound_to_different_splits() -> None:
+    """Regression: identical group IDs are not enough; the splits must agree.
+
+    An earlier implementation compared only `{group_id}` set equality, so a
+    dataset manifest that called group g0 "train" was accepted against a split
+    plan that put g0 in "scientific_holdout". That is a holdout leak, and it is
+    exactly what the leakage check exists to prevent.
+    """
+    docs = _documents()
+    conflicting = build_dataset_manifest(
+        dataset_id="ds-003",
+        source_kind="campaign",
+        source_identity_sha256=SOURCE_SHA,
+        candidate_ids=[f"cand-g{index}" for index in range(10)],
+        row_ids=[f"row-g{index}" for index in range(10)],
+        leakage_groups=[
+            {"group_id": f"g{index}", "row_ids": [f"row-g{index}"]} for index in range(10)
+        ],
+        # Every group claimed as "train" while the split plan assigns g0 to the
+        # holdout and others to validation/test. Identical group IDs, so only a
+        # split-aware check can catch this.
+        split_assignments=[{"row_id": f"row-g{index}", "split": "train"} for index in range(10)],
+    )
+    # The group-ID sets really are identical, which is why the old check passed.
+    assert {item["group_id"] for item in conflicting["leakage_groups"]} == {
+        item["group_id"] for item in docs["split"]["assignments"]
+    }
+    with pytest.raises(ValueError, match="is train in the dataset manifest but"):
+        normalize_surrogate_training_spec(_spec(dataset_manifest=conflicting))
+
+
+def test_spec_rejects_a_group_that_spans_splits_in_the_dataset() -> None:
+    """A group whose own rows disagree is refused on the specification path too."""
+    docs = _documents()
+    group_split = {item["group_id"]: item["split"] for item in docs["split"]["assignments"]}
+    # g1's rows are split across train and test inside the dataset manifest.
+    assignments = [
+        {"row_id": f"row-g{index}", "split": group_split[f"g{index}"]} for index in range(10)
+    ]
+    assignments[1] = {
+        "row_id": "row-g1",
+        "split": "test" if group_split["g1"] != "test" else "train",
+    }
+    spanning = build_dataset_manifest(
+        dataset_id="ds-004",
+        source_kind="campaign",
+        source_identity_sha256=SOURCE_SHA,
+        candidate_ids=[f"cand-g{index}" for index in range(10)],
+        row_ids=[f"row-g{index}" for index in range(10)],
+        leakage_groups=[
+            {"group_id": f"g{index}", "row_ids": [f"row-g{index}"]} for index in range(10)
+        ],
+        split_assignments=assignments,
+    )
+    with pytest.raises(ValueError, match="must match the split plan exactly"):
+        normalize_surrogate_training_spec(_spec(dataset_manifest=spanning))
+
+
+def test_the_shipped_training_fixture_is_internally_consistent() -> None:
+    """The fixture the other tests rely on must not itself conflict.
+
+    It previously assigned every row to "train" while its own split plan placed
+    g0 in the scientific holdout, so it encoded the very leak the check was
+    supposed to catch.
+    """
+    docs = _documents()
+    group_split = {item["group_id"]: item["split"] for item in docs["split"]["assignments"]}
+    for assignment in docs["dataset"]["split_assignments"]:
+        group = assignment["row_id"].removeprefix("row-")
+        assert assignment["split"] == group_split[group], assignment
+    # And the fixture must survive the specification path unchanged.
+    assert normalize_surrogate_training_spec(_spec())["spec_fingerprint"]
 
 
 def test_spec_rejects_duplicate_seeds_and_bad_budgets() -> None:
@@ -153,7 +234,9 @@ def test_spec_rejects_duplicate_seeds_and_bad_budgets() -> None:
         normalize_surrogate_training_spec(_spec(wall_time_budget_seconds=0))
     with pytest.raises(ValueError, match="resource policy wall time"):
         normalize_surrogate_training_spec(
-            _spec(resource_policy={"wall_time_budget_seconds": 99999, "minimum_next_point_seconds": 5})
+            _spec(
+                resource_policy={"wall_time_budget_seconds": 99999, "minimum_next_point_seconds": 5}
+            )
         )
 
 
