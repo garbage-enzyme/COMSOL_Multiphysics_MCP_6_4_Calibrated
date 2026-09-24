@@ -64,6 +64,18 @@ def test_the_declared_dispositions_are_exactly_the_four_the_handoff_permits() ->
     assert {entry.disposition for entry in declared_inventory()} <= set(DISPOSITIONS)
 
 
+def test_the_ledger_is_not_a_public_schema() -> None:
+    """The status dict is a developer ledger, not an emitted evidence schema.
+
+    Declaring a ``comsol_mcp.*`` ``schema_name`` here would add an entry to the
+    frozen public schema registry for a document the MCP surface never emits.
+    """
+    status = _status()
+    assert "schema_name" not in status
+    assert "schema_version" not in status
+    assert status["ledger"] == "comsol_mcp.s4a_migration_inventory"
+
+
 def test_every_declared_module_is_named_once_and_gives_a_reason() -> None:
     inventory = declared_inventory()
     modules = [entry.module for entry in inventory]

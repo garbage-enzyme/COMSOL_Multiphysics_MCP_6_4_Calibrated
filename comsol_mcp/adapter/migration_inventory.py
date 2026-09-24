@@ -450,6 +450,11 @@ def inventory_status(
     test can check that each rule actually fires, by running a synthetic ledger
     against a synthetic tree; a rule that is only ever exercised by the real
     ledger cannot be distinguished from a rule that never runs.
+
+    The result deliberately does **not** declare a ``schema_name``.  This is a
+    developer ledger rather than an evidence document the MCP surface emits, and
+    a ``comsol_mcp.*`` schema name here would add an unregistered entry to the
+    frozen public schema registry for no benefit.
     """
     measured = measure_repository(root)
     inventory = tuple(inventory) if inventory is not None else declared_inventory()
@@ -521,8 +526,8 @@ def inventory_status(
         violations.append(f"{module} has an unhandled disposition {entry.disposition!r}")
 
     return {
-        "schema_name": "comsol_mcp.s4a_migration_inventory",
-        "schema_version": "1.0.0",
+        "ledger": "comsol_mcp.s4a_migration_inventory",
+        "ledger_version": "1.0.0",
         "dispositions": list(DISPOSITIONS),
         "measures": list(MEASURES),
         "measured_module_count": len(measured),
