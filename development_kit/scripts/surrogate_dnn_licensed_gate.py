@@ -360,7 +360,7 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
         jm.param().set("a2", "2.0")
         component = jm.component().create("comp1", True)
         result["component_created"] = str(component.tag())
-        backend = ClientapiSurrogateDnnBackend(model)
+        backend = ClientapiSurrogateDnnBackend(model, client=client)
         configuration = _configuration()
         result["configuration_sha256"] = configuration["configuration_sha256"]
 
@@ -448,7 +448,7 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
             "study_tags": [str(item) for item in list(rjm.study().tags())],
             "func_tags": [str(item) for item in list(rjm.func().tags())],
         }
-        reload_backend = ClientapiSurrogateDnnBackend(reloaded)
+        reload_backend = ClientapiSurrogateDnnBackend(reloaded, client=client)
         rdnn = reload_backend.get_dnn_function(DNN_FUNCTION_TAG)
         result["reload"]["dnn_type"] = str(rdnn.getType())
         result["reload"]["seed_readback"] = {
@@ -477,7 +477,7 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
         client.clear()
         rollback_model = client.create("SurrogateDnnRollbackGate")
         rollback_model.java.component().create("comp1", True)
-        rollback_backend = ClientapiSurrogateDnnBackend(rollback_model)
+        rollback_backend = ClientapiSurrogateDnnBackend(rollback_model, client=client)
         original_write = rollback_backend.write_scalar
         state = {"writes": 0}
 

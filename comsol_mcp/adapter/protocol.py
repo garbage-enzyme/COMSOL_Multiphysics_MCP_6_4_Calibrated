@@ -263,6 +263,16 @@ class NodeRef:
     def child(self, tag: str) -> "NodeRef":
         return NodeRef(tag=tag, path=(*self.path, tag), node_type=None)
 
+    def getType(self) -> str | None:  # noqa: N802 - mirrors the COMSOL Java name
+        """Return the COMSOL node type.
+
+        Named after the Java accessor it replaces, so a caller that already read a
+        feature type through ``getType()`` keeps working when the handle it holds
+        is a resolved reference rather than a raw Java object. The type is read
+        once at resolution time, so this performs no Java call.
+        """
+        return self.node_type
+
 
 @dataclass(frozen=True)
 class ConvertedValue:
@@ -445,6 +455,15 @@ class ComsolAdapter(Protocol):
         """Read one property through the typed accessors, recording which one won."""
         ...
 
+    def java_string_array(self, node: NodeRef, name: str) -> list[str]:
+        """Read one string-array property explicitly.
+
+        Deliberately not the probing read: a caller that needs the array form
+        must not be answered by a scalar accessor. The original DNN data-binding
+        code called ``getStringArray`` directly for exactly this reason.
+        """
+        ...
+
     def run_feature(self, node: NodeRef, *, method: str) -> None:
         """Invoke one named lifecycle method on a resolved feature.
 
@@ -462,14 +481,22 @@ class ComsolAdapter(Protocol):
     # containers they operate on. That is ordinary tag/list/node work, so it
     # belongs to step 2 and reports the step-2 operations rather than adding a
     # new operation name to the frozen protocol surface.
-    def attach_client(self, model: Any) -> None:
+    def attach_client(self, model: Any, *, client: Any = None) -> None:
         """Adopt an already-created client that the caller owns.
 
         MPh forbids a second client in one process, so a caller that already
         built one hands it over instead of having the adapter open another.
         Ownership does not transfer: the adapter must not close or clear a
         client it merely adopted.
+
+        The client is an explicit argument because MPh 1.3.1 ``Model`` exposes no
+        back-reference to its owner: the adapter cannot discover it and must not
+        guess.
         """
+        ...
+
+    def adopted_client(self) -> Any:
+        """Return the adopted client, or ``None`` when this backend owns its own."""
         ...
 
     def container_tags(self, kind: str) -> Sequence[str]:

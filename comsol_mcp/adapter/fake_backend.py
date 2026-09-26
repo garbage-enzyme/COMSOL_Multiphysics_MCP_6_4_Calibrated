@@ -295,20 +295,21 @@ class FakeComsolBackend:
         return ["sol1"]
 
     # -- step 6: typed Java access and feature operations -------------------
-    def attach_client(self, model: Any) -> None:
+    def attach_client(self, model: Any, *, client: Any = None) -> None:
         """Adopt a caller-owned client, exactly as the MPh backend does.
 
         The fake records the adoption and opens a synthetic session so node
         operations after an attach behave as they do on a real adopted client.
         Ownership stays with the caller: ``close_session`` must not clear it.
+        The client is explicit for the same reason as in the MPh backend: a real
+        MPh 1.3.1 model has no back-reference to its owner.
         """
         self._record("session_open", attach=True, model=type(model).__name__)
         self._maybe_fail("session_open")
-        client = getattr(model, "client", None)
         if client is None:
             raise AdapterError(
                 "adapter_unavailable",
-                "the supplied object does not expose a client",
+                "attach_client requires the client that owns the model",
                 operation="session_open",
             )
         self._client = client
@@ -321,6 +322,9 @@ class FakeComsolBackend:
                 port=None,
                 standalone=True,
             )
+
+    def adopted_client(self) -> Any:
+        return self._client if self.attached else None
 
     @staticmethod
     def _tag_of(node: Any) -> str:
@@ -425,7 +429,7 @@ class FakeComsolBackend:
         self.java_writes.append((tag, request.name, request.kind, request.value))
         self._java_values[(tag, request.name)] = ("set", request.value)
 
-    def java_typed_read(self, node: Any, name: str) -> JavaTypedRead:
+    def java_typed_read(self, node: Any, name: str, *, form: str = "auto") -> JavaTypedRead:
         self._record("property_read", name=name, kind="java_typed")
         self._maybe_fail("property_read")
         tag = self._tag_of(node)
@@ -438,7 +442,21 @@ class FakeComsolBackend:
                 rejected=("getString: JException", "getDouble: JException"),
             )
         accessor, value = scripted
+        if form == "string_array" and accessor != "getStringArray":
+            raise AdapterError(
+                "property_not_found",
+                f"{name!r} on {tag} is not a string-array property",
+                operation="property_read",
+                rejected=(f"{accessor}: wrong form",),
+            )
         return JavaTypedRead(node=node, name=name, accessor=accessor, value=value, rejected=())
+
+    def java_string_array(self, node: Any, name: str) -> list[str]:
+        read = self.java_typed_read(node, name, form="string_array")
+        value = read.value
+        if isinstance(value, list):
+            return [str(item) for item in value]
+        return [str(value)]
 
     def set_java_value(self, tag: str, name: str, accessor: str, value: Any) -> None:
         """Script one typed Java read result."""

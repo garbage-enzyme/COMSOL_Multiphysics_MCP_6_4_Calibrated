@@ -326,7 +326,7 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
                     jm.param().set("a1", "1.0")
                     jm.param().set("a2", "2.0")
                     jm.component().create("comp1", True)
-                    backend = ClientapiSurrogateDnnBackend(model)
+                    backend = ClientapiSurrogateDnnBackend(model, client=client)
                     configuration = build_dnn_configuration(
                         configuration_id=f"diag-{name}",
                         input_features=["a1", "a2"],

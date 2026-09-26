@@ -67,11 +67,23 @@ class ClientapiSurrogateDnnBackend:
     Java typing rules of its own and cannot drift from the rest of the project.
     Passing ``adapter`` explicitly is supported so a licensed gate or a test can
     inject a fake.
+
+    The owning ``client`` must be supplied by the caller. MPh 1.3.1 forbids a
+    second client in one process, and ``mph.Model`` exposes no back-reference to
+    its owner, so the adapter cannot discover it: a caller that already holds a
+    client hands that exact object over. Measured defect this fixes: the first
+    migration tried to read the client off the model and every licensed gate
+    failed before DNN configuration with
+    ``the supplied object does not expose an MPh client``.
     """
 
-    #: Study and function container tags are resolved by the adapter, never by
-    #: reaching into a model here.
-    def __init__(self, model: Any = None, *, adapter: ComsolAdapter | None = None):
+    def __init__(
+        self,
+        model: Any = None,
+        *,
+        client: Any = None,
+        adapter: ComsolAdapter | None = None,
+    ):
         if adapter is None:
             if model is None:
                 raise AdapterError(
@@ -84,16 +96,17 @@ class ClientapiSurrogateDnnBackend:
             # The client already exists in the licensed gates, so the adapter is
             # given that client rather than opening a second one, which MPh
             # forbids in a single process. Ownership stays with the caller.
-            attach = getattr(adapter, "attach_client", None)
-            if not callable(attach):
+            if client is None:
                 raise AdapterError(
                     "adapter_unavailable",
-                    "the configured adapter cannot attach an existing client",
+                    "a client that owns the model is required; MPh 1.3.1 Model "
+                    "exposes no client back-reference",
                     operation="session_open",
                 )
-            attach(model)
+            adapter.attach_client(model, client=client)
         self.adapter: ComsolAdapter = adapter
         self.model = model
+        self.client = client
 
     # -- node resolution -----------------------------------------------------
     def study_tags(self) -> list[str]:
@@ -206,13 +219,18 @@ class ClientapiSurrogateDnnBackend:
         column_probe_errors: list[str] = []
         for name in ("columnKeys", "fileheaders", "columnHeaders"):
             try:
-                read = self.adapter.java_typed_read(_handle(feature), name)
+                # Explicitly the array form. The pre-migration code called
+                # ``feature.getStringArray(name)`` and the probing read would
+                # let ``getString`` answer instead, turning a comma-joined
+                # header such as "col1, col2, col3" into 16 one-character
+                # "columns"; that surfaced as
+                # "data file exposes 16 columns but the schema declares 3".
+                values = self.adapter.java_string_array(_handle(feature), name)
             except AdapterError as exc:
                 # A missing key is expected while probing, but the failure is
                 # recorded so a genuine accessor break is not silently hidden.
                 column_probe_errors.append(f"{name}: {exc.reason_code}")
                 continue
-            values = [str(item) for item in list(read.value)]
             if values:
                 columns = values
                 break

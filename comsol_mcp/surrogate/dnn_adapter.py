@@ -452,7 +452,12 @@ def build_write_plan(
 
 
 class SurrogateDnnBackend(Protocol):
-    """Exact operations the typed adapter needs; no generic property setter."""
+    """Exact operations the typed adapter needs; no generic property setter.
+
+    Construction is deliberately outside this protocol: a licensed gate builds
+    the backend from the ``mph.Client`` and ``Model`` it already owns, and MPh
+    1.3.1 exposes no client back-reference, so the caller must supply both.
+    """
 
     def study_tags(self) -> list[str]: ...
 

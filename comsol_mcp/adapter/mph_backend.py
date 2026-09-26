@@ -57,6 +57,25 @@ from comsol_mcp.adapter.protocol import (
 )
 
 
+def _model_tag(java: Any) -> str | None:
+    """Read one Java model's tag, or ``None`` when it cannot be read."""
+    try:
+        return str(java.tag())
+    except Exception:
+        # A tag that cannot be read is reported unknown, never guessed.
+        return None
+
+
+def _live_model_tags(models: Sequence[Any]) -> set[str]:
+    """The set of Java tags a client currently holds."""
+    tags: set[str] = set()
+    for candidate in models:
+        tag = _model_tag(getattr(candidate, "java", None))
+        if tag is not None:
+            tags.add(tag)
+    return tags
+
+
 def _client_kwargs(request: SessionRequest) -> dict[str, Any]:
     """Build MPh client kwargs, dropping only unset values.
 
@@ -95,6 +114,10 @@ class MphBackendBase:
         #: here. Initialized up front so a capability read cannot depend on
         #: whether ``attach_client`` has run yet.
         self._attached: bool = False
+        #: The exact model this backend was told to operate on, when adopted.
+        #: ``None`` means "whatever the session holds", which is only unambiguous
+        #: for a session the backend opened itself.
+        self._adopted_model: Any = None
 
     # -- lane metadata -------------------------------------------------------
     def observed_lane(self) -> str:
@@ -124,7 +147,19 @@ class MphBackendBase:
         return self._client
 
     def _require_model(self, operation: str) -> Any:
+        """Return the model this backend operates on.
+
+        Measured need this fixes: the S6 training gate creates a *second* model on
+        the same client (``SurrogateTrainingGateSeed17``) while the first is still
+        loaded, and the strict "exactly one loaded model" rule then failed a
+        licensed run with ``expected exactly one loaded model, found 2`` at a
+        phase that had already trained successfully. An explicitly adopted model
+        is therefore addressed by identity; the strict rule remains for a session
+        this backend opened itself, where ambiguity really is a defect.
+        """
         client = self._require_client(operation)
+        if self._adopted_model is not None:
+            return self._adopted_model
         try:
             models = list(client.models())
         except Exception as exc:  # pragma: no cover - backend-specific
@@ -179,6 +214,7 @@ class MphBackendBase:
         attached = self._attached
         self._client = None
         self._attached = False
+        self._adopted_model = None
         if client is None:
             return
         if attached:
@@ -654,20 +690,48 @@ class MphBackendBase:
         except Exception as exc:
             raise self._translate(exc, "java_typed_write") from exc
 
-    def java_typed_read(self, node: Any, name: str) -> JavaTypedRead:
-        """Read one property through the typed accessors, recording which won."""
+    def java_typed_read(self, node: Any, name: str, *, form: str = "auto") -> JavaTypedRead:
+        """Read one property through the typed accessors, recording which won.
+
+        ``form`` selects which accessors may answer:
+
+        ``auto``
+            Try scalars first, then arrays, and report whichever accepts. This is
+            the probing read, and the accessor name in the result is what tells a
+            caller how to render the value.
+        ``string_array``
+            Try only ``getStringArray``. Measured need: the original
+            ``bind_data_source`` called ``feature.getStringArray(name)`` directly,
+            and routing that through ``auto`` changed its meaning. A
+            comma-joined property such as ``col1, col2, col3`` is accepted by
+            ``getString`` as one string, so ``auto`` returned that string and the
+            caller split it into 16 characters, which made the S6 gate fail with
+            ``data file exposes 16 columns but the schema declares 3``. A caller
+            that knows it wants the array must be able to say so.
+        """
         java = self._resolve_handle(node)
+        accessors: tuple[str, ...]
+        if form == "string_array":
+            accessors = ("getStringArray",)
+        elif form == "auto":
+            accessors = (
+                "getString",
+                "getBoolean",
+                "getInt",
+                "getDouble",
+                "getStringArray",
+                "getStringMatrix",
+                "getDoubleArray",
+                "getDoubleMatrix",
+            )
+        else:
+            raise AdapterError(
+                "conversion_not_representable",
+                f"unsupported typed read form: {form}",
+                operation="property_read",
+            )
         rejected: list[str] = []
-        for accessor in (
-            "getString",
-            "getBoolean",
-            "getInt",
-            "getDouble",
-            "getStringArray",
-            "getStringMatrix",
-            "getDoubleArray",
-            "getDoubleMatrix",
-        ):
+        for accessor in accessors:
             try:
                 raw = getattr(java, accessor)(name)
             except Exception as exc:
@@ -703,6 +767,19 @@ class MphBackendBase:
             rejected=tuple(rejected),
         )
 
+    def java_string_array(self, node: Any, name: str) -> list[str]:
+        """Read one string-array property explicitly, or refuse.
+
+        This is the migrated form of the direct ``getStringArray`` call the DNN
+        bridge used to make, and it is deliberately not the probing read: a
+        scalar accessor must never be allowed to answer an array question.
+        """
+        read = self.java_typed_read(node, name, form="string_array")
+        value = read.value
+        if isinstance(value, list):
+            return [str(item) for item in value]
+        return [str(value)]
+
     def run_feature(self, node: Any, *, method: str) -> None:
         """Invoke one declared lifecycle method on a resolved feature."""
         if method not in DNN_FEATURE_METHODS:
@@ -725,32 +802,89 @@ class MphBackendBase:
             raise self._translate(exc, "dnn_feature_export") from exc
 
     # -- container enumeration and node creation (plan step 6) --------------
-    def attach_client(self, model: Any) -> None:
+    def attach_client(self, model: Any, *, client: Any = None) -> None:
         """Adopt an already-created client that the caller owns.
 
         The licensed gates create their own ``mph.Client`` and then need the
-        adapter's operations on it. MPh forbids a second client in one process, so
-        the existing client is taken over rather than opened again. Ownership
-        stays with the caller: this only records the reference, and
-        ``close_session`` on an attached client drops it without clearing a client
-        the caller created, because closing it would be a hidden resource change.
+        adapter's operations on that client's models. MPh forbids a second client
+        in one process, so the existing one is adopted rather than opened again.
+
+        The client must be supplied explicitly. Measured defect this fixes: the
+        first version read ``model.client``, but on MPh 1.3.1 ``mph.Model`` holds
+        only ``java`` and exposes no back-reference to its owning client --
+        ``Client.create`` returns ``Model(java)`` and nothing else -- so every
+        licensed gate failed before training with
+        ``the supplied object does not expose an MPh client``. A client that owns
+        the given model is therefore looked for in ``client.models()``, which
+        proves the pairing instead of assuming it.
+
+        Ownership stays with the caller: this records the reference, and
+        ``close_session`` drops it without clearing a client the caller created,
+        because closing it would be a hidden resource change.
         """
-        if model is None:
-            raise AdapterError(
-                "adapter_unavailable",
-                "attach_client requires a model",
-                operation="session_open",
-            )
-        client = getattr(model, "client", None)
         if client is None:
             raise AdapterError(
                 "adapter_unavailable",
-                "the supplied object does not expose an MPh client",
+                "attach_client requires the MPh client that owns the model; "
+                "MPh 1.3.1 Model exposes no client back-reference",
+                operation="session_open",
+            )
+        if model is not None and not self._client_owns_model(client, model):
+            raise AdapterError(
+                "adapter_unavailable",
+                "the supplied client does not own the supplied model",
                 operation="session_open",
             )
         self._client = client
         self._attached = True
+        self._adopted_model = model
         self._mph_version = installed_mph_version() or self._mph_version
+
+    @staticmethod
+    def _client_owns_model(client: Any, model: Any) -> bool:
+        """Whether ``client`` really owns ``model``.
+
+        Measured facts this encodes, both taken from real MPh 1.3.1 objects:
+
+        * ``Client.models()`` returns **fresh ``Model`` wrappers** around the same
+          Java model, so ``any(candidate is model ...)`` is always False for a
+          model obtained from ``Client.create`` or ``Client.load``. The first
+          version of this proof therefore refused every legitimate adoption, and
+          the licensed preflight caught it.
+        * Distinct live models do have distinct Java tags (``model1``, ``model2``),
+          while every wrapper of one model reports that model's tag. The shared
+          Java object or its tag is therefore the honest identity.
+
+        A model whose Java tag is not in the client's **live** tag set is refused.
+        ``client.models()`` is the authority and is re-read on every call.
+
+        The proof deliberately does not accept a candidate by Python identity
+        alone. A client that reports a wrapper it does not really own would
+        otherwise be believed: ``_ForeignClient`` in the licensed preflight is
+        exactly that case, and an ``is`` shortcut made the negative control pass
+        when it had to fail. Only a readable live tag counts, so a model destroyed
+        by ``Client.clear`` is refused because its tag no longer resolves.
+        """
+        try:
+            owned = list(client.models())
+        except Exception as exc:
+            raise MphBackendBase()._translate(exc, "session_open") from exc
+        target_java = getattr(model, "java", None)
+        if target_java is None:
+            return False
+        live_tags = _live_model_tags(owned)
+        if not live_tags:
+            return False
+        target_tag = _model_tag(target_java)
+        if target_tag is not None and target_tag in live_tags:
+            return True
+        # Fall back to the Java object itself, which is shared between wrappers of
+        # one live model even though the Python wrappers differ.
+        return any(getattr(candidate, "java", None) is target_java for candidate in owned)
+
+    def adopted_client(self) -> Any:
+        """Return the adopted client, if one was adopted, else ``None``."""
+        return self._client if self._attached else None
 
     def container_tags(self, kind: str) -> Sequence[str]:
         """List the child tags of a top-level container the adapter enumerates.

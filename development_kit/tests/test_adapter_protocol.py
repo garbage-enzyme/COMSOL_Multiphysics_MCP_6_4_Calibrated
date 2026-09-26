@@ -1203,29 +1203,35 @@ def test_an_adopted_client_is_released_rather_than_cleared() -> None:
     clients: list[object] = []
 
     class Client:
-        def __init__(self) -> None:
+        def __init__(self, models: list[object]) -> None:
+            self._models = models
             self.cleared = False
+
+        def models(self) -> list[object]:
+            return list(self._models)
 
         def clear(self) -> None:
             self.cleared = True
 
     class Model:
-        def __init__(self, client: object) -> None:
-            self.client = client
+        """Mirrors MPh 1.3.1: no back-reference to the owning client."""
 
     backend = FakeComsolBackend()
-    adopted = Client()
+    model = Model()
+    adopted = Client([model])
     clients.append(adopted)
+    # The client is required: a bare model cannot be used to discover it.
     with pytest.raises(AdapterError) as excinfo:
-        backend.attach_client(Model(None))
+        backend.attach_client(model)
     assert excinfo.value.reason_code == "adapter_unavailable"
-    backend.attach_client(Model(adopted))
+    backend.attach_client(model, client=adopted)
     assert backend.attached is True
+    assert backend.adopted_client() is adopted
     backend.close_session()
     assert adopted.cleared is False
 
     # A session the backend opened itself is still cleaned up by the backend.
-    owned_client = Client()
+    owned_client = Client([])
     clients.append(owned_client)
 
     class OpenedBackend(FakeComsolBackend):

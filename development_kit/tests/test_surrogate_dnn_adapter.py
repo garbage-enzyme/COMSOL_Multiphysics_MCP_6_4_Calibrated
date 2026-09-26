@@ -582,6 +582,55 @@ def test_bind_data_source_reports_import_failure_and_no_columns() -> None:
     assert result["blockers"] == ["data_columns_unavailable"]
 
 
+def test_column_probe_reads_the_array_form_and_never_a_comma_joined_string() -> None:
+    """The column probe must not let a scalar accessor answer an array question.
+
+    Measured licensed defect this reproduces: COMSOL returns ``columnKeys`` as a
+    comma-joined string (``"col1, col2, col3"``) that ``getString`` also accepts.
+    The pre-migration code called ``getStringArray`` directly; routing it through
+    the probing read let ``getString`` win, and iterating that string produced 16
+    one-character "columns", so the S6 gate failed with
+    ``data file exposes 16 columns but the schema declares 3``.
+    """
+    from comsol_mcp.adapter import AdapterError
+    from comsol_mcp.adapter.fake_backend import FakeComsolBackend
+    from comsol_mcp.adapter.protocol import NodeRef
+
+    backend = FakeComsolBackend()
+    node = NodeRef(tag="dnn1", path=("function", "dnn1"))
+    backend.set_java_value("dnn1", "columnKeys", "getString", "col1, col2, col3")
+
+    # The probing read still reports the scalar, which is why it must not be used.
+    probed = backend.java_typed_read(node, "columnKeys")
+    assert probed.accessor == "getString"
+    assert probed.value == "col1, col2, col3"
+    assert len([str(item) for item in list(probed.value)]) == 16
+
+    # The explicit array form refuses it rather than splitting it.
+    with pytest.raises(AdapterError) as excinfo:
+        backend.java_string_array(node, "columnKeys")
+    assert excinfo.value.reason_code == "property_not_found"
+
+    # With a real array property the array form returns the three columns.
+    backend.set_java_value("dnn1", "columnKeys", "getStringArray", ["col1", "col2", "col3"])
+    assert backend.java_string_array(node, "columnKeys") == ["col1", "col2", "col3"]
+
+
+def test_resolved_nodes_report_their_type_without_a_java_call() -> None:
+    """A resolved reference answers ``getType()`` like the Java object it replaces.
+
+    Measured licensed defect: the DNN gate read ``rdnn.getType()`` on the handle
+    the adapter returned and failed with
+    ``AttributeError: 'NodeRef' object has no attribute 'getType'``.
+    """
+    from comsol_mcp.adapter.protocol import NodeRef
+
+    node = NodeRef(tag="dnn1", path=("function", "dnn1"), node_type="DNN")
+    assert node.getType() == "DNN"
+    assert NodeRef(tag="x", path=("function", "x")).getType() is None
+    assert node.child("child").getType() is None
+
+
 def test_bind_data_source_requires_an_existing_dnn_function() -> None:
     from comsol_mcp.surrogate.dnn_adapter import bind_data_source_and_arguments
 
@@ -899,19 +948,105 @@ def test_clientapi_backend_attaches_an_existing_model_without_owning_it() -> Non
             self.cleared = True
 
     class Model:
-        def __init__(self) -> None:
-            self.client = Client()
+        """Mirrors MPh 1.3.1: a model with no client back-reference."""
 
     from comsol_mcp.adapter.fake_backend import FakeComsolBackend
     from comsol_mcp.surrogate.dnn_clientapi_backend import ClientapiSurrogateDnnBackend
 
     adapter = FakeComsolBackend()
     model = Model()
-    bridge = ClientapiSurrogateDnnBackend(model, adapter=adapter)
+    client = Client()
+    bridge = ClientapiSurrogateDnnBackend(model, client=client, adapter=adapter)
     assert bridge.model is model
-    assert adapter.attached is True
+    assert bridge.client is client
+    assert adapter.adopted_client() is client
     adapter.close_session()
-    assert model.client.cleared is False
+    assert client.cleared is False
+
+
+def test_clientapi_backend_refuses_a_model_without_its_owning_client() -> None:
+    """A model alone is not enough on MPh 1.3.1, and guessing is not allowed.
+
+    ``mph.Model`` holds only ``java``; ``Client.create`` returns ``Model(java)``
+    with no back-reference. The first migration read ``model.client``, got
+    ``None``, and every licensed gate failed before training. The bridge must
+    therefore refuse rather than silently open a second client or invent one.
+    """
+    from comsol_mcp.adapter import AdapterError
+    from comsol_mcp.adapter.fake_backend import FakeComsolBackend
+    from comsol_mcp.surrogate.dnn_clientapi_backend import ClientapiSurrogateDnnBackend
+
+    class ModelWithoutClient:
+        """The real MPh 1.3.1 shape: no ``client`` attribute at all."""
+
+    with pytest.raises(AdapterError) as excinfo:
+        ClientapiSurrogateDnnBackend(ModelWithoutClient(), adapter=FakeComsolBackend())
+    assert excinfo.value.reason_code == "adapter_unavailable"
+    assert "client" in str(excinfo.value)
+
+
+def test_attach_client_refuses_a_client_that_does_not_own_the_model() -> None:
+    """The pairing is proven against the client's live model set, not assumed.
+
+    The measured MPh 1.3.1 shape is reproduced here: ``client.models()`` returns
+    fresh wrappers whose Java tags identify the live models. A client that reports
+    a wrapper whose tag is not live -- a model destroyed by ``clear`` -- must be
+    refused, and so must a client that reports nothing.
+    """
+    from comsol_mcp.adapter import AdapterError
+    from comsol_mcp.adapter.mph_backend import MphReferenceBackend
+
+    class Java:
+        def __init__(self, tag: str, live: bool = True) -> None:
+            self._tag = tag
+            self.live = live
+
+        def tag(self) -> str:
+            if not self.live:
+                raise RuntimeError("variable points to an object no longer in the model")
+            return self._tag
+
+    class Wrapper:
+        """Mirrors ``mph.Model``: a wrapper around a Java model, no client ref."""
+
+        def __init__(self, java: Java) -> None:
+            self.java = java
+
+    class Client:
+        def __init__(self, models: list[Wrapper]) -> None:
+            self._models = models
+
+        def models(self) -> list[Wrapper]:
+            return list(self._models)
+
+    backend_type = MphReferenceBackend
+    live = Wrapper(Java("model1"))
+
+    # A live model is accepted even though the wrapper is a different object:
+    # this is the real MPh behaviour that broke the first identity check.
+    backend_type().attach_client(live, client=Client([Wrapper(Java("model1"))]))
+    assert backend_type().adopted_client() is None  # a fresh backend adopts nothing
+
+    adopting = backend_type()
+    adopting.attach_client(live, client=Client([Wrapper(Java("model1"))]))
+    assert adopting.adopted_client() is not None
+
+    # A tag that is no longer live is refused, and so is an unreachable one.
+    for dead in (Wrapper(Java("model1", live=False)), Wrapper(Java("model9"))):
+        with pytest.raises(AdapterError) as excinfo:
+            backend_type().attach_client(dead, client=Client([Wrapper(Java("model1"))]))
+        assert excinfo.value.reason_code == "adapter_unavailable"
+        assert "does not own" in str(excinfo.value)
+
+    # A client that owns nothing cannot adopt anything.
+    with pytest.raises(AdapterError) as empty:
+        backend_type().attach_client(live, client=Client([]))
+    assert empty.value.reason_code == "adapter_unavailable"
+
+    # A missing client is refused rather than guessed at.
+    with pytest.raises(AdapterError) as missing:
+        backend_type().attach_client(None, client=None)
+    assert missing.value.reason_code == "adapter_unavailable"
 
 
 def test_clientapi_backend_requires_a_model_or_an_adapter() -> None:

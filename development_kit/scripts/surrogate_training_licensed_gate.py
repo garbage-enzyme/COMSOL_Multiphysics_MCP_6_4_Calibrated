@@ -417,7 +417,7 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
             return model
 
         def _prepare(model: Any, seed: int, epochs: int = 60) -> tuple[Any, dict, Any]:
-            backend = ClientapiSurrogateDnnBackend(model)
+            backend = ClientapiSurrogateDnnBackend(model, client=client)
             configuration = _configuration(seed, epochs=epochs)
             applied = apply_surrogate_configuration(backend, configuration)
             if not applied["success"]:
