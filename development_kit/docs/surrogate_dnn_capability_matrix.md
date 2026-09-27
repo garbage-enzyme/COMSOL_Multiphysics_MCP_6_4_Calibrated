@@ -425,10 +425,24 @@ licensed lane; unrepresentable paths and missing nodes were refused
 (unknown, not invented); and the session was released with no solver lease left
 behind.
 
-Frozen limitation, unchanged: only the MPh **1.3.1 reference lane** is installed,
+Frozen limitation, unchanged: only the MPh **1.3.1 reference lane** is supported,
 so the licensed run exercises that lane. The isolated 1.4 lane remains
 solver-free, and no MPh 1.4 compatibility is claimed. Two further facts from the
-same reconnaissance bound the deferred work: MPh 1.4.0 is the release that makes
-`Client.load` accept `dbmodel://` at all, and 1.4.0 generalizes `DoubleRowMatrix`
-**read** conversion beyond two rows while the write path refuses above two rows
-on both lanes.
+same reconnaissance bound the deferred work: MPh 1.4.0 is the release whose
+`Client.load` branches on a `dbmodel://` URI instead of resolving it
+unconditionally as a local path, and 1.4.0 generalizes `DoubleRowMatrix` **read**
+conversion beyond two rows while the write path refuses above two rows on both
+lanes.
+
+**Measured correction (2026-09-26), after running the 1.4 lane for real.** The
+`dbmodel://` difference is real but is a *client-library* difference only. Read
+from the installed sources: 1.3.1 `Client.load` calls `Path(file).resolve()`
+unconditionally, mangling the URI into a local path; 1.4.0 branches on
+`str.startswith('dbmodel://')` and passes the URI to `self.java.load` untouched.
+Against a **standalone** COMSOL both lanes still refuse the load with the same
+`FlException`/`InvalidPathException`, because a standalone client has no database
+server. So "1.4.0 accepts `dbmodel://`" must not be read as end-to-end
+acceptance; demonstrating that would require a connected database server, which
+is not claimed. Receipts:
+`D:\mcp_tests\a75lanediff\ref131.json` and `lane140.json`. Parity and smoke
+detail: `Desktop\plans\comsol_mcp\records\COMSOL_MCP_0.7.5_mph140_parity_and_smoke.md`.

@@ -17,7 +17,12 @@ See ``D:\\mcp_tests\\a75s4inv\\mph_131_140_differences.md``.
 1. ``Client.load()`` accepts ``dbmodel://`` URIs on 1.4.0; on 1.3.1 the argument
    is unconditionally resolved as a filesystem path.  The 1.4 backend therefore
    routes a ``dbmodel://`` string to ``load`` unchanged, and the reference
-   backend refuses it rather than passing it to ``Path``.
+   backend refuses it rather than passing it to ``Path``.  Measured 2026-09-26:
+   this is a **client-library** difference only.  Against a *standalone* COMSOL
+   both lanes still refuse the load with the same
+   ``FlException``/``InvalidPathException``, because a standalone client has no
+   database server, so this must not be read as end-to-end ``dbmodel://``
+   support.  See ``COMSOL_MCP_0.7.5_mph140_parity_and_smoke.md``.
 2. ``DoubleRowMatrix`` **read** conversion is general on 1.4.0 but raises
    ``TypeError`` for more than two rows on 1.3.1.  This backend reports that
    difference through a stable reason code instead of padding or truncating rows
