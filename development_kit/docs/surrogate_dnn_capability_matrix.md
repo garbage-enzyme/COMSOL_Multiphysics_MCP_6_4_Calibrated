@@ -211,7 +211,7 @@ inference. Each one failed with a message that did **not** name the real cause:
 | Finding | Consequence |
 | --- | --- |
 | `activation` is a per-layer array whose length must equal `layertype` (the COMSOL default is `none, tanh` for an input+dense pair). A single-element array fails at training time with "数组长度错误". | The write plan emits one activation per layer: `none` for the input layer and the configured activation for every dense layer. |
-| `table` validation/test modes require a bound COMSOL result table and fail with "未选择结果表". | The gate uses COMSOL-internal subsetting (`fraction`/`random`) for training-time model selection. The authoritative group-disjoint split remains this project's own manifest, because COMSOL's internal subset membership is not retrievable and must never be reported as the group-disjoint split. |
+| `table` validation/test modes require a bound COMSOL result table and fail with "未选择结果表". | The current gate binds explicit validation and test tables and imports only frozen training rows. Earlier internal-subset evidence did not prove a common baseline split. |
 | A leading text header row imports cleanly but makes training fail with "读取训练数据时出错 - 线条数: 1". A headerless file trains successfully. | Dataset files are written without a header and bound positionally against COMSOL's own `col1, col2, col3` keys, with the binding mode recorded as evidence. |
 | `sourcetype` is **not** a DNN property: it is absent from the S0 enumeration and from every documented reference table. | The probe that wrote it was unproven mutation and was removed. This is the reason the S0 gate requires the live enumerated surface, not the reference tables, as authority. |
 
@@ -227,10 +227,12 @@ Verified on the licensed training run:
 - Continuation: identical contract identities permitted `continueRun`, which
   produced a new `trained_chksum`; a changed `comsol_build` was refused as a
   `nonidentical_continuation` that creates a new lineage.
-- Baseline: a non-DNN `constant_mean` baseline was fitted on the training split
-  only (`fit_row_count=33`) and scored on the same held-out rows, giving
-  `rmse=0.7102`; the DNN's `testloss=0.0206` beats it by 97.1% on identical
-  splits. The comparison records `accepted_on_training_loss=false`.
+- Historical baseline comparison withdrawn: the original gate compared an
+  uncalibrated internal test loss with a baseline scored on different rows.
+  Current gates compute RMSE directly from COMSOL predictions on seven frozen
+  external test rows, using identical training rows for constant and linear
+  baselines. The 48-row synthetic fixture uses 34/7/7 rows; it demonstrates API
+  behavior and does not establish campaign-level scientific acceptance.
 - Cleanup: session, lease, descendants, and listeners were all released with
   zero active durable jobs.
 
@@ -270,20 +272,24 @@ Verified on the licensed export run:
   (`a417ee48…`, 2105 bytes). Because `exportfilename` is unreadable, the file's
   content hash is the only trustworthy export evidence, and the manifest records
   `trusted_property_filename=false`.
-- Consistency was evaluated against 64 real float32 values decoded from the
-  exported ONNX payload: agreement scored `consistent` and registered, while a
-  perturbed copy scored `inconsistent` with `violating_rows=[0]` and was refused
-  registration with escalation required.
+- The historical self-comparison of exported float bytes is superseded. The
+  current gate checks the full ONNX graph and compares its independent reference
+  evaluator output with real COMSOL function evaluations on the same frozen
+  inputs. Changing an activation, normalization tensor or feature order must
+  cause a consistency failure. Byte identity alone cannot register an artifact.
 - An out-of-domain state registered the consistent artifact but still demanded
   fresh FEM escalation, so a prediction never becomes FEM evidence.
 - Session, lease, descendants, and listeners were all released with zero active
   durable jobs.
 
-Frozen limitation: consistency is checked against the exported payload's own
-weight bytes, which proves the artifact is stable and non-degenerate, but does
-not independently prove that a third-party ONNX runtime reproduces the same
-predictions. That would require an ONNX runtime, which this project does not
-depend on.
+Validation environment: the licensed export gate requires the optional ONNX
+package for its checker and ReferenceEvaluator. This is a development-only
+oracle, not a new production dependency. Missing validation dependencies fail
+the gate rather than falling back to weight-byte comparison. Use an isolated
+validation environment; retain evaluator version and artifact identities.
+COMSOL function predictions use a tiny solved one-dimensional dataset because
+a geometry-free numerical evaluator returns no samples. This scaffold is not
+physical validation of the synthetic training function.
 
 ## 13. S8 bounded campaign findings — resolved against live COMSOL
 
@@ -440,8 +446,8 @@ from the installed sources: 1.3.1 `Client.load` calls `Path(file).resolve()`
 unconditionally, mangling the URI into a local path; 1.4.0 branches on
 `str.startswith('dbmodel://')` and passes the URI to `self.java.load` untouched.
 Against a **standalone** COMSOL both lanes still refuse the load with the same
-`FlException`/`InvalidPathException`, because a standalone client has no database
-server. So "1.4.0 accepts `dbmodel://`" must not be read as end-to-end
+`FlException`/`InvalidPathException`, with no demonstrated cause attribution. The exception alone does not establish
+the Model Manager configuration. So "1.4.0 accepts `dbmodel://`" must not be read as end-to-end
 acceptance; demonstrating that would require a connected database server, which
 is not claimed. Receipts:
 `D:\mcp_tests\a75lanediff\ref131.json` and `lane140.json`. Parity and smoke

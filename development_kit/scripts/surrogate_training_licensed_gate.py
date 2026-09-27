@@ -45,7 +45,7 @@ terminate_exact = process_control_module.terminate_exact
 verify_absent = process_control_module.verify_absent
 
 SCHEMA_NAME = "comsol_mcp.surrogate_training_licensed_gate"
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 EXPECTED_BACKEND = {"major": 6, "minor": 4, "patch": 0, "build": 293}
 
 
@@ -55,6 +55,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--runtime-root", type=Path, default=Path("D:/comsol_runtime"))
     parser.add_argument("--cores", type=int, required=True)
+    parser.add_argument("--mph-lane", choices=["1.3.1", "1.4.0"], default="1.3.1")
     parser.add_argument("--timeout-seconds", type=float, default=1800.0)
     parser.add_argument("--minimum-free-gb", type=float, default=2.0)
     parser.add_argument("--dry-run", action="store_true")
@@ -94,7 +95,7 @@ def _process_identity(pid: int) -> dict:
         command_line = list(process.cmdline())
         try:
             executable = process.exe()
-        except (psutil.AccessDenied, psutil.ZombieProcess):
+        except psutil.AccessDenied, psutil.ZombieProcess:
             executable = None
         return {
             "pid": process.pid,
@@ -325,14 +326,7 @@ def _numeric_readback(record: Any) -> float:
 
 
 def _configuration(seed: int, epochs: int = 60) -> dict:
-    """Build the gate configuration.
-
-    COMSOL's ``table`` validation/test modes require a bound COMSOL result table
-    ("未选择结果表"), which this gate does not construct.  The gate therefore uses
-    COMSOL-internal subsetting for training-time model selection and records
-    explicitly that the authoritative group-disjoint split is this project's own
-    manifest, not COMSOL's internal subsetting.
-    """
+    """Use independently frozen external validation and test tables."""
     from comsol_mcp.surrogate.dnn_adapter import build_dnn_configuration
 
     return build_dnn_configuration(
@@ -347,12 +341,12 @@ def _configuration(seed: int, epochs: int = 60) -> dict:
         batch_size=8,
         maximum_epochs=epochs,
         seed=seed,
-        validation_mode="fraction",
-        test_mode="random",
+        validation_mode="table",
+        test_mode="table",
     )
 
 
-def _run_worker(output: Path, cores: int, workspace: Path) -> int:
+def _run_worker(output: Path, cores: int, workspace: Path, mph_lane: str = "1.3.1") -> int:
     result: dict[str, Any] = {
         "schema_name": f"{SCHEMA_NAME}_worker",
         "schema_version": SCHEMA_VERSION,
@@ -365,6 +359,26 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
     try:
         import jpype
         import mph
+
+        from comsol_mcp.adapter import make_backend
+
+        if str(mph.__version__) != mph_lane:
+            raise RuntimeError(f"expected MPh {mph_lane}, loaded {mph.__version__}")
+        result["mph_identity"] = {
+            "version": str(mph.__version__),
+            "module": str(mph.__file__),
+            "module_sha256": _sha256_file(Path(mph.__file__)),
+            "adapter_lane": mph_lane,
+        }
+
+        from surrogate_gate_oracles import (
+            bind_split_tables,
+            comsol_predictions,
+            content_hash,
+            frozen_split,
+            score_holdout,
+            write_rows,
+        )
 
         from comsol_mcp.surrogate.dnn_adapter import (
             DNN_FUNCTION_TAG,
@@ -402,8 +416,11 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
 
         dataset_path = workspace / "surrogate_training_gate.csv"
         rows = _write_dataset(dataset_path)
+        split = frozen_split(rows)
+        write_rows(dataset_path, split["rows"]["train"])
+        result["frozen_split"] = split
         result["dataset"] = {
-            "row_count": len(rows),
+            "row_count": len(split["rows"]["train"]),
             "bytes": dataset_path.stat().st_size,
             "sha256": _sha256_file(dataset_path),
         }
@@ -417,7 +434,9 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
             return model
 
         def _prepare(model: Any, seed: int, epochs: int = 60) -> tuple[Any, dict, Any]:
-            backend = ClientapiSurrogateDnnBackend(model, client=client)
+            backend = ClientapiSurrogateDnnBackend(
+                model, client=client, adapter=make_backend(mph_lane)
+            )
             configuration = _configuration(seed, epochs=epochs)
             applied = apply_surrogate_configuration(backend, configuration)
             if not applied["success"]:
@@ -427,6 +446,8 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
             )
             if not bound["success"]:
                 raise RuntimeError(f"data binding failed: {bound.get('error')}")
+            dnn = backend.get_dnn_function(DNN_FUNCTION_TAG)
+            bound["external_tables"] = bind_split_tables(model, backend, dnn, split)
             return backend, configuration, bound
 
         # ---- Phase 1: train on seed 17 ------------------------------------
@@ -436,6 +457,7 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
             "success": binding["success"],
             "binding_mode": binding["binding_mode"],
             "column_keys": binding["column_keys"],
+            "external_tables": binding["external_tables"],
         }
         first = train_surrogate(backend, run_test=True)
         result["train_seed17"] = {
@@ -475,24 +497,33 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
             result["training_diagnostics"] = diag
             raise RuntimeError(f"training failed: {first.get('error')}")
 
+        function_names = [str(name) for name in model.java.func(DNN_FUNCTION_TAG).functionNames()]
+        if len(function_names) != 1:
+            raise RuntimeError("scalar fixture requires exactly one COMSOL function")
+        predictions = comsol_predictions(model, split["rows"]["test"], function_names[0])
+        result["heldout"] = score_holdout(split, predictions)
+        result["heldout"]["function"] = function_names[0]
+        result["heldout"]["source"] = "COMSOL_function_evaluation_before_continuation"
+        checkpoint = workspace / "trained_seed17.mph"
+        model.java.save(str(checkpoint))
+        result["checkpoint_sha256"] = _sha256_file(checkpoint)
+
         # ---- Phase 2: continuation identity rules -------------------------
         base_identity = build_continuation_identity(
-            dataset_manifest_sha256="a" * 64,
-            split_manifest_sha256="b" * 64,
+            dataset_manifest_sha256=_sha256_file(dataset_path),
+            split_manifest_sha256=split["split_sha256"],
             field_schema_sha256=configuration["configuration_sha256"],
-            transforms_sha256="d" * 64,
+            transforms_sha256=content_hash(configuration["column_scales"]),
             architecture_sha256=configuration["configuration_sha256"],
             comsol_build=str(backend_identity["build"]),
             objective="minimize_mse_on_qoi",
-            prior_checkpoint_sha256="e" * 64,
+            prior_checkpoint_sha256=result["checkpoint_sha256"],
         )
         changed_identity = dict(base_identity)
         changed_identity["comsol_build"] = "9.9.9"
         result["continuation"] = {
             "identical": evaluate_continuation(prior=base_identity, current=base_identity),
-            "changed_build": evaluate_continuation(
-                prior=base_identity, current=changed_identity
-            ),
+            "changed_build": evaluate_continuation(prior=base_identity, current=changed_identity),
         }
         # A real continueRun must be attempted and its outcome recorded.
         continued = train_surrogate(backend, continue_training=True, run_test=False)
@@ -525,10 +556,26 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
             result["train_seed17"]["trained_chksum"] != result["seed29"]["trained_chksum"]
         )
 
+        seed43_model = _build_model("SurrogateTrainingGateSeed43")
+        backend43, _cfg43, _bind43 = _prepare(seed43_model, 43)
+        seed43 = train_surrogate(backend43, run_test=False)
+        result["seed43"] = {
+            "success": seed43["success"],
+            "trained_chksum": seed43.get("trained_chksum"),
+        }
+        if not all(item["success"] for item in (repeat, seed29, seed43)):
+            raise RuntimeError("every declared seed must train successfully")
+        result["per_seed_holdout"] = {"17": result["heldout"]}
+        for seed, trained_model in ((29, seed29_model), (43, seed43_model)):
+            names = [str(n) for n in trained_model.java.func(DNN_FUNCTION_TAG).functionNames()]
+            if len(names) != 1:
+                raise RuntimeError("seed model does not expose one scalar function")
+            values = comsol_predictions(trained_model, split["rows"]["test"], names[0])
+            result["per_seed_holdout"][str(seed)] = score_holdout(split, values)
+
         # ---- Phase 4: non-DNN baselines on the identical split ------------
-        split_index = int(len(rows) * 0.7)
-        train_rows = rows[:split_index]
-        test_rows = rows[split_index:]
+        train_rows = split["rows"]["train"]
+        test_rows = split["rows"]["test"]
         features_train = [[row["a1"], row["a2"]] for row in train_rows]
         targets_train = [[row["qoi"]] for row in train_rows]
         features_test = [[row["a1"], row["a2"]] for row in test_rows]
@@ -540,9 +587,7 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
             train_targets=targets_train,
         )
         baseline_predictions = predict_baseline(baseline, features_test)
-        baseline_metrics = compute_metrics(
-            predicted=baseline_predictions, actual=targets_test
-        )
+        baseline_metrics = compute_metrics(predicted=baseline_predictions, actual=targets_test)
         result["baseline"] = {
             "kind": baseline["kind"],
             "fit_row_count": baseline["fit_row_count"],
@@ -554,16 +599,38 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
                 "r2": baseline_metrics["r2"],
             },
         }
-        # The DNN's own test loss is compared with the baseline on the same rows.
+        # Raw internal loss is diagnostic only; compare independently computed RMSE.
         # Readback values are accessor records, so the numeric field is extracted
         # explicitly rather than coerced from the record.
         dnn_testloss = _numeric_readback(first.get("testloss"))
         result["dnn_testloss_value"] = dnn_testloss
         comparison = compare_against_baseline(
-            surrogate_metrics={"rmse": dnn_testloss},
+            surrogate_metrics={"rmse": result["heldout"]["metrics"]["rmse"]},
             baseline_metrics={"rmse": baseline_metrics["rmse"]},
         )
         result["baseline_comparison"] = comparison
+        result["baseline"]["train_row_ids"] = split["row_ids"]["train"]
+        result["baseline"]["test_row_ids"] = split["row_ids"]["test"]
+        result["baseline"]["predictions"] = baseline_predictions
+        linear = fit_baseline(
+            baseline_id="gate-linear",
+            kind="linear_least_squares",
+            train_features=features_train,
+            train_targets=targets_train,
+        )
+        linear_predictions = predict_baseline(linear, features_test)
+        result["linear_baseline"] = {
+            "model": linear,
+            "predictions": linear_predictions,
+            "train_row_ids": split["row_ids"]["train"],
+            "test_row_ids": split["row_ids"]["test"],
+            "metrics": compute_metrics(predicted=linear_predictions, actual=targets_test),
+        }
+        result["numerical_validation"] = {
+            "same_external_test_rows": True,
+            "test_excluded_from_training_and_validation": True,
+            "scientific_acceptance": "not_claimed_synthetic_api_fixture",
+        }
 
         result["success"] = True
     except Exception as exc:
@@ -602,6 +669,7 @@ def _run_parent(args) -> int:
             "git": git,
             "script": str(Path(__file__).resolve().relative_to(ROOT)),
             "script_sha256": _sha256_file(Path(__file__).resolve()),
+            "oracle_sha256": _sha256_file(Path(__file__).with_name("surrogate_gate_oracles.py")),
         },
         "environment": {
             "python": platform.python_version(),
@@ -654,6 +722,8 @@ def _run_parent(args) -> int:
             str(worker_output),
             "--cores",
             str(args.cores),
+            "--mph-lane",
+            args.mph_lane,
         ]
         with worker_stdout.open("wb") as stdout_handle, worker_stderr.open("wb") as stderr_handle:
             process = subprocess.Popen(
@@ -734,9 +804,14 @@ def _run_parent(args) -> int:
             # The seed must control the trained result.
             and worker_result.get("seed_reproducible") is True
             and worker_result.get("seed_distinct") is True
+            and set(worker_result.get("per_seed_holdout", {})) == {"17", "29", "43"}
             # A non-DNN baseline must exist on the identical split.
             and baseline.get("is_dnn") is False
             and baseline.get("fitted_on") == "train_split_only"
+            and worker_result.get("continue_run", {}).get("success") is True
+            and worker_result.get("heldout", {}).get("row_ids") == baseline.get("test_row_ids")
+            and len(worker_result.get("heldout", {}).get("predictions", [])) == 7
+            and worker_result.get("numerical_validation", {}).get("same_external_test_rows") is True
             and active.get("durable_jobs", {}).get("active_count") == 0
         )
         if not phase_passed:
@@ -863,7 +938,7 @@ def main() -> int:
         if args.worker_output is None:
             raise SystemExit("worker mode requires --worker-output")
         resolved = args.worker_output.resolve()
-        return _run_worker(resolved, args.cores, resolved.parent / "workspace")
+        return _run_worker(resolved, args.cores, resolved.parent / "workspace", args.mph_lane)
     if args.confirm != "RUN_REAL_COMSOL" or args.output is None:
         raise SystemExit("licensed gate requires --confirm RUN_REAL_COMSOL and --output")
     try:

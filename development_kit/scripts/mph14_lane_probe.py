@@ -5,13 +5,10 @@ lane and this script does not change that. It exists because the 2026-09-25
 licensed acceptance repair gate asks for the 1.4 lane to be exercised
 separately, and doing that by hand invites two mistakes that this script avoids.
 
-**Do not use a venv for this.** Measured 2026-09-26: a ``venv`` ``python.exe``
-re-execs a real interpreter, so ``process_identity`` from the parent and from the
-child disagree on the PID, and the durable-job tests fail with
-``durable job is already bound to another worker``. That is an artifact of the
-measurement environment, not of the lane. This script therefore overlays MPh
-1.4.0 onto the *existing* interpreter with ``PYTHONPATH``, which keeps process
-identity semantics intact.
+The overlay keeps the selected interpreter unchanged. A venv launcher can have
+its own parent/worker process identities; that is a separate environment
+compatibility question, not evidence that a project ownership failure is safe
+to ignore. The lane is enforced before pytest and again inside its interpreter.
 
 Usage::
 
@@ -21,6 +18,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -65,33 +63,72 @@ def main(argv: list[str] | None = None) -> int:
     environment["PYTHONPATH"] = str(args.overlay)
 
     version = subprocess.run(
-        [sys.executable, "-c", "import mph; print(mph.__version__)"],
+        [
+            sys.executable,
+            "-c",
+            "import json, mph, sys; "
+            "print(json.dumps(dict(version=mph.__version__, module=mph.__file__, "
+            "interpreter=sys.executable)))",
+        ],
         capture_output=True,
         text=True,
         env=environment,
         cwd=ROOT,
+        timeout=30,
     )
+    try:
+        identity = json.loads(version.stdout) if version.returncode == 0 else {}
+    except ValueError, TypeError:
+        identity = {}
+    if not isinstance(identity, dict):
+        identity = {}
     report: dict = {
         "schema_name": "comsol_mcp.mph14_lane_probe",
         "schema_version": "1.0.0",
         "interpreter": sys.executable,
         "overlay": str(args.overlay),
-        "mph_version_under_overlay": version.stdout.strip(),
+        "mph_version_under_overlay": identity.get("version"),
+        "lane_identity": identity,
         "suites": list(SUITES),
         "success": False,
     }
-    if version.returncode != 0:
-        report["error"] = f"overlay does not provide MPh: {version.stderr.strip()[-400:]}"
+    module = Path(str(identity.get("module") or "")).resolve()
+    if (
+        version.returncode != 0
+        or identity.get("version") != "1.4.0"
+        or not args.overlay.is_dir()
+        or not module.is_relative_to(args.overlay.resolve())
+        or not module.is_file()
+        or Path(str(identity.get("interpreter") or "")).resolve() != Path(sys.executable).resolve()
+    ):
+        report["error"] = "MPh 1.4.0 must be imported from the selected overlay by this interpreter"
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
         print(json.dumps(report, indent=2, sort_keys=True))
         return 1
+    report["mph_module_sha256"] = hashlib.sha256(module.read_bytes()).hexdigest()
+    report["source_sha"] = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    ).stdout.strip()
 
+    report["driver_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    report["suite_sha256"] = {
+        p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in SUITES
+    }
     done = subprocess.run(
         [
             sys.executable,
-            "-m",
-            "pytest",
+            "-c",
+            "import mph, os, pathlib, pytest, sys; "
+            "assert mph.__version__ == '1.4.0'; "
+            "assert pathlib.Path(mph.__file__).resolve().is_relative_to("
+            "pathlib.Path(os.environ['PYTHONPATH']).resolve()); "
+            "sys.exit(pytest.main(sys.argv[1:]))",
             "-q",
             "-p",
             "no:cacheprovider",
@@ -103,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         text=True,
         env=environment,
         cwd=ROOT,
+        timeout=600,
     )
     tail = (done.stdout + done.stderr).strip().splitlines()
     report["pytest_returncode"] = done.returncode

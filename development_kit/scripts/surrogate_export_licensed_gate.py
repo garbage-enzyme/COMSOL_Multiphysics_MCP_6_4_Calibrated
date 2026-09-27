@@ -46,7 +46,7 @@ terminate_exact = process_control_module.terminate_exact
 verify_absent = process_control_module.verify_absent
 
 SCHEMA_NAME = "comsol_mcp.surrogate_export_licensed_gate"
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 EXPECTED_BACKEND = {"major": 6, "minor": 4, "patch": 0, "build": 293}
 
 CONSISTENCY_ABSOLUTE_TOLERANCE = 1e-6
@@ -58,6 +58,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--runtime-root", type=Path, default=Path("D:/comsol_runtime"))
     parser.add_argument("--cores", type=int, required=True)
+    parser.add_argument("--mph-lane", choices=["1.3.1", "1.4.0"], default="1.3.1")
     parser.add_argument("--timeout-seconds", type=float, default=1800.0)
     parser.add_argument("--minimum-free-gb", type=float, default=2.0)
     parser.add_argument("--dry-run", action="store_true")
@@ -97,7 +98,7 @@ def _process_identity(pid: int) -> dict:
         command_line = list(process.cmdline())
         try:
             executable = process.exe()
-        except (psutil.AccessDenied, psutil.ZombieProcess):
+        except psutil.AccessDenied, psutil.ZombieProcess:
             executable = None
         return {
             "pid": process.pid,
@@ -231,9 +232,7 @@ def _terminate_owned_tree(
     return {
         "descendant_verification": verification,
         "errors": errors,
-        "passed": process.poll() is not None
-        and verification.get("absent") is True
-        and not errors,
+        "passed": process.poll() is not None and verification.get("absent") is True and not errors,
     }
 
 
@@ -265,39 +264,7 @@ def _write_dataset(path: Path) -> list[dict[str, float]]:
     return rows
 
 
-def _onnx_weight_reference(path: Path, maximum: int = 64) -> list[list[float]]:
-    """Extract a bounded float reference from an ONNX file's raw tensor data.
-
-    ONNX stores initializer weights as raw little-endian float32 inside
-    protobuf ``raw_data`` fields.  This scans the payload for the longest run of
-    finite float32 values and returns a bounded prefix, giving a real numerical
-    reference derived from the exported artifact rather than a fabricated
-    constant.  The scan is deliberately dependency-free: no ONNX runtime is
-    required, so the check stays solver-free and portable.
-    """
-    import struct
-
-    raw = path.read_bytes()
-    values: list[float] = []
-    # Scan 4-byte windows; a genuine weight block yields a long run of finite
-    # values, whereas structural protobuf bytes rarely do.
-    best: list[float] = []
-    index = 0
-    length = len(raw)
-    while index + 4 <= length:
-        (value,) = struct.unpack_from("<f", raw, index)
-        if math.isfinite(value) and abs(value) < 1e6:
-            values.append(value)
-            if len(values) > len(best):
-                best = list(values[:maximum])
-            index += 4
-            continue
-        values = []
-        index += 1
-    return [[value] for value in best[:maximum]]
-
-
-def _run_worker(output: Path, cores: int, workspace: Path) -> int:
+def _run_worker(output: Path, cores: int, workspace: Path, mph_lane: str = "1.3.1") -> int:
     result: dict[str, Any] = {
         "schema_name": f"{SCHEMA_NAME}_worker",
         "schema_version": SCHEMA_VERSION,
@@ -309,6 +276,26 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
     try:
         import jpype
         import mph
+
+        from comsol_mcp.adapter import make_backend
+
+        if str(mph.__version__) != mph_lane:
+            raise RuntimeError(f"expected MPh {mph_lane}, loaded {mph.__version__}")
+        result["mph_identity"] = {
+            "version": str(mph.__version__),
+            "module": str(mph.__file__),
+            "module_sha256": _sha256_file(Path(mph.__file__)),
+            "adapter_lane": mph_lane,
+        }
+
+        from surrogate_gate_oracles import (
+            bind_split_tables,
+            comsol_predictions,
+            frozen_split,
+            mutated_onnx_predictions,
+            onnx_predictions,
+            write_rows,
+        )
 
         from comsol_mcp.surrogate.dnn_adapter import (
             DNN_FUNCTION_TAG,
@@ -336,8 +323,11 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
 
         dataset_path = workspace / "surrogate_export_gate.csv"
         rows = _write_dataset(dataset_path)
+        split = frozen_split(rows)
+        write_rows(dataset_path, split["rows"]["train"])
+        result["frozen_split"] = split
         result["dataset"] = {
-            "row_count": len(rows),
+            "row_count": len(split["rows"]["train"]),
             "sha256": _sha256_file(dataset_path),
         }
 
@@ -347,7 +337,7 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
         jm.param().set("a2", "2.0")
         jm.component().create("comp1", True)
 
-        backend = ClientapiSurrogateDnnBackend(model, client=client)
+        backend = ClientapiSurrogateDnnBackend(model, client=client, adapter=make_backend(mph_lane))
         configuration = build_dnn_configuration(
             configuration_id="s7-export-gate",
             input_features=["a1", "a2"],
@@ -360,8 +350,8 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
             batch_size=8,
             maximum_epochs=60,
             seed=17,
-            validation_mode="fraction",
-            test_mode="random",
+            validation_mode="table",
+            test_mode="table",
         )
         applied = apply_surrogate_configuration(backend, configuration)
         if not applied["success"]:
@@ -371,6 +361,8 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
         )
         if not bound["success"]:
             raise RuntimeError(f"data binding failed: {bound.get('error')}")
+        dnn = backend.get_dnn_function(DNN_FUNCTION_TAG)
+        result["table_bindings"] = bind_split_tables(model, backend, dnn, split)
         trained = train_surrogate(backend, run_test=True)
         if not trained["success"]:
             raise RuntimeError(f"training failed: {trained.get('error')}")
@@ -401,9 +393,7 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
         result["export_attempts"] = {
             "errors": internal_errors,
             "exists": [path.is_file() for path in internal_paths],
-            "bytes": [
-                path.stat().st_size if path.is_file() else 0 for path in internal_paths
-            ],
+            "bytes": [path.stat().st_size if path.is_file() else 0 for path in internal_paths],
         }
 
         # A differently-named export proves the extension is not the format.
@@ -428,9 +418,7 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
         # ---- Phase 2: bind the exported artifact --------------------------
         artifacts: list[dict[str, Any]] = []
         if internal_paths[0].is_file() and internal_paths[0].stat().st_size > 0:
-            artifacts.append(
-                hash_export_artifact(path=internal_paths[0], export_format="onnx")
-            )
+            artifacts.append(hash_export_artifact(path=internal_paths[0], export_format="onnx"))
         result["artifacts"] = artifacts
 
         # ---- Phase 3: prove the exported identity is stable and faithful ---
@@ -453,48 +441,9 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
             }
         result["hash_stable"] = export_deterministic
 
-        # The exported payload must carry the trained network, not an empty or
-        # degenerate record.  ONNX stores weights as raw little-endian float32
-        # in the protobuf's raw_data fields, so the payload is validated by
-        # parsing the ONNX graph structure: initializer count, tensor shapes,
-        # node ops, and the COMSOL producer identity.
-        payload_evidence: dict[str, Any] = {
-            "graph_nodes": 0,
-            "initializers": [],
-            "has_weights": False,
-            "carries_trained_state": False,
-        }
-        if internal_paths[0].is_file():
-            raw_bytes = internal_paths[0].read_bytes()
-            payload_evidence["payload_bytes"] = len(raw_bytes)
-            payload_evidence["is_onnx_protobuf"] = b"COMSOL" in raw_bytes and b"Gemm" in raw_bytes
-            # ONNX initializer names are length-prefixed ASCII in the protobuf.
-            names = []
-            for token in (
-                b"node_Gemm.weight",
-                b"node_Gemm.bias",
-                b"node_Gemm_1.weight",
-                b"node_Gemm_1.bias",
-                b"node_Gemm_2.weight",
-                b"node_Gemm_2.bias",
-            ):
-                if token in raw_bytes:
-                    names.append(token.decode("ascii"))
-            ops = [
-                op.decode("ascii")
-                for op in (b"Gemm", b"Tanh", b"Mul", b"Add")
-                if op in raw_bytes
-            ]
-            payload_evidence.update(
-                {
-                    "initializer_names": names,
-                    "operator_types": sorted(set(ops)),
-                    "has_weights": len(names) >= 6,
-                    # Six weight/bias initializers plus the activation nodes is a
-                    # trained 2->16->8->1 network, not a placeholder.
-                    "carries_trained_state": len(names) >= 6 and b"Gemm" in raw_bytes,
-                }
-            )
+        exported_predictions, payload_evidence = onnx_predictions(
+            internal_paths[0], split["rows"]["test"]
+        )
         result["export_payload"] = payload_evidence
 
         if artifacts:
@@ -509,19 +458,24 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
             result["manifest"] = None
             result["manifest_error"] = "no export artifact was produced"
 
-        # ---- Phase 4: consistency contract over the real exported payload --
-        # The exported ONNX initializers are the artifact's observable content.
-        # A re-imported artifact whose weights agree is consistent; a perturbed
-        # copy must be detected as inconsistent.
+        # ---- Phase 4: independent COMSOL-versus-ONNX predictions ----------
         if artifacts and payload_evidence.get("carries_trained_state"):
-            reference = _onnx_weight_reference(internal_paths[0])
+            names = [str(n) for n in model.java.func(DNN_FUNCTION_TAG).functionNames()]
+            if len(names) != 1:
+                raise RuntimeError("scalar fixture requires exactly one COMSOL function")
+            reference = comsol_predictions(model, split["rows"]["test"], names[0])
             result["consistency_reference"] = {
-                "source": "exported_onnx_weight_bytes",
+                "source": "COMSOL_function_evaluation",
                 "count": len(reference),
+                "row_ids": split["row_ids"]["test"],
+                "input_rows": split["rows"]["test"],
+                "in_model_predictions": reference,
+                "exported_predictions": exported_predictions,
+                "split_sha256": split["split_sha256"],
             }
             agreeing = check_prediction_consistency(
                 in_model_predictions=reference,
-                reimported_predictions=reference,
+                reimported_predictions=exported_predictions,
                 absolute_tolerance=CONSISTENCY_ABSOLUTE_TOLERANCE,
             )
             perturbed = [list(row) for row in reference]
@@ -532,10 +486,19 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
                 absolute_tolerance=CONSISTENCY_ABSOLUTE_TOLERANCE,
             )
             result["consistency"] = {
-                "reference_source": "exported_onnx_weight_bytes",
+                "reference_source": "independent_COMSOL_and_ONNX_evaluators",
                 "reference_count": len(reference),
                 "agreeing": agreeing,
                 "disagreeing": disagreeing,
+            }
+            mutations = mutated_onnx_predictions(internal_paths[0], split["rows"]["test"])
+            result["mutation_consistency"] = {
+                name: check_prediction_consistency(
+                    in_model_predictions=reference,
+                    reimported_predictions=predictions,
+                    absolute_tolerance=CONSISTENCY_ABSOLUTE_TOLERANCE,
+                )
+                for name, predictions in mutations.items()
             }
             result["registry"] = {
                 "consistent": integrate_export_into_registry(
@@ -597,6 +560,7 @@ def _run_parent(args) -> int:
             "git": git,
             "script": str(Path(__file__).resolve().relative_to(ROOT)),
             "script_sha256": _sha256_file(Path(__file__).resolve()),
+            "oracle_sha256": _sha256_file(Path(__file__).with_name("surrogate_gate_oracles.py")),
         },
         "environment": {"python": platform.python_version(), "platform": platform.platform()},
     }
@@ -644,6 +608,8 @@ def _run_parent(args) -> int:
             str(worker_output),
             "--cores",
             str(args.cores),
+            "--mph-lane",
+            args.mph_lane,
         ]
         with worker_stdout.open("wb") as out_handle, worker_stderr.open("wb") as err_handle:
             process = subprocess.Popen(
@@ -708,6 +674,12 @@ def _run_parent(args) -> int:
             and (worker_result.get("artifacts") or [{}])[0].get("export_format") == "onnx"
             # Consistency must pass for agreement and fail for disagreement.
             and agreeing.get("state") == "consistent"
+            and consistency.get("reference_source") == "independent_COMSOL_and_ONNX_evaluators"
+            and len(worker_result.get("mutation_consistency", {})) == 3
+            and all(
+                item.get("state") == "inconsistent"
+                for item in worker_result.get("mutation_consistency", {}).values()
+            )
             and disagreeing.get("state") == "inconsistent"
             and (registry.get("consistent") or {}).get("registered") is True
             and (registry.get("inconsistent") or {}).get("registered") is False
@@ -828,7 +800,7 @@ def main() -> int:
         if args.confirm != "RUN_REAL_COMSOL" or args.worker_output is None:
             raise SystemExit("worker mode requires --confirm RUN_REAL_COMSOL and --worker-output")
         resolved = args.worker_output.resolve()
-        return _run_worker(resolved, args.cores, resolved.parent / "workspace")
+        return _run_worker(resolved, args.cores, resolved.parent / "workspace", args.mph_lane)
     if args.confirm != "RUN_REAL_COMSOL" or args.output is None:
         raise SystemExit("licensed gate requires --confirm RUN_REAL_COMSOL and --output")
     try:
