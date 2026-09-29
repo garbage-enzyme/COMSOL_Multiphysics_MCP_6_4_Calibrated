@@ -207,6 +207,7 @@ Java 查找顺序是：COMSOL 自带且可用的 Java、`JAVA_HOME`、`JDK_HOME`
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
 | `shared_server.enabled` | `false` | 独立控制本机 Desktop/Server 交互协作流程；可与任意 profile 组合，也不会启动或关闭用户自己的 COMSOL Server。 |
+| `model_manager.upload_enabled` | `false` | 独立控制 `dbmodel://` upload 操作的布尔开关。它与 `shared_server.enabled` 双向独立，因此共享会话绝不会顺带授予 Model Manager 写入权限。关闭时 open、run、download 均可正常使用；开启后 upload 仍需显式声明派生来源身份，且目标已存在、revision 不匹配或任何 overwrite 都会被拒绝。 |
 | `ownership.owner` | `null` | 可选的所有者名称。最多 256 个字符，不能为空且不能含控制字符；`null` 时从父进程生成有限长度的名称。 |
 
 ### 证据检查

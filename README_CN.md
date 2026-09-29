@@ -128,6 +128,7 @@ fake-server 测试只证明 bridge 行为，真实 DSH discovery、cleanup 和 l
   授权的 COMSOL 6.4、由 COMSOL 编译的 Java 单点驱动，以及启动器 EXE。目标机不需要
   Python、Conda、MPh、JPype 或另装 Java；COMSOL 本身仍然必需，项目不会打包或替代它。
 - **共享 Desktop 协作（默认关闭）。** 独立的 `shared_server.enabled` 功能可与任意工具 profile 组合，连接用户手动启动的本地 COMSOL Server，精确采用一个 Server 模型，执行非拥有式租约和 revision lock，运行持久化 attached job，并在 detach 时保留用户的 Server、Desktop、listener 和模型。
+- **Model Manager 写入（默认关闭）。** 独立的 `model_manager.upload_enabled` 功能控制 `dbmodel://` 的 upload 操作。open、run、download 无需该开关，共享会话也绝不会顺带把它打开。即使开启，upload 仍需显式声明派生来源身份，且已存在的目标、revision 不匹配或任何 overwrite 都会被拒绝而不强制写入。
 - **Wave Optics 验证。** 专用 profile 支持只读模型预检，以及用于周期性超表面的单波长证据审计。
 - **有界离线手册检索（默认关闭）。** `manuals.root` 表示原始 COMSOL PDF 目录；独立的 `lexical_docs.enabled` 功能在生成本地索引后增加 SQLite FTS5/BM25 检索和页读取。
 - **如实标注的可选语义检索。** 隔离式 `semantic_docs.enabled` 功能可与任意工具 profile 组合，但基线模型未通过质量和内存的晋级门槛；推荐默认使用词法手册检索。
@@ -247,6 +248,7 @@ Profile 只控制 COMSOL 自动化仿真工具以及未来自主探索工具的�
 | --- | --- |
 | `lexical_docs.enabled=true` | 两个隔离的 SQLite FTS5/BM25 手册检索和精确页读取工具。 |
 | `shared_server.enabled=true` | 需要显式确认及精确进程/listener/model 身份的受保护 shared Desktop/attached-Server 工作流。 |
+| `model_manager.upload_enabled=true` | 允许把调用方指定的派生副本上传到 `dbmodel://`。默认关闭，且独立于 `shared_server.enabled`；open、run、download 永不依赖它，overwrite 或 revision 冲突仍会被拒绝。 |
 | `semantic_docs.enabled=true` | 三个隔离的实验性向量辅助手册检索工具。 |
 
 调用 `capabilities` 可在不启动 COMSOL 的情况下获知当前 profile、精确注册工具、目标版本、禁用工具组和重启要求。其中有界的 `deployment_identity` 会报告当前代码来自源码树还是已安装包，并给出冻结的 profile/schema 与 catalog 哈希；因此即使版本号相同，也能在重启后识别旧安装或源码遮蔽，且不暴露本机路径。

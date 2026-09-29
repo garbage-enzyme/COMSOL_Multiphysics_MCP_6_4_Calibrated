@@ -539,6 +539,21 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.shared_session.solver_owners",
         ),
         _entry(
+            "comsol_mcp.operation_ledger_row",
+            "1.0.0",
+            "comsol_mcp.durable.operation_ledger",
+        ),
+        _entry(
+            "comsol_mcp.operation_recovery_report",
+            "1.0.0",
+            "comsol_mcp.durable.operation_ledger",
+        ),
+        _entry(
+            "comsol_mcp.operation_receipt_binding",
+            "1.0.0",
+            "comsol_mcp.durable.operation_ledger",
+        ),
+        _entry(
             EVIDENCE_SETTINGS_SCHEMA,
             EVIDENCE_INTEGRITY_VERSION,
             "comsol_mcp.evidence.integrity_controls",

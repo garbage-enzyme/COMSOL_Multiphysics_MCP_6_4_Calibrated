@@ -312,6 +312,8 @@ models are intentionally absent.
 - `development_kit/tests/test_tasks_server_registration.py` — This module tests real-server Tasks advertisement, additive registration, and removed-method absence.
 - `development_kit/tests/test_dbmodel_operations.py` — This module tests the `dbmodel://` operation contract, including the default-off write gate, refused overwrite, and revision collisions.
 - `development_kit/tests/test_solver_owners.py` — This module tests the two-owner one-core ceiling, verified-absence release, and cross-owner isolation.
+- `development_kit/tests/test_operation_ledger.py` — This module tests append-only operation journaling, replay recovery, artifact immutability, and preserved cleanup uncertainty.
+- `development_kit/tests/test_model_manager_gate.py` — This module binds the default-off Model Manager write gate to operation admission and checks the advertised capability metadata.
 - `development_kit/tests/test_mesh.py` — This module tests mesh helpers without a COMSOL client.
 - `development_kit/tests/test_mim_patch.py` — This module tests patch-metasurface helper behavior without a COMSOL client.
 - `development_kit/tests/test_mim_recipe_contracts.py` — This module tests solver-free safety contracts shared by the standalone MIM recipes.
@@ -569,6 +571,7 @@ models are intentionally absent.
 - `comsol_mcp/jobs/tasks_extension.py` — This module registers the stable Tasks extension over the public SDK extension hooks.
 - `comsol_mcp/shared_session/dbmodel_operations.py` — This module admits and receipt-binds the four `dbmodel://` Model Manager operations with a separate default-off write gate.
 - `comsol_mcp/shared_session/solver_owners.py` — This module enforces at most two independent one-core solver owners with verified-absence release and no cross-owner access.
+- `comsol_mcp/durable/operation_ledger.py` — This module journals Model Manager, owner, and local-session operations for append-only replay, duplicate suppression, and recovery.
 - `comsol_mcp/schema_registry.py` — This module registers named artifact schema producers and readable and writable versions.
 - `comsol_mcp/native_runtime.py` — This module classifies native-backed imports and preloads every main-process runtime before event-loop dispatch.
 - `comsol_mcp/server.py` — This module creates the profiled MCP server and console entry point.

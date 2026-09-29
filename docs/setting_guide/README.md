@@ -235,6 +235,7 @@ then `PATH`. Auto-detect never replaces a non-null value without confirmation.
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
 | `shared_server.enabled` | `false` | Independent Boolean gate for the explicit local Desktop/attached-Server workflow. It composes with every profile and never starts or terminates the user's COMSOL Server. |
+| `model_manager.upload_enabled` | `false` | Independent Boolean gate for the `dbmodel://` upload operation. It is separate from `shared_server.enabled` in both directions, so sharing a session never grants Model Manager write access. Opening, running, and downloading work while it is off. When it is on, an upload still requires an explicit derived source identity and is refused on any existing destination, revision mismatch, or overwrite. |
 | `ownership.owner` | `null` | Optional non-empty owner label, at most 256 characters and without control characters. `null` derives a bounded label from the parent process. |
 
 ### Evidence Integrity

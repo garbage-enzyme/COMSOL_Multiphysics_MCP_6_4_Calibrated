@@ -17,6 +17,9 @@
   "shared_server": {
     "enabled": false
   },
+  "model_manager": {
+    "upload_enabled": false
+  },
   "evidence_integrity": {
     "checks": {
       "outcome_contract_validation": true,
