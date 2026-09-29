@@ -51,6 +51,8 @@ LINT_TARGETS = (
     "comsol_mcp/protocol_identity.py",
     "comsol_mcp/jobs/tasks_bridge.py",
     "comsol_mcp/jobs/tasks_extension.py",
+    "comsol_mcp/shared_session/dbmodel_operations.py",
+    "comsol_mcp/shared_session/solver_owners.py",
     "comsol_mcp/schema_registry.py",
     "comsol_mcp/settings_gui_handshake.py",
     "comsol_mcp/settings_gui_launcher.py",
@@ -237,6 +239,11 @@ MYPY_GROUPS = (
         "--follow-imports=silent",
         "comsol_mcp/jobs/tasks_bridge.py",
         "comsol_mcp/jobs/tasks_extension.py",
+    ),
+    (
+        "--follow-imports=silent",
+        "comsol_mcp/shared_session/dbmodel_operations.py",
+        "comsol_mcp/shared_session/solver_owners.py",
     ),
 )
 PRODUCTION_ROOTS = ("comsol_mcp", "src")
