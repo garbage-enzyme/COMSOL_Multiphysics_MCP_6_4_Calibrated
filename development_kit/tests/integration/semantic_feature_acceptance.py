@@ -146,7 +146,7 @@ async def _semantic_flow(runtime_dir: Path) -> dict[str, Any]:
     assert capabilities["payload"]["semantic_search"]["available"] is True
     assert capabilities["payload"]["profile"] == "core"
     assert capabilities["payload"]["enabled_features"] == ["manuals", "semantic_docs"]
-    assert capabilities["payload"]["tool_count"] == 50
+    assert capabilities["payload"]["tool_count"] == 55
     assert reset["payload"]["success"] is True
     assert stopped["payload"]["worker"]["state"] == "stopped"
     assert lexical["payload"]["success"] is True and lexical["payload"]["results"]

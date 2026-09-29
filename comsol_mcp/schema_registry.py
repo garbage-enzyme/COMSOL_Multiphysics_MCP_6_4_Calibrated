@@ -259,6 +259,13 @@ def _entry(
 def _entries() -> list[dict[str, Any]]:
     legacy_point_audit = _LEGACY_POINT_AUDIT_SCHEMA
     entries = [
+        # S4A: the adapter protocol declares its own receipt schema.
+        _entry(
+            "comsol_mcp.adapter.operation",
+            "1.0.0",
+            "comsol_mcp.adapter.protocol",
+            artifact_kind="public_artifact",
+        ),
         _entry(
             "comsol_mcp.adjoint_optimization_manifest",
             "1.0.0",
@@ -579,6 +586,144 @@ def _entries() -> list[dict[str, Any]]:
             "1.0.0",
             "comsol_mcp.evidence.offline_export",
             artifact_kind="public_response",
+        ),
+        # S10: the bounded public surrogate surface emits these two responses.
+        # Both are read-only validation verdicts that never upgrade FEM evidence.
+        _entry(
+            "comsol_mcp.surrogate_evidence_verdict",
+            "1.0.0",
+            "comsol_mcp.evidence.surrogate_evidence",
+            artifact_kind="public_response",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_training_preview",
+            "1.0.0",
+            "comsol_mcp.evidence.surrogate_evidence",
+            artifact_kind="public_response",
+        ),
+        # S10/S11: the surrogate lifecycle modules emit these artifact schemas
+        # with a "schema" identity key.  They were emitted but unregistered, so
+        # the registry completeness assertion could not see them until the
+        # scanner was taught both identity spellings.  All are version 1.0.0.
+        _entry(
+            "comsol_mcp.surrogate_baseline",
+            "1.0.0",
+            "comsol_mcp.surrogate.training",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_campaign_spec",
+            "1.0.0",
+            "comsol_mcp.surrogate.campaign",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_campaign_summary",
+            "1.0.0",
+            "comsol_mcp.surrogate.campaign",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_continuation_identity",
+            "1.0.0",
+            "comsol_mcp.surrogate.training",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_dataset_manifest",
+            "1.0.0",
+            "comsol_mcp.surrogate.manifests",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_dnn_configuration",
+            "1.0.0",
+            "comsol_mcp.surrogate.dnn_adapter",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_dnn_write_plan",
+            "1.0.0",
+            "comsol_mcp.surrogate.dnn_adapter",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_export_manifest",
+            "1.0.0",
+            "comsol_mcp.surrogate.export",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_fem_result",
+            "1.0.0",
+            "comsol_mcp.surrogate.campaign",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_field_schema",
+            "1.0.0",
+            "comsol_mcp.surrogate.fields",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_fitted_transforms",
+            "1.0.0",
+            "comsol_mcp.surrogate.fields",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_lhs_design",
+            "1.0.0",
+            "comsol_mcp.surrogate.rows",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_model_card",
+            "1.0.0",
+            "comsol_mcp.surrogate.registry",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_onnx_model",
+            "1.0.0",
+            "comsol_mcp.surrogate.onnx_runtime",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_registry_entry",
+            "1.0.0",
+            "comsol_mcp.surrogate.registry",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_row_provenance",
+            "1.0.0",
+            "comsol_mcp.surrogate.rows",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_schema_manifest",
+            "1.0.0",
+            "comsol_mcp.surrogate.manifests",
+            artifact_kind="configuration",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_screening_record",
+            "1.0.0",
+            "comsol_mcp.surrogate.campaign",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_split_plan",
+            "1.0.0",
+            "comsol_mcp.surrogate.splits",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            "comsol_mcp.surrogate_training_transforms",
+            "1.0.0",
+            "comsol_mcp.surrogate.manifests",
+            artifact_kind="configuration",
         ),
         _entry(
             "comsol_mcp.observation_receipt",

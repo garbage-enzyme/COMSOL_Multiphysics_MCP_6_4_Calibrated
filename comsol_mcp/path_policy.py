@@ -570,6 +570,14 @@ _ARTIFACT_READ_ARGUMENTS = {
     "wave_optics_point_audit": ("air_reference_artifact_path",),
     # B04: offline export manifest must stay inside the owned artifact root.
     "offline_export_validate": ("manifest_path",),
+    # Surrogate artifacts are owned read-only inputs: a dataset, a schema, a
+    # model document, and a prediction row set must all stay inside the owned
+    # artifact root so a caller cannot point these tools at arbitrary files.
+    "surrogate_dataset_validate": ("dataset_path", "field_schema_path"),
+    "surrogate_training_preview": ("dataset_path",),
+    "surrogate_model_inspect": ("document_path",),
+    "surrogate_model_verify": ("document_path",),
+    "surrogate_prediction_validate": ("prediction_path",),
 }
 _ARTIFACT_READ_ROOT_ARGUMENTS = {
     "standalone_start": ("deployment_directory",),
@@ -608,6 +616,14 @@ _ALWAYS_ENFORCED_TOOLS = frozenset(
         # B04: export containment must not silently inherit full-profile
         # legacy broad-path behavior.
         "offline_export_validate",
+        # Surrogate tools are new read-only public surfaces; they must never
+        # inherit full-profile legacy broad-path behavior, because that would let
+        # a caller aim them at arbitrary files on the host.
+        "surrogate_dataset_validate",
+        "surrogate_training_preview",
+        "surrogate_model_inspect",
+        "surrogate_model_verify",
+        "surrogate_prediction_validate",
         *_ARTIFACT_READ_ROOT_ARGUMENTS,
     }
 )

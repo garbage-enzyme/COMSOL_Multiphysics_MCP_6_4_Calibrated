@@ -40,7 +40,7 @@
     {
       "path": "development_kit/tests/test_schema_registry.py",
       "match_count": 1,
-      "match_sha256": "1b334b532e3c1c72c26c219582be2cf4c096572257528f9b8cb14c9a6cc38b09"
+      "match_sha256": "babbb765b2c46daf533ebc741a578d179f917374f5a0c449e1ea19b86e16b021"
     },
     {
       "path": "pyproject.toml",

@@ -102,6 +102,7 @@ models are intentionally absent.
 - `development_kit/docs/layout.md` — This file maps every tracked repository file to one concise purpose statement.
 - `development_kit/docs/legacy_phase_compatibility.md` — This file records the frozen compatibility allowlist for historical aliases.
 - `development_kit/docs/release_checklist.md` — This file gives the ordered dependency, package, licensed, install, and restart release checklist.
+- `development_kit/docs/surrogate_dnn_capability_matrix.md` — This file records the proven COMSOL 6.4 surrogate-training and DNN ClientAPI capability matrix, including the exact creation hierarchy, training-lifecycle methods, split and seed controls, and frozen limitations.
 
 ## Release contracts and fixtures
 
@@ -155,6 +156,18 @@ models are intentionally absent.
 - `development_kit/scripts/planning_code_gate.py` — This script verifies the exact frozen planning-code compatibility surface.
 - `development_kit/scripts/python_compatibility_licensed_gate.py` — This script runs the pinned Python and COMSOL compatibility regression on a licensed host.
 - `development_kit/scripts/reference_power_gate_preflight.py` — This script validates reference-power gate inputs without starting COMSOL.
+- `development_kit/scripts/surrogate_dnn_capability_probe.py` — This repository-only licensed probe resolves the exact COMSOL 6.4 surrogate-training study-step and DNN function property, method, default, allowed-value, seed, and save/reload surface into a bounded capability receipt without generic mutation.
+- `development_kit/scripts/adopted_client_licensed_preflight.py` — This repository-only licensed preflight proves the adopted-client path against real MPh 1.3.1: it records that a created `Model` exposes no client back-reference, that the bridge accepts an explicitly supplied client, that a stale model is refused, and that a node resolves through the adopted client, then releases the client it created.
+- `development_kit/scripts/mph14_lane_probe.py` — This repository-only lane runner exercises the solver-free adapter and surrogate suites against an MPh 1.4.0 overlay on the existing interpreter, and records why a venv must not be used for that measurement: a venv `python.exe` re-execs, so the parent and child disagree on the worker PID and the durable-job tests fail on an environment artifact rather than a lane defect.
+- `development_kit/scripts/surrogate_dnn_licensed_gate.py` — This repository-only licensed gate applies the typed surrogate DNN adapter to real COMSOL, proving construction, full default readback, data-source argument binding, save/reload identity, duplicate refusal, mid-batch rollback, and owned cleanup.
+- `development_kit/scripts/surrogate_dnn_data_diagnostic.py` — This repository-only licensed diagnostic resolves the exact accepted DNN training-data encoding and split-mode contract by bounded experiment, because neither the reference tables nor the error messages state them.
+- `development_kit/scripts/surrogate_gate_oracles.py` — Independent frozen-split, COMSOL prediction, ONNX reference-evaluation and semantic-mutation oracles for licensed gates; never packaged.
+- `development_kit/scripts/surrogate_training_licensed_gate.py` — This repository-only licensed gate trains, tests, and continues a COMSOL-native DNN surrogate on real COMSOL, proving real losses and trained identity, seed-controlled reproducibility, continuation identity refusal, non-DNN baselines on the identical split, and owned cleanup.
+- `development_kit/scripts/surrogate_export_licensed_gate.py` — This repository-only licensed gate exports a trained COMSOL DNN surrogate to ONNX, proving deterministic byte-stable export, a real ONNX graph with its weight initializers, extension-independent format, content-hash manifest binding, consistency refusal, and out-of-domain escalation.
+- `development_kit/scripts/surrogate_campaign_licensed_gate.py` — This repository-only licensed gate runs the full prediction-to-FEM escalation on real COMSOL, proving prediction-only screening, forced out-of-domain escalation, per-candidate fresh solves, and measured surrogate error.
+- `development_kit/scripts/surrogate_prediction_eval_probe.py` — This repository-only licensed probe resolves which COMSOL call can evaluate a trained DNN function, recording each attempted evaluation path and its exact outcome.
+- `development_kit/scripts/surrogate_point_eval_probe.py` — This repository-only licensed probe resolves the Point-dataset and numerical-evaluation chain a geometry-free surrogate model would require, recording why it cannot be built.
+- `development_kit/scripts/surrogate_fem_eval_probe.py` — This repository-only licensed probe resolves which numerical evaluation node returns a real value from a solved model, distinguishing a working Global node from an Eval node that silently returns an empty array.
 - `development_kit/scripts/release_gate.py` — This script runs compile, test, package, clean-install, and installed-discovery gates.
 - `development_kit/scripts/release_facts.py` — This script generates and checks the durable release-facts view from live implementation data.
 - `development_kit/scripts/regenerate_tool_snapshots.py` — This script regenerates frozen tool-schema, profile-name, feature-name, deployment-identity, release-facts, and support-matrix counts after a public surface change.
@@ -222,6 +235,16 @@ models are intentionally absent.
 - `development_kit/tests/test_electro_chemistry.py` — This module tests the isolated electrochemistry profile surface, rollback, and offline catalog without COMSOL.
 - `development_kit/tests/test_alpha73_public_surface.py` — This module tests the alpha7.3 public surface: frozen comsolless dispatch, cold discovery, and package boundaries.
 - `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
+- `development_kit/tests/test_surrogate_campaign.py` — This module tests solver-free bounded campaign specification, prediction-only screening, ranking escalation rules, fresh-FEM promotion, and the no-prediction-promotion invariant.
+- `development_kit/tests/test_surrogate_gate_oracles.py` — Regression tests for exact lane identity, worker propagation, disjoint test rows, table corruption and independently computed RMSE.
+- `development_kit/tests/test_surrogate_dnn_adapter.py` — This module tests solver-free surrogate DNN configuration sealing, typed write-plan derivation, deferred argument binding, failure-atomic rollback, and the solver-free/licensed module boundary, including a structural check that the licensed bridge reaches Java only through the adapter.
+- `development_kit/tests/test_surrogate_export.py` — This module tests solver-free surrogate export-artifact content hashing, sealed export manifests, prediction-consistency tolerances, and out-of-domain registry integration.
+- `development_kit/tests/test_surrogate_fields_and_splits.py` — This module tests solver-free surrogate field-schema, transform round-trip, deterministic split, and adversarial leakage contracts.
+- `development_kit/tests/test_surrogate_manifests.py` — This module tests solver-free surrogate dataset, schema, split, and transform manifest contracts.
+- `development_kit/tests/test_surrogate_onnx_runtime.py` — This module tests solver-free ONNX protobuf decoding, operator coverage, transB weight layout, input binding, refusal paths, and regression against a real COMSOL export.
+- `development_kit/tests/test_surrogate_registry.py` — This module tests solver-free surrogate model-card sealing, lifecycle transitions, drift detection, out-of-domain policy, and prediction-evidence separation.
+- `development_kit/tests/test_surrogate_rows.py` — This module tests solver-free surrogate row-provenance binding, ineligible-row retention, ledger summarization, and deterministic Latin-hypercube design reproducibility.
+- `development_kit/tests/test_surrogate_training_metrics.py` — This module tests solver-free surrogate physical-unit metrics, deterministic non-DNN baselines, baseline comparison, continuation identity rules, and multi-seed stability reporting.
 - `development_kit/tests/test_acdc_differential_coils_recipe.py` — This module tests static portability and input contracts for the differential-coil recipe.
 - `development_kit/tests/test_attached_job_backend.py` — This module tests immutable attached-job targets, handoff, worker execution, resume, cancellation, and preservation.
 - `development_kit/tests/test_async_solver.py` — This module tests asynchronous solver thread state with fake studies.
@@ -300,6 +323,7 @@ models are intentionally absent.
 - `development_kit/tests/test_ownership.py` — This module tests solver ownership, leases, and collision detection.
 - `development_kit/tests/test_parameters.py` — This module tests parameter tools without a COMSOL client.
 - `development_kit/tests/test_path_policy.py` — This module tests configured model-read and owned-artifact path containment.
+- `development_kit/tests/test_surrogate_public_tools.py` — This module solver-free tests the five bounded public surrogate tools: typed contracts, the frozen `dbmodel://` source kind, document verification, dataset shape, evidence separation, real dispatch, cold discovery, and path containment.
 - `development_kit/tests/test_parallel_plate_capacitor_recipe.py` — This module tests the standalone capacitor recipe without starting COMSOL.
 - `development_kit/tests/test_periodic_mesh_audit.py` — This module tests periodic mesh evidence and clone-only smoke logic.
 - `development_kit/tests/test_physics.py` — This module tests physics helpers without a COMSOL client.
@@ -338,6 +362,8 @@ models are intentionally absent.
 - `development_kit/tests/test_research_tools.py` — This module tests real dispatch for experimental solver-free campaign compilation and robustness planning.
 - `development_kit/tests/test_research_adapters.py` — This module tests exact trusted-template manifests, closed x/y mutation scope, and live-tree drift rejection.
 - `development_kit/tests/test_adjoint_adapter.py` — This module tests native adapter readback, unit canonicalization, and rollback on mutation failure.
+- `development_kit/tests/test_adapter_protocol.py` — This module solver-free tests the project-owned COMSOL adapter protocol, explicit conversion, failure-atomic rollback, error translation, the step-6 typed Java and feature-lifecycle surface, and MPh 1.3.1/1.4 behavior parity.
+- `development_kit/tests/test_adapter_migration_inventory.py` — This module enforces the S4A direct-call inventory: every measured module needs a declared disposition, a migrated module must measure no direct site, and each ledger rule is exercised against a synthetic tree so a rule that never fires cannot pass unnoticed.
 - `development_kit/tests/test_derivative_support.py` — This module tests strict derivative-support identities, variable mappings, objective contracts, and immutable normalization.
 - `development_kit/tests/test_gradient_contracts.py` — This module tests caller-budgeted native optimizer and exact gradient-row contracts.
 - `development_kit/tests/test_gradient_validation.py` — This module tests independent finite-difference, sign, cosine, directional, and step-sensitivity gradient checks.
@@ -392,6 +418,7 @@ models are intentionally absent.
 - `development_kit/tests/test_simulation_configuration.py` — This module tests typed configuration normalization, classified diffs, and solver-free durable-job previews.
 - `development_kit/tests/test_thermal_radiation.py` — This module tests Kirchhoff applicability, Planck/Jacobian integration, angular and polarization handling, detector kernels, and public dispatch.
 - `development_kit/tests/test_thermal_material.py` — This module tests typed material states, analytic/table models, phase boundaries, extrapolation, conversion previews, and public dispatch.
+- `development_kit/tests/test_surrogate_training_job.py` — This module tests durable surrogate-training spec binding, epoch journaling, resume without duplicates, deduplication, and solver-free preflight.
 - `development_kit/tests/test_thermo_optomechanical_replay.py` — This module tests the closed thermo-optomechanical specification, durable stage replay, result binding, save semantics, evidence validation, and cleanup.
 - `development_kit/tests/test_spectral_audit.py` — This module tests strict projection of point-audit artifacts into durable spectral rows.
 - `development_kit/tests/test_spectral_acceptance_runner.py` — This module tests the licensed spectral runner contract without starting COMSOL.
@@ -492,6 +519,13 @@ models are intentionally absent.
 - `src/__init__.py` — This compatibility package aliases legacy imports to the canonical implementation modules.
 - `comsol_mcp/__init__.py` — This module defines the single authored package version.
 - `comsol_mcp/artifact_chain.py` — This module verifies bounded JSON artifact dependency chains without a solver.
+- `comsol_mcp/adapter/__init__.py` — This module exposes the project-owned COMSOL adapter seam and resolves a backend lazily so importing it never imports MPh.
+- `comsol_mcp/adapter/conversion.py` — This module performs explicit, version-neutral scalar and matrix conversion so no backend can silently coerce a value.
+- `comsol_mcp/adapter/fake_backend.py` — This module is a deterministic scripted backend that lets adapter contract and parity tests run with no COMSOL, JVM, or lease; it implements the whole protocol, including the step-6 typed Java access and container/node lifecycle operations.
+- `comsol_mcp/adapter/migration_inventory.py` — This module holds the executable S4A direct-call inventory: the AST-grounded measures of a direct MPh/ClientAPI site, the declared per-module disposition ledger, and the checker that fails when the declaration and a fresh scan of the tree disagree.
+- `comsol_mcp/adapter/mph14_backend.py` — This module is the isolated MPh 1.4.0 lane, recording that lane's general matrix read and `dbmodel://` load capability without enabling a live operation.
+- `comsol_mcp/adapter/mph_backend.py` — This module is the MPh 1.3.1 reference backend and the only place that constructs an MPh client for operational work; it also owns the closed Java write-kind vocabulary, the typed accessor probe, and the enumerable-container and node-lifecycle operations the DNN bridge depends on.
+- `comsol_mcp/adapter/protocol.py` — This module defines the typed adapter protocol, request/result objects, stable error codes, the closed `JAVA_WRITE_KINDS` and `DNN_FEATURE_METHODS` vocabularies, the already-resolved node handle, and the operation list the six S4A steps map onto.
 - `comsol_mcp/build_identity.py` — This module derives package build identity from shipped paths and bytes.
 - `comsol_mcp/compatibility.py` — This module loads and validates the packaged runtime compatibility declaration.
 - `comsol_mcp/contracts/__init__.py` — This module exports lightweight public input contracts without solver imports.
@@ -504,9 +538,22 @@ models are intentionally absent.
 - `comsol_mcp/contracts/thermo_optomechanical.py` — This module defines the closed durable thermal-to-optical replay input contract.
 - `comsol_mcp/contracts/offline_export.py` — This module defines bounded offline export-validation input contracts.
 - `comsol_mcp/contracts/structural.py` — This module applies shared public schema and runtime structural limits.
+- `comsol_mcp/contracts/surrogate.py` — This module defines closed solver-free input contracts for the five bounded public surrogate tools, including the frozen `dbmodel://` URI source kind.
 - `comsol_mcp/durable/__init__.py` — This module exports versioned canonicalization and durable filesystem primitives.
 - `comsol_mcp/durable/canonical.py` — This module preserves legacy canonical bytes and adds domain-separated identities for new schemas.
 - `comsol_mcp/durable/io.py` — This module implements bounded hashing, atomic replacement, and complete-row persistence.
+- `comsol_mcp/surrogate/__init__.py` — This module exports solver-free surrogate dataset, split, schema, transform, and row contracts.
+- `comsol_mcp/surrogate/campaign.py` — This module plans and adjudicates a bounded screening campaign in which a surrogate ranks candidates while only a fresh verified FEM run may promote a candidate to evidence.
+- `comsol_mcp/surrogate/dnn_adapter.py` — This module validates one bounded fully connected DNN configuration, derives an exact typed property-write plan, and applies it failure-atomically with full COMSOL-owned default readback.
+- `comsol_mcp/surrogate/dnn_clientapi_backend.py` — This licensed module is the ClientAPI bridge for the typed surrogate DNN adapter; since the S4A step-6 migration it owns no Java typing rule of its own and routes node resolution, typed reads and writes, the feature lifecycle, and export through the project adapter, presenting a caller-resolved Java feature as an already-resolved node.
+- `comsol_mcp/surrogate/export.py` — This module hashes exported surrogate artifacts by content, binds them into a sealed export manifest, checks re-imported prediction consistency within a declared tolerance, and routes the result through the out-of-domain and registry decisions.
+- `comsol_mcp/surrogate/fields.py` — This module freezes ordered feature and target field declarations with units and bounds, and fits training-only transforms with proven round-trip inversion.
+- `comsol_mcp/surrogate/manifests.py` — This module validates closed versioned surrogate dataset, schema, leakage-group, split, and training-transform manifests with deterministic hashes.
+- `comsol_mcp/surrogate/onnx_runtime.py` — This module decodes the ONNX protobuf COMSOL's DNN export produces and runs a bounded forward pass with only the standard library, so an exported surrogate can be evaluated without an ONNX dependency.
+- `comsol_mcp/surrogate/registry.py` — This module seals immutable surrogate model cards and registry entries, enforces forward-only lifecycle transitions, detects contract drift, and evaluates out-of-domain policy without clipping.
+- `comsol_mcp/surrogate/rows.py` — This module binds each label row to its exact producing candidate, model, solver, study, solution, dataset, fidelity, and evidence identities, and builds deterministic bounded Latin-hypercube designs.
+- `comsol_mcp/surrogate/training.py` — This module computes held-out physical-unit metrics, fits deterministic non-DNN baselines, and decides continuation eligibility from exact contract identities.
+- `comsol_mcp/surrogate/splits.py` — This module assigns whole leakage groups to disjoint train, validation, test, and scientific-holdout splits deterministically and detects declared leakage classes.
 - `comsol_mcp/compatibility_manifest.json` — This file declares exact licensed, dependency-only, and unknown runtime compatibility.
 - `comsol_mcp/deployment_manifest.json` — This file binds deployment identity to frozen tool and profile snapshots.
 - `comsol_mcp/environment_identity.py` — This module reports redacted Python, platform, dependency, and optional-feature identity.
@@ -567,6 +614,7 @@ models are intentionally absent.
 - `comsol_mcp/evidence/reference_power_gate.py` — This module evaluates reference-power receipts and artifact accounting.
 - `comsol_mcp/evidence/spectral_characterization.py` — This module validates and characterizes provenance-bound spectra without a solver.
 - `comsol_mcp/evidence/spectral_model_comparison.py` — This module compares bounded scalar line-shape fits on identical spectral evidence without assigning a physical mechanism.
+- `comsol_mcp/evidence/surrogate_evidence.py` — This module validates surrogate datasets, documents, and predictions by re-deriving their canonical hashes without a solver or any FEM-evidence upgrade.
 - `comsol_mcp/evidence/simulation_configuration.py` — This module normalizes declared simulation units and classifies provenance-bound configuration differences.
 - `comsol_mcp/evidence/thermal_radiation.py` — This module evaluates exact-channel Kirchhoff applicability and bounded channel-resolved thermal radiation.
 - `comsol_mcp/evidence/thermal_material.py` — This module validates and evaluates provenance-bound temperature/state material ledgers.
@@ -609,6 +657,8 @@ models are intentionally absent.
 - `comsol_mcp/jobs/thermo_optomechanical_replay_execution.py` — This module executes fixed COMSOL thermal, structural, moving-mesh, and optical stages against explicit result datasets.
 - `comsol_mcp/jobs/thermo_optomechanical_replay_rows.py` — This module validates and persists hash-chained thermo-optomechanical stage evidence.
 - `comsol_mcp/jobs/thermo_optomechanical_replay_runner.py` — This module runs resumable thermo-optomechanical stages and derives the policy-separated summary.
+- `comsol_mcp/jobs/surrogate_training.py` — This module normalizes and binds one bounded durable surrogate-training submission to exact dataset, split, schema, transform, and architecture identities.
+- `comsol_mcp/jobs/surrogate_training_worker.py` — This module is the injected solver-free surrogate-training worker that proves durable epoch journaling, resume without duplicate work, cancellation, and terminal receipts.
 - `comsol_mcp/jobs/thermo_optomechanical_replay_worker.py` — This worker owns one licensed COMSOL client and publishes terminal state only after cleanup.
 - `comsol_mcp/jobs/validation_collectors.py` — This module adapts validation points to physical evidence collectors.
 - `comsol_mcp/jobs/validation_matrix.py` — This module normalizes bounded durable validation-matrix specifications.
@@ -680,6 +730,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/physics.py` — This module exposes COMSOL physics and multiphysics tools.
 - `comsol_mcp/tools/electro_chemistry.py` — This module exposes the isolated Electrochemistry Module catalog, interface creation, electrode reaction, electrolyte, and inspect tools.
 - `comsol_mcp/tools/acoustics_pde.py` — This module exposes constrained Pressure Acoustics and mathematical PDE tools.
+- `comsol_mcp/tools/surrogate.py` — This module exposes the five bounded solver-free surrogate tools that validate datasets, preview configurations, inspect and verify documents, and validate predictions without promoting them to FEM evidence.
 - `comsol_mcp/tools/profiles.py` — This module resolves static profiles and filters tool registration.
 - `comsol_mcp/tools/session_status.py` — This module stores last-known session booleans without importing COMSOL or MPh.
 - `comsol_mcp/tools/properties.py` — This module exposes constrained clientapi property access.
