@@ -81,8 +81,21 @@ Release `0.7.6` moves the runtime base to the newest stable MCP Python SDK,
 same application contract, and MCP 1.x clients stay wire-compatible through the
 ordinary-tool path. The SDK version, the `2026-07-28` protocol revision, and any
 extension wire generation are three separate identities: an SDK upgrade is not
-an extension implementation, and this release makes no native Tasks claim.
-Clients that do not opt in keep using the ordinary durable job tools.
+an extension implementation.
+
+This release also implements the stable `2026-07-28` MCP Tasks extension
+(`io.modelcontextprotocol/tasks`) as a bounded adapter over the existing durable
+job engine, so a client that opts in can start a long simulation and poll it
+through `tasks/get` instead of blocking. The adapter adds no second scheduler:
+`job_submit` is the only task-capable tool, a task handle is emitted only when
+*that* request declares the extension, and an identical retry returns the
+existing durable job rather than launching another one. Task TTL limits
+addressability only — it never abandons a running solve and never erases a
+scientific receipt — and a cancellation acknowledgement is reported separately
+from verified cleanup. Clients that do not opt in keep using the ordinary
+`job_submit`/`job_status`/`job_tail`/`job_cancel`/`job_resume` tools unchanged,
+and the experimental `2025-11-25` Tasks dialect is refused rather than
+reinterpreted.
 
 The initialize response also carries a short safety instruction through the
 legacy MCP initialize schema: discover capabilities and preflight first, require

@@ -67,8 +67,17 @@ acceptance 报告应至少包含不启动 COMSOL 的 `initialize`、实时 `list
 `0.7.6` 把运行基座升级到最新的稳定 MCP Python SDK `2.2.x`。工具、profile、schema
 和 stdio 配置保持同一应用合同，MCP 1.x client 通过普通工具路径继续保持 wire 兼容。
 SDK 版本、`2026-07-28` 协议修订版和任何 extension wire generation 是三个互相独立
-的身份：升级 SDK 不等于实现 extension，本版本不做 native Tasks 声明。未 opt in 的
-client 继续使用普通 durable job 工具。
+的身份：升级 SDK 不等于实现 extension。
+
+本版本同时把稳定的 `2026-07-28` MCP Tasks extension
+（`io.modelcontextprotocol/tasks`）实现为现有 durable job engine 之上的受限
+适配层：opt in 的 client 可以启动长时间仿真并通过 `tasks/get` 轮询，而不必阻塞
+等待。该适配层不引入第二个调度器：`job_submit` 是唯一 task-capable 工具，只有
+当**该次请求**声明了 extension 时才返回 task handle，重复提交相同规格只会返回
+已有的 durable job。task TTL 只限制可寻址性，绝不放弃正在运行的求解，也绝不
+删除科学 receipt；取消的协议确认与已验证清理分开报告。未 opt in 的 client 继续
+使用原有的 `job_submit`/`job_status`/`job_tail`/`job_cancel`/`job_resume` 工具。
+实验性的 `2025-11-25` Tasks 方言会被拒绝，而不是被重新解释。
 
 initialize 响应也会通过旧 MCP initialize schema 携带一段简短安全说明：先 discovery
 和 preflight；只有用户明确要求时才 start、solve 或 mutate；源模型保持只读；执行成功、

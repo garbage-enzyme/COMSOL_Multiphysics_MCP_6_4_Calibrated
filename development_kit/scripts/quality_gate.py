@@ -46,9 +46,11 @@ LINT_TARGETS = (
     # S4A: the project-owned COMSOL adapter seam is lint-clean and stays covered.
     "comsol_mcp/adapter",
     "comsol_mcp/native_runtime.py",
-    # The separated SDK/protocol/extension identity surface is lint- and
-    # strict-typing-clean and stays covered.
+    # The separated SDK/protocol/extension identity surface and the Tasks
+    # adapter are lint- and strict-typing-clean and stay covered.
     "comsol_mcp/protocol_identity.py",
+    "comsol_mcp/jobs/tasks_bridge.py",
+    "comsol_mcp/jobs/tasks_extension.py",
     "comsol_mcp/schema_registry.py",
     "comsol_mcp/settings_gui_handshake.py",
     "comsol_mcp/settings_gui_launcher.py",
@@ -225,6 +227,16 @@ MYPY_GROUPS = (
         "comsol_mcp/standalone",
         "comsol_mcp/research",
         "src/__init__.py",
+    ),
+    (
+        # The Tasks adapter subclasses SDK base classes and pydantic models whose
+        # types resolve only when imports are followed as far as the checker
+        # needs. `silent` type-checks these files strictly while not reporting
+        # diagnostics for transitively imported modules, so the modules stay
+        # fully covered without weakening any rule for the rest of the tree.
+        "--follow-imports=silent",
+        "comsol_mcp/jobs/tasks_bridge.py",
+        "comsol_mcp/jobs/tasks_extension.py",
     ),
 )
 PRODUCTION_ROOTS = ("comsol_mcp", "src")

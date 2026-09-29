@@ -59,14 +59,28 @@ def test_legacy_revisions_are_declared_oldest_to_newest() -> None:
     assert SUPPORTED_LEGACY_REVISIONS[-1] == "2025-11-25"
 
 
-def test_sdk_upgrade_is_not_reported_as_native_tasks_support() -> None:
-    """The installed SDK explicitly does not implement SEP-2663 Tasks."""
+def test_native_tasks_support_is_declared_without_overclaiming() -> None:
+    """Native Tasks is implemented, but only for the stable dialect and one tool."""
     identity = get_protocol_identity()
     tasks = identity["extensions"]["tasks"]
     assert tasks["identifier"] == TASKS_EXTENSION_IDENTIFIER
-    assert tasks["native_implemented"] is False
+    assert tasks["native_implemented"] is True
+    assert tasks["native_scope"] == "tools/call only, gated per request"
+    assert tasks["task_capable_tools"] == ["job_submit"]
     assert tasks["fallback"] == "ordinary_durable_job_tools"
+    # An SDK bump alone still does not implement the extension.
     assert identity["claim_boundary"]["sdk_bump_implements_tasks"] is False
+
+
+def test_the_declared_generation_status_matches_the_implementation() -> None:
+    """The identity surface and the adapter must not disagree about support."""
+    from comsol_mcp.jobs.tasks_extension import SUPPORTED_PROTOCOL_VERSIONS
+    from comsol_mcp.protocol_identity import TARGET_PROTOCOL_REVISION
+
+    stable = TASKS_WIRE_GENERATIONS[TARGET_PROTOCOL_REVISION]
+    assert stable["status"] == "implemented"
+    assert SUPPORTED_PROTOCOL_VERSIONS == frozenset({TARGET_PROTOCOL_REVISION})
+    assert TASKS_WIRE_GENERATIONS["2025-11-25"]["status"] == "not_implemented"
 
 
 def test_both_tasks_wire_generations_stay_distinguishable() -> None:
@@ -74,7 +88,7 @@ def test_both_tasks_wire_generations_stay_distinguishable() -> None:
     experimental = TASKS_WIRE_GENERATIONS["2025-11-25"]
     stable = TASKS_WIRE_GENERATIONS[TARGET_PROTOCOL_REVISION]
     assert experimental["status"] == "not_implemented"
-    assert stable["status"] == "declared_not_implemented"
+    assert stable["status"] == "implemented"
     # Each of these alone is enough to make the two generations wire-incompatible.
     assert experimental["opt_in"] != stable["opt_in"]
     assert experimental["result_envelope"] != stable["result_envelope"]
@@ -87,6 +101,8 @@ def test_stable_dialect_records_the_extension_facts_verbatim() -> None:
     assert stable["dialect"] == "stable_extension"
     assert stable["ttl_field"] == "ttlMs"
     assert stable["retrieval_method"] == "tasks/get"
+    # The redesign deleted this method; it must not reappear anywhere here.
+    assert "tasks/result" not in stable.values()
 
 
 def test_no_task_shaped_result_is_claimed_without_request_capability() -> None:

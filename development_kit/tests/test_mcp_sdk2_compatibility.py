@@ -144,6 +144,15 @@ async def _legacy_stdio_exchange(protocol_version: str, runtime_root: Path) -> d
             {"jsonrpc": "2.0", "id": 3, "method": "resources/list", "params": {}},
         )
         resources = await _read_response(process, 3)
+        # A legacy client cannot speak the Tasks extension. Asking for a task
+        # method must fail as an unknown method rather than silently succeeding,
+        # and the ordinary durable-job tools must still be advertised so the
+        # legacy fallback path is real rather than nominal.
+        await _write_message(
+            process,
+            {"jsonrpc": "2.0", "id": 4, "method": "tasks/get", "params": {"taskId": "x"}},
+        )
+        task_method = await _read_response(process, 4)
     finally:
         active_error = sys.exception()
         if process.stdin is not None:
@@ -167,6 +176,7 @@ async def _legacy_stdio_exchange(protocol_version: str, runtime_root: Path) -> d
         "listed": listed,
         "called": called,
         "resources": resources,
+        "task_method": task_method,
     }
 
 
@@ -218,6 +228,15 @@ def test_sdk2_server_preserves_legacy_stdio_protocols(
     }
     assert all("inputSchema" in tool for tool in listed["tools"])
     assert "resultType" not in listed
+    # Ordinary-tool fallback: a legacy client keeps the full durable-job
+    # control surface even though it cannot speak the Tasks extension.
+    assert {tool["name"] for tool in listed["tools"]} >= {
+        "job_submit",
+        "job_status",
+        "job_tail",
+        "job_cancel",
+        "job_resume",
+    }
 
     called = exchange["called"]["result"]
     assert called.get("isError", False) is False
@@ -230,3 +249,10 @@ def test_sdk2_server_preserves_legacy_stdio_protocols(
     resources = exchange["resources"]["result"]
     assert resources["resources"]
     assert "resultType" not in resources
+
+    # A legacy wire cannot address the extension's methods, so dispatch must
+    # report an unknown method rather than returning a task-shaped result.
+    task_method = exchange["task_method"]
+    assert "result" not in task_method, task_method
+    assert task_method["error"]["code"] == -32601
+    assert "taskId" not in task_method.get("error", {}).get("data", {})

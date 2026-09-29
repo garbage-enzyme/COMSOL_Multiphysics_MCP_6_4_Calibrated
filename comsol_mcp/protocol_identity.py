@@ -73,16 +73,17 @@ TASKS_WIRE_GENERATIONS: dict[str, dict[str, Any]] = {
         ),
     },
     TARGET_PROTOCOL_REVISION: {
-        "status": "declared_not_implemented",
+        "status": "implemented",
         "dialect": "stable_extension",
         "opt_in": "request_meta_client_capabilities_extension",
         "result_envelope": "flat_result_type_discriminator",
         "ttl_field": "ttlMs",
         "retrieval_method": "tasks/get",
         "note": (
-            "Stable extension dialect. Declared here as the only native dialect "
-            "in scope; native Tasks support is not yet implemented, so ordinary "
-            "durable job tools remain the fallback."
+            "Stable extension dialect, implemented in this release by a bounded "
+            "adapter over the existing durable job engine. It is the only native "
+            "dialect in scope; clients that do not opt in keep using the "
+            "ordinary durable job tools."
         ),
     },
 }
@@ -162,7 +163,9 @@ def get_protocol_identity() -> dict[str, Any]:
         "extensions": {
             "tasks": {
                 "identifier": TASKS_EXTENSION_IDENTIFIER,
-                "native_implemented": False,
+                "native_implemented": True,
+                "native_scope": "tools/call only, gated per request",
+                "task_capable_tools": ["job_submit"],
                 "declared_generations": sorted(TASKS_WIRE_GENERATIONS),
                 "generations": {
                     generation: dict(details)

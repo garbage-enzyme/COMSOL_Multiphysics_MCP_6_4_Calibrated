@@ -509,6 +509,16 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.protocol_identity",
         ),
         _entry(
+            "comsol_mcp.task_cleanup_receipt",
+            "1.0.0",
+            "comsol_mcp.jobs.tasks_bridge",
+        ),
+        _entry(
+            "comsol_mcp.tasks_mapping",
+            "1.0.0",
+            "comsol_mcp.jobs.tasks_bridge",
+        ),
+        _entry(
             EVIDENCE_SETTINGS_SCHEMA,
             EVIDENCE_INTEGRITY_VERSION,
             "comsol_mcp.evidence.integrity_controls",

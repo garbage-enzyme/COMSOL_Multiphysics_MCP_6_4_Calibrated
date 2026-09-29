@@ -2,6 +2,7 @@
 
 import logging
 import multiprocessing as mp
+import os
 from weakref import WeakKeyDictionary, WeakSet
 
 from mcp.server.mcpserver import MCPServer
@@ -107,13 +108,44 @@ def register_all_resources(server: MCPServer | None = None) -> None:
     logger.info("Registered all resources")
 
 
+def _tasks_extensions() -> list:
+    """Build the enabled MCP extensions for one server instance.
+
+    The Tasks extension is registered unconditionally rather than behind a
+    profile gate: it is additive, its methods answer only to clients that opt in
+    per request, and ``job_submit`` already refuses anything the durable engine
+    would refuse. Gating it would make the standards surface depend on a startup
+    flag without changing what any client is actually permitted to do.
+
+    Construction is deliberately cheap and imports nothing heavy: the mapping
+    layer is bound to the lazy job manager, so cold discovery still starts no
+    COMSOL client and no worker process.
+    """
+    from comsol_mcp.jobs.tasks_bridge import TasksBridge, TasksMappingStore
+    from comsol_mcp.jobs.tasks_extension import build_tasks_extension
+    from comsol_mcp.settings import OWNER_ENV
+    from comsol_mcp.utils.runtime_paths import default_runtime_dir
+
+    from .tools.jobs import job_manager
+
+    owner = os.environ.get(OWNER_ENV) or "local"
+    store = TasksMappingStore(default_runtime_dir() / "tasks")
+    bridge = TasksBridge(engine=job_manager, store=store, owner=owner)
+    return [build_tasks_extension(bridge)]
+
+
 def create_server(
     name: str = "COMSOL MCP",
     profile: str | ProfileSelection | None = None,
 ) -> MCPServer:
     """Create a fully registered server without starting its transport."""
     apply_java_settings()
-    server = MCPServer(name, instructions=SERVER_INSTRUCTIONS, version=__version__)
+    server = MCPServer(
+        name,
+        instructions=SERVER_INSTRUCTIONS,
+        version=__version__,
+        extensions=_tasks_extensions(),
+    )
     register_all_tools(server, profile)
     register_all_resources(server)
     return server
