@@ -2,40 +2,53 @@
   "schema_name": "comsol_mcp.tested_versions",
   "schema_version": "2.0.0",
   "description": "Human-reviewed runtime and optional dependency versions for the Python 3.14 production lane. Package metadata in pyproject.toml governs compatible ranges; the complete transitive release lock governs the accepted Windows environment.",
-  "last_reviewed": "2026-08-04",
+  "last_reviewed": "2026-09-29",
+  "dependency_lane_policy": {
+    "mcp": "newest stable SDK minor line only; MCP 1.x stays a client wire-compatibility requirement, not a second server lane",
+    "runtime": "at most two reviewed lanes per library where behavior changes across them (newest minor plus the oldest supported line)",
+    "development": "newest available release, because newer tooling encodes newer and stricter rules; a new diagnostic is fixed or narrowly excepted, never suppressed by loosening a rule or threshold"
+  },
   "production_python_3_14": {
     "python": "3.14.6",
     "abi": "cp314-win_amd64",
     "gil_mode": "standard",
     "platform": "win_amd64",
     "direct_dependencies": {
-      "mcp": "2.0.0",
-      "mph": "1.3.1",
-      "matplotlib": "3.11.1",
-      "numpy": "2.5.1",
-      "scipy": "1.18.0",
-      "pydantic": "2.13.4",
+      "mcp": "2.2.0",
+      "mph": "1.4.0",
+      "matplotlib": "3.11.2",
+      "numpy": "2.5.3",
+      "scipy": "1.18.1",
+      "pydantic": "2.13.5",
       "psutil": "7.2.2"
+    },
+    "development_tooling": {
+      "ruff": "0.16.9",
+      "mypy": "2.3.1",
+      "pytest": "9.1.1",
+      "pytest-asyncio": "1.4.0",
+      "pytest-cov": "7.1.0",
+      "pytest-xdist": "3.8.0",
+      "coverage": "7.16.2",
+      "hypothesis": "6.168.3",
+      "build": "1.6.1",
+      "packaging": "26.3",
+      "pyyaml": "6.0.3"
+    },
+    "build_tooling": {
+      "hatchling": "1.32.4"
     },
     "optional_dependencies": {
       "manuals": {
-        "pymupdf": "1.28.0"
+        "pymupdf": "1.28.2"
       }
     },
-    "test_result": "alpha6.5 solver-free implementation candidate: 2938-test quality suite plus 3-test startup tail passed locally; exact-SHA CI and final locked release gate pending",
+    "test_result": "alpha7.6 dependency-lane candidate: solver-free focused and complete local split executed on the reviewed 2.2.x SDK lane; exact-SHA CI and the locked release gate remain pending",
     "licensed_result": {
-      "status": "passed",
-      "source_commit": "afc466f6fd12a5aba92320081588bc6f788c39c2",
-      "source_tree": "ae74deb3ed1202786225ef41987f83ac742b29ff",
-      "receipt_source_commit_before_history_rewrite": "f1750f79cb51f4e7b623911d2d30be5023e96dba",
-      "receipt": "D:/experimental_build/runtime/python_compatibility_f1750f7.json",
-      "receipt_sha256": "d89f42fe89357560da5bcb312f4ea9ff2571b938e2be0618e5efced382791387",
-      "comsol": "6.4.0.293",
-      "java": "21.0.7",
-      "measured_capacitance_pf": 1.8593794419540677,
-      "theory_capacitance_pf": 1.8593794406880002,
-      "relative_error": 6.809086114311227e-10,
-      "cleanup_passed": true
+      "status": "not_reestablished_for_0_7_6",
+      "note": "The 0.7.5 licensed lane evidence covers MPh 1.3.1 only. The 1.4.0 lane carries 0.7.5 isolated parity/smoke evidence; a 0.7.6 licensed gate is a separate caller-authorized, serial step and is not claimed here.",
+      "predecessor_source_commit": "a9e6c3a48d85356f473b712ce200e617bc1b49a2",
+      "predecessor_receipt": "../records/COMSOL_MCP_0.7.5_mph140_parity_and_smoke.md"
     }
   },
   "minimum_supported_python_3_14": {
@@ -45,7 +58,7 @@
     "platform": "win_amd64",
     "constraints": "constraints/minimum_supported_py314.txt",
     "direct_dependencies": {
-      "mcp": "2.0.0",
+      "mcp": "2.2.0",
       "mph": "1.3.1",
       "matplotlib": "3.10.7",
       "numpy": "2.3.3",
@@ -53,15 +66,17 @@
       "pydantic": "2.12.3",
       "psutil": "7.1.0"
     },
-    "selection_basis": "earliest reviewed binary-installable versions for standard CPython 3.14 within package metadata ranges",
+    "selection_basis": "earliest reviewed binary-installable versions for standard CPython 3.14 within package metadata ranges; the MCP SDK entry matches the declared newest-minor floor because the SDK lane does not retain an older installable 2.x",
     "local_resolution_result": "non-editable package install and pip check passed",
-    "hosted_ci_result": "passed"
+    "hosted_ci_result": "pending",
+    "hosted_ci_note": "The 0.7.6 lane set is not yet validated by hosted CI. The recorded passing run below belongs to the predecessor 0.7.5 lanes and is retained as history only."
   },
   "hosted_dependency_ci": {
     "workflow": "solver-free-ci",
-    "run_id": 30913193089,
-    "source_commit": "1fa16b55b3a0d0bad698171513ea0ce4e546dca7",
+    "run_id": 36340627633,
+    "source_commit": "a9e6c3a48d85356f473b712ce200e617bc1b49a2",
     "result": "passed",
+    "scope": "predecessor_0_7_5_lanes",
     "jobs": {
       "minimum_supported": "passed",
       "current_compatible": "passed",
@@ -72,18 +87,25 @@
   },
   "release_lock": {
     "path": "constraints/release_locked_py314.txt",
-    "sha256": "7953c51a5cef6a205fa2be2051198680ff3cf453246abd15a70d29700ee5bf9e",
-    "requirement_count": 45,
+    "sha256": "74ab20d93633cd1d16e0de9f7ace2209c22f1162cda83339d8b633aeed785df1",
+    "requirement_count": 44,
     "scope": "complete transitive default runtime dependencies",
-    "install_mode": "pip --require-hashes followed by local wheel --no-deps"
+    "install_mode": "pip --require-hashes followed by local wheel --no-deps",
+    "state": "candidate_pending_exact_sha_ci"
+  },
+  "mph_lanes": {
+    "policy": "two reviewed lanes: the retained 1.3.1 reference lane and the 1.4.x line",
+    "reference_lane": "1.3.1",
+    "current_lane": "1.4.0",
+    "declared_range": ">=1.3.1,<1.5"
   },
   "notes": [
-    "2026-09-21 candidate lock changes only the exact httpx2/httpcore2 pair to 2.12.0 for reviewed security fixes; historical CI and licensed receipts above do not accept this candidate. Production installation is unchanged.",
+    "0.7.6 moves the server SDK lane to the newest stable MCP Python SDK minor line and formally adopts MPh 1.4.0 alongside the retained 1.3.1 reference lane, per the recorded two-lane dependency policy.",
+    "SDK version, date-based protocol revision, and extension wire generation are separate identities; see comsol_mcp/protocol_identity.py. Upgrading the SDK does not implement the Tasks extension.",
+    "MCP 1.x client compatibility is preserved through the ordinary-tool wire path and is verified by legacy-protocol stdio tests, not by keeping a second SDK installed.",
     "Python 3.14 remains the main development and production lane; Python 3.15 uses a separate experimental solver-free CI gate without semantic-docs or licensed acceptance.",
     "The standard GIL-enabled CPython ABI is required; the free-threaded ABI is not accepted.",
-    "MCP SDK 2.0.0 is the conservative candidate base; MCP 2026 application features remain disabled and legacy protocol compatibility is mandatory.",
-    "MPh 1.3.1 is calibrated for COMSOL Multiphysics 6.4.0.293.",
-    "PyMuPDF 1.28.0 is reviewed only for the manuals extra and is outside the default runtime release lock.",
+    "PyMuPDF is reviewed only for the manuals extra and is outside the default runtime release lock.",
     "Optional semantic dependencies are outside the default runtime release lock."
   ]
 }

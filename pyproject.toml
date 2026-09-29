@@ -5,9 +5,14 @@ description = "A safety-focused MCP server for reproducible, provenance-bound CO
 readme = "README.md"
 requires-python = ">=3.14,<3.16"
 dependencies = [
-    "mcp>=2.0.0,<2.1",
+    # The MCP server lane tracks only the newest stable SDK minor line. MCP 1.x
+    # clients stay supported through the ordinary-tool wire path; that is a
+    # client-compatibility requirement, not a second server dependency lane.
+    "mcp>=2.2.0,<2.3",
     "matplotlib>=3.9,<4.0",
-    "mph>=1.3.1,<1.4",
+    # Two reviewed MPh lanes: the retained 1.3.1 reference lane and the 1.4.x
+    # line. Add a third lane only with an explicit recorded decision.
+    "mph>=1.3.1,<1.5",
     "numpy>=2.0,<3.0",
     "pydantic>=2.0.0,<3",
     "psutil>=5.9.0,<8",
@@ -44,7 +49,7 @@ comsol-mcp-settings = "settings_gui.__main__:main"
 comsol-mcp-settings-gui = "settings_gui.__main__:main"
 
 [build-system]
-requires = ["hatchling==1.31.0"]
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]

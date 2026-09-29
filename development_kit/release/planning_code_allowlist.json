@@ -45,7 +45,7 @@
     {
       "path": "pyproject.toml",
       "match_count": 3,
-      "match_sha256": "84b587acb020a9f4e872fd37ade9b2ef6536e75db05d131800fc964dcfe87886"
+      "match_sha256": "ad0bbf748aaba70c8342cd40a712af7dce998c36f2f90ee8750c33a1c534e5af"
     }
   ]
 }

@@ -504,6 +504,11 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.environment_identity",
         ),
         _entry(
+            "comsol_mcp.protocol_identity",
+            "1.0.0",
+            "comsol_mcp.protocol_identity",
+        ),
+        _entry(
             EVIDENCE_SETTINGS_SCHEMA,
             EVIDENCE_INTEGRITY_VERSION,
             "comsol_mcp.evidence.integrity_controls",

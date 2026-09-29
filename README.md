@@ -5,7 +5,7 @@ English | [中文](README_CN.md)
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.5](https://img.shields.io/badge/release-0.7.5-blue)
+![Release: 0.7.6](https://img.shields.io/badge/release-0.7.6-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -76,11 +76,13 @@ and `capabilities` readback without starting COMSOL, then separately label any
 licensed start/solve/cleanup coverage. Treat live discovery, not a count copied
 from documentation, as the authority for the installed tool surface.
 
-Release `0.7.5` uses the MCP Python SDK `2.0.x` runtime base conservatively.
-Its tools, profiles, schemas, and stdio configuration remain on the accepted
-legacy-compatible application contract; the release does not opt clients into
-MCP `2026-07-28` features such as multi-round-trip requests, cache hints,
-subscriptions, or Tasks extensions.
+Release `0.7.6` moves the runtime base to the newest stable MCP Python SDK,
+`2.2.x`. Its tools, profiles, schemas, and stdio configuration remain on the
+same application contract, and MCP 1.x clients stay wire-compatible through the
+ordinary-tool path. The SDK version, the `2026-07-28` protocol revision, and any
+extension wire generation are three separate identities: an SDK upgrade is not
+an extension implementation, and this release makes no native Tasks claim.
+Clients that do not opt in keep using the ordinary durable job tools.
 
 The initialize response also carries a short safety instruction through the
 legacy MCP initialize schema: discover capabilities and preflight first, require

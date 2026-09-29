@@ -404,18 +404,46 @@ def test_measured_call_records_callback_exception_before_reraising():
 
 
 def test_public_solver_preflight_worker_exception_is_transported(monkeypatch):
+    """An unexpected worker failure must surface, never be swallowed as success.
+
+    Under the reviewed SDK 2.2.x lane an unanticipated handler exception is
+    deliberately redacted on the wire (release note #3314): the caller sees a
+    stable `Error executing tool <name>` instead of the exception text, while
+    the server logs the traceback. That redaction must not become a silent
+    success, and the control plane must still record the failure, so this test
+    asserts transport plus the recorded error outcome rather than the raw
+    exception message that 2.0.x happened to forward.
+    """
+    metrics = ControlPlaneMetrics(window_size=8)
+
     class OwnershipStub:
         def preflight(self, **_kwargs):
             raise RuntimeError("bounded preflight failure")
 
     monkeypatch.setattr(ownership_module, "ownership_manager", OwnershipStub())
+    monkeypatch.setattr(ownership_module, "measured_call", _measured_call_with(metrics))
     server = _profiled_preflight_server()
 
     async def exercise():
-        with pytest.raises(ToolError, match="bounded preflight failure"):
+        # A transported failure is reported as an in-band error result, not a
+        # successful tool completion.
+        with pytest.raises(ToolError, match=r"Error executing tool solver_preflight"):
             await asyncio.wait_for(server.call_tool("solver_preflight", {}), timeout=2.0)
 
     asyncio.run(exercise())
+
+    summary = metrics.summary("solver_preflight")
+    assert summary["total_recorded"] == 1
+    assert summary["outcomes"] == {"success": 0, "busy": 0, "timeout": 0, "error": 1}
+
+
+def _measured_call_with(metrics: ControlPlaneMetrics):
+    """Bind one metrics sink to the shared `measured_call` failure path."""
+
+    def call(operation: str, callback):
+        return measured_call(operation, callback, metrics=metrics)
+
+    return call
 
 
 def test_lightweight_job_summaries_avoid_campaign_imports(tmp_path):

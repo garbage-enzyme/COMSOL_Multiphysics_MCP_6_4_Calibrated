@@ -306,7 +306,8 @@ models are intentionally absent.
 - `development_kit/tests/test_launcher_distribution.py` — This module tests launcher portability and runs its PowerShell 5.1 and pwsh acceptance suite on Windows.
 - `development_kit/tests/test_lexical_manual.py` — This module tests bounded SQLite lexical manual search and page reading.
 - `development_kit/tests/test_material_expressions.py` — This module tests solver-free dispersive material-expression previews.
-- `development_kit/tests/test_mcp_sdk2_compatibility.py` — This module locks the conservative MCP SDK 2.0 lane, unchanged wire schemas, absent modern-protocol opt-in, and legacy stdio revisions.
+- `development_kit/tests/test_mcp_sdk2_compatibility.py` — This module locks the reviewed MCP SDK 2.2.x lane, unchanged wire schemas, absent modern-protocol opt-in, and legacy stdio revisions.
+- `development_kit/tests/test_protocol_identity.py` — This module locks the separated SDK, protocol-revision, and Tasks wire-generation identities and the public SDK extension hooks.
 - `development_kit/tests/test_mesh.py` — This module tests mesh helpers without a COMSOL client.
 - `development_kit/tests/test_mim_patch.py` — This module tests patch-metasurface helper behavior without a COMSOL client.
 - `development_kit/tests/test_mim_recipe_contracts.py` — This module tests solver-free safety contracts shared by the standalone MIM recipes.
@@ -559,6 +560,7 @@ models are intentionally absent.
 - `comsol_mcp/environment_identity.py` — This module reports redacted Python, platform, dependency, and optional-feature identity.
 - `comsol_mcp/operation_arbiter.py` — This module serializes COMSOL-bound calls with a durable exact-process lock.
 - `comsol_mcp/path_policy.py` — This module enforces configured model-read and owned ASCII artifact roots.
+- `comsol_mcp/protocol_identity.py` — This module reports the separated MCP SDK version, protocol revision, and extension wire-generation identities without starting a transport.
 - `comsol_mcp/schema_registry.py` — This module registers named artifact schema producers and readable and writable versions.
 - `comsol_mcp/native_runtime.py` — This module classifies native-backed imports and preloads every main-process runtime before event-loop dispatch.
 - `comsol_mcp/server.py` — This module creates the profiled MCP server and console entry point.

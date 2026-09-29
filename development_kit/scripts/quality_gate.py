@@ -46,6 +46,9 @@ LINT_TARGETS = (
     # S4A: the project-owned COMSOL adapter seam is lint-clean and stays covered.
     "comsol_mcp/adapter",
     "comsol_mcp/native_runtime.py",
+    # The separated SDK/protocol/extension identity surface is lint- and
+    # strict-typing-clean and stays covered.
+    "comsol_mcp/protocol_identity.py",
     "comsol_mcp/schema_registry.py",
     "comsol_mcp/settings_gui_handshake.py",
     "comsol_mcp/settings_gui_launcher.py",
@@ -214,6 +217,7 @@ MYPY_GROUPS = (
         "comsol_mcp/settings_gui_handshake.py",
         "comsol_mcp/settings_gui_launcher.py",
         "comsol_mcp/compatibility.py",
+        "comsol_mcp/protocol_identity.py",
         "comsol_mcp/tools/session_status.py",
         "comsol_mcp/tools/settings_gui.py",
         "comsol_mcp/knowledge/lexical_build_worker.py",
