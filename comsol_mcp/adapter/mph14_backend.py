@@ -32,9 +32,18 @@ See ``D:\\mcp_tests\\a75s4inv\\mph_131_140_differences.md``.
 Lane isolation
 --------------
 
-Selecting this backend is explicit (``make_backend(lane="1.4.0")``).  It must not
+Selecting this backend is explicit (``make_backend(lane="1.4.0")``). It must not
 become the default, and constructing it does not import MPh: the import stays
 inside ``open_session``.
+
+Support status
+--------------
+
+As of 0.7.6 the 1.4.x line is a formally supported lane in the declared range
+(``mph>=1.3.1,<1.5``), so this backend is a supported parity target rather than
+an isolated smoke target. It still is not the default: the reviewed minimum lane
+stays the default so a newer line cannot become the implicit production path
+without an explicit selection.
 """
 
 from __future__ import annotations
@@ -83,15 +92,16 @@ class Mph14Backend(MphBackendBase):
 
         On 1.4.0 ``Client.load`` recognises the URI and passes it to the COMSOL
         Model Manager.  This project still performs no live Model Manager
-        operation in 0.7.5, so a URI is refused with a stable code before it
-        reaches COMSOL; the branch exists to make the capability and its
-        deliberate restriction both explicit.
+        operation until the connection and authorization contracts are
+        implemented, so a URI is refused with a stable code before it reaches
+        COMSOL; the branch exists to make the capability and its deliberate
+        restriction both explicit.
         """
         if isinstance(path, str) and path.startswith("dbmodel://"):
             raise AdapterError(
                 "model_load_failed",
-                "live dbmodel:// loading is deferred to alpha7.6; "
-                "0.7.5 validates the URI as syntax and evidence only",
+                "live dbmodel:// loading is not enabled in this release; "
+                "the URI is validated as syntax and evidence only",
                 operation="model_load",
             )
         return super().load_model(path)

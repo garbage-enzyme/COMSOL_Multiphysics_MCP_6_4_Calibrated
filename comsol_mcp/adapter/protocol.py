@@ -49,17 +49,23 @@ from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 PROTOCOL_SCHEMA_NAME = "comsol_mcp.adapter.operation"
 PROTOCOL_SCHEMA_VERSION = "1.0.0"
 
-# The reference lanes this project supports today. `pyproject.toml` declares
-# `mph>=1.3.1,<1.4`, and **1.3.2 exists on the index**, so an eager-upgrade
-# install legitimately resolves to 1.3.2. Both are reference lanes. A 1.4 lane is
-# opt-in and never becomes the default implicitly.
+# The reference lanes this project supports. `pyproject.toml` declares
+# `mph>=1.3.1,<1.5`, which is the recorded two-lane policy: the retained 1.3.x
+# line and the 1.4.x line. A 1.3.2 install is legitimate because the range admits
+# it and eager upgrades resolve there, and 1.4.0 is a formally supported lane as
+# of 0.7.6 rather than an isolated smoke target.
 REFERENCE_MPH_LANE = "1.3.1"
-SUPPORTED_MPH_LANES = ("1.3.1", "1.3.2")
+SUPPORTED_MPH_LANES = ("1.3.1", "1.3.2", "1.4.0")
 
-#: Behaviour that varies across the supported `<1.4` range, keyed by version.
+#: Lanes that are a supported *claim* while remaining non-default. Selecting a
+#: lane outside this set is refused; the default stays the reviewed minimum so a
+#: newer line can never become the implicit production path.
+DEFAULT_MPH_LANE = REFERENCE_MPH_LANE
+
+#: Behaviour that varies across the supported range, keyed by version.
 #: MPh 1.3.1 limits `DoubleRowMatrix` **reads** to two rows and raises `TypeError`
-#: beyond that; 1.3.2 generalizes the same branch to any row count, exactly as
-#: 1.4.0 does (verified against both wheels). The limit is therefore a property of
+#: beyond that; 1.3.2 and 1.4.0 generalize the same branch to any row count
+#: (verified against both wheels). The limit is therefore a property of
 #: the *installed version*, not of a backend class: a claim tied to the class
 #: would be wrong on whichever lane happened to be installed.
 MATRIX_READ_ROW_LIMIT_BY_VERSION: Mapping[str, int | None] = {
@@ -546,11 +552,12 @@ def operation_is_known(operation: str) -> bool:
 
 
 def lane_is_supported(lane: str) -> bool:
-    """Whether a lane may be selected as the *reference* lane.
+    """Whether ``lane`` is inside the declared supported MPh range.
 
-    A non-reference lane is reachable only through an explicit isolated backend
-    selection; this function deliberately answers about the supported set rather
-    than about what happens to be importable.
+    This answers about the declared claim, not about what happens to be
+    importable. The default backend remains the reviewed minimum lane so a
+    supported-but-newer line never becomes the implicit production path; callers
+    that want 1.4.x must select it explicitly.
     """
     return lane in SUPPORTED_MPH_LANES
 
@@ -561,6 +568,7 @@ def describe_protocol() -> Mapping[str, Any]:
         "schema_name": PROTOCOL_SCHEMA_NAME,
         "schema_version": PROTOCOL_SCHEMA_VERSION,
         "reference_lane": REFERENCE_MPH_LANE,
+        "default_lane": DEFAULT_MPH_LANE,
         "supported_lanes": list(SUPPORTED_MPH_LANES),
         "operations": list(OPERATIONS),
         "error_codes": list(ADAPTER_ERROR_CODES),
@@ -569,6 +577,7 @@ def describe_protocol() -> Mapping[str, Any]:
 
 __all__ = [
     "ADAPTER_ERROR_CODES",
+    "DEFAULT_MPH_LANE",
     "OPERATIONS",
     "PROTOCOL_SCHEMA_NAME",
     "PROTOCOL_SCHEMA_VERSION",

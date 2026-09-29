@@ -19,6 +19,7 @@ import pytest
 
 from comsol_mcp.adapter import (
     ADAPTER_ERROR_CODES,
+    DEFAULT_MPH_LANE,
     DNN_FEATURE_METHODS,
     JAVA_WRITE_KINDS,
     OPERATIONS,
@@ -97,19 +98,32 @@ def test_protocol_declares_every_operation_and_error_code() -> None:
     assert len(OPERATIONS) == len(set(OPERATIONS))
 
 
-def test_the_reference_lane_range_excludes_one_point_four() -> None:
-    """Both published `<1.4` lanes are reference lanes; 1.4 is constructible only.
+def test_the_declared_range_is_the_two_reviewed_mph_lanes() -> None:
+    """The range is the retained 1.3.x line plus the supported 1.4.x line.
 
-    1.4 is never a supported compatibility claim, but it stays selectable
-    explicitly so it can be tested in isolation.
+    1.4.x is a formally supported lane as of this release, but it is still not
+    the default: the reviewed minimum stays the default so a newer line cannot
+    become the implicit production path.
     """
     assert REFERENCE_MPH_LANE == "1.3.1"
-    assert SUPPORTED_MPH_LANES == ("1.3.1", "1.3.2")
+    assert SUPPORTED_MPH_LANES == ("1.3.1", "1.3.2", "1.4.0")
+    assert DEFAULT_MPH_LANE == REFERENCE_MPH_LANE
     assert lane_is_supported("1.3.1") is True
     assert lane_is_supported("1.3.2") is True
-    assert lane_is_supported(MPH_1_4_LANE) is False
-    # The lane is still selectable explicitly, so it can be tested in isolation.
-    assert MPH_1_4_LANE in available_lanes()
+    assert lane_is_supported(MPH_1_4_LANE) is True
+    assert lane_is_supported("1.2.9") is False
+    # Two distinct notions must not be conflated. `available_lanes` names
+    # *backend classes*: the reference backend plus the 1.4 backend, because only
+    # 1.4 changes method bodies. `lane_is_supported` names the declared
+    # *installed-version* range, which additionally admits 1.3.2 because the
+    # reference backend keys its capability on the observed installed version.
+    assert set(available_lanes()) == {REFERENCE_MPH_LANE, MPH_1_4_LANE}
+    assert make_backend(lane=MPH_1_4_LANE).lane == MPH_1_4_LANE
+    assert available_lanes().count(REFERENCE_MPH_LANE) == 1
+    # The default selection must resolve to the reviewed minimum, not to 1.4.
+    assert make_backend().lane == REFERENCE_MPH_LANE
+    # A 1.3.2 install is served by the reference backend and reports its own lane.
+    assert MphReferenceBackend().observed_lane() == installed_mph_version()
 
 
 def test_an_unknown_lane_is_refused_with_a_stable_code() -> None:
@@ -786,11 +800,12 @@ def test_the_declared_matrix_limit_matches_the_installed_lane() -> None:
 
 
 def test_the_whole_declared_mph_range_is_a_supported_reference_lane() -> None:
-    """`pyproject.toml` allows `mph>=1.3.1,<1.4`, so 1.3.2 must be supported too."""
+    """`pyproject.toml` allows `mph>=1.3.1,<1.5`, so 1.3.2 and 1.4.0 must be supported."""
     assert lane_is_supported("1.3.1") is True
     assert lane_is_supported("1.3.2") is True
-    assert lane_is_supported("1.4.0") is False
+    assert lane_is_supported("1.4.0") is True
     assert lane_is_supported("1.2.9") is False
+    assert lane_is_supported("1.5.0") is False
 
 
 def test_a_backend_reports_the_installed_lane_not_its_class_lane() -> None:
@@ -830,14 +845,14 @@ def test_lanes_differ_only_on_the_two_documented_capabilities() -> None:
 
 
 def test_the_14_lane_refuses_live_dbmodel_loading_with_a_stable_code() -> None:
-    """1.4 can load dbmodel:// URIs; 0.7.5 still performs no live operation."""
+    """1.4 can load dbmodel:// URIs; this release still performs no live operation."""
     from comsol_mcp.adapter.mph14_backend import Mph14Backend
 
     backend = Mph14Backend()
     with pytest.raises(AdapterError) as excinfo:
         backend.load_model("dbmodel://library/models/cell")
     assert excinfo.value.reason_code == "model_load_failed"
-    assert "deferred to alpha7.6" in str(excinfo.value)
+    assert "not enabled in this release" in str(excinfo.value)
     assert backend.supports_dbmodel_uri() is True
 
 

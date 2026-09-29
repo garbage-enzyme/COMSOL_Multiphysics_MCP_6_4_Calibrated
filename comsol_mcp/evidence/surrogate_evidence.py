@@ -901,7 +901,7 @@ def resolve_dbmodel_source(
 
     This is the solver-free half of the Model Manager contract.  It resolves the
     URI as pure syntax and reports an explicit ``unavailable`` evidence state,
-    because 0.7.5 deliberately performs no Model Manager operation.  Nothing is
+    because this release deliberately performs no Model Manager operation.  Nothing is
     read, connected, authenticated, or inferred: the report says what is known
     (the parsed components) and what is not (any live identity).
     """
@@ -929,7 +929,7 @@ def resolve_dbmodel_source(
             {
                 "check": "live_model_manager_identity",
                 "state": "unavailable",
-                "detail": "0.7.5 performs no Model Manager operation; identity is not resolved",
+                "detail": "no live Model Manager operation is performed; identity is not resolved",
             },
             {
                 "check": "content_hash",
