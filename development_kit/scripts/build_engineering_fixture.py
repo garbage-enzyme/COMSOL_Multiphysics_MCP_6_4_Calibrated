@@ -3,14 +3,17 @@
 This is a **fixture builder**, not a scientific recipe. It constructs the
 periodic wave-optics engineering model that the licensed integration probes
 require, reads the top-air domain identity and coordinate extent back out of the
-model it actually built, saves the model, and writes the SHA-256-bound fixture
-spec those probes consume.
+model it actually built, solves the declared wavelength, saves the model, and
+writes the SHA-256-bound fixture spec those probes consume.
 
 Scope, stated plainly: the model uses a single lossless dielectric
 (``relative_permittivity = 2.1``) as the layer material. It exists to exercise
-interfaces, ownership, artifact handling, and gate behaviour against real
-licensed COMSOL. It does **not** reproduce any published structure and does
-**not** validate a real metal or metasurface. No physical claim is made here.
+interfaces, ownership, artifact handling, periodic evidence, a real solve, and
+gate behaviour against real licensed COMSOL. It does **not** reproduce any
+published structure and does **not** validate a real metal or metasurface. The
+R/T/A values it records are a numerical self-consistency check on a lossless
+placeholder, not the reflectance of any physical device. No physical claim is
+made here.
 
 Safety properties enforced here, all of which the diagnostic recipes do not have:
 
@@ -24,6 +27,7 @@ Safety properties enforced here, all of which the diagnostic recipes do not have
   only after the COMSOL client has released it;
 * the air domain identity and coordinate extent are read back from the built
   model, never copied from the Python literals used to create it;
+* the periodic evidence each licensed audit consumes is verified, not assumed;
 * the spec's SHA-256 is computed after the model is saved.
 
 Usage::
@@ -66,6 +70,9 @@ AIR_HEIGHT_M = 0.83e-6
 TOP_AIR_SELECTION_TAG = "geom1_b_air_dom"
 COMPONENT_TAG = "comp1"
 GEOMETRY_TAG = "geom1"
+MESH_TAG = "mesh1"
+STUDY_TAG = "std1"
+STUDY_STEP_TAG = "wl_step"
 AIR_BLOCK_TAG = "b_air"
 LAYER_BLOCK_TAG = "b_al2"
 
@@ -171,8 +178,126 @@ def _close(actual: list[float], expected: list[float]) -> bool:
     return True
 
 
-def _build_model(client: Any) -> Any:
-    """Create the two-block periodic cell and its wave-optics interface."""
+def _boundary_normals(geometry: Any) -> dict[int, dict[str, Any]]:
+    """Read each boundary's center and outward normal, as the preflight does.
+
+    ``_periodic_groups`` splits a Floquet selection by opposing normals, so the
+    fixture must be able to prove which boundaries form a periodic side pair.
+    """
+    import jpype
+
+    ups: list[int] = []
+    downs: list[int] = []
+    adjacency = geometry.getUpDown()
+    ups = [int(value) for value in list(adjacency[0])]
+    downs = [int(value) for value in list(adjacency[1])]
+
+    out: dict[int, dict[str, Any]] = {}
+    for number in range(1, int(geometry.getNBoundaries()) + 1):
+        item: dict[str, Any] = {}
+        if number <= len(ups) and number <= len(downs):
+            item["up_domain"] = ups[number - 1]
+            item["down_domain"] = downs[number - 1]
+            item["interior"] = ups[number - 1] != 0 and downs[number - 1] != 0
+        ranges = [float(value) for value in list(geometry.faceParamRange(number))]
+        point = jpype.JArray(jpype.JArray(jpype.JDouble))(1)
+        point[0] = _jarray([(ranges[0] + ranges[1]) / 2, (ranges[2] + ranges[3]) / 2])
+        item["center"] = [float(value) for value in list(geometry.faceX(number, point)[0])]
+        item["normal"] = [float(value) for value in list(geometry.faceNormal(number, point)[0])]
+        out[number] = item
+    return out
+
+
+def _periodic_side_pairs(
+    boundaries: dict[int, dict[str, Any]], bounding_box: list[float]
+) -> dict[str, list[int]]:
+    """Classify exterior boundaries into the periodic cell sides.
+
+    Mirrors ``comsol_mcp/tools/mim_patch.py::_identify_side_pairs``, including its
+    coordinate filter: a face is only a cell side if its normal points out of the
+    cell *and* its center lies on the matching bounding-box plane. Without the
+    coordinate filter an interior interface sharing the same normal would be
+    copied as a periodic source and break Floquet mesh compatibility.
+    """
+    xmin, xmax, ymin, ymax, _zmin, _zmax = bounding_box
+    tolerance = COORDINATE_RELATIVE_TOLERANCE * max(abs(xmax - xmin), abs(ymax - ymin), 1.0)
+    sides: dict[str, list[int]] = {key: [] for key in ("x_src", "x_dst", "y_src", "y_dst")}
+    for number, item in boundaries.items():
+        if item.get("interior"):
+            continue
+        normal = item.get("normal")
+        center = item.get("center")
+        if not normal or not center:
+            continue
+        nx, ny, _nz = normal
+        cx, cy, _cz = center
+        if nx < -0.5 and abs(cx - xmin) <= tolerance:
+            sides["x_src"].append(number)
+        elif nx > 0.5 and abs(cx - xmax) <= tolerance:
+            sides["x_dst"].append(number)
+        elif ny < -0.5 and abs(cy - ymin) <= tolerance:
+            sides["y_src"].append(number)
+        elif ny > 0.5 and abs(cy - ymax) <= tolerance:
+            sides["y_dst"].append(number)
+    return {key: sorted(value) for key, value in sides.items()}
+
+
+def _set_copy_face(feature: Any, source: list[int], destination: list[int]) -> str:
+    """Set a directed CopyFace pair, matching mim_patch's contract handling."""
+    failures = []
+    for source_name, destination_name in (("source", "destination"), ("src", "dst")):
+        try:
+            feature.selection(source_name).set(source)
+            feature.selection(destination_name).set(destination)
+            return f"{source_name}/{destination_name}"
+        except Exception as exc:
+            failures.append(type(exc).__name__)
+    raise RuntimeError(
+        "CopyFace does not expose a supported directed source/destination selection "
+        f"contract ({', '.join(failures)})"
+    )
+
+
+def _build_periodic_mesh(component: Any, sides: dict[str, list[int]]) -> tuple[Any, int]:
+    """Build a Floquet-compatible mesh: FreeTri on the sources, CopyFace, FreeTet.
+
+    A bare FreeTet mesh makes the periodic conditions fail at solve time with
+    "source and destination meshes are not compatible", measured on real COMSOL
+    6.4. Copying the source-face mesh onto the destination face is what makes the
+    Floquet pair node-for-node identical, and it is the same recipe the
+    repository's own ``mim_patch`` tool uses.
+    """
+    for key in ("x_src", "x_dst", "y_src", "y_dst"):
+        if not sides[key]:
+            raise ValueError(f"periodic side pair {key} is empty; cannot build a periodic mesh")
+
+    mesh = component.mesh().create(MESH_TAG)
+    size = mesh.feature().create("size1", "Size")
+    size.set("hmax", float(AIR_HEIGHT_M / 10.0))
+    size.set("hmaxactive", True)
+
+    triangle_x = mesh.feature().create("ftri_x", "FreeTri")
+    triangle_x.selection().set(sides["x_src"])
+    triangle_y = mesh.feature().create("ftri_y", "FreeTri")
+    triangle_y.selection().set(sides["y_src"])
+
+    copy_x = mesh.feature().create("cp_x", "CopyFace")
+    _set_copy_face(copy_x, sides["x_src"], sides["x_dst"])
+    copy_y = mesh.feature().create("cp_y", "CopyFace")
+    _set_copy_face(copy_y, sides["y_src"], sides["y_dst"])
+
+    mesh.feature().create("ftet1", "FreeTet")
+    mesh.run()
+    return mesh, int(mesh.getNumElem())
+
+
+def _build_model(client: Any) -> tuple[Any, dict[str, list[int]]]:
+    """Create the two-block periodic cell and its wave-optics interface.
+
+    Returns the model and the measured periodic side pairs, so the caller can
+    verify the periodic evidence against the same classification the mesh was
+    built from instead of re-deriving (and possibly re-guessing) it.
+    """
     model = client.create("ControlledWaveOpticsFixture")
     java = model.java
     component = java.component().create(COMPONENT_TAG, True)
@@ -216,21 +341,26 @@ def _build_model(client: Any) -> Any:
     physics = component.physics().create(
         "ewfd", "ElectromagneticWavesFrequencyDomain", str(int(geometry.getSDim()))
     )
-    # The incidence probe requires exactly one PeriodicStructure.
+    # The incidence probe requires exactly one PeriodicStructure. COMSOL creates
+    # the two PeriodicPort children, the two Floquet periodic conditions and the
+    # reference direction automatically; measured on COMSOL 6.4, so the builder
+    # verifies them rather than fabricating them.
     physics.feature().create("ps1", "PeriodicStructure", 3)
 
-    mesh = component.mesh().create("mesh1")
-    size = mesh.feature().create("size1", "Size")
-    size.set("hmax", float(AIR_HEIGHT_M / 10.0))
-    size.set("hmaxactive", True)
-    mesh.feature().create("ftet1", "FreeTet")
-    mesh.run()
+    sides = _periodic_side_pairs(
+        _boundary_normals(geometry), [float(value) for value in geometry.getBoundingBox()]
+    )
+    _build_periodic_mesh(component, sides)
 
-    study = java.study().create("std1")
-    study.create("step1", "Wavelength")
+    study = java.study().create(STUDY_TAG)
+    # `wl_step` is the repository-wide convention for a Wavelength study step
+    # (see the documented `study_step_tag` example in tools/workflow.py). The
+    # live-profile gate addresses the step by that tag, so the fixture must use
+    # it too rather than a private name.
+    study.create(STUDY_STEP_TAG, "Wavelength")
     java.param().set("wl", f"{FIXTURE_WAVELENGTH_UM}[um]")
 
-    return model
+    return model, sides
 
 
 def _retry_permission_error(
@@ -252,6 +382,92 @@ def _retry_permission_error(
             if time.monotonic() >= deadline:
                 raise
             time.sleep(WINDOWS_FILE_RETRY_INTERVAL_SECONDS)
+
+
+def _verify_periodic_evidence(component: Any, sides: dict[str, list[int]]) -> dict[str, Any]:
+    """Confirm the periodic features each licensed audit consumes actually exist.
+
+    ``incidence_configuration_acceptance`` requires exactly two PeriodicPort
+    children and one non-empty reference-direction edge selection;
+    ``periodic_mesh_acceptance`` requires Floquet selections whose opposing
+    normal groups are balanced. COMSOL creates all of these automatically when
+    the PeriodicStructure is created -- measured on 6.4 -- so this verifies them
+    instead of creating duplicates, and fails loudly if a future COMSOL release
+    stops providing them.
+    """
+    periodic_structure = component.physics("ewfd").feature("ps1")
+    children = {
+        str(tag): str(periodic_structure.feature(tag).getType())
+        for tag in list(periodic_structure.feature().tags())
+    }
+    ports = sorted(tag for tag, kind in children.items() if "periodicport" in kind.casefold())
+    floquet = sorted(tag for tag, kind in children.items() if "floquetperiodic" in kind.casefold())
+    references = sorted(
+        tag for tag, kind in children.items() if "referencedirection" in kind.casefold()
+    )
+    if len(ports) != 2:
+        raise ValueError(f"exactly two PeriodicPort children are required, found {ports}")
+    if len(references) != 1:
+        raise ValueError(f"exactly one ReferenceDirection child is required, found {references}")
+    if not floquet:
+        raise ValueError("no Floquet periodic condition was created")
+
+    reference_edges = sorted(
+        int(value) for value in periodic_structure.feature(references[0]).selection().entities()
+    )
+    if not reference_edges:
+        raise ValueError("the reference-direction edge selection is empty")
+
+    groups = {}
+    for tag in floquet:
+        selection = sorted(
+            int(value) for value in periodic_structure.feature(tag).selection().entities()
+        )
+        if not selection:
+            raise ValueError(f"Floquet feature {tag} has an empty boundary selection")
+        groups[tag] = selection
+
+    copied = {key: sides[key] for key in ("x_src", "x_dst", "y_src", "y_dst")}
+    for key, value in copied.items():
+        if not value:
+            raise ValueError(f"periodic side pair {key} is empty")
+    return {
+        "periodic_ports": ports,
+        "floquet_groups": groups,
+        "reference_direction": {"tag": references[0], "edges": reference_edges},
+        "copy_face_side_pairs": copied,
+    }
+
+
+def _verify_solve(model: Any) -> dict[str, Any]:
+    """Confirm the built model solved and exposes the R/T/A expressions.
+
+    A fixture that claims to be solvable must prove it here. The values are not
+    a physical result -- the layer is a lossless dielectric placeholder -- so
+    they are recorded only as an internal consistency check.
+    """
+    solutions = [str(tag) for tag in list(model.java.sol().tags())]
+    datasets = [str(tag) for tag in list(model.java.result().dataset().tags())]
+    if not solutions:
+        raise ValueError("the wavelength study produced no solution")
+    if not datasets:
+        raise ValueError("the wavelength study produced no dataset")
+
+    power: dict[str, float] = {}
+    for expression in ("ewfd.Rtotal", "ewfd.Ttotal", "ewfd.Atotal"):
+        try:
+            power[expression] = float(model.evaluate(expression))
+        except Exception as exc:
+            raise ValueError(f"flux expression {expression} is not evaluable: {exc}") from exc
+    return {
+        "solutions": solutions,
+        "datasets": datasets,
+        "flux_self_consistency": power,
+        "note": (
+            "flux values are a numerical self-consistency check on a lossless "
+            "dielectric placeholder, not a physical reflectance of any real structure"
+        ),
+    }
 
 
 def _save_staged(java_model: Any, destination: Path) -> Path:
@@ -357,7 +573,7 @@ def main() -> int:
     try:
         client = mph.Client(cores=arguments.cores, version=arguments.version)
         ownership.heartbeat(refresh_server_processes=True)
-        model = _build_model(client)
+        model, sides = _build_model(client)
 
         component = model.java.component(COMPONENT_TAG)
         geometry = component.geom(GEOMETRY_TAG)
@@ -396,7 +612,17 @@ def main() -> int:
             raise ValueError(
                 f"exactly one PeriodicStructure is required, found {tags['periodic_structures']}"
             )
-        mesh_elements = int(component.mesh("mesh1").getNumElem())
+        mesh_elements = int(component.mesh(MESH_TAG).getNumElem())
+
+        # Verify the periodic evidence the licensed audits read, rather than
+        # assuming COMSOL created it. Each check names the exact consumer.
+        periodic = _verify_periodic_evidence(component, sides)
+
+        # The point-audit gate requires a model that actually solves at one
+        # wavelength and exposes R/T/A, so the fixture is solved here. This is
+        # still not a physical claim: the layer is a lossless placeholder.
+        model.java.study(STUDY_TAG).run()
+        solve_evidence = _verify_solve(model)
 
         staging = _save_staged(model.java, model_path)
 
@@ -434,6 +660,9 @@ def main() -> int:
             air_coordinate_range=air_coordinate_range,
             air_extent_verified_against_geometry=True,
             mesh_elements=mesh_elements,
+            periodic=periodic,
+            solve=solve_evidence,
+            solved=True,
             tags=tags,
         )
     except BaseException as exc:  # noqa: BLE001 - record, clean up, then re-raise

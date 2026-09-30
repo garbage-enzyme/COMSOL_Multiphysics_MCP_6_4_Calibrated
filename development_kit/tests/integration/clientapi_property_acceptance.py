@@ -93,7 +93,7 @@ def _round_trip_case(
     container: str,
     feature_tag: str,
     property_name: str,
-    temporary_value: str,
+    temporary_value,
 ) -> dict[str, object]:
     before = get_existing_property(model, "comp1", container, feature_tag, property_name)
     _require(bool(before.get("success")), f"property read failed: {before}")
@@ -181,7 +181,12 @@ def _run_gate(client, artifact_dir: Path) -> dict[str, object]:
         ("geometry_feature", "geom1/blk1", "base", "center"),
         ("physics_feature", "es/ep1", "V0", "2[V]"),
         ("mesh_feature", "mesh1/size1", "custom", "on"),
-        ("study_step", "std1/step1", "plist", "2[um]"),
+        # `plist` is declared DoubleArray, not String. Measured on COMSOL 6.4:
+        # writing the string "2[um]" is accepted but stored as the numeric array
+        # [2.0], so a string can never round-trip and the setter rightly refuses
+        # to claim it did. A numeric list round-trips exactly ([2.0] -> [2.0]),
+        # which is what this case is meant to prove.
+        ("study_step", "std1/step1", "plist", [2.0]),
     )
     results = []
     for container, feature_tag, property_name, temporary_value in cases:

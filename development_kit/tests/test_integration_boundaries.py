@@ -300,6 +300,15 @@ def test_live_profile_cleanup_continues_and_reports_every_failure():
 
         async def call_tool(self, name, arguments, **_kwargs):
             self.calls.append((name, arguments))
+            if name == "comsol_status":
+                payload = {
+                    "success": True,
+                    "models": [
+                        {"name": "first", "revision_sha256": "a" * 64},
+                        {"name": "second", "revision_sha256": "b" * 64},
+                    ],
+                }
+                return SimpleNamespace(isError=False, structuredContent=payload)
             if name == "model_remove" and arguments["model_name"] == "first":
                 raise OSError("injected removal failure")
             payload = {"success": name != "comsol_disconnect"}
@@ -308,14 +317,48 @@ def test_live_profile_cleanup_continues_and_reports_every_failure():
     session = Session()
     cleanup = asyncio.run(live_profile_gate._cleanup_live_session(session, ["first", "second"]))
 
-    assert session.calls == [
-        ("model_remove", {"model_name": "second"}),
-        ("model_remove", {"model_name": "first"}),
+    # `model_remove` is destructive_session, so it is guarded by the required
+    # model-revision contract; the cleanup must read and declare the revision
+    # before each removal. Only the removals and the disconnect are asserted
+    # here; the preceding revision reads are filtered out.
+    assert [call for call in session.calls if call[0] != "comsol_status"] == [
+        ("model_remove", {"model_name": "second", "expected_model_revision": "b" * 64}),
+        ("model_remove", {"model_name": "first", "expected_model_revision": "a" * 64}),
         ("comsol_disconnect", {}),
     ]
     assert cleanup["passed"] is False
     assert cleanup["steps"]["model_remove:first"]["error_type"] == "OSError"
     assert cleanup["steps"]["comsol_disconnect"]["passed"] is False
+
+
+def test_live_profile_declares_the_model_revision_for_every_guarded_call():
+    """Both guarded call sites must declare the revision, so the gate measures
+    the real contract instead of failing closed with
+    "expected_model_revision does not match current model state."
+    """
+
+    class Session:
+        async def call_tool(self, name, _arguments, **_kwargs):
+            assert name == "comsol_status"
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "success": True,
+                    "models": [{"name": "m", "revision_sha256": "c" * 64}],
+                },
+            )
+
+    assert asyncio.run(live_profile_gate._model_revision(Session(), "m")) == "c" * 64
+
+    class Missing:
+        async def call_tool(self, _name, _arguments, **_kwargs):
+            return SimpleNamespace(isError=False, structuredContent={"success": True, "models": []})
+
+    with pytest.raises(RuntimeError, match="absent from the session status"):
+        asyncio.run(live_profile_gate._model_revision(Missing(), "m"))
+
+    source = inspect.getsource(live_profile_gate)
+    assert source.count('"expected_model_revision"') >= 2
 
 
 def test_live_profile_call_timeout_is_bounded_by_absolute_deadline(monkeypatch):

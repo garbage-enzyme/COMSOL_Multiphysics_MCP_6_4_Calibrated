@@ -163,14 +163,44 @@ def main() -> None:
                 validation_policy=case["policy"],
                 session_state={"connected": True, "models": [model.name()]},
                 active_profile="wave_optics",
+                # The preflight behind this audit early-returns with
+                # `integrity_blocked` when the caller declares an expected source
+                # but does not attest the bytes that were loaded. This probe
+                # loads `source` itself in this process, so it can attest that
+                # identity honestly; `model_registration` is the capture label
+                # the session manager uses for a file loaded from disk.
+                loaded_source_identity={
+                    "source_path": str(source),
+                    "source_sha256": source_hash,
+                    "capture": "model_registration",
+                },
                 ownership_preflight={"ready": True},
             )
             output["solve_count"] += int(
                 audit.get("measurement", {}).get("solve", {}).get("ran", False)
             )
             _require(audit["success"], audit)
-            _require(audit.get("audit_status") == "measurement_complete", audit)
-            _require(audit.get("assessment", {}).get("project_verdict") is True, audit)
+            # This probe always supplies a validation policy, and a policy-bearing
+            # audit legitimately reports `policy_evaluated` rather than
+            # `measurement_complete` (see wave_optics_audit.py, where the status is
+            # set to "policy_evaluated" whenever a policy is evaluated). Both mean
+            # "the measurement completed"; the rest of the codebase already treats
+            # them as equivalent (_COMPLETE_AUDIT_STATES in jobs/validation_rows.py,
+            # jobs/validation_runner.py, and jobs/spectral_audit.py). Asserting only
+            # `measurement_complete` made a passing audit look like a failure.
+            _require(
+                audit.get("audit_status") in {"measurement_complete", "policy_evaluated"},
+                audit,
+            )
+            # `evaluate_validation_policy` reports the legacy point-audit verdict
+            # as the string "pass" (it also uses "missing" and "fail"), while the
+            # strict physical-evidence policy path reports a boolean. Accept the
+            # documented legacy spelling rather than only the strict-path type;
+            # previously this assertion could never hold for a legacy policy.
+            _require(
+                audit.get("assessment", {}).get("project_verdict") in (True, "pass"),
+                audit,
+            )
             _require(Path(audit["artifacts"]["csv"]).is_file(), "audit CSV is missing")
             _require(Path(audit["artifacts"]["manifest"]).is_file(), "audit manifest is missing")
             _require(_sha256(source) == source_hash, "controlled source hash changed")

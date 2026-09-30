@@ -267,7 +267,10 @@ async def _cleanup_live_session(session: ClientSession, model_names: list[str]) 
             result, timing = await _call_before(
                 session,
                 "model_remove",
-                {"model_name": model_name},
+                {
+                    "model_name": model_name,
+                    "expected_model_revision": await _model_revision(session, model_name),
+                },
                 deadline=deadline,
             )
             step_passed = result.get("success") is True
@@ -317,6 +320,27 @@ def _agent_reasoning(case: dict[str, Any], audit: dict[str, Any]) -> dict[str, A
         ),
         "project_type": case["name"],
     }
+
+
+async def _model_revision(session: ClientSession, model_name: str) -> str:
+    """Read the exact current revision a guarded call must declare.
+
+    `wave_optics_point_audit` (solver_execution) and `model_remove`
+    (destructive_session) both sit in `_MODEL_REVISION_REQUIRED_CLASSES`, so on
+    every non-`full` profile the operation arbiter requires the caller to declare
+    the revision it is acting on ("required_for_verified_mutation_and_solve" in
+    the capabilities contract) and otherwise fails closed with
+    "expected_model_revision does not match current model state." The session
+    status publishes `models[].revision_sha256`, which is the value to declare.
+    """
+    status, timing = await _call(session, "comsol_status", {})
+    _require(status.get("success", True), status)
+    for entry in status.get("models", []):
+        if entry.get("name") == model_name:
+            revision = entry.get("revision_sha256")
+            _require(isinstance(revision, str) and revision, (model_name, status))
+            return revision
+    raise RuntimeError(f"model {model_name!r} is absent from the session status: {status}")
 
 
 async def _live_three_call_matrix() -> dict[str, Any]:
@@ -397,6 +421,7 @@ async def _live_three_call_matrix() -> dict[str, Any]:
                             "study_step_tag": "wl_step",
                             "study_step_property": "plist",
                             "expected_source_sha256": source_hash,
+                            "expected_model_revision": await _model_revision(session, model_name),
                             "config_id": f"live-profile-{case['name']}",
                             "artifact_dir": str(ARTIFACT_DIR / "audits"),
                             "top_air_domain_ids": case["top_air_domain_ids"],
@@ -438,7 +463,12 @@ async def _live_three_call_matrix() -> dict[str, Any]:
                         }
                     )
                     removed, remove_timing = await _call(
-                        session, "model_remove", {"model_name": model_name}
+                        session,
+                        "model_remove",
+                        {
+                            "model_name": model_name,
+                            "expected_model_revision": await _model_revision(session, model_name),
+                        },
                     )
                     _require(removed.get("success"), removed)
                     loaded_model_names.remove(model_name)
