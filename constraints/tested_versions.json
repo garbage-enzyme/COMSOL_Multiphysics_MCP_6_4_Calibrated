@@ -43,10 +43,14 @@
         "pymupdf": "1.28.2"
       }
     },
-    "test_result": "alpha7.6 dependency-lane candidate verified on source c1e654d: solver-free quality and release gates passed locally on the reviewed 2.2.x SDK lane (quality_gate status=passed, 4896 tests, all coverage targets met; release_gate exit 0 with the hash-pinned non-editable install and installed-package/stdio probes), and hosted CI run 36662156534 passed 7/7 jobs on that same exact SHA",
+    "test_result": "alpha7.6 dependency-lane candidate verified on source c8c49a5: solver-free quality and release gates passed locally on the reviewed 2.2.x SDK lane (quality_gate status=passed, 4928 tests, coverage 79.1% against the 73.4% minimum, every target met; release_gate exit 0 with the hash-pinned non-editable install and installed-package/stdio probes reporting comsol-mcp 0.7.6, 56 stdio tools, and comsol_client_started=false), and hosted CI run 36712241809 passed 7/7 jobs on that same exact SHA after one runner-flake re-run of a 20-second Windows PowerShell launcher subprocess. The predecessor candidate c1e654d passed hosted CI run 36662156534 (7/7).",
     "licensed_result": {
-      "status": "not_reestablished_for_0_7_6",
-      "note": "The 0.7.5 licensed lane evidence covers MPh 1.3.1 only. The 1.4.0 lane carries 0.7.5 isolated parity/smoke evidence; a 0.7.6 licensed gate is a separate caller-authorized, serial step and is not claimed here.",
+      "status": "attempted_not_all_green_for_0_7_6",
+      "note": "The 0.7.6 licensed release gate was run twice with caller authorization and is not yet all green: 5 passed / 8 failed, then 8 passed / 5 failed after the controlled engineering fixture and three defect fixes. The remaining failures are one environment gap (the production conda environment carries comsol-mcp 0.7.4, so a probe correctly demands 56 core tools and sees 50), three fixture-scope gaps (probes expecting a solved periodic model with Floquet periodic ports and a captured source identity), and one probe expectation about a COMSOL study-step plist type quirk. See records/COMSOL_MCP_0.7.6_licensed_gate_attempt.md and records/COMSOL_MCP_0.7.6_fixture_wrapper_review.md. No licensed all-green result is claimed here.",
+      "receipt": "D:/comsol_release/real_gate2.json",
+      "receipt_sha256": "fa794bb612f0a27cd1a3a330311199905954a15ef3c82d32330a25f70c118ba8",
+      "first_attempt_receipt": "D:/comsol_release/real_gate.json",
+      "first_attempt_receipt_sha256": "946300bd26c9a3bf65c3f3dd2859bd6240006b841a87bca3b7975cfbb77dc42d",
       "predecessor_source_commit": "a9e6c3a48d85356f473b712ce200e617bc1b49a2",
       "predecessor_receipt": "../records/COMSOL_MCP_0.7.5_mph140_parity_and_smoke.md"
     }
