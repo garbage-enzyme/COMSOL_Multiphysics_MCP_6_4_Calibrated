@@ -8,6 +8,12 @@
     },
     {
       "default_enabled": false,
+      "name": "model_manager",
+      "support": "experimental_default_off",
+      "tool_count": 5
+    },
+    {
+      "default_enabled": false,
       "name": "semantic_docs",
       "support": "experimental_promotion_rejected",
       "tool_count": 3
@@ -23,27 +29,27 @@
     {
       "name": "core",
       "support": "verified",
-      "tool_count": 55
+      "tool_count": 56
     },
     {
       "name": "basic_fem",
       "support": "verified",
-      "tool_count": 117
+      "tool_count": 118
     },
     {
       "name": "wave_optics",
       "support": "experimental",
-      "tool_count": 84
+      "tool_count": 85
     },
     {
       "name": "experimental",
       "support": "experimental",
-      "tool_count": 109
+      "tool_count": 110
     },
     {
       "name": "full",
       "support": "compatibility_only",
-      "tool_count": 165
+      "tool_count": 166
     },
     {
       "name": "comsolless_read_only",
@@ -53,7 +59,7 @@
     {
       "name": "electro_chemistry",
       "support": "experimental",
-      "tool_count": 60
+      "tool_count": 61
     }
   ],
   "real_integration": {

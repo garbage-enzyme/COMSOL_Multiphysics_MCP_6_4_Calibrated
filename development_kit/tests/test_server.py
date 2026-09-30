@@ -361,7 +361,7 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
 
     assert result["profile"] == "core"
     assert result["active_profile"] == "core"
-    assert result["tool_count"] == 55
+    assert result["tool_count"] == 56
     assert result["profile_source"]["default_used"] is True
     assert [item["name"] for item in result["available_profiles"]] == [
         "core",
@@ -375,6 +375,7 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
     assert result["enabled_features"] == []
     assert [item["name"] for item in result["available_features"]] == [
         "lexical_docs",
+        "model_manager",
         "semantic_docs",
         "shared_server",
     ]
@@ -388,6 +389,7 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
     assert result["profile_guidance"]["wave_optics_recommended_profile"] == "wave_optics"
     assert result["profile_guidance"]["independent_feature_gates"] == {
         "lexical_docs": "COMSOL_MCP_ENABLE_LEXICAL_DOCS",
+        "model_manager": "COMSOL_MCP_ENABLE_MODEL_MANAGER",
         "semantic_docs": "COMSOL_MCP_ENABLE_SEMANTIC_DOCS",
         "shared_server": "COMSOL_MCP_ENABLE_SHARED_SERVER",
     }
@@ -446,7 +448,7 @@ def test_startup_capability_summary_is_compact_and_truthful(monkeypatch):
     summary = startup_capability_summary()
 
     assert "profile=core" in summary
-    assert "tools=55" in summary
+    assert "tools=56" in summary
     assert "lexical_manual=disabled" in summary
     assert "semantic_docs=disabled" in summary
     assert "durable_jobs=staged_sweep" in summary

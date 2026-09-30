@@ -235,7 +235,9 @@ then `PATH`. Auto-detect never replaces a non-null value without confirmation.
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
 | `shared_server.enabled` | `false` | Independent Boolean gate for the explicit local Desktop/attached-Server workflow. It composes with every profile and never starts or terminates the user's COMSOL Server. |
-| `model_manager.upload_enabled` | `false` | Independent Boolean gate for the `dbmodel://` upload operation. It is separate from `shared_server.enabled` in both directions, so sharing a session never grants Model Manager write access. Opening, running, and downloading work while it is off. When it is on, an upload still requires an explicit derived source identity and is refused on any existing destination, revision mismatch, or overwrite. |
+| `model_manager.enabled` | `false` | Independent Boolean gate for the optional COMSOL Model Manager tools. It composes with every profile and is separate from `shared_server.enabled` in both directions, so sharing a session never grants Model Manager access. While it is off the tools are not registered at all. |
+| `model_manager.upload_enabled` | `false` | Independent Boolean gate for saving back to the Model Manager. It is separate from `model_manager.enabled` in both directions, so enabling the feature does not grant write access. Opening, running, and downloading keep working while it is off. When it is on, an upload still requires an explicit derived source identity and is refused on any existing destination, revision mismatch, or overwrite. |
+| `discovery.pagination_enabled` | `false` | Independent Boolean gate for the experimental `tools/list` cursor adapter. It changes only how the tool list is delivered, never which tools or side effects the profile permits. While it is off, `tools/list` returns the ordinary complete listing, which is the contract clients that read only a first page rely on. While it is on, the listing is returned in bounded pages whose `_meta` states the true total, so a partial page can never be mistaken for the whole surface. |
 | `ownership.owner` | `null` | Optional non-empty owner label, at most 256 characters and without control characters. `null` derives a bounded label from the parent process. |
 
 ### Evidence Integrity
@@ -300,6 +302,7 @@ Canonical default template:
     "artifact_write_root": "%PROGRAMDATA%/comsol_mcp/artifacts"
   },
   "shared_server": {"enabled": false},
+  "discovery": {"pagination_enabled": false},
   "evidence_integrity": {
     "checks": {
       "outcome_contract_validation": true,

@@ -99,6 +99,19 @@ MESSAGE_IDS = (
         "Enable optional interactive collaboration with a COMSOL Desktop connected to a "
         "local Server. This feature composes with every tool profile."
     ),
+    (
+        "Experimental progressive tool-schema delivery. It is off by default and only "
+        "changes discovery pagination; it does not enable tools or change permissions."
+    ),
+    (
+        "Enable the COMSOL Model Manager tools for the selected profile. This is a "
+        "separate optional feature and stays off unless you enable it here."
+    ),
+    (
+        "Allow saving a derived copy back to the COMSOL Model Manager. This is separate "
+        "from shared Desktop collaboration. Opening, running, and downloading models "
+        "work without it."
+    ),
     "Check that execution results and scientific conclusions are reported separately.",
     "Check saved result files and their hashes.",
     "Check that summary statements match the saved result values.",

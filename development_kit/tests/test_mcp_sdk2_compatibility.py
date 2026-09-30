@@ -189,7 +189,7 @@ def test_server_uses_official_mcpserver_and_preserves_wire_schema_aliases() -> N
     server = create_server("MCP SDK 2 compatibility", profile="core")
     assert isinstance(server, MCPServer)
     tools = asyncio.run(server.list_tools())
-    assert len(tools) == 55
+    assert len(tools) == 56
     capabilities = next(tool for tool in tools if tool.name == "capabilities")
     serialized = capabilities.model_dump(mode="json", by_alias=True, exclude_none=True)
     assert serialized["inputSchema"] == capabilities.input_schema
@@ -220,7 +220,7 @@ def test_sdk2_server_preserves_legacy_stdio_protocols(
     assert initialized["instructions"] == SERVER_INSTRUCTIONS
 
     listed = exchange["listed"]["result"]
-    assert len(listed["tools"]) == 55
+    assert len(listed["tools"]) == 56
     assert {tool["name"] for tool in listed["tools"]} >= {
         "capabilities",
         "solver_preflight",
@@ -243,7 +243,7 @@ def test_sdk2_server_preserves_legacy_stdio_protocols(
     assert "resultType" not in called
     capabilities = _response_payload(called)
     assert capabilities["profile"] == "core"
-    assert capabilities["tool_count"] == 55
+    assert capabilities["tool_count"] == 56
     assert capabilities["session"] == {"connected": False, "starting": False}
 
     resources = exchange["resources"]["result"]

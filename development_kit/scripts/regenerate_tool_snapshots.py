@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 from comsol_mcp.server import create_server
 from comsol_mcp.settings import (
     LEXICAL_DOCS_ENABLED_ENV,
+    MODEL_MANAGER_ENABLED_ENV,
     SEMANTIC_ENABLED_ENV,
     SHARED_SERVER_ENV,
 )
@@ -47,6 +48,7 @@ async def _collect() -> dict[str, dict]:
         "core",
         environ={
             LEXICAL_DOCS_ENABLED_ENV: "true",
+            MODEL_MANAGER_ENABLED_ENV: "true",
             SEMANTIC_ENABLED_ENV: "true",
             SHARED_SERVER_ENV: "true",
         },
@@ -64,9 +66,7 @@ def main() -> int:
         extra = sorted(set(schemas) - set(TOOL_METADATA))
         raise SystemExit(f"schema/tool mismatch missing={missing} extra={extra}")
 
-    profile_names = {
-        profile: sorted(tool_names_for_profile(profile)) for profile in PROFILE_NAMES
-    }
+    profile_names = {profile: sorted(tool_names_for_profile(profile)) for profile in PROFILE_NAMES}
     feature_names = {
         feature: sorted(
             name for name, meta in TOOL_METADATA.items() if meta.feature_gate == feature
@@ -126,6 +126,29 @@ def main() -> int:
                 "tool_count": counts["electro_chemistry"],
             }
         )
+
+    # Support matrix feature entries. Features are added explicitly rather than
+    # inferred: the support label is a reviewed claim about maturity, so a new
+    # feature must be given one deliberately instead of inheriting a default.
+    SUPPORT_BY_FEATURE = {
+        "lexical_docs": "verified_default_off",
+        "model_manager": "experimental_default_off",
+        "semantic_docs": "experimental_promotion_rejected",
+        "shared_server": "experimental_default_off",
+    }
+    feature_counts = {
+        feature: sum(metadata.feature_gate == feature for metadata in TOOL_METADATA.values())
+        for feature in FEATURE_NAMES
+    }
+    matrix["features"] = [
+        {
+            "default_enabled": False,
+            "name": feature,
+            "support": SUPPORT_BY_FEATURE[feature],
+            "tool_count": feature_counts[feature],
+        }
+        for feature in FEATURE_NAMES
+    ]
     _dump(matrix_path, matrix, sort_keys=False)
     print("snapshot regeneration complete")
     return 0

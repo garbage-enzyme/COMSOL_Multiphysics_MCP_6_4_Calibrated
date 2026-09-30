@@ -22,12 +22,19 @@ MAX_CORE_TOOL_SCHEMA_BYTES = 16 * 1024
 # accommodating a public surface addition, matching the documented 80 KiB
 # capabilities bound below. Measured 2026-09-28: 70,978 B / 55 tools.
 #
-# The capabilities result also embeds the complete schema registry. The registry
-# legitimately grows with each public schema (151 entries measured at 66,692 B
-# on 2026-08-18, alpha7.2 with robust forward-shape schemas), so the bound is
-# 80 KiB to keep headroom for documented registry growth while still bounding
-# the response.
+# 0.7.6 P0 changes what the capabilities response may contain rather than what it
+# is allowed to weigh. It previously embedded the complete schema registry, which
+# legitimately grows with each public schema (151 entries measured at 66,692 B on
+# 2026-08-18, alpha7.2; 193 entries at 60,293 B on 2026-09-29), so the old bound
+# had to keep absorbing registry growth that no client needed at startup.
+# Progressive discovery replaces that with a compact identity/count view and
+# serves entries on demand through ``catalog``, so the byte gate can now be the
+# plan's real target instead of a ceiling that tracked the artifact surface.
 MAX_CAPABILITIES_RESPONSE_BYTES = 80 * 1024
+# The 0.7.6 release gate: default fresh-client bootstrap <= 32 KiB with a hard
+# regression ceiling of 40 KiB. Measured 2026-09-30 after P0: 22,594 B.
+BOOTSTRAP_TARGET_BYTES = 32 * 1024
+BOOTSTRAP_CEILING_BYTES = 40 * 1024
 
 _CHILD_PROBE = r"""
 import asyncio
@@ -82,6 +89,16 @@ capabilities_response_bytes = len(
         separators=(",", ":"),
     ).encode("utf-8")
 )
+# 0.7.6 P0: the schema registry must be delivered progressively, so the cold
+# response must not carry its entry rows at all. Size alone cannot prove that, so
+# this measures the registry block and whether entries were actually sent.
+capability_registry = capabilities.get("schema_registry")
+schema_registry_bytes = len(
+    json.dumps(capability_registry, sort_keys=True, separators=(",", ":")).encode("utf-8")
+)
+schema_registry_entry_rows_sent = isinstance(capability_registry, dict) and (
+    "entries" in capability_registry
+)
 if os.environ.get("COMSOL_MCP_CONTROL_PLANE_AUDIT_SELF_TEST") == "1":
     subprocess.run([sys.executable, "-c", "pass"], check=True)
 heavy_roots = ("mph", "jpype", "numpy", "scipy", "matplotlib")
@@ -100,6 +117,8 @@ print(json.dumps({
     "core_discovery_bytes": core_discovery_bytes,
     "largest_tool_schema_bytes": max(tool_record_bytes, default=0),
     "capabilities_response_bytes": capabilities_response_bytes,
+    "schema_registry_bytes": schema_registry_bytes,
+    "schema_registry_entry_rows_sent": schema_registry_entry_rows_sent,
 }))
 """
 
@@ -129,7 +148,7 @@ def test_fresh_core_discovery_is_solver_free():
 
     assert sample["heavy_modules"] == []
     assert sample["process_launch_events"] == []
-    assert sample["tool_count"] == 55
+    assert sample["tool_count"] == 56
     assert sample["create_seconds"] <= 0.75
     assert sample["core_discovery_bytes"] <= MAX_CORE_DISCOVERY_BYTES
     assert sample["largest_tool_schema_bytes"] <= MAX_CORE_TOOL_SCHEMA_BYTES
@@ -139,6 +158,13 @@ def test_fresh_core_discovery_is_solver_free():
     # changes, so a future tool that bloats discovery is caught even though the
     # total still fits.
     assert sample["core_discovery_bytes"] / sample["tool_count"] <= 1536
+    # The 0.7.6 progressive-discovery release gate. The byte budget is only
+    # meaningful if the payload actually excludes the schema registry, so the
+    # exclusion is asserted here rather than inferred from the size alone.
+    assert sample["capabilities_response_bytes"] <= BOOTSTRAP_TARGET_BYTES
+    assert sample["capabilities_response_bytes"] <= BOOTSTRAP_CEILING_BYTES
+    assert sample["schema_registry_bytes"] < 2048
+    assert sample["schema_registry_entry_rows_sent"] is False
 
 
 def test_process_launch_audit_captures_a_short_lived_child():
@@ -168,6 +194,9 @@ def test_cold_core_discovery_budget_has_seven_raw_samples(capsys):
                 "maximum_capabilities_response_bytes": max(
                     sample["capabilities_response_bytes"] for sample in samples
                 ),
+                "maximum_schema_registry_bytes": max(
+                    sample["schema_registry_bytes"] for sample in samples
+                ),
             }
         )
     )
@@ -179,5 +208,12 @@ def test_cold_core_discovery_budget_has_seven_raw_samples(capsys):
         sample["core_discovery_bytes"] <= MAX_CORE_DISCOVERY_BYTES
         and sample["largest_tool_schema_bytes"] <= MAX_CORE_TOOL_SCHEMA_BYTES
         and sample["capabilities_response_bytes"] <= MAX_CAPABILITIES_RESPONSE_BYTES
+        for sample in samples
+    )
+    # A single sample could pass by luck; the release target is asserted across
+    # all of them, together with the proof that registry rows are not sent.
+    assert all(
+        sample["capabilities_response_bytes"] <= BOOTSTRAP_TARGET_BYTES
+        and sample["schema_registry_entry_rows_sent"] is False
         for sample in samples
     )

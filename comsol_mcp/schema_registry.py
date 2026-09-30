@@ -554,6 +554,11 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.durable.operation_ledger",
         ),
         _entry(
+            "comsol_mcp.model_manager_refusal",
+            "1.0.0",
+            "comsol_mcp.shared_session.model_manager",
+        ),
+        _entry(
             EVIDENCE_SETTINGS_SCHEMA,
             EVIDENCE_INTEGRITY_VERSION,
             "comsol_mcp.evidence.integrity_controls",
@@ -1276,17 +1281,99 @@ def _entries() -> list[dict[str, Any]]:
     return sorted(entries, key=lambda item: item["schema_name"])
 
 
-def get_schema_registry() -> dict[str, Any]:
-    """Return the complete deterministic schema support registry."""
-    entries = _entries()
-    body = {
+def _entries_body(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build the exact hashed body shared by the full and summarized views."""
+    return {
         "schema_name": _REGISTRY_SCHEMA,
         "schema_version": _REGISTRY_VERSION,
         "producer": {"package": "comsol-mcp", "version": __version__},
         "entries": entries,
         "entry_count": len(entries),
     }
+
+
+def get_schema_registry() -> dict[str, Any]:
+    """Return the complete deterministic schema support registry."""
+    body = _entries_body(_entries())
     return deepcopy({**body, "registry_sha256": canonical_sha256_v1(body)})
+
+
+def summarize_schema_registry() -> dict[str, Any]:
+    """Return the compact discovery view of the schema support registry.
+
+    The complete registry is ~60 kB and does not belong in cold discovery: it
+    grows by roughly 300 B with every new public artifact schema, so embedding it
+    makes the startup payload scale with the artifact surface instead of with the
+    tool surface. This view keeps the parts a client actually needs at startup --
+    the identity (``registry_sha256``, computed over exactly the same body the
+    full view hashes, so the two views can never disagree), the entry count, the
+    producer, and bounded count breakdowns -- and names the solver-free operation
+    that returns one entry or the full registry on demand.
+
+    It is not a truncation: no entry is partially represented, and the counts
+    below always describe the whole registry. A caller that needs an entry asks
+    for it by name through ``catalog``.
+    """
+    entries = _entries()
+    body = _entries_body(entries)
+    by_kind: dict[str, int] = {}
+    for entry in entries:
+        kind = entry["artifact_kind"]
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+    readable_version_counts: dict[str, int] = {}
+    for entry in entries:
+        count = len(entry["readable_versions"])
+        key = str(count)
+        readable_version_counts[key] = readable_version_counts.get(key, 0) + 1
+    return deepcopy(
+        {
+            "schema_name": _REGISTRY_SCHEMA,
+            "schema_version": _REGISTRY_VERSION,
+            "view": "summary",
+            "producer": body["producer"],
+            "entry_count": body["entry_count"],
+            "registry_sha256": canonical_sha256_v1(body),
+            "full_registry_available": True,
+            "on_demand_operation": "catalog",
+            "on_demand_selectors": ["schema", "domain", "tool"],
+            "artifact_kind_counts": dict(sorted(by_kind.items())),
+            "readable_version_count_histogram": dict(sorted(readable_version_counts.items())),
+            "writable_entry_count": sum(
+                1 for entry in entries if entry["writable_version"] is not None
+            ),
+            "migration_capable_entry_count": sum(
+                1 for entry in entries if entry["migration"]["available"]
+            ),
+        }
+    )
+
+
+def select_schema_entry(schema_name: object) -> dict[str, Any]:
+    """Return exactly one registry entry, or a bounded refusal.
+
+    The refusal is explicit and never substitutes a different schema: a caller
+    that asked for an unknown name must not receive a plausible-looking entry.
+    """
+    if not isinstance(schema_name, str) or not schema_name.strip():
+        return {
+            "found": False,
+            "reason_code": "invalid_schema_name",
+            "schema_name": schema_name if isinstance(schema_name, str) else None,
+        }
+    requested = schema_name.strip()
+    for entry in _entries():
+        if entry["schema_name"] == requested:
+            return {
+                "found": True,
+                "reason_code": "found",
+                "entry": deepcopy(entry),
+                "registry_sha256": get_schema_registry()["registry_sha256"],
+            }
+    return {
+        "found": False,
+        "reason_code": "unknown_schema_name",
+        "schema_name": requested,
+    }
 
 
 def check_schema_support(
@@ -1338,4 +1425,9 @@ def check_schema_support(
     }
 
 
-__all__ = ["check_schema_support", "get_schema_registry"]
+__all__ = [
+    "check_schema_support",
+    "get_schema_registry",
+    "select_schema_entry",
+    "summarize_schema_registry",
+]

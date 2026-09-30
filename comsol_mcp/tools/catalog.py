@@ -16,7 +16,7 @@ PROFILE_NAMES = (
     "full",
     "comsolless_read_only",
 )
-FEATURE_NAMES = ("lexical_docs", "semantic_docs", "shared_server")
+FEATURE_NAMES = ("lexical_docs", "model_manager", "semantic_docs", "shared_server")
 # Isolated module profiles own tools that must never be merged into the
 # default or compatibility ``full`` surface.
 ISOLATED_MODULE_PROFILES = frozenset({"electro_chemistry"})
@@ -56,6 +56,7 @@ ToolMetadata = ToolSpec
 
 _TOOLS_BY_REGISTRAR = {
     "comsol_mcp.tools.capabilities.register_capability_tools": ("capabilities",),
+    "comsol_mcp.tools.discovery_tools.register_discovery_tools": ("catalog",),
     "comsol_mcp.tools.settings_gui.register_settings_gui_tools": ("settings.start",),
     "comsol_mcp.tools.evidence_integrity.register_evidence_integrity_tools": (
         "evidence_integrity_status",
@@ -311,6 +312,13 @@ _TOOLS_BY_REGISTRAR = {
         "shared_model_snapshot",
         "shared_model_adopt",
     ),
+    "comsol_mcp.tools.model_manager.register_model_manager_tools": (
+        "model_manager_open",
+        "model_manager_run",
+        "model_manager_download",
+        "model_manager_upload",
+        "model_manager_status",
+    ),
     "comsol_mcp.knowledge.embedded.register_knowledge_tools": (
         "docs_get",
         "docs_list",
@@ -326,6 +334,7 @@ _TOOLS_BY_REGISTRAR = {
 
 _GROUP_BY_REGISTRAR = {
     "register_capability_tools": "capabilities",
+    "register_discovery_tools": "discovery",
     "register_settings_gui_tools": "settings",
     "register_evidence_integrity_tools": "evidence_integrity",
     "register_ownership_tools": "ownership",
@@ -368,6 +377,7 @@ _GROUP_BY_REGISTRAR = {
     "register_research_tools": "research_exploration",
     "register_robust_shape_tools": "robust_shape_optimization",
     "register_shared_session_tools": "shared_session",
+    "register_model_manager_tools": "model_manager",
     "register_knowledge_tools": "embedded_docs",
     "register_lexical_manual_tools": "lexical_docs",
 }
@@ -428,6 +438,11 @@ _EXPERIMENTAL_TOOLS = frozenset(
         "robust_shape_job_submit",
         "robust_shape_evidence_inspect",
         "robust_shape_evidence_verify",
+        "model_manager_open",
+        "model_manager_run",
+        "model_manager_download",
+        "model_manager_upload",
+        "model_manager_status",
     }
 )
 
@@ -532,6 +547,12 @@ _SIDE_EFFECTS = {
     "shared_model_adopt": "shared_model_guard",
     "shared_model_unlock": "shared_model_guard",
     "shared_model_snapshot": "filesystem_write",
+    # Only `run` starts a solver; the rest read or write a bounded artifact.
+    "model_manager_open": "read_only",
+    "model_manager_run": "solver_execution",
+    "model_manager_download": "filesystem_write",
+    "model_manager_upload": "filesystem_write",
+    "model_manager_status": "read_only_process_status",
 }
 
 _STARTS_SOLVER = frozenset(
@@ -548,6 +569,7 @@ _STARTS_SOLVER = frozenset(
         "mesh_convergence_study",
         "wave_optics_point_audit",
         "wave_optics_reference_audit",
+        "model_manager_run",
     }
 )
 
@@ -555,6 +577,7 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
     {
         "branch_continuation_plan",
         "capabilities",
+        "catalog",
         "clientapi_property_get",
         "comsol_status",
         "convergence_evaluate",
@@ -648,6 +671,7 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
 _CONTROL_PLANE_TOOLS = frozenset(
     {
         "capabilities",
+        "catalog",
         "settings.start",
         "evidence_integrity_status",
         "solver_status",
@@ -666,6 +690,7 @@ _CONTROL_PLANE_TOOLS = frozenset(
         "semantic_worker_reset",
         "shared_server_preflight",
         "shared_server_status",
+        "model_manager_status",
     }
 )
 
@@ -746,6 +771,11 @@ _MODEL_REVISION_EXCLUSIONS = frozenset(
         "semantic_worker_reset",
         "standalone_start",
         "standalone_resume",
+        "model_manager_open",
+        "model_manager_run",
+        "model_manager_download",
+        "model_manager_upload",
+        "model_manager_status",
     }
 )
 
@@ -782,6 +812,10 @@ _MODEL_REVISION_NONADVANCING = frozenset(
 _CORE_TOOLS = frozenset(
     {
         "capabilities",
+        # Progressive discovery: the compact catalog replaces the full schema
+        # registry in bootstrap, so it must be reachable in every profile that
+        # can start work.
+        "catalog",
         "settings.start",
         "evidence_integrity_status",
         "evidence_integrity_verify",
@@ -1041,6 +1075,19 @@ _DESKTOP_SHARED_FOUNDATION = frozenset(
 )
 _SHARED_SERVER_ADDITIONS = _DESKTOP_SHARED_FOUNDATION - _CORE_TOOLS
 
+# COMSOL Model Manager tools. The read operations are ordinary capabilities that
+# belong to every profile; only the upload is gated, so the feature toggle can
+# never be confused with permission to read.
+_MODEL_MANAGER_READ_TOOLS = frozenset(
+    {
+        "model_manager_open",
+        "model_manager_run",
+        "model_manager_download",
+        "model_manager_status",
+    }
+)
+_MODEL_MANAGER_WRITE_TOOLS = frozenset({"model_manager_upload"})
+
 # Isolated Electrochemistry Module tools. They exist only on the
 # ``electro_chemistry`` profile and must not enter default or ``full``.
 _ELECTRO_CHEMISTRY_ADDITIONS = frozenset(
@@ -1067,6 +1114,12 @@ def _build_registry() -> dict[str, ToolMetadata]:
         **{name: "lexical_docs" for name in _MANUALS_ADDITIONS},
         **{name: "semantic_docs" for name in _SEMANTIC_DOCS_ADDITIONS},
         **{name: "shared_server" for name in _SHARED_SERVER_ADDITIONS},
+        # The whole Model Manager surface is one optional feature. Gating it
+        # makes its tools members of every profile while keeping the surface
+        # default-off; the separate upload setting then controls writes alone.
+        **{
+            name: "model_manager" for name in _MODEL_MANAGER_READ_TOOLS | _MODEL_MANAGER_WRITE_TOOLS
+        },
     }
     base_names = frozenset(all_names - set(feature_by_tool))
     profile_tools = {

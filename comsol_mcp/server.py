@@ -134,6 +134,33 @@ def _tasks_extensions() -> list:
     return [build_tasks_extension(bridge)]
 
 
+def _install_discovery_pagination(server: MCPServer) -> bool:
+    """Install the experimental ``tools/list`` pager when the setting enables it.
+
+    Default-off by construction: the setting defaults to ``false``, and when it is
+    off this does nothing at all, so the ``tools/list`` path stays the untouched
+    SDK handler and clients that read only a first page (MCP1, OpenCode) keep the
+    complete listing. A ``False`` return means either the setting is off or the
+    reviewed SDK no longer exposes the provisional middleware shape; both leave
+    the ordinary contract in place rather than a half-installed adapter.
+    """
+    from comsol_mcp.settings import load_settings
+
+    try:
+        enabled = bool(load_settings()["discovery"]["pagination_enabled"])
+    except Exception:
+        # A settings read failure must never decide to change the wire contract.
+        logger.info("Discovery pagination setting was unreadable; staying off")
+        return False
+    if not enabled:
+        return False
+    from .tools.tools_list_pagination import install_tools_list_pagination
+
+    installed = install_tools_list_pagination(server)
+    logger.info("Experimental tools/list pagination installed=%s", installed)
+    return installed
+
+
 def create_server(
     name: str = "COMSOL MCP",
     profile: str | ProfileSelection | None = None,
@@ -148,6 +175,7 @@ def create_server(
     )
     register_all_tools(server, profile)
     register_all_resources(server)
+    _install_discovery_pagination(server)
     return server
 
 
@@ -184,6 +212,7 @@ def main() -> None:
 
     register_all_tools(profile=selection)
     register_all_resources()
+    _install_discovery_pagination(mcp)
 
     mcp.run()
 

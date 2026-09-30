@@ -24,7 +24,7 @@ from comsol_mcp.jobs.tasks_extension import (
 from comsol_mcp.protocol_identity import TASKS_EXTENSION_IDENTIFIER
 from comsol_mcp.server import create_server
 
-EXISTING_TOOL_COUNT = 55
+EXISTING_TOOL_COUNT = 56
 
 
 def test_the_real_server_advertises_the_tasks_extension() -> None:

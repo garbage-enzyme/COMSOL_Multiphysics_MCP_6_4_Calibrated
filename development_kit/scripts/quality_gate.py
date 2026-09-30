@@ -52,8 +52,14 @@ LINT_TARGETS = (
     "comsol_mcp/jobs/tasks_bridge.py",
     "comsol_mcp/jobs/tasks_extension.py",
     "comsol_mcp/shared_session/dbmodel_operations.py",
+    "comsol_mcp/shared_session/model_manager.py",
     "comsol_mcp/shared_session/solver_owners.py",
     "comsol_mcp/durable/operation_ledger.py",
+    "comsol_mcp/tools/model_manager.py",
+    # P0: the progressive-discovery surface is lint-clean and stays covered.
+    "comsol_mcp/tools/discovery.py",
+    "comsol_mcp/tools/discovery_tools.py",
+    "comsol_mcp/tools/tools_list_pagination.py",
     "comsol_mcp/schema_registry.py",
     "comsol_mcp/settings_gui_handshake.py",
     "comsol_mcp/settings_gui_launcher.py",
@@ -244,8 +250,15 @@ MYPY_GROUPS = (
     (
         "--follow-imports=silent",
         "comsol_mcp/shared_session/dbmodel_operations.py",
+        "comsol_mcp/shared_session/model_manager.py",
         "comsol_mcp/shared_session/solver_owners.py",
         "comsol_mcp/durable/operation_ledger.py",
+        "comsol_mcp/tools/model_manager.py",
+        # P0: the discovery surface handles SDK result shapes whose types resolve
+        # only when imports are followed as far as the checker needs.
+        "comsol_mcp/tools/discovery.py",
+        "comsol_mcp/tools/discovery_tools.py",
+        "comsol_mcp/tools/tools_list_pagination.py",
     ),
 )
 PRODUCTION_ROOTS = ("comsol_mcp", "src")

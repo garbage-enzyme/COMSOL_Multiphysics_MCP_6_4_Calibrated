@@ -2,6 +2,7 @@
   "core": [
     "branch_continuation_plan",
     "capabilities",
+    "catalog",
     "comsol_disconnect",
     "comsol_start",
     "comsol_status",
@@ -59,6 +60,7 @@
   "basic_fem": [
     "branch_continuation_plan",
     "capabilities",
+    "catalog",
     "comsol_disconnect",
     "comsol_start",
     "comsol_status",
@@ -178,6 +180,7 @@
   "wave_optics": [
     "branch_continuation_plan",
     "capabilities",
+    "catalog",
     "comsol_disconnect",
     "comsol_start",
     "comsol_status",
@@ -264,6 +267,7 @@
   "electro_chemistry": [
     "branch_continuation_plan",
     "capabilities",
+    "catalog",
     "comsol_disconnect",
     "comsol_start",
     "comsol_status",
@@ -326,6 +330,7 @@
   "experimental": [
     "branch_continuation_plan",
     "capabilities",
+    "catalog",
     "clientapi_property_get",
     "clientapi_property_set",
     "comsol_connect",
@@ -437,6 +442,7 @@
   "full": [
     "branch_continuation_plan",
     "capabilities",
+    "catalog",
     "clientapi_property_get",
     "clientapi_property_set",
     "comsol_connect",

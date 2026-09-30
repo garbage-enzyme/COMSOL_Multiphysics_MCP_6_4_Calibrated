@@ -51,6 +51,67 @@
     "title": "capabilitiesArguments",
     "type": "object"
   },
+  "catalog": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "domain": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Domain"
+      },
+      "limit": {
+        "default": 32,
+        "maximum": 1e+308,
+        "minimum": -1e+308,
+        "title": "Limit",
+        "type": "integer"
+      },
+      "offset": {
+        "default": 0,
+        "maximum": 1e+308,
+        "minimum": -1e+308,
+        "title": "Offset",
+        "type": "integer"
+      },
+      "schema": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Schema"
+      },
+      "tool": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Tool"
+      }
+    },
+    "title": "catalogArguments",
+    "type": "object"
+  },
   "clientapi_property_get": {
     "additionalProperties": false,
     "maxProperties": 256,
@@ -4791,6 +4852,161 @@
       "file_path"
     ],
     "title": "model_loadArguments",
+    "type": "object"
+  },
+  "model_manager_download": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "destination": {
+        "maxLength": 16384,
+        "title": "Destination",
+        "type": "string"
+      },
+      "destination_exists": {
+        "default": false,
+        "title": "Destination Exists",
+        "type": "boolean"
+      },
+      "existing_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Existing Sha256"
+      },
+      "incoming_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Incoming Sha256"
+      },
+      "uri": {
+        "maxLength": 16384,
+        "title": "Uri",
+        "type": "string"
+      }
+    },
+    "required": [
+      "uri",
+      "destination"
+    ],
+    "title": "model_manager_downloadArguments",
+    "type": "object"
+  },
+  "model_manager_open": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "uri": {
+        "maxLength": 16384,
+        "title": "Uri",
+        "type": "string"
+      }
+    },
+    "required": [
+      "uri"
+    ],
+    "title": "model_manager_openArguments",
+    "type": "object"
+  },
+  "model_manager_run": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "resource_policy": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "maxProperties": 256,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Resource Policy"
+      },
+      "uri": {
+        "maxLength": 16384,
+        "title": "Uri",
+        "type": "string"
+      }
+    },
+    "required": [
+      "uri"
+    ],
+    "title": "model_manager_runArguments",
+    "type": "object"
+  },
+  "model_manager_status": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {},
+    "title": "model_manager_statusArguments",
+    "type": "object"
+  },
+  "model_manager_upload": {
+    "additionalProperties": false,
+    "maxProperties": 256,
+    "properties": {
+      "derived_source_identity": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "title": "Derived Source Identity",
+        "type": "object"
+      },
+      "expected_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Revision"
+      },
+      "observed_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Observed Revision"
+      },
+      "uri": {
+        "maxLength": 16384,
+        "title": "Uri",
+        "type": "string"
+      }
+    },
+    "required": [
+      "uri",
+      "derived_source_identity"
+    ],
+    "title": "model_manager_uploadArguments",
     "type": "object"
   },
   "model_remove": {

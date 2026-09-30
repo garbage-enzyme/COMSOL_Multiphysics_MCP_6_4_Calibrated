@@ -14,17 +14,21 @@ from pathlib import Path
 import pytest
 
 from comsol_mcp.settings import (
-    MODEL_MANAGER_UPLOAD_ENV,
+    MODEL_MANAGER_ENABLED_ENV,
     SHARED_SERVER_ENV,
     load_settings,
 )
 from comsol_mcp.shared_session.dbmodel_operations import (
     DbmodelOperationError,
     build_request,
+)
+from comsol_mcp.shared_session.dbmodel_operations import (
     capability_document as dbmodel_capabilities,
 )
 from comsol_mcp.shared_session.solver_owners import (
     MAX_SOLVER_OWNERS,
+)
+from comsol_mcp.shared_session.solver_owners import (
     capability_document as owner_capabilities,
 )
 
@@ -39,7 +43,7 @@ def _write_settings(tmp_path: Path, **overrides: object) -> Path:
         "schema_version": "1.3.0",
         "profile": {"name": "core"},
         "shared_server": {"enabled": False},
-        "model_manager": {"upload_enabled": False},
+        "model_manager": {"enabled": False},
     }
     for key, value in overrides.items():
         document[key] = value
@@ -54,48 +58,46 @@ def _write_settings(tmp_path: Path, **overrides: object) -> Path:
 
 
 def test_the_model_manager_write_gate_defaults_to_off() -> None:
-    assert load_settings({})["model_manager"]["upload_enabled"] is False
+    assert load_settings({})["model_manager"]["enabled"] is False
 
 
 def test_the_gate_has_a_dedicated_environment_switch() -> None:
     """A dedicated switch means sharing a session never implies write access."""
-    assert MODEL_MANAGER_UPLOAD_ENV == "COMSOL_MCP_ENABLE_MODEL_MANAGER_UPLOAD"
-    assert MODEL_MANAGER_UPLOAD_ENV != SHARED_SERVER_ENV
+    assert MODEL_MANAGER_ENABLED_ENV == "COMSOL_MCP_ENABLE_MODEL_MANAGER"
+    assert MODEL_MANAGER_ENABLED_ENV != SHARED_SERVER_ENV
 
 
 @pytest.mark.parametrize("value", [True])
 def test_the_gate_can_be_enabled_explicitly(tmp_path: Path, value: bool) -> None:
-    path = _write_settings(tmp_path, model_manager={"upload_enabled": value})
+    path = _write_settings(tmp_path, model_manager={"enabled": value})
     from comsol_mcp.settings import SETTINGS_PATH_ENV
 
     loaded = load_settings({SETTINGS_PATH_ENV: str(path)})
-    assert loaded["model_manager"]["upload_enabled"] is True
+    assert loaded["model_manager"]["enabled"] is True
 
 
 @pytest.mark.parametrize("value", [False])
 def test_the_gate_stays_off_when_disabled(tmp_path: Path, value: bool) -> None:
-    path = _write_settings(tmp_path, model_manager={"upload_enabled": value})
+    path = _write_settings(tmp_path, model_manager={"enabled": value})
     from comsol_mcp.settings import SETTINGS_PATH_ENV
 
     loaded = load_settings({SETTINGS_PATH_ENV: str(path)})
-    assert loaded["model_manager"]["upload_enabled"] is False
+    assert loaded["model_manager"]["enabled"] is False
 
 
 @pytest.mark.parametrize("value", ["true", "1", "yes", "on"])
-def test_a_stringly_typed_gate_value_is_rejected_not_coerced(
-    tmp_path: Path, value: str
-) -> None:
+def test_a_stringly_typed_gate_value_is_rejected_not_coerced(tmp_path: Path, value: str) -> None:
     """A truthy string must not silently enable a write gate.
 
     The settings contract requires a real JSON boolean, so a string falls back to
     the default rather than being interpreted. Coercing it would let a quoted
     "false" enable writes.
     """
-    path = _write_settings(tmp_path, model_manager={"upload_enabled": value})
+    path = _write_settings(tmp_path, model_manager={"enabled": value})
     from comsol_mcp.settings import SETTINGS_PATH_ENV
 
     loaded = load_settings({SETTINGS_PATH_ENV: str(path)})
-    assert loaded["model_manager"]["upload_enabled"] is False
+    assert loaded["model_manager"]["enabled"] is False
 
 
 def test_enabling_shared_server_does_not_enable_the_write_gate(tmp_path: Path) -> None:
@@ -103,11 +105,11 @@ def test_enabling_shared_server_does_not_enable_the_write_gate(tmp_path: Path) -
     from comsol_mcp.settings import SETTINGS_PATH_ENV
 
     path = _write_settings(
-        tmp_path, shared_server={"enabled": True}, model_manager={"upload_enabled": False}
+        tmp_path, shared_server={"enabled": True}, model_manager={"enabled": False}
     )
     loaded = load_settings({SETTINGS_PATH_ENV: str(path)})
     assert loaded["shared_server"]["enabled"] is True
-    assert loaded["model_manager"]["upload_enabled"] is False
+    assert loaded["model_manager"]["enabled"] is False
 
 
 def test_an_absent_group_from_an_older_file_defaults_to_off(tmp_path: Path) -> None:
@@ -127,13 +129,13 @@ def test_an_absent_group_from_an_older_file_defaults_to_off(tmp_path: Path) -> N
         encoding="utf-8",
     )
     loaded = load_settings({SETTINGS_PATH_ENV: str(path)})
-    assert loaded["model_manager"]["upload_enabled"] is False
+    assert loaded["model_manager"]["enabled"] is False
 
 
 def test_the_project_settings_file_declares_the_gate_off() -> None:
     root = Path(__file__).resolve().parents[2]
     document = json.loads((root / "settings.json").read_text(encoding="utf-8"))
-    assert document["model_manager"]["upload_enabled"] is False
+    assert document["model_manager"]["enabled"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +145,7 @@ def test_the_project_settings_file_declares_the_gate_off() -> None:
 
 def test_a_disabled_gate_refuses_an_upload_through_the_operation_layer() -> None:
     """The settings gate and admission must agree, not merely coexist."""
-    gate = load_settings({})["model_manager"]["upload_enabled"]
+    gate = load_settings({})["model_manager"]["enabled"]
     assert gate is False
     with pytest.raises(DbmodelOperationError) as excinfo:
         build_request(
@@ -168,7 +170,7 @@ def test_an_enabled_gate_admits_an_upload() -> None:
 @pytest.mark.parametrize("operation", ["open", "run", "download"])
 def test_read_operations_work_with_the_gate_off(operation: str) -> None:
     """Read access must never depend on the write gate."""
-    gate = load_settings({})["model_manager"]["upload_enabled"]
+    gate = load_settings({})["model_manager"]["enabled"]
     kwargs: dict[str, object] = {"write_enabled": gate}
     if operation == "download":
         kwargs["destination"] = "D:/downloads/cell.mph"

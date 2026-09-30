@@ -314,6 +314,7 @@ models are intentionally absent.
 - `development_kit/tests/test_solver_owners.py` — This module tests the two-owner one-core ceiling, verified-absence release, and cross-owner isolation.
 - `development_kit/tests/test_operation_ledger.py` — This module tests append-only operation journaling, replay recovery, artifact immutability, and preserved cleanup uncertainty.
 - `development_kit/tests/test_model_manager_gate.py` — This module binds the default-off Model Manager write gate to operation admission and checks the advertised capability metadata.
+- `development_kit/tests/test_model_manager_runtime.py` — This module tests the default-off Model Manager feature gate, upload setting, collision refusals, and durable journalling without a solver.
 - `development_kit/tests/test_mesh.py` — This module tests mesh helpers without a COMSOL client.
 - `development_kit/tests/test_mim_patch.py` — This module tests patch-metasurface helper behavior without a COMSOL client.
 - `development_kit/tests/test_mim_recipe_contracts.py` — This module tests solver-free safety contracts shared by the standalone MIM recipes.
@@ -395,6 +396,7 @@ models are intentionally absent.
 - `development_kit/tests/test_runtime_paths.py` — This module tests shared ASCII-safe runtime and lease paths.
 - `development_kit/tests/test_schema_registry.py` — This module tests named schema coverage and version support resolution.
 - `development_kit/tests/test_security_gate.py` — This module tests vulnerability report parsing and expiring allowlist policy.
+- `development_kit/tests/test_progressive_discovery.py` — This module tests the cold-start byte budget, catalog, and cursor paging boundaries.
 - `development_kit/tests/test_semantic_contracts.py` — This module tests semantic benchmark contracts, limits, and import safety.
 - `development_kit/tests/test_semantic_index.py` — This module tests immutable semantic index construction and publication.
 - `development_kit/tests/test_semantic_retrieval.py` — This module tests deterministic vector retrieval, filtering, fusion, and cache identity.
@@ -570,6 +572,7 @@ models are intentionally absent.
 - `comsol_mcp/jobs/tasks_bridge.py` — This module maps durable jobs onto the stable MCP Tasks wire contract without owning a second scheduler.
 - `comsol_mcp/jobs/tasks_extension.py` — This module registers the stable Tasks extension over the public SDK extension hooks.
 - `comsol_mcp/shared_session/dbmodel_operations.py` — This module admits and receipt-binds the four `dbmodel://` Model Manager operations with a separate default-off write gate.
+- `comsol_mcp/shared_session/model_manager.py` — This module runs the default-off Model Manager feature over an injected transport, journalling every attempt including refusals.
 - `comsol_mcp/shared_session/solver_owners.py` — This module enforces at most two independent one-core solver owners with verified-absence release and no cross-owner access.
 - `comsol_mcp/durable/operation_ledger.py` — This module journals Model Manager, owner, and local-session operations for append-only replay, duplicate suppression, and recovery.
 - `comsol_mcp/schema_registry.py` — This module registers named artifact schema producers and readable and writable versions.
@@ -723,6 +726,9 @@ models are intentionally absent.
 - `comsol_mcp/tools/branch_continuation.py` — This module exposes bounded solver-free branch-continuation planning.
 - `comsol_mcp/tools/convergence_evaluation.py` — This module exposes bounded solver-free convergence evaluation.
 - `comsol_mcp/tools/catalog.py` — This module classifies tools and snapshots deterministic public schemas.
+- `comsol_mcp/tools/discovery.py` — This module builds the compact domain catalog and bounded on-demand schema fetches.
+- `comsol_mcp/tools/discovery_tools.py` — This module registers the read-only progressive-discovery catalog tool.
+- `comsol_mcp/tools/tools_list_pagination.py` — This module implements the default-off experimental tools/list cursor adapter.
 - `comsol_mcp/tools/derived_geometry.py` — This module applies typed edits only to provenance-tracked derived models.
 - `comsol_mcp/tools/evidence_integrity.py` — This module exposes solver-free evidence-integrity status and formal verification tools.
 - `comsol_mcp/tools/field_evidence.py` — This module exposes read-only field discovery and extraction tools.
@@ -757,6 +763,7 @@ models are intentionally absent.
 - `comsol_mcp/tools/compatibility_registry.py` — This module exposes the read-only runtime compatibility status tool.
 - `comsol_mcp/tools/thermal_radiation.py` — This module exposes solver-free Kirchhoff and thermal-radiation evidence tools.
 - `comsol_mcp/tools/thermal_material.py` — This module exposes solver-free thermal material ledger validation and evaluation.
+- `comsol_mcp/tools/model_manager.py` — This module exposes the default-off COMSOL Model Manager tools, which stay hidden until the feature is enabled.
 - `comsol_mcp/tools/session.py` — This module manages COMSOL client startup, status, models, and shutdown.
 - `comsol_mcp/tools/settings_gui.py` — This module exposes the profile-independent solver-free Settings GUI launcher.
 - `comsol_mcp/tools/shared_session.py` — This module exposes default-off local attached-server lifecycle tools.
