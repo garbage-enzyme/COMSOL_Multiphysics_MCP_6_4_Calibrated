@@ -130,6 +130,7 @@ models are intentionally absent.
 
 - `development_kit/scripts/__init__.py` — This file marks repository-only release utilities as a Python package.
 - `development_kit/scripts/acceptance_cleanup.py` — This module records independent licensed-gate cleanup steps and makes them part of final success.
+- `development_kit/scripts/build_engineering_fixture.py` — This repository-only builder creates the controlled periodic wave-optics engineering fixture that the licensed integration probes consume, using exactly one core and a private output directory under an acquired solver lease, deriving the top-air domain identity and coordinate extent from the model it actually built, refusing to overwrite any existing model, publishing through an atomic link after the client is released, and writing the SHA-256-bound fixture spec. Its fixture uses a lossless dielectric placeholder and validates interface and gate behaviour only; it makes no published-structure and no real-metal claim.
 - `development_kit/scripts/dependency_license_gate.py` — This script emits a path-free receipt and fails on expired, missing, stale, or unmatched runtime dependency license reviews.
 - `development_kit/scripts/dependency_drift_report.py` — This script builds the deterministic information-only dependency report with declared scopes, project ranges, exact-pair constraints, and complete release-lock drift.
 - `development_kit/scripts/quality_gate.py` — This script runs the ratcheted lint, format, typing, property, coverage, license, cold-start, and response-budget gates, using four isolated pytest workers locally and deterministic plain-pytest file shards on GitHub-hosted Python 3.14 (no xdist), plus a serial process-inventory tail and a unique evidence directory per run.
@@ -352,6 +353,7 @@ models are intentionally absent.
 - `development_kit/tests/test_reference_power_release_orchestrator.py` — This module tests mandatory serial release orchestration with fake processes.
 - `development_kit/tests/test_reference_power_runner.py` — This module tests reference-power coordinator and worker process boundaries.
 - `development_kit/tests/test_release_engineering.py` — This module tests repository, dependency, fixture, archive, and release policies.
+- `development_kit/tests/test_engineering_fixture_builder.py` — This module tests the controlled engineering fixture builder solver-free: single-core enforcement, ASCII absolute output isolation, staging-and-publish behaviour, refusal to overwrite an existing model, propagation of save failures without residue, release-failure accounting, and the scope limits that keep the fixture from claiming physical validity.
 - `development_kit/tests/test_release_facts.py` — This module tests the generated release-facts view against live implementation data.
 - `development_kit/tests/test_release_receipts.py` — This module tests deterministic SBOM and release inventory receipts.
 - `development_kit/tests/test_research_contracts.py` — This module tests closed goal and design-space normalization, identities, and the first MIM campaign bounds.

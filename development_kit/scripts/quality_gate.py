@@ -106,6 +106,9 @@ LINT_TARGETS = (
     "development_kit/scripts/robust_gradient_ladder_licensed_gate.py",
     "development_kit/scripts/verify_robust_gradient_ladder_receipt.py",
     "development_kit/scripts/standalone_licensed_gate.py",
+    # 0.7.6: the controlled engineering fixture builder is lint-clean and covered.
+    "development_kit/scripts/build_engineering_fixture.py",
+    "development_kit/tests/test_engineering_fixture_builder.py",
     "development_kit/benchmarks/research_campaign.py",
     "development_kit/tests/conftest.py",
     "development_kit/tests/test_alpha73_public_surface.py",
