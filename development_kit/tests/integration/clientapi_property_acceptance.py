@@ -36,21 +36,50 @@ def _require(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
+#: The exact COMSOL build this gate certifies.
+EXPECTED_COMSOL_RELEASE = "6.4"
+EXPECTED_COMSOL_BUILD = 293
+
+
+def _parse_runtime_release(java_version: str) -> tuple[str, int] | None:
+    """Return ``(release, build)`` from a COMSOL version string, or ``None``.
+
+    Positional parsing of four numbers is not portable. A Chinese-localized
+    installation reports ``COMSOL Multiphysics 6.4 (开发版本: 293)`` -- the literal
+    rendering on the acceptance host -- which carries only three numbers, so
+    ``findall(r"\\d+")[:4]`` yields ``['6', '4', '293']`` and the comparison
+    against ``(6, 4, 0, 293)`` failed even though the build *was* 293.
+
+    Read the release from the leading ``major.minor`` pair and the build from the
+    last integer in the string instead. This still rejects a different build: a
+    genuine ``6.4.0.292`` reports build 292.
+    """
+    release = re.search(r"(\d+\.\d+)", java_version)
+    builds = re.findall(r"\d+", java_version)
+    if release is None or not builds:
+        return None
+    return release.group(1), int(builds[-1])
+
+
 def _verify_runtime_release(client) -> dict[str, object]:
     mph_version = str(client.version)
     java_version = str(client.java.getComsolVersion())
-    numbers = tuple(int(value) for value in re.findall(r"\d+", java_version)[:4])
+    parsed = _parse_runtime_release(java_version)
     _require(
-        mph_version.startswith("6.4"), f"MPh selected unexpected COMSOL release: {mph_version}"
+        mph_version.startswith(EXPECTED_COMSOL_RELEASE),
+        f"MPh selected unexpected COMSOL release: {mph_version}",
     )
     _require(
-        numbers == (6, 4, 0, 293),
-        f"connected COMSOL runtime is not 6.4.0.293: {java_version}",
+        parsed == (EXPECTED_COMSOL_RELEASE, EXPECTED_COMSOL_BUILD),
+        f"connected COMSOL runtime is not {EXPECTED_COMSOL_RELEASE}.0.{EXPECTED_COMSOL_BUILD}: "
+        f"{java_version}",
     )
     return {
         "mph_client_version": mph_version,
         "java_reported_version": java_version,
-        "expected_build": "6.4.0.293",
+        "expected_build": f"{EXPECTED_COMSOL_RELEASE}.0.{EXPECTED_COMSOL_BUILD}",
+        "parsed_release": parsed[0],
+        "parsed_build": parsed[1],
         "verified": True,
     }
 

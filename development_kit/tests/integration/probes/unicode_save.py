@@ -17,7 +17,14 @@ def _cleanup_probe(client, output_file, output_dir, result) -> int:
     cleanup = CleanupRecorder(result)
     if client is not None:
         cleanup.run("client_clear", client.clear, expose_result=False)
-        cleanup.run("client_disconnect", client.disconnect, expose_result=False)
+        # Clearing a standalone client already tears the server down, after which
+        # MPh's ``Client.disconnect`` raises "The client is not connected to a
+        # server." because it only acts ``if self.port``. Guarding on the same
+        # attribute keeps this probe truthful: an already-disconnected client is
+        # a completed cleanup, not a fabricated failure. This matches the
+        # established idiom in ``recipes/parallel_plate_capacitor.py``.
+        if getattr(client, "port", None):
+            cleanup.run("client_disconnect", client.disconnect, expose_result=False)
     cleanup.run(
         "output_unlink",
         lambda: output_file.unlink(missing_ok=True),

@@ -13,6 +13,7 @@ from typing import Any
 import anyio
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.types import PaginatedRequestParams
 
 ROOT = Path(__file__).parents[3]
 if str(ROOT) not in sys.path:
@@ -23,16 +24,24 @@ from src.evidence.real_fixture import controlled_fixture_from_environment
 PYTHON = Path(sys.executable)
 RUNTIME = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
 ARTIFACT_DIR = RUNTIME / "live_profile"
+#: Independent expectations for this gate: the exact tool count each profile must
+#: expose through a real stdio session. These are deliberately written out here
+#: rather than read from ``development_kit/tests/snapshots/profile_tool_names.json``
+#: so the gate keeps asserting an independent number instead of agreeing with the
+#: artifact it is supposed to check. ``test_integration_boundaries`` fails if these
+#: drift from that frozen snapshot, so they cannot rot silently again.
 PROFILE_COUNTS = {
-    "core": 47,
-    "basic_fem": 109,
-    "wave_optics": 76,
-    "experimental": 97,
-    "full": 150,
+    "core": 56,
+    "basic_fem": 118,
+    "wave_optics": 85,
+    "experimental": 110,
+    "full": 166,
 }
 COLD_START_RESPONSE_LIMIT_SECONDS = 5.0
 CONTROL_PLANE_READ_LIMIT_SECONDS = 15.0
 LIVE_CLEANUP_LIMIT_SECONDS = 30.0
+#: Hard stop so a server that keeps handing back a cursor cannot loop forever.
+MAX_DISCOVERY_PAGES = 40
 
 
 def _require(condition: object, detail: object) -> None:
@@ -81,13 +90,21 @@ def _decode(result: Any) -> dict[str, Any]:
 
 
 def _server(profile: str) -> StdioServerParameters:
+    """Launch the *installed* distribution, which is what this gate asserts.
+
+    ``src`` is the repository-only legacy import shim and is deliberately not
+    packaged, so ``-m src.server`` cannot start under the installed layout whose
+    ``source_classification == "installed_site_package"`` this gate requires.
+    Launch the packaged module instead, and keep the working directory outside
+    the checkout so the run cannot accidentally import the source tree.
+    """
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env["COMSOL_MCP_PROFILE"] = profile
     env["COMSOL_MCP_RUNTIME_DIR"] = str(RUNTIME)
     return StdioServerParameters(
         command=str(PYTHON),
-        args=["-m", "src.server"],
+        args=["-m", "comsol_mcp.server"],
         cwd=RUNTIME,
         env=env,
     )
@@ -133,17 +150,40 @@ async def _call_before(
     }
 
 
+async def _list_every_tool(session: ClientSession) -> tuple[list[str], int]:
+    """Collect the complete advertised tool surface across every page.
+
+    The server may answer ``tools/list`` with a cursor (progressive discovery is
+    a default-off setting), so one call is not guaranteed to be the whole
+    surface. Walk the cursor to exhaustion and return the names plus the page
+    count, so the profile-count assertion measures the real surface either way.
+    """
+    names: list[str] = []
+    pages = 0
+    cursor: str | None = None
+    while pages < MAX_DISCOVERY_PAGES:
+        params = PaginatedRequestParams(cursor=cursor) if cursor is not None else None
+        listed = await session.list_tools(params=params)
+        pages += 1
+        names.extend(tool.name for tool in listed.tools)
+        cursor = getattr(listed, "next_cursor", None) or getattr(listed, "nextCursor", None)
+        if not cursor:
+            break
+    return names, pages
+
+
 async def _discover_profile(profile: str) -> dict[str, Any]:
     started = time.perf_counter()
     async with stdio_client(_server(profile)) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            listed = await session.list_tools()
-            names = sorted(tool.name for tool in listed.tools)
+            names, pages = await _list_every_tool(session)
+            names = sorted(names)
             capabilities_result = await session.call_tool("capabilities", {})
             capabilities = _decode(capabilities_result)
     expected = PROFILE_COUNTS[profile]
     _require(len(names) == expected, (profile, len(names), expected))
+    _require(len(names) == len(set(names)), (profile, "duplicate tools across pages"))
     _require(capabilities["profile"] == profile, capabilities)
     _require(capabilities["tool_count"] == expected, capabilities)
     identity = capabilities["deployment_identity"]
@@ -152,6 +192,7 @@ async def _discover_profile(profile: str) -> dict[str, Any]:
     return {
         "profile": profile,
         "tool_count": len(names),
+        "listed_pages": pages,
         "tools": names,
         "capabilities": capabilities,
         "elapsed_seconds": time.perf_counter() - started,

@@ -36,6 +36,12 @@ _COMPONENT_SCOPED_CONTAINERS = frozenset(
 )
 _TAG = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
+#: Declared value types whose reader is ``getStringArray`` rather than
+#: ``getString``. Measured on COMSOL 6.4 against an ordinary geometry ``Block``,
+#: whose ``input`` and ``posvertex`` properties are both declared ``Selection``.
+#: Strings are matched on the normalized (lowercased) declared type.
+_CONTAINER_PROPERTY_TYPES = frozenset({"selection"})
+
 
 def _validate_target(
     component_name: str,
@@ -130,6 +136,16 @@ def _read_property(target, property_name: str) -> tuple[JSONValue, str]:
         value = int(target.getInt(property_name))
     elif "bool" in normalized_type:
         value = bool(target.getBoolean(property_name))
+    elif normalized_type in _CONTAINER_PROPERTY_TYPES:
+        # Selection-valued properties are not strings: COMSOL rejects
+        # ``getString`` with a FlException ("property 'input' cannot be converted
+        # to a string"), which used to surface as an unexplained snapshot failure
+        # on any geometry containing an ordinary Block, because every Block has an
+        # ``input`` property of this kind. Measured on COMSOL 6.4: the supported
+        # reader is ``getStringArray``, which returns the selection's entity
+        # expressions (an empty list when nothing is selected). Reporting an empty
+        # selection honestly is better than refusing to snapshot the feature.
+        value = [str(item) for item in target.getStringArray(property_name)]
     else:
         value = str(target.getString(property_name))
     return normalize_property_value(value), value_type
