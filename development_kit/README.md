@@ -4,7 +4,7 @@ This directory contains repository-only tests, integration probes, release
 fixtures, build/release utilities, benchmarks, and developer documentation. It
 is intentionally excluded from the ordinary wheel and source distribution.
 Installed runtime imports and the `comsol-mcp` console entry point depend only
-on packaged runtime resources under `comsol_mcp/` and `settings_gui/`; `src/`
+on packaged runtime resources under `comsol_mcp/` and `settings_gui/`. `src/`
 is a repository-only legacy import compatibility layer.
 
 ## Start here
@@ -81,9 +81,9 @@ explicitly requested.
 `comsol_mcp/evidence/outcome_contract.py` keeps three decisions independent:
 
 - `execution.state` records whether requested work completed, failed, was
-  interrupted, or reached verified cancellation;
+  interrupted, or reached verified cancellation.
 - `evidence.state` records whether the evidence is complete, incomplete, or
-  invalid and preserves available raw artifacts as diagnostic evidence;
+  invalid and preserves available raw artifacts as diagnostic evidence.
 - `scientific.disposition` records accepted, residual, unresolved at the
   declared cap, invalid evidence, or not evaluated.
 
@@ -102,7 +102,7 @@ threshold, acceptance tolerance, or automatic next action.
 ## Layout maintenance
 
 `docs/layout.md` is a tested inventory, not an informal sketch. Every tracked
-file must appear there with one English sentence describing its purpose; update
+file must appear there with an English description of its purpose. Update
 the layout in the same commit whenever a file is added, renamed, or removed.
 
 ## Copyright and provenance
@@ -123,5 +123,5 @@ and the separate redistribution state before it can pass the release gate.
 inventory. Every JSON contract entry binds a canonical JSON SHA-256 that is
 stable across LF/CRLF checkout conversion, plus provenance, redistribution
 state, and a `paper_derived` flag. Binary/model fixtures are not currently
-committed; any future binary must include an exact raw-file SHA-256 and a
+committed. Any future binary must include an exact raw-file SHA-256 and a
 source/generated/sanitized/derived classification.

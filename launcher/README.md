@@ -79,17 +79,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 The resource values above are examples, not portable recommendations. Set them
 from the model, mesh, solver, host, and expected artifact size. The module
-checks the actual Windows system drive and the drive containing `-Output`; it
+checks the actual Windows system drive and the drive containing `-Output`. It
 does not require fixed `C:` or `D:` layouts. Output must be on a local drive.
 
 Use `-ValidateOnly` first. It must print
 `LAUNCHER_VALIDATE_PASS no solver client created`. Then use `-Run` or start the
 template without a mode switch and select `RUN` interactively. `-Run` starts or
-resumes the driver and then opens the monitor; do not add `-Monitor` to that
+resumes the driver and then opens the monitor. Do not add `-Monitor` to that
 command. Use `-Monitor` by itself only to inspect an existing or stopped job and
 choose any offered `resume` action explicitly. `-Run`, `-Monitor`, and
 `-ValidateOnly` are mutually exclusive. The monitor accepts `pause`, `status`,
-`help`, `resume`, and `quit`. `quit` closes only the monitor; it does not
+`help`, `resume`, and `quit`. `quit` closes only the monitor. It does not
 terminate an active worker.
 
 An idle `comsol-mcp.exe` process is a solver-free MCP stdio host and does not
@@ -126,15 +126,15 @@ pwsh.exe -NoProfile `
 
 The repository pytest wrapper also runs the complete PowerShell suite in both
 hosts on Windows CI. Change the version whenever the shared module, helper, or
-template behavior changes; never edit a shared launcher already imported by an
+template behavior changes. Never edit a shared launcher already imported by an
 active campaign.
 
 ## Limits
 
-- Windows only; the module uses CIM process inventory and a foreground console.
+- Windows only. The module uses CIM process inventory and a foreground console.
 - Local launcher mode requires Python and the project's COMSOL Python runtime.
 - Pause is cooperative and occurs only after the current point is durably
-  committed; it does not interrupt a factorization.
+  committed. It does not interrupt a factorization.
 - The module cannot make a non-durable project driver resumable.
 - This launcher is for one host and one solver owner. It is not a distributed
   scheduler or a network lease.

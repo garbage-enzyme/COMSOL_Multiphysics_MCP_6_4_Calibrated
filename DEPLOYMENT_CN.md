@@ -3,23 +3,24 @@
 本指南覆盖 COMSOL MCP 的全新安装，以及 Claude Code、Hermes Agent、Codex CLI
 和 opencode 配置。所有示例路径都必须替换为目标机器的实际路径。
 
-Client 验收状态：
+客户端验收范围：
 
-- Codex CLI 和 opencode 已完成本机 installed-package 验证。
-- Claude Code 和 Hermes Agent 按其公开的 stdio MCP 配置在理论上兼容，但本项目
-  尚未对两者进行端到端测试；欢迎提交测试结果和 PR。
+- 早期安装包测试覆盖 Codex CLI、opencode 和 Claude Code 的部分普通工具调用，具体范围见 [README](README_CN.md#client-兼容性与部署)。
+- 0.7.6 的 Claude 原生 Tasks 验收未完成。Python SDK 测试不能替代原生客户端测试。
+- OpenCode 本轮测试因连接失败而停止，不能记为通过。
+- Hermes Agent 只有配置指导，尚无端到端验收结果。
 
 ## 1. 安装 Server
 
 要求：
 
-- COMSOL Multiphysics 6.4.0.*（licensed reference acceptance 固定于 6.4.0.293；
-  第三位数字变化视为新的 release family）；
-- 标准 GIL 版本的 Python 3.14，环境路径只使用 ASCII 字符；
+- COMSOL Multiphysics 6.4.0.*（licensed reference acceptance 固定于 6.4.0.293。
+  第三位数字变化视为新的 release family）。
+- 标准 GIL 版本的 Python 3.14，环境路径只使用 ASCII 字符。
 - 已验证本机配置所需的 COMSOL Java runtime。
 
 Python 3.15 是独立的实验性工程通道，不建议因此升级生产解释器。使用前请查阅
-[兼容构建要求](README_CN.md#环境要求与安装)：缺少原生 wheel 时需要源码构建；
+[兼容构建要求](README_CN.md#环境要求与安装)：缺少原生 wheel 时需要源码构建。
 该通道尚不代表 licensed COMSOL 或 `semantic-docs` extra 已验收。
 
 执行非 editable 安装：
@@ -32,13 +33,13 @@ Test-Path "D:\path\to\python-env\Scripts\comsol-mcp.exe"
 Test-Path "D:\path\to\python-env\Scripts\comsol-mcp-settings.exe"
 ```
 
-wheel 公开 canonical `comsol_mcp` runtime 和 solver-free `settings_gui` 应用；仓库源码中的
+wheel 公开 canonical `comsol_mcp` runtime 和 solver-free `settings_gui` 应用。仓库源码中的
 `src` compatibility namespace 不会安装。可移植部署应配置安装后的 server console entry
 point 绝对路径。
 
 ## 2. 使用设置界面配置（推荐）
 
-普通用户应在启动 MCP client 前打开设置界面；若 agent 已连接，也可以让它只调用一次
+普通用户应在启动 MCP client 前打开设置界面。若 agent 已连接，也可以让它只调用一次
 `settings.start`：
 
 ```powershell
@@ -57,8 +58,8 @@ agent 修改的是同一份 `settings.json`，不存在每个 agent 各自的设
 
 ### 开发者和 agent 的 JSON 配置（高级）
 
-模板列出所有设置和默认值。用户删去设置条目时，该条目使用安全默认值；输入非法值时，
-仅该条目回退默认值，并在 `settings_errors` 中报错；JSON 整体损坏时回退完整安全默认
+模板列出所有设置和默认值。用户删去设置条目时，该条目使用安全默认值。输入非法值时，
+仅该条目回退默认值，并在 `settings_errors` 中报错。JSON 整体损坏时回退完整安全默认
 文件并报错。启动后调用 `capabilities` 或 `evidence_integrity_status`，检查
 `project_settings.configuration_state` 和 `project_settings.settings_errors`。
 
@@ -100,13 +101,13 @@ COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
 ```
 
 对普通用户，只调用一次 `settings.start`，说明启动设置需要重启 Codex 或所属 MCP client，
-然后停止继续输出并等待用户下一条消息；GUI 打开期间不要直接修改设置。只有用户明确要求
-时才由 agent 编辑 JSON；只修改解析出的可写文件，验证后请求重启。GUI 默认写入
+然后停止继续输出并等待用户下一条消息。GUI 打开期间不要直接修改设置。只有用户明确要求
+时才由 agent 编辑 JSON。只修改解析出的可写文件，验证后请求重启。GUI 默认写入
 `%LOCALAPPDATA%/comsol_mcp/settings.json`，包内文件保持只读
 模板。`comsol-mcp-settings` 是直接命令行备用入口。MCP 响应会要求 agent 暂停，但无法从
 技术上强制任意第三方 agent 遵守。
 
-安装版应把独立 GUI 可执行文件绑定到实际共享设置文件；即使所有 MCP stdio host 都已停止，
+安装版应把独立 GUI 可执行文件绑定到实际共享设置文件。即使所有 MCP stdio host 都已停止，
 它也能工作：
 
 ```powershell
@@ -117,10 +118,10 @@ comsol-mcp-settings --settings-path "D:\settings\settings.json" --remove-desktop
 ```
 
 每用户快捷方式名为 `COMSOL MCP Settings.lnk`，只能由用户明确创建。安装、部署、启动、首次
-打开、“保存”或“应用”都不会自动创建。外来同名项目会保留；只有用户在 GUI 中确认，或在
+打开、“保存”或“应用”都不会自动创建。外来同名项目会保留。只有用户在 GUI 中确认，或在
 创建命令中明确追加 `--replace-existing-shortcut` 后才会替换。
 
-用户确认首次设置后，支持 Unicode 的模型读取目录创建在 `%LOCALAPPDATA%/comsol_mcp`；
+用户确认首次设置后，支持 Unicode 的模型读取目录创建在 `%LOCALAPPDATA%/comsol_mcp`。
 必须仅含 ASCII 字符的 runtime 和自有 artifact 目录创建在 `%PROGRAMDATA%/comsol_mcp`。
 可选资产保持未设置。
 
@@ -137,29 +138,29 @@ comsol-mcp-settings --settings-path "D:\settings\settings.json" --remove-desktop
 | `basic_fem` | 常规 FEM 构建、有界导出，以及无需 Python 的独立启动器工具。 |
 | `wave_optics` | 周期光学、超表面、有界场数据发现/提取、预检和证据审计。 |
 | `experimental` | 显式选择的通用工具，以及有界的鲁棒形状预览、durable 提交和证据检查/验证工具。 |
-| `full` | 宽泛的非 feature 兼容界面；默认不推荐。 |
+| `full` | 宽泛的非 feature 兼容界面。默认不推荐。 |
 
 普通用户在设置界面选择 profile。开发者和 agent 可以在 JSON 的 `profile.name` 中设置
-等价值；删除时使用 `core`。stdio 进程启动时会冻结 profile，修改后必须重启 client/MCP
+等价值。删除时使用 `core`。stdio 进程启动时会冻结 profile，修改后必须重启 client/MCP
 host。非法 profile 保持 `core`，并在 `settings_errors` 中报告，不会静默选择另一个 profile。
 
 Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性。在设置界面中，独立功能
 开关可与任意 profile 组合，也可彼此组合。高级 JSON 等价值是用于受保护 shared workflow
 的 `shared_server.enabled=true`，以及用于隔离语义检索的
-`semantic_docs.enabled=true`；两个开关默认均为 false。旧 `comsol_connect` 仍是
+`semantic_docs.enabled=true`。两个开关默认均为 false。旧 `comsol_connect` 仍是
 experimental 兼容工具，不能替代该生命周期。
 
 alpha7.2 鲁棒形状工具只在 `experimental` 和 `full` 中提供。
-`robust_shape_plan_preview` 不启动求解器；`robust_shape_job_submit` 通过 durable job
-authority 提交，并可能启动 licensed solver；证据检查/验证工具有界、隐藏路径且只读。
+`robust_shape_plan_preview` 不启动求解器。`robust_shape_job_submit` 通过 durable job
+authority 提交，并可能启动 licensed solver。证据检查/验证工具有界、隐藏路径且只读。
 这些工具不会出现在 `core`、`basic_fem` 或 `wave_optics` 中，也不提供通用 Java/属性
 修改 escape hatch。
 
-`basic_fem` 中的独立启动器工具仍运行在普通 Python MCP host 中；它们负责构建和控制另一个原生
+`basic_fem` 中的独立启动器工具仍运行在普通 Python MCP host 中。它们负责构建和控制另一个原生
 EXE。目标机只需 Windows 10/11 x64 与已安装并授权的 COMSOL 6.4。EXE 不打包 COMSOL，
 也不要求目标机安装 Python、Conda、MPh、JPype 或外部 Java。
 构建步骤使用 Windows 随系统提供的 `.NET Framework 4.x` 64 位编译器
-`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`；不需要另装现代
+`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`。不需要另装现代
 `.NET Runtime`、`.NET SDK` 或 Visual Studio，也不需要下载或联网。系统内置编译器缺失时
 会直接 fail closed。
 
@@ -180,14 +181,14 @@ Server 协作。等价的高级 JSON 配置如下：
 
 重启 MCP host 后调用 `capabilities`，确认所选 live profile 未改变、`enabled_features`
 包含 `shared_server`，且 `shared_session.feature_enabled` 与 `shared_session.gate_open` 都是 true。在
-`shared_server_attach` 前调用 `shared_server_preflight`；只有确认 endpoint 和 Desktop
+`shared_server_attach` 前调用 `shared_server_preflight`。只有确认 endpoint 和 Desktop
 连接正确后，才传入 `user_confirmed=true`。attach 要求一个精确的 6.4.0.* Server 身份
-和一个精确的 Server-held model；对于启动中/未就绪 Server、多个 GUI client、歧义模型、
+和一个精确的 Server-held model。对于启动中/未就绪 Server、多个 GUI client、歧义模型、
 PID reuse、混合 release family 和未分类 COMSOL/MPh 进程，都会拒绝并 fail closed，不会猜测。
 
 Desktop 左下角的 `localhost:2036` 提示可作为用户观察证据，但不能替代进程/listener
 身份检查。MCP 持有 `automation_exclusive` lock 时，COMSOL 可能显示占用模型警告并禁用
-GUI 编辑，这是预期行为。detach 前先 unlock；detach 会保留用户的 Server、listener、
+GUI 编辑，这是预期行为。detach 前先 unlock。detach 会保留用户的 Server、listener、
 Desktop、model 和 result，MCP 不会调用 `clear()` 或关闭外部 Server。
 
 ## 4. Claude Code（理论兼容，尚未测试）
@@ -222,10 +223,9 @@ Claude Code 官方 `.mcp.json` 格式没有本项目可用的“禁止并行调�
 项目 `CLAUDE.md` 或配套 skill 中要求 Claude 先调用 `capabilities`、
 `solver_status` 和 `solver_preflight`，且绝不并行执行 COMSOL 修改或求解操作。
 
-完整模板：`config/claude-code-mcp.example.json`。它依据 Claude Code 官方
-[MCP 文档](https://code.claude.com/docs/en/mcp)编写，但尚未经过真实 Claude Code
-client 测试。如果验证成功，欢迎提交包含脱敏 `initialize`、`list_tools`、
-`capabilities`、status 和 cleanup receipt 的 PR。
+完整模板：`config/claude-code-mcp.example.json`。模板依据 Claude Code 官方 MCP 文档。
+配置指导不能证明 0.7.6 的完整原生兼容性。客户端测试必须保留脱敏后的 `initialize`、
+`list_tools`、`capabilities`、状态和清理证据。
 
 ## 5. Hermes Agent（理论兼容，尚未测试）
 
@@ -249,7 +249,7 @@ mcp_servers:
 
 Hermes 文档中的 stdio launcher 会传递 `command`、`args` 和 `env`，但不会给
 子进程提供工作目录。保持 `supports_parallel_tool_calls: false`：COMSOL ownership
-和模型修改必须串行。Windows COMSOL 理论上应搭配 Hermes native Windows；本项目
+和模型修改必须串行。Windows COMSOL 理论上应搭配 Hermes native Windows。本项目
 既未完成 Hermes 端到端测试，也未验证 WSL 到 Windows COMSOL bridge。欢迎提交带
 有脱敏 discovery 和 cleanup receipt 的测试结果及 PR。
 
@@ -311,13 +311,13 @@ active_profile = wave_optics
 owner。长仿真使用 durable jobs，不要让单个同步 MCP call 持续占用全部 wall time。
 
 对于本地 stand-alone session，`comsol_start` 会先返回 accepted 响应，再执行 solver
-preflight、MPh import 和 JPype JVM 初始化。随后轮询 `comsol_status`；它会返回有界启动
+preflight、MPh import 和 JPype JVM 初始化。随后轮询 `comsol_status`。它会返回有界启动
 阶段，同一状态也持久化在配置的 runtime root 下。JVM 可能嵌入 MCP Python 进程，
 因此没有单独的 COMSOL child process 本身不代表启动失败。
 
 MPh 每个 Python 进程只允许一个 client wrapper。因此 `comsol_disconnect` 会清除
 模型并释放 solver lease，但保留同一个 stand-alone wrapper，供同一 host 后续
-`comsol_start` 复用；绝不创建第二个 client。启动超过 180 秒后，对调用方进入终态。
+`comsol_start` 复用。绝不创建第二个 client。启动超过 180 秒后，对调用方进入终态。
 若 native constructor 仍被阻塞，状态会报告 `cleanup_pending=true`，并继续持有 owned
 lease，直到该调用返回且清理得到验证。cleanup pending 时不要重试 start，也不要重启
 MCP host。

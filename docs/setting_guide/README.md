@@ -5,7 +5,7 @@ Applies to COMSOL MCP `0.6.5` and settings schema `1.2.0`.
 The Settings GUI is the primary way to configure COMSOL MCP. Direct JSON editing
 remains supported for developers, agents, automation, recovery, and advanced
 deployments. Ordinary users should not need to edit JSON by hand. Both methods
-write the same shared `settings.json`; there is no per-agent configuration file.
+write the same shared `settings.json`. There is no per-agent configuration file.
 
 Saved changes take effect only after restarting Codex or the MCP client that owns
 the server process.
@@ -26,7 +26,7 @@ comsol-mcp-settings --settings-path "D:\settings\settings.json"
 comsol-mcp-settings --settings-path "D:\settings\settings.json" --validate-only
 ```
 
-This executable starts the GUI directly; it does not require or start an MCP
+This executable starts the GUI directly. It does not require or start an MCP
 stdio host, COMSOL, or Java. Use `--settings-path` to bind it to the exact file
 used by the MCP client. `--validate-only` verifies the package, settings target,
 GUI runtime, and shortcut prerequisites without importing Tk or writing a file.
@@ -45,7 +45,7 @@ exact settings file. Installation, deployment, MCP startup, `settings.start`,
 first launch, Save, and Apply never create it. A stale or foreign same-name item
 is preserved until the user confirms replacement in the GUI or repeats the
 create command with `--replace-existing-shortcut`. Remove deletes only an owned
-shortcut; it preserves foreign or damaged Desktop items.
+shortcut. It preserves foreign or damaged Desktop items.
 
 From a repository checkout or unpacked source distribution, use the root manual
 launcher:
@@ -82,7 +82,7 @@ settings. Nothing is written until the user confirms. Confirmation creates:
 
 The first two locations work when the Windows user name contains Chinese or other
 non-ASCII characters. The last two store working records, locks, and formal
-outputs; they must contain only ASCII characters, so they are placed under the
+outputs. They must contain only ASCII characters, so they are placed under the
 normally ASCII `%PROGRAMDATA%` folder. Folders for optional features are not
 created.
 
@@ -93,7 +93,7 @@ for COMSOL 6.4 and its included Java:
   are not saved automatically.
 - If none is found, the boxes stay empty. The window does not invent a path or stop
   the user with an error.
-- If several installations are found, the user chooses one; the window does not
+- If several installations are found, the user chooses one. The window does not
   guess.
 - After installing or moving COMSOL, click `Auto-detect` to look again.
 - Click `Browse` to choose a folder manually.
@@ -156,7 +156,7 @@ leaf. Malformed JSON falls back to the complete default document.
 
 The portable prefixes `%LOCALAPPDATA%` and `%PROGRAMDATA%` are expanded when a
 settings document is loaded. Other environment-variable tokens are not expanded.
-All configured paths must be absolute; empty strings, relative paths, and control
+All configured paths must be absolute. Empty strings, relative paths, and control
 characters are invalid.
 
 | Path type | Unicode support | Default |
@@ -167,7 +167,7 @@ characters are invalid.
 | Durable jobs override | ASCII only | `null`, derived below runtime |
 | Owned artifacts | ASCII only | `%PROGRAMDATA%\comsol_mcp\artifacts` |
 | COMSOL and Java | Installation-dependent | `null`, discovered by the GUI |
-| Semantic assets | Backend-dependent; use ASCII when possible | `null` |
+| Semantic assets | Backend-dependent. Use ASCII when possible | `null` |
 
 Model-read roots may contain Chinese or other Unicode characters. Runtime,
 durable-job, and artifact roots containing non-ASCII characters are rejected by
@@ -179,8 +179,8 @@ the GUI before save and by backend validation when JSON is edited directly.
 
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
-| `schema_name` | `"comsol_mcp.settings"` | Read-only schema identity; must match exactly. |
-| `schema_version` | `"1.2.0"` | New writes use `1.2.0`; `1.0.0` and `1.1.0` are read and migrated in memory. |
+| `schema_name` | `"comsol_mcp.settings"` | Read-only schema identity. Must match exactly. |
+| `schema_version` | `"1.2.0"` | New writes use `1.2.0`. `1.0.0` and `1.1.0` are read and migrated in memory. |
 | `gui.language` | `"zh-cn"` | `"en"`, `"zh-cn"`, or `"zh-tw"`. |
 | `gui.scale` | `"system"` | `"system"`, `"100"`, `"125"`, `"150"`, or `"200"`. The GUI displays the numeric choices as percentages. |
 
@@ -202,8 +202,8 @@ independent Boolean feature gates and may be enabled together for any profile.
 | `basic_fem` | Recommended for most users: ordinary FEM construction, result export, and Windows standalone packages. |
 | `wave_optics` | Optical and metasurface work, field review, Wave Optics checks, point audits, and staged parameters. |
 | `experimental` | Extra helpers that are broader or less mature and require careful review. |
-| `full` | Legacy migration that needs nearly every non-feature tool and accepts weaker file containment; not recommended for new users. |
-| `comsolless_read_only` | Computers without a COMSOL installation: offline model/evidence inspection tools only; nothing can start COMSOL or Java. |
+| `full` | Legacy migration that needs nearly every non-feature tool and accepts weaker file containment. Not recommended for new users. |
+| `comsolless_read_only` | Computers without a COMSOL installation: offline model/evidence inspection tools only. Nothing can start COMSOL or Java. |
 | `electro_chemistry` | Isolated Electrochemistry Module profile: Core plus electrochemistry discovery, interface creation, electrode reaction, and electrolyte tools. Not merged into default or `full`. |
 
 ### Runtime and Containment
@@ -212,7 +212,7 @@ independent Boolean feature gates and may be enabled together for any profile.
 | --- | --- | --- |
 | `runtime.directory` | `%PROGRAMDATA%\comsol_mcp\runtime` | Server-owned runtime and lease root. Use `null` only to delegate to the legacy platform fallback. A configured value must be absolute and ASCII-only. |
 | `runtime.jobs_directory` | `null` | Optional durable-job override. `null` derives the job directory from the effective runtime root. A configured value must be absolute and ASCII-only. |
-| `paths.model_read_roots` | `[%LOCALAPPDATA%\comsol_mcp\models]` | Approved immutable source-model roots. Values must be unique absolute paths; Unicode is supported. `[]` deliberately rejects every model input. |
+| `paths.model_read_roots` | `[%LOCALAPPDATA%\comsol_mcp\models]` | Approved immutable source-model roots. Values must be unique absolute paths. Unicode is supported. `[]` deliberately rejects every model input. |
 | `paths.artifact_write_root` | `%PROGRAMDATA%\comsol_mcp\artifacts` | MCP-owned artifacts, manifests, and evidence. Use `null` only to derive the legacy owned-artifact root. A configured value must be absolute and ASCII-only. |
 
 A path accepted by settings validation is not automatically authorized for every
@@ -237,7 +237,7 @@ then `PATH`. Auto-detect never replaces a non-null value without confirmation.
 | `shared_server.enabled` | `false` | Independent Boolean gate for the explicit local Desktop/attached-Server workflow. It composes with every profile and never starts or terminates the user's COMSOL Server. |
 | `model_manager.enabled` | `false` | Independent Boolean gate for the optional COMSOL Model Manager tools. It composes with every profile and is separate from `shared_server.enabled` in both directions, so sharing a session never grants Model Manager access. While it is off the tools are not registered at all. |
 | `model_manager.upload_enabled` | `false` | Independent Boolean gate for saving back to the Model Manager. It is separate from `model_manager.enabled` in both directions, so enabling the feature does not grant write access. Opening, running, and downloading keep working while it is off. When it is on, an upload still requires an explicit derived source identity and is refused on any existing destination, revision mismatch, or overwrite. |
-| `discovery.pagination_enabled` | `false` | Independent Boolean gate for the experimental `tools/list` cursor adapter. It changes only how the tool list is delivered, never which tools or side effects the profile permits. While it is off, `tools/list` returns the ordinary complete listing, which is the contract clients that read only a first page rely on. While it is on, the listing is returned in bounded pages whose `_meta` states the true total, so a partial page can never be mistaken for the whole surface. |
+| `discovery.pagination_enabled` | `false` | Enables the experimental `tools/list` cursor adapter independently of the profile. It changes delivery only, not permitted tools or side effects. When disabled, `tools/list` returns the complete ordinary list. When enabled, it returns bounded pages with the total in `_meta`. Clients must read that metadata and fetch subsequent pages for the complete list. |
 | `ownership.owner` | `null` | Optional non-empty owner label, at most 256 characters and without control characters. `null` derives a bounded label from the parent process. |
 
 ### Evidence Integrity
@@ -342,9 +342,9 @@ start COMSOL, Java, MPh, or JPype:
 | Tool | Purpose |
 | --- | --- |
 | `mph_inspect` | Bounded offline inspection of one `.mph` archive: declared version, node/runnable/solved/preview state, parameters, tags, savepoints, deterministic size breakdown. |
-| `mph_diff` | Two-archive metadata/tag/parameter/entry diff with input-immutability proof; a zero diff is not a scientific equivalence proof. |
-| `model_identity` | Read-only identity for source/derived files with checkpoint readiness; live session identity is structured-unavailable unless explicitly requested from an already-connected session. |
-| `runtime_compatibility_status` | Active Python/MPh/JPype identities, supported ranges, profile, and skill-layer hashes; bound COMSOL identity only on explicit request; no fallback runtime is ever selected. |
+| `mph_diff` | Two-archive metadata/tag/parameter/entry diff with input-immutability proof. A zero diff is not a scientific equivalence proof. |
+| `model_identity` | Read-only identity for source/derived files with checkpoint readiness. Live session identity is structured-unavailable unless explicitly requested from an already-connected session. |
+| `runtime_compatibility_status` | Active Python/MPh/JPype identities, supported ranges, profile, and skill-layer hashes. Bound COMSOL identity only on explicit request. No fallback runtime is ever selected. |
 | `offline_export_validate` | Validates an export manifest plus its VTU/CSV/TXT files (paths, IDs, ordering, units, byte counts, hashes) entirely offline. |
 
 The `comsolless_read_only` profile exposes exactly these five tools and

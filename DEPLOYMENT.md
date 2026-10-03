@@ -4,20 +4,20 @@ This guide covers a fresh COMSOL MCP installation and client configuration for
 Claude Code, Hermes Agent, Codex CLI, and opencode. Replace every example path
 with the target machine's actual paths.
 
-Client acceptance status:
+Client acceptance scope:
 
-- Codex CLI and opencode have completed local installed-package validation.
-- Claude Code and Hermes Agent are expected to be compatible from their
-  documented stdio MCP configuration, but neither client has been tested
-  end-to-end by this project. Testing reports and pull requests are welcome.
+- Earlier installed-package tests covered ordinary tool calls in Codex CLI, opencode, and Claude Code. See the [README](README.md#client-compatibility-and-deployment) for limits.
+- Native Claude Tasks acceptance for 0.7.6 remains incomplete. Python SDK tests do not replace native-client tests.
+- OpenCode testing stopped after a connection failure. This is not a pass.
+- Hermes Agent has configuration guidance only. End-to-end acceptance remains untested.
 
 ## 1. Server installation
 
 Requirements:
 
 - COMSOL Multiphysics 6.4.0.* (licensed reference acceptance is pinned to
-  6.4.0.293; a third numeric component change is a separate release family);
-- standard GIL-enabled Python 3.14 in an ASCII-only environment path;
+  6.4.0.293. A third numeric component change is a separate release family).
+- standard GIL-enabled Python 3.14 in an ASCII-only environment path.
 - COMSOL's Java runtime for the verified local configuration.
 
 Python 3.15 is a separate experimental engineering lane, not a production
@@ -36,7 +36,7 @@ Test-Path "D:\path\to\python-env\Scripts\comsol-mcp-settings.exe"
 ```
 
 The wheel exposes the canonical `comsol_mcp` runtime and the solver-free
-`settings_gui` application; the repository-only `src` compatibility namespace
+`settings_gui` application. The repository-only `src` compatibility namespace
 is not installed. Configure the absolute installed server console entry point
 for a portable deployment.
 
@@ -60,12 +60,12 @@ Then add the `comsol-bridge` Cordis entry documented in
 [`dsh_bridge/README.md`](dsh_bridge/README.md), using the absolute installed
 `comsol-mcp.exe`, runtime working directory, and shared settings path. The
 bridge's own `config.enabled` Boolean controls whether the client plugin is
-active; it is intentionally not a Settings GUI/server feature. Do not configure
+active. It is intentionally not a Settings GUI/server feature. Do not configure
 a second `dsh-mcp-client` COMSOL entry in the same DSH session: the bridge owns
 the single serialized stdio connection. Follow the versioned
 [`DeepSeek compatibility contract`](dsh_bridge/DEEPSEEK_COMPATIBILITY.md) for
 settings-change, verification, and recovery boundaries. Fake-server tests prove bridge behavior
-only; report real DSH discovery, cleanup, and licensed solves separately.
+only. Report real DSH discovery, cleanup, and licensed solves separately.
 The current recovery checks cover original-session delivery on DSH 0.1.6-alpha.2
 after explicit session persistence. Do not infer crash-proof notification
 delivery from a successful mirror or tool registration.
@@ -85,7 +85,7 @@ comsol-mcp-settings --settings-path "D:\settings\settings.json"
 Use the GUI to choose the profile and feature gates, review discovered COMSOL
 and Java paths, and set runtime, model-read, and artifact roots. Save the
 settings, close the GUI, then restart the owning MCP client. The GUI and every
-agent use one shared `settings.json`; there is no per-agent settings file. See
+agent use one shared `settings.json`. There is no per-agent settings file. See
 the [settings guide](docs/setting_guide/README.md) for every field's meaning,
 default, and accepted values.
 
@@ -97,7 +97,7 @@ hand-edit the checked-in template.
 
 The template contains every setting and its default. Removing a field restores
 that field's safe default. An illegal value restores only that field's default
-and is reported in `settings_errors`; malformed JSON restores the complete safe
+and is reported in `settings_errors`. Malformed JSON restores the complete safe
 default document. Call `capabilities` or `evidence_integrity_status` after
 startup and inspect `project_settings.configuration_state` and
 `project_settings.settings_errors`.
@@ -146,9 +146,9 @@ For an ordinary user, call `settings.start` once, state that startup-setting
 changes require restarting Codex or the owning MCP client, stop further task
 output, and wait for the user's next message. Do not modify settings directly
 while the GUI is open. Use agent JSON editing only when the user explicitly
-requests it; modify only the resolved writable file, validate it, and request
+requests it. Modify only the resolved writable file, validate it, and request
 the restart.
-The GUI writes `%LOCALAPPDATA%/comsol_mcp/settings.json` by default; the bundled
+The GUI writes `%LOCALAPPDATA%/comsol_mcp/settings.json` by default. The bundled
 package file remains a read-only template. `comsol-mcp-settings` is the direct
 console fallback. The MCP response asks agents to pause, but cannot technically
 enforce arbitrary third-party behavior.
@@ -186,10 +186,10 @@ build/modules, license, scheduler, storage, and output requirements first.
 | `basic_fem` | Conventional FEM construction, bounded exports, and the Python-free standalone launcher tools. |
 | `wave_optics` | Periodic optics, metasurfaces, bounded field discovery/extraction, preflight, and evidence audits. |
 | `experimental` | Explicit opt-in generic tools plus bounded robust-shape preview, durable submission, and evidence inspection/verification. |
-| `full` | Broad non-feature compatibility surface; not recommended by default. |
+| `full` | Broad non-feature compatibility surface. Not recommended by default. |
 
 Select the profile in the Settings GUI. Developers and agents may set the
-equivalent `profile.name` field in JSON; omitting it selects `core`. The profile
+equivalent `profile.name` field in JSON. Omitting it selects `core`. The profile
 is frozen when the stdio process starts, so changing it requires a
 client/MCP-host restart. An invalid profile keeps `core` and is reported in
 `settings_errors` instead of silently selecting another profile.
@@ -198,13 +198,13 @@ Profiles control COMSOL automation/simulation and future autonomous-exploration
 tool visibility. In the GUI, independent feature gates can be combined with any
 profile and with one another. Their advanced JSON equivalents are
 `shared_server.enabled=true` for the protected shared workflow and
-`semantic_docs.enabled=true` for isolated semantic retrieval; both remain
+`semantic_docs.enabled=true` for isolated semantic retrieval. Both remain
 default-off. The legacy `comsol_connect` compatibility tool remains experimental
 and is not a substitute for this lifecycle.
 
 The alpha7.2 robust-shape tools are available only in `experimental` and
-`full`. `robust_shape_plan_preview` is solver-free; `robust_shape_job_submit`
-uses the durable job authority and can start licensed solver work; the evidence
+`full`. `robust_shape_plan_preview` is solver-free. `robust_shape_job_submit`
+uses the durable job authority and can start licensed solver work. The evidence
 inspect/verify tools are bounded, path-redacted, and read-only. These tools are
 absent from `core`, `basic_fem`, and `wave_optics`, and they do not expose a
 generic Java/property mutation escape hatch.
@@ -214,7 +214,7 @@ and control a separate native EXE whose target runtime needs only Windows
 10/11 x64 plus an installed licensed COMSOL 6.4. The EXE does not bundle COMSOL
 and does not require target-side Python, Conda, MPh, JPype, or external Java.
 The build step uses the Windows inbox `.NET Framework 4.x` x64 compiler at
-`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`; no separate modern
+`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`. No separate modern
 `.NET Runtime`, `.NET SDK`, Visual Studio, download, or network access is
 required. A missing inbox compiler is a fail-closed prerequisite error.
 
@@ -238,7 +238,7 @@ collaboration in the Profile tab. The equivalent advanced JSON configuration is:
 After restarting the MCP host, call `capabilities` and verify the chosen live
 profile, `enabled_features` contains `shared_server`, and
 `shared_session.feature_enabled` and `shared_session.gate_open` are true. Call `shared_server_preflight` before
-`shared_server_attach`; pass `user_confirmed=true` only after the endpoint and
+`shared_server_attach`. Pass `user_confirmed=true` only after the endpoint and
 Desktop connection are correct. The attach path requires one exact 6.4.0.*
 Server identity and one exact server-held model. It rejects starting/unready
 servers, multiple GUI clients, ambiguous models, PID reuse, mixed release
@@ -247,11 +247,11 @@ families, and unclassified COMSOL/MPh processes without guessing.
 The Desktop lower-left `localhost:2036` cue is useful user evidence, but it does
 not replace process/listener identity checks. While MCP holds an
 `automation_exclusive` lock, COMSOL may display an occupied-model warning and
-disable GUI editing; this is expected. Unlock before detach. Detach preserves
-the user-owned Server, listener, Desktop, model, and result; MCP does not call
+disable GUI editing. This is expected. Unlock before detach. Detach preserves
+the user-owned Server, listener, Desktop, model, and result. MCP does not call
 `clear()` or shut down the external Server.
 
-## 4. Claude Code (theoretical compatibility; not yet tested)
+## 4. Claude Code (limited prior tests, incomplete 0.7.6 acceptance)
 
 Claude Code officially supports local stdio MCP servers through `claude mcp
 add`, user/local configuration in `~/.claude.json`, or a project-scoped
@@ -279,7 +279,7 @@ claude mcp add --transport stdio --scope user `
 All Claude options must precede the server name, and `--` separates the server
 name from its executable and arguments. Use the in-session `/mcp` panel to
 inspect connection status. The configuration deliberately uses an absolute
-installed executable and an ASCII runtime root; it does not depend on Claude
+installed executable and an ASCII runtime root. It does not depend on Claude
 Code's launch directory.
 
 Claude Code's documented `.mcp.json` format has no project-specific field used
@@ -289,11 +289,10 @@ first and never issue COMSOL mutation or solver operations in parallel.
 
 Complete template: `config/claude-code-mcp.example.json`. This configuration is
 derived from the official [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp),
-but remains untested with the real Claude Code client. Please submit a PR with a
-sanitized `initialize`, `list_tools`, `capabilities`, status, and cleanup receipt
-if you validate it.
+but configuration guidance does not establish complete native compatibility for 0.7.6.
+A client test must retain sanitized `initialize`, `list_tools`, `capabilities`, status, and cleanup evidence.
 
-## 5. Hermes Agent (theoretical compatibility; not yet tested)
+## 5. Hermes Agent (theoretical compatibility. Not yet tested)
 
 Native Windows Hermes stores its default configuration at
 `%LOCALAPPDATA%\hermes\config.yaml`. Linux and WSL use
@@ -317,7 +316,7 @@ Hermes' documented stdio launcher passes `command`, `args`, and `env`, but does
 not provide a working directory to the child process. Keep
 `supports_parallel_tool_calls` false: COMSOL ownership and mutation must remain
 serialized. Native Windows is the expected configuration for a Windows COMSOL
-installation; neither Hermes end-to-end operation nor a WSL-to-Windows COMSOL
+installation. Neither Hermes end-to-end operation nor a WSL-to-Windows COMSOL
 bridge has been tested by this project. Test reports and pull requests with
 sanitized discovery and cleanup receipts are welcome.
 
@@ -375,7 +374,7 @@ profile = wave_optics
 active_profile = wave_optics
 ```
 
-Use the returned registered-tool list and deployment hashes as authority; do
+Use the returned registered-tool list and deployment hashes as authority. Do
 not compare against a tool count copied from this guide.
 
 Then call `solver_status` and `solver_preflight` before constructing a client.
@@ -384,14 +383,14 @@ single synchronous MCP call for the full wall time.
 
 For a local stand-alone session, `comsol_start` returns an accepted response
 before solver preflight, MPh import, or JPype JVM initialization. Poll
-`comsol_status`; it exposes the bounded startup phases also persisted under the
+`comsol_status`. It exposes the bounded startup phases also persisted under the
 configured runtime root.
 The JVM may remain embedded in the MCP Python process, so the absence of a
 separate COMSOL child process is not by itself a startup failure.
 
 MPh permits only one client wrapper per Python process. Therefore
 `comsol_disconnect` clears models and releases the solver lease but retains the
-exact stand-alone wrapper for a later same-host `comsol_start`; it never creates
+exact stand-alone wrapper for a later same-host `comsol_start`. It never creates
 a second client. A 180-second startup timeout is terminal to callers. If the
 native constructor is still blocked, status reports `cleanup_pending=true` and
 the owned lease remains held until that call returns and cleanup is verified.

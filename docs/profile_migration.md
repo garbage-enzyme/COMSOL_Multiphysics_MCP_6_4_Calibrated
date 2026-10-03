@@ -9,16 +9,22 @@ independent, default-off Boolean feature gates.
 | --- | --- | --- |
 | Ownership, durable jobs, model inspection, one-point solve | `core` profile | Verified default |
 | Typed conventional FEM construction, bounded exports, and Python-free launcher control | `basic_fem` profile | Verified |
-| Periodic Wave Optics preflight, evidence audit, visual-review contracts | `wave_optics` profile | Experimental; licensed acceptance is version/model-specific |
-| Isolated Electrochemistry Module discovery, interface creation, electrode reaction, electrolyte setup | `electro_chemistry` profile | Experimental; requires Electrochemistry Module; not merged into default/full |
+| Periodic Wave Optics preflight, evidence audit, visual-review contracts | `wave_optics` profile | Experimental. Licensed acceptance is version/model-specific |
+| Isolated Electrochemistry Module discovery, interface creation, electrode reaction, electrolyte setup | `electro_chemistry` profile | Experimental. Requires Electrochemistry Module. Not merged into default/full |
 | Generic or risky legacy helpers | `experimental` profile | Experimental |
 | Robust shape preview, durable submit, and evidence inspection/verification | `experimental` profile | Experimental and default-off |
 | Maximum legacy discovery compatibility | `full` profile | Compatibility only |
-| Isolated SQLite lexical manuals | `lexical_docs.enabled=true` | Verified; default-off |
-| Isolated vector-assisted manuals | `semantic_docs.enabled=true` | Experimental; promotion rejected |
-| User-owned local Desktop/Server collaboration | `shared_server.enabled=true` | Experimental; default-off, local-only, explicit confirmation |
+| Isolated SQLite lexical manuals | `lexical_docs.enabled=true` | Verified. Default-off |
+| Isolated vector-assisted manuals | `semantic_docs.enabled=true` | Experimental (promotion rejected) |
+| User-owned local Desktop/Server collaboration | `shared_server.enabled=true` | Experimental. Default-off, local-only, explicit confirmation |
 
-The three feature gates compose with every profile and with each other. Set them
+Model Manager uses the separate `model_manager.enabled` gate.
+Writes also require `model_manager.upload_enabled`.
+Experimental tool-list pagination uses `discovery.pagination_enabled`.
+These settings default to `false` and do not change profile permissions.
+See the [settings guide](setting_guide/README.md) for all current defaults.
+
+The manual and shared-session feature gates compose with every profile and with each other. Set them
 in the same shared `settings.json`, restart the MCP host, then confirm
 `active_profile`, `enabled_features`, exact tool names, schemas, and deployment
 hashes through `capabilities` and live discovery.
@@ -30,12 +36,12 @@ installed and licensed. The isolated surface currently contains catalog,
 inspection, interface creation, electrode-surface, and electrolyte tools. It
 does not silently fall back to Electrostatics, and it does not change solver,
 mesh, core, out-of-core, or resource policy. The COMSOL 6.4 probe verified
-`SecondaryCurrentDistribution`, `ElectrodeSurface.rhos`, and `Electrolyte`;
-unsupported interface/property names return explicit errors. A live API probe is
+`SecondaryCurrentDistribution`, `ElectrodeSurface.rhos`, and `Electrolyte`.
+Unsupported interface/property names return explicit errors. A live API probe is
 not scientific validation of a model or result.
 
 Profiles are immutable for the lifetime of one MCP host process. Independent
-feature-gate selections are likewise startup-only; changing either kind of
+feature-gate selections are likewise startup-only. Changing either kind of
 selection requires a fresh host before discovery can reflect the new surface.
 
 Settings schema `1.3.0` reads older files without rewriting the source during
@@ -46,12 +52,12 @@ discovery. The canonical migration rules are:
 | `semantic_docs` | `profile.name=core`, `semantic_docs.enabled=true` |
 | `desktop_shared` | `profile.name=core`, `shared_server.enabled=true` |
 | `full` | Retain `profile.name=full`, set `semantic_docs.enabled=true` to preserve the former broad tool surface |
-| 1.2 `semantic_docs.lexical_index` | Move the value to `lexical_docs.index_path`; keep `lexical_docs.enabled=false` until the user verifies or rebuilds the index. |
+| 1.2 `semantic_docs.lexical_index` | Move the value to `lexical_docs.index_path`. Keep `lexical_docs.enabled=false` until the user verifies or rebuilds the index. |
 | Any other unsupported value | Fall back to `profile.name=core` and report bounded fallback/error provenance |
 
 Explicit Boolean values already present in the settings file remain
 authoritative. New files default all three features to `false`. A direct unsupported
-profile argument also falls back to `core`; it does not silently enable a
+profile argument also falls back to `core`. It does not silently enable a
 legacy feature alias.
 
 Migration sequence:
@@ -62,7 +68,7 @@ Migration sequence:
 3. Enable manual, semantic, or shared functionality with its Boolean feature gate,
    independently of the selected profile.
 4. Restart and confirm the exact registered surface and fallback provenance.
-5. Keep semantic retrieval opt-in; it is not verified as multilingual and must
+5. Keep semantic retrieval opt-in. It is not verified as multilingual and must
    not replace the lexical production path.
 
 For shared Desktop use, enable `shared_server.enabled`, start the Server

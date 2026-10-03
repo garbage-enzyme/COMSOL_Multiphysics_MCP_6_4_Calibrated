@@ -2,7 +2,7 @@
 
 This guide covers common COMSOL physics interfaces and the current typed MCP
 helpers. The verified runtime is COMSOL 6.4.0.293 with MPh 1.3.1. The creation
-helpers shown below require the `basic_fem` or `full` profile; call
+helpers shown below require the `basic_fem` or `full` profile. Call
 `capabilities` and use live tool schemas as authority.
 
 Before constructing physics, run `solver_status` and `solver_preflight`, build

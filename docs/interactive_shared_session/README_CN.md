@@ -1,7 +1,7 @@
 # COMSOL Desktop/Server 交互协作模式
 
 感谢原始 [Ching-Chiang/comsol-mcp](https://github.com/Ching-Chiang/comsol-mcp)
-仓库提出这种交互思路。本项目只参考了操作方法，独立完成了默认关闭的安全实现；没有复制、
+仓库提出这种交互思路。本项目只参考了操作方法，独立完成了默认关闭的安全实现。没有复制、
 改写、翻译、挑选提交或机械重写原仓库代码。两个项目的具体行为不一定相同。
 
 ## 先看结论
@@ -16,13 +16,13 @@ MCP 不会启动、关闭、清空或终止用户拥有的 Server、Desktop、�
 
 目前支持：
 
-- 一台 Windows 计算机；
-- 一个用户手动启动的 COMSOL Multiphysics Server；
-- 一个连接到该 Server 的 COMSOL Desktop 窗口；
-- 一个由 Server 持有、且能被精确识别的模型；
-- COMSOL `6.4.0.*`，正式参考构建号为 `6.4.0.293`；
-- MPh 1.3.1 和本 MCP；
-- 短时查看、读取和保存副本；
+- 一台 Windows 计算机。
+- 一个用户手动启动的 COMSOL Multiphysics Server。
+- 一个连接到该 Server 的 COMSOL Desktop 窗口。
+- 一个由 Server 持有、且能被精确识别的模型。
+- COMSOL `6.4.0.*`，正式参考构建号为 `6.4.0.293`。
+- MPh 1.3.1 和本 MCP。
+- 短时查看、读取和保存副本。
 - 通过 `staged_sweep` 提交的有界自动任务。
 
 这不是远程桌面，也不支持用户与智能助手同时编辑。
@@ -47,11 +47,11 @@ MCP 不会启动、关闭、清空或终止用户拥有的 Server、Desktop、�
 
 请先确认：
 
-- COMSOL Multiphysics 和 COMSOL Multiphysics Server 安装在同一台计算机；
-- Desktop 和 Server 都属于 `6.4.0.*` 版本系列；
-- 许可证允许本机 Client/Server 连接；
-- 正式任务的源模型位于已配置的只读目录；
-- 快照和任务产物写入只含 ASCII 字符的目录；
+- COMSOL Multiphysics 和 COMSOL Multiphysics Server 安装在同一台计算机。
+- Desktop 和 Server 都属于 `6.4.0.*` 版本系列。
+- 许可证允许本机 Client/Server 连接。
+- 正式任务的源模型位于已配置的只读目录。
+- 快照和任务产物写入只含 ASCII 字符的目录。
 - 更改 MCP 配置后会重启 MCP 宿主进程。
 
 `6.4.0.293` 与另一个 `6.4.0.x` 只差最后构建号时，MCP 会给出警告但可以继续。若第三段
@@ -70,7 +70,7 @@ comsol-mcp-settings
 ```
 
 在“Profile”页选择能提供任务所需工具的任意基础 profile，再开启交互式共享 Server
-协作；然后在其他页面配置 runtime、模型读取目录和 artifact 目录。保存设置并关闭界面，
+协作。然后在其他页面配置 runtime、模型读取目录和 artifact 目录。保存设置并关闭界面，
 再重启实际拥有 MCP 的客户端。界面打开期间不要同时编辑 JSON。
 
 直接编辑 JSON 是面向开发者、自动部署和获得用户明确授权的 agent 的高级等价方式。
@@ -96,13 +96,13 @@ COMSOL_MCP_SETTINGS_PATH=D:\path\to\COMSOL_Multiphysics_MCP\settings.json
 
 重启 MCP，然后调用 `capabilities`，确认：
 
-- `active_profile` 是用户选择的 profile；
-- `enabled_features` 包含 `shared_server`；
-- `shared_session.feature_enabled` 和 `shared_session.gate_open` 都是 `true`；
-- 返回结果中列出了共享模式工具；
+- `active_profile` 是用户选择的 profile。
+- `enabled_features` 包含 `shared_server`。
+- `shared_session.feature_enabled` 和 `shared_session.gate_open` 都是 `true`。
+- 返回结果中列出了共享模式工具。
 - 证据完整性检查仍保持默认开启。
 
-如果仍显示旧配置，不要继续。必须重启真正运行 MCP 的进程；仅在命令行中修改环境变量
+如果仍显示旧配置，不要继续。必须重启真正运行 MCP 的进程。仅在命令行中修改环境变量
 不会改变已经运行的服务。
 
 ### 第二步：手动启动 Server
@@ -149,13 +149,13 @@ Server 地址填写 `localhost`，端口填写上一步记录的精确端口。�
 
 只需告诉智能助手本机端口，不要提供凭据。标准顺序如下：
 
-1. 调用 `shared_server_preflight(host="localhost", port=2036)`；
-2. 检查返回的 `state`、版本、进程、监听器和警告；
+1. 调用 `shared_server_preflight(host="localhost", port=2036)`。
+2. 检查返回的 `state`、版本、进程、监听器和警告。
 3. 用户确认 Desktop 显示同一地址后，调用
-   `shared_server_attach(..., user_confirmed=true)`；
-4. 调用 `shared_server_models` 查看 Server 中的模型；
+   `shared_server_attach(..., user_confirmed=true)`。
+4. 调用 `shared_server_models` 查看 Server 中的模型。
 5. 选定一个模型后调用 `shared_model_adopt`。除了 `model_tag`，已保存的模型必须提供
-   完整保存路径；未保存的模型必须提供 `expected_unsaved=true`。标签可以不填；
+   完整保存路径。未保存的模型必须提供 `expected_unsaved=true`。标签可以不填。
 6. 调用 `shared_model_lock(collaboration_mode="interactive_inspection", ...)`。
 
 `user_confirmed=true` 表示用户确实看到了相同的 Desktop 连接。智能助手不能仅根据进程
@@ -185,21 +185,21 @@ MCP 不会根据“第一个模型”或“当前窗口”猜测目标。请始�
 
 ### 用户操作时
 
-1. 确认 Desktop 仍显示 `localhost:<port>`；
-2. 确认智能助手已经解除模型锁；
-3. 只做一个清楚、有限的修改，并等待 COMSOL 完成；
-4. 告诉智能助手改了什么；
+1. 确认 Desktop 仍显示 `localhost:<port>`。
+2. 确认智能助手已经解除模型锁。
+3. 只做一个清楚、有限的修改，并等待 COMSOL 完成。
+4. 告诉智能助手改了什么。
 5. 让智能助手重新读取模型并建立新的锁。
 
 聊天中的说明只是提示，不能替代模型读取结果。若模型实际状态与旧锁不一致，旧锁会失效。
 
 ### 智能助手查看时
 
-1. 用 `interactive_inspection` 锁定精确模型；
-2. 保存返回的 `lock_sha256` 和 `revision_sha256`；
-3. 每次关键操作前调用 `shared_model_verify`；
-4. 需要副本时调用 `shared_model_snapshot`；
-5. 再次核对模型，然后调用 `shared_model_unlock`；
+1. 用 `interactive_inspection` 锁定精确模型。
+2. 保存返回的 `lock_sha256` 和 `revision_sha256`。
+3. 每次关键操作前调用 `shared_model_verify`。
+4. 需要副本时调用 `shared_model_snapshot`。
+5. 再次核对模型，然后调用 `shared_model_unlock`。
 6. 明确告诉用户现在可以继续操作。
 
 COMSOL 6.4 的 Save Copy 只能按路径写文件，无法在写入过程中强制最大字节数。因此当前
@@ -242,7 +242,7 @@ COMSOL 6.4 的 Save Copy 只能按路径写文件，无法在写入过程中强�
 助手完成，不要强行同时编辑。
 
 很短的读取或属性修改可能在提示出现前已经结束，因此没有提示不等于没有执行。这个提示
-只能说明 COMSOL 当时认为模型被占用，不能证明 MCP 的身份、证据和清理检查已经通过；
+只能说明 COMSOL 当时认为模型被占用，不能证明 MCP 的身份、证据和清理检查已经通过。
 这些结论应以 MCP 返回结果为准。
 
 ## 三种文件不要混用
@@ -254,22 +254,22 @@ COMSOL 6.4 的 Save Copy 只能按路径写文件，无法在写入过程中强�
 | Save Copy 快照或检查点 | MCP 产物流程 | 只能新建 | 写入 ASCII 目录，名称不得碰撞，记录大小、散列和清单 |
 
 即使三个文件当前内容相同，也不能把它们当成同一个角色。未保存的内存模型没有可验证的
-源文件散列；需要正式任务时，应先保存一个独立源模型，再建立新的任务标识。
+源文件散列。需要正式任务时，应先保存一个独立源模型，再建立新的任务标识。
 
 ## 安全结束
 
 按以下顺序结束一次协作：
 
-1. 等任务达到已确认的终止状态；
-2. 保存需要的原始结果和快照；
-3. 调用 `shared_model_verify` 核对当前锁；
-4. 调用 `shared_model_unlock`；
-5. 调用 `shared_server_detach`；
-6. 确认返回结果说明外部资源仍被保留；
+1. 等任务达到已确认的终止状态。
+2. 保存需要的原始结果和快照。
+3. 调用 `shared_model_verify` 核对当前锁。
+4. 调用 `shared_model_unlock`。
+5. 调用 `shared_server_detach`。
+6. 确认返回结果说明外部资源仍被保留。
 7. 确认 Desktop 仍显示 `localhost:<port>`，模型仍可见。
 
 正常解除连接后不需要重启 Server。若返回 `model_lock_active`，应先解除模型锁。若解除
-连接结果不确定，不要按进程名强制结束 COMSOL；应检查精确进程和监听器身份，由用户决定
+连接结果不确定，不要按进程名强制结束 COMSOL。应检查精确进程和监听器身份，由用户决定
 是否重启自己的资源。
 
 ## 安全限制
@@ -284,13 +284,13 @@ IPv4。任何通配监听都会保留 `listener_bind_scope=wildcard` 警告，MC
 
 其他限制：
 
-- 不支持用户和智能助手同时编辑；
-- 不自动选择多个 Desktop、Server 或模型；
-- 不支持 `6.4.0.*` 以外的版本；
-- MCP 不处理用户名和密码；
-- 不保证每个短操作都会触发 COMSOL 的占用提示；
-- Desktop 中看见的几何、图和结果不等于科学结论已经验证；
-- 共享自动任务目前只支持 `staged_sweep`；
+- 不支持用户和智能助手同时编辑。
+- 不自动选择多个 Desktop、Server 或模型。
+- 不支持 `6.4.0.*` 以外的版本。
+- MCP 不处理用户名和密码。
+- 不保证每个短操作都会触发 COMSOL 的占用提示。
+- Desktop 中看见的几何、图和结果不等于科学结论已经验证。
+- 共享自动任务目前只支持 `staged_sweep`。
 - `shared_server.enabled` 仍是默认关闭的试验功能。
 
 Desktop 中可见的一致结果是有价值的协作证据，但正式科学结论还需要原始数据、明确的判定

@@ -13,13 +13,13 @@ artifact 字节、模型 revision 和软件身份来降低这些风险。它不�
 ## 一页快速开始
 
 1. 让 agent 只调用一次 `settings.start`，或运行 `comsol-mcp-settings` 打开设置界面。
-   在“证据”页保持四项检查全部开启；在“路径”页把正式 artifact 保存在
+   在“证据”页保持四项检查全部开启。在“路径”页把正式 artifact 保存在
    `paths.artifact_write_root` 中。默认位置是 `runtime.directory` 下的
-   `owned_artifacts`；覆盖时应使用绝对、仅 ASCII 的目录。保存并关闭界面，然后重启
+   `owned_artifacts`。覆盖时应使用绝对、仅 ASCII 的目录。保存并关闭界面，然后重启
    实际拥有 MCP 的客户端。
 2. 调用 `evidence_integrity_status`。四项检查均应显示 `enabled: true`、
    `source: project_settings`，并且 `strict_verification_active: true`。
-3. 可以正常进行探索，但要保留原始行和 diagnostic 行；不要为了让总结更好看而删除
+3. 可以正常进行探索，但要保留原始行和 diagnostic 行。不要为了让总结更好看而删除
    失败点或 partial 数据。
 4. 构造 `comsol_mcp.portfolio_evidence_request`，其中包含精确的 outcome contract、
    artifact-chain manifest 和 summary citation。每条 claim 都引用 artifact ID、
@@ -34,14 +34,14 @@ artifact 字节、模型 revision 和软件身份来降低这些风险。它不�
 
 两个公共 guard tool 都是 solver-free，并存在于每个 static profile：
 
-- `evidence_integrity_status` 报告有效设置，但不泄露 settings 路径；
+- `evidence_integrity_status` 报告有效设置，但不泄露 settings 路径。
 - `evidence_integrity_verify` 执行确定性的正式验证，不启动 COMSOL，也不修改模型。
 
 ## 为什么需要这些控制
 
-一个看起来正确的数值可能以多种互相独立的方式出错：求解完成了，但用的是错误模型；
-原始数据正确，但 summary 引用了另一个 attempt；计算和证据均完整，但声明的科学阈值
-仍未通过；截图显示了场分布，却不能证明 polarization、能量闭合或 mode identity。
+一个看起来正确的数值可能以多种互相独立的方式出错：求解完成了，但用的是错误模型。
+原始数据正确，但 summary 引用了另一个 attempt。计算和证据均完整，但声明的科学阈值
+仍未通过。截图显示了场分布，却不能证明 polarization、能量闭合或 mode identity。
 
 因此，本项目把三个 outcome 分开表示：
 
@@ -52,7 +52,7 @@ artifact 字节、模型 revision 和软件身份来降低这些风险。它不�
 | Scientific disposition | 声明的 policy 得出什么结论？ | `accepted`、`residual`、`unresolved_at_declared_cap`、`invalid_evidence`、`not_evaluated` |
 
 `completed` 不等于 `accepted`。同样，`cancel requested` 不等于终态
-`cancelled`；终态取消需要 worker、descendant、port 和 lease 的清理证据。
+`cancelled`。终态取消需要 worker、descendant、port 和 lease 的清理证据。
 
 ## 有哪些保护，以及用户能看到什么
 
@@ -63,16 +63,16 @@ artifact 字节、模型 revision 和软件身份来降低这些风险。它不�
 | polished summary 隐藏 partial/failed 行 | Durable raw evidence | durable job 在 summary 前逐点写入，使用 atomic state 或 append-only/hash-chained journal、flush、`fsync` 和 attempt identity | 原始行、diagnostic 标签、checkpoint 和精确 artifact hash |
 | 被引用文件遭到替换或重排 | Artifact-chain verification | `artifact_chain_verification` 在 owned root 下检查 manifest、dependency closure、byte count、schema、顺序和 SHA-256 | 每项 check receipt hash、artifact 数量和不含私有路径的 receipt |
 | AI 编造附近的 peak、fit、mesh count 或 wavelength | Exact summary-claim verification | `summary_claim_verification` 解析 artifact hash 与 JSON Pointer，并按 canonical JSON 比较值 | claim/check state 以及精确 request/verification hash |
-| Resume 混入不兼容软件或 driver | Producer/driver compatibility | `resumed: true` 时，`producer_driver_compatibility` 要求 producer、producer version、schema version 和 driver SHA-256 完全一致 | `passed`、`failed` 或 `not_applicable`；不静默迁移旧行 |
+| Resume 混入不兼容软件或 driver | Producer/driver compatibility | `resumed: true` 时，`producer_driver_compatibility` 要求 producer、producer version、schema version 和 driver SHA-256 完全一致 | `passed`、`failed` 或 `not_applicable`。不静默迁移旧行 |
 | Agent 自动化期间 Desktop 改变模型 | Model revision/external-change guards | serialization、shared-model lock identity 以及 expected revision/readback 检查 | lock/revision hash 和 changed fields |
-| 只发出取消请求就宣称清理完成 | Cancellation/cleanup proof | durable cancellation 协调精确 worker/descendant identity、port、lease 和 attached-resource preservation | 终态 cleanup evidence；外部 Server/Desktop/model 仍不归 MCP 所有 |
+| 只发出取消请求就宣称清理完成 | Cancellation/cleanup proof | durable cancellation 协调精确 worker/descendant identity、port、lease 和 attached-resource preservation | 终态 cleanup evidence。外部 Server/Desktop/model 仍不归 MCP 所有 |
 | 逃逸目录或覆盖证据 | Path/overwrite containment | configured read/owned-write root 拒绝 traversal、device/reserved name、link/junction、alias 和 caller-selected overwrite | 脱敏 path-policy decision 与稳定 root ID |
 | 把截图或标签当作物理证明 | Physical/visual evidence gates | 适用工具保留原始 R/T/A、closure、synchronization、mesh/material/field evidence 和 calibrated visual-review contract | `measured`、`unknown`、`diagnostic` 或 policy result，而不是猜测 |
-| 关闭保护后 warning 丢失 | Effective settings/warning propagation | capabilities 和公共 guarded response 携带 effective fingerprint；任何 disabled check 都强制 `strictly_verified: false` | response 和正式 receipt 中的 disabled-check 列表与稳定 warning code |
-| settings 输入错误后使用猜测 fallback | Bounded settings fallback 与 machine-readable error | 缺失条目使用默认值；非法条目仅回退自身默认值；JSON 损坏时回退完整安全默认；artifact/identity mismatch 仍然 fail closed | `project_settings.settings_errors`、有界 reason code，且不会静默变成 default-off |
+| 关闭保护后 warning 丢失 | Effective settings/warning propagation | capabilities 和公共 guarded response 携带 effective fingerprint。任何 disabled check 都强制 `strictly_verified: false` | response 和正式 receipt 中的 disabled-check 列表与稳定 warning code |
+| settings 输入错误后使用猜测 fallback | Bounded settings fallback 与 machine-readable error | 缺失条目使用默认值。非法条目仅回退自身默认值。JSON 损坏时回退完整安全默认。artifact/identity mismatch 仍然 fail closed | `project_settings.settings_errors`、有界 reason code，且不会静默变成 default-off |
 
 这些检查由确定性代码执行。部分事实来自 COMSOL/clientapi readback，例如模型和 revision
-状态；另一些是用户声明，例如 scientific policy 或 domain interpretation。AI 编写的
+状态。另一些是用户声明，例如 scientific policy 或 domain interpretation。AI 编写的
 文字只是一层解释，不是 trust root。如果一项用户声明没有独立 readback，receipt 可以
 证明使用了哪项声明，但不能证明声明本身诚实。
 
@@ -97,7 +97,7 @@ artifact 字节、模型 revision 和软件身份来降低这些风险。它不�
 ```
 
 只有显式 opt-out 才能关闭某项检查：在设置界面的“证据”页取消对应复选框，或把高级
-JSON 值设为 boolean `false`。删除 JSON 条目会回到 `true`。探索时只关闭必要的检查；
+JSON 值设为 boolean `false`。删除 JSON 条目会回到 `true`。探索时只关闭必要的检查。
 受影响的 response 必须携带 `strictly_verified: false` 和稳定 warning。证据设置会在每次
 status 或 guarded call 时读取，但恢复检查后仍必须针对**未改变的 artifacts 重新验证**，
 不能给旧 receipt 重新贴 verified 标签。
@@ -198,29 +198,29 @@ policy 接受该 case。summary 随后引用某个 artifact 中的
 
 你可以：
 
-- 快速探索并保留 raw data，之后请求新的 formal verification；
-- 选择精确的 source、configuration、policy、revision 和 owned artifact root；
-- 运行前检查 `capabilities` 或 `evidence_integrity_status`，并保存 settings fingerprint；
-- 查看 raw/diagnostic row、artifact hash、build identity、policy decision 和 exact citation；
-- 使用受支持的 job control 取消，并等待 verified terminal state；
-- 分享脱敏 receipt 和 cited artifacts，让另一个过程重跑 solver-free verification；
+- 快速探索并保留 raw data，之后请求新的 formal verification。
+- 选择精确的 source、configuration、policy、revision 和 owned artifact root。
+- 运行前检查 `capabilities` 或 `evidence_integrity_status`，并保存 settings fingerprint。
+- 查看 raw/diagnostic row、artifact hash、build identity、policy decision 和 exact citation。
+- 使用受支持的 job control 取消，并等待 verified terminal state。
+- 分享脱敏 receipt 和 cited artifacts，让另一个过程重跑 solver-free verification。
 - 显式关闭某项检查进行探索，同时保留 unverified warning。
 
 你不能通过下列方法获得或保留 `strictly_verified: true`：
 
 - 要求 AI 推测缺失的 configuration、raw value、failed point、source identity、policy
-  或 artifact bytes；
-- 修改 model、artifact、manifest、settings、row 或 summary 后继续引用旧 receipt；
-- 把 completed solve、漂亮 plot、screenshot、label、fit 或好看的数值当作充分证据；
-- 在没有受支持 migration 的情况下混用不同 run、attempt、model、build 或 producer/driver；
-- 把 cancel request、PID 消失或 GUI 断开当作 cleanup proof；
-- automation-exclusive 工作期间修改 Desktop model 并保留旧 revision；
-- 关闭 required check、隐藏 warning，或恢复检查后升级旧 receipt；
+  或 artifact bytes。
+- 修改 model、artifact、manifest、settings、row 或 summary 后继续引用旧 receipt。
+- 把 completed solve、漂亮 plot、screenshot、label、fit 或好看的数值当作充分证据。
+- 在没有受支持 migration 的情况下混用不同 run、attempt、model、build 或 producer/driver。
+- 把 cancel request、PID 消失或 GUI 断开当作 cleanup proof。
+- automation-exclusive 工作期间修改 Desktop model 并保留旧 revision。
+- 关闭 required check、隐藏 warning，或恢复检查后升级旧 receipt。
 - 在缺少相应科学证据时，声称 provenance/hash 已证明物理正确性、收敛、polarization、
   power closure 或 publication readiness。
 
-发生拒绝时，应保留 diagnostic evidence。恢复检查、修正输入；如果 artifacts 完全
-未改变，可以只运行缺失的 deterministic verification；只要输入改变，就创建新的
+发生拒绝时，应保留 diagnostic evidence。恢复检查、修正输入。如果 artifacts 完全
+未改变，可以只运行缺失的 deterministic verification。只要输入改变，就创建新的
 run identity。不要通过删除失败数据来让验证通过。
 
 ## `strictly_verified` 表示什么
@@ -242,16 +242,16 @@ policy、producer/driver identity 或 summary claim 发生改变，旧 verified 
 
 | 现象 | 含义 | 安全的下一步 |
 | --- | --- | --- |
-| `configuration_state: degraded` | 一个或多个 settings 在验证报错后使用了安全默认值 | 修正文件、检查 `settings_errors`；static setting 改变后重启，不要增加竞争配置来源 |
-| `outcome_contract_validation: failed` | execution/evidence/scientific state 或 hash 不一致 | 从保留的 raw state 修复 contract；不要编造 cleanup/acceptance |
+| `configuration_state: degraded` | 一个或多个 settings 在验证报错后使用了安全默认值 | 修正文件、检查 `settings_errors`。static setting 改变后重启，不要增加竞争配置来源 |
+| `outcome_contract_validation: failed` | execution/evidence/scientific state 或 hash 不一致 | 从保留的 raw state 修复 contract。不要编造 cleanup/acceptance |
 | `artifact_chain_verification: failed` | manifest、dependency、byte count、schema 或 hash 改变 | 保留两个版本，恢复目标字节，或创建新的 chain identity |
 | `summary_claim_verification: failed` | claim 在 cited hash/JSON Pointer 处不存在 | 修正 summary/citation 后重新验证 |
-| `producer_driver_compatibility: failed` | resume producer、schema 或 driver identity 改变 | 使用受支持 migration，或创建新的 attempt；不要 relabel stale row |
+| `producer_driver_compatibility: failed` | resume producer、schema 或 driver identity 改变 | 使用受支持 migration，或创建新的 attempt。不要 relabel stale row |
 | `resume_compatibility_missing` | resumed result 缺少 exact compatibility evidence | 提供 expected/observed identity，或作为 fresh run 处理 |
 | `partial`、`diagnostic` 或 `incomplete` | 有可用数据，但 formal evidence 不完整 | 保留标签，只补齐缺失 evidence |
 | `strict_evidence_checks_disabled` | exploration opt-out 正在生效 | 保留 warning，恢复检查并重新做 formal verification |
 | Artifact root 被拒绝 | 目录不在 configured owned root 下或使用不安全 alias | 通过受支持 owned workflow 移动/复制，不要降低 containment |
-| `unresolved_at_declared_cap` 或 `residual` | 有效的 non-acceptance outcome，不是 execution failure | 原样报告；改变 policy/cap 必须作为新决定 |
+| `unresolved_at_declared_cap` 或 `residual` | 有效的 non-acceptance outcome，不是 execution failure | 原样报告。改变 policy/cap 必须作为新决定 |
 
 ## 威胁模型与限制
 
@@ -261,5 +261,5 @@ policy、producer/driver identity 或 summary claim 发生改变，旧 verified 
 policy authority。
 
 安全的 assistant 用词应保留精确 evidence state 与 citation。证据缺失时写
-`unknown` 或 `unavailable`；绝不能把 `unverified`、`diagnostic`、`partial`、
+`unknown` 或 `unavailable`。绝不能把 `unverified`、`diagnostic`、`partial`、
 `residual` 或 `unresolved_at_declared_cap` 静默改写成成功。

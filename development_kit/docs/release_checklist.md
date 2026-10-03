@@ -8,11 +8,12 @@ python development_kit/scripts/release_gate.py `
   --dependency-lock constraints/release_locked_py314.txt
 ```
 
-The gate compiles `src`, `tests`, and `scripts`; runs the default unit suite;
-checks frozen tool/profile schemas; builds wheel and sdist artifacts; creates a
-fresh virtual environment; installs the wheel non-editably; runs `pip check`;
-and verifies installed discovery against the frozen snapshots. Discovery fails
-if it starts `mph.Client` or imports ChromaDB, SentenceTransformer, or Torch.
+The gate compiles `comsol_mcp`, `src`, and `development_kit`.
+It runs the selected tests and checks frozen tool/profile schemas.
+It builds wheel and sdist artifacts, then creates a fresh virtual environment.
+It installs the wheel non-editably and runs `pip check`.
+It checks installed discovery against the frozen snapshots.
+Discovery fails if it starts `mph.Client` or imports ChromaDB, SentenceTransformer, or Torch.
 
 Before a release:
 
@@ -38,7 +39,7 @@ Before a release:
    ```
 
    The environment value is also consumed by direct licensed integration
-   entry points. Select it for the current host and campaign; do not copy a
+   entry points. Select it for the current host and campaign. Do not copy a
    core count from another machine or release receipt.
 
 5. On a free, licensed, version-pinned host, run the serial real gate explicitly:
@@ -75,8 +76,8 @@ Before a release:
     Confirm `comsol-mcp-settings`, all three compiled catalogs, and
     profile-independent `settings.start` are installed while GUI tests and PO
     sources remain outside the wheel.
-11. Restart the MCP host; source and profile changes are not hot-reloaded.
-12. Call `capabilities`; require `deployment_identity.source_classification` to
+11. Restart the MCP host. Source and profile changes are not hot-reloaded.
+12. Call `capabilities`. Require `deployment_identity.source_classification` to
    be `installed_site_package`, compare its profile/schema/catalog hashes with
    the clean release receipt, and then treat installed profile counts as
    authoritative. A matching version string alone is insufficient.
@@ -89,4 +90,4 @@ registry/schema/profile tests and a separate exact-version COMSOL 6.4 probe
 receipt. The probe may create and inspect bounded derived objects, but must not
 run a scientific solve unless a separate caller-owned scientific policy is
 authorized. Record module/interface findings, rollback, lease release, and
-process cleanup; do not treat upstream COMSOL 6.3 records as release evidence.
+process cleanup. Do not treat upstream COMSOL 6.3 records as release evidence.

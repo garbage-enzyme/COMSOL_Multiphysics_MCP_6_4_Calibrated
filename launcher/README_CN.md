@@ -18,7 +18,7 @@ v1.8.1 区分空闲的 `comsol-mcp.exe` stdio host 与真实求解器，并拒�
 - `tests/`：合成驱动以及 PowerShell 5.1、pwsh 验收测试。
 
 这些文件是仓库资源，不会作为 `comsol_mcp` wheel 的导入模块。不要把共享模块复制到每个
-项目中；应保留一个版本，并在每次任务中记录它的哈希。
+项目中。应保留一个版本，并在每次任务中记录它的哈希。
 
 ## Python 驱动必须做到什么
 
@@ -31,7 +31,7 @@ v1.8.1 区分空闲的 `comsol-mcp.exe` stdio host 与真实求解器，并拒�
 4. 求解前设置并回读所有会影响求解器的值。
 5. 将一个通过验证的结果追加到 `results.jsonl`，执行 flush 与 `fsync`，然后才能更新
    进度或开始下一点。
-6. 以 `results.jsonl` 作为完成依据；`status.json` 只是便于查看的状态摘要。
+6. 以 `results.jsonl` 作为完成依据。`status.json` 只是便于查看的状态摘要。
 7. 只在点与点之间调用 `durable_control.pending_pause_request()`。当前点完成并写稳后，
    才能写入 `paused_after_point` 并调用 `acknowledge_pause()`。
 8. 无论如何结束，都要释放精确 worker、子进程、模型、租约、锁和临时文件。
@@ -71,8 +71,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 `C:` 或 `D:`。输出必须位于本地磁盘。
 
 先使用 `-ValidateOnly`，并要求它输出
-`LAUNCHER_VALIDATE_PASS no solver client created`。然后使用 `-Run`；也可以不加运行开关，
-在交互提示中选择 `RUN`。`-Run` 会启动或继续 driver，随后自动进入状态窗口；不要再与
+`LAUNCHER_VALIDATE_PASS no solver client created`。然后使用 `-Run`。也可以不加运行开关，
+在交互提示中选择 `RUN`。`-Run` 会启动或继续 driver，随后自动进入状态窗口。不要再与
 `-Monitor` 组合。`-Monitor` 只能单独用于查看已有或已停止任务，并由操作者明确选择界面
 提供的 `resume`。`-Run`、`-Monitor` 和 `-ValidateOnly` 互斥。状态窗口接受 `pause`、
 `status`、`help`、`resume` 和 `quit`。`quit` 只关闭状态窗口，不会终止仍在运行的
@@ -92,7 +92,7 @@ Java runtime 仍属于冲突，必须拒绝启动。
 | 蓝色 `PAUSED` | 当前点可靠写入后，暂停请求得到确认 |
 | 黄色持久边界 | 到达运行时限或部分完成边界，尚未完成全部点 |
 
-非成功界面会显示简短原因，以及状态、标准输出和错误日志的精确路径；不会把大型证据数组
+非成功界面会显示简短原因，以及状态、标准输出和错误日志的精确路径。不会把大型证据数组
 打印到终端。
 
 ## 验证启动器
@@ -115,7 +115,7 @@ pwsh.exe -NoProfile `
 
 ## 限制
 
-- 仅支持 Windows；模块使用 CIM 进程检查和前台控制台。
+- 仅支持 Windows。模块使用 CIM 进程检查和前台控制台。
 - 本地 launcher 方式需要 Python 和项目使用的 COMSOL Python 运行环境。
 - 暂停只发生在当前点可靠完成后，不会中断正在进行的矩阵分解。
 - 如果项目驱动本身不保存逐点进度，启动器不能凭空让它支持续跑。

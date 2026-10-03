@@ -1,7 +1,7 @@
 # COMSOL MCP workflow guide
 
 This guide describes the current profile-aware workflow. Tool availability and
-schemas come from live MCP discovery; examples are illustrative named-argument
+schemas come from live MCP discovery. Examples are illustrative named-argument
 calls rather than a substitute for the returned schema.
 
 ## 1. Discover before starting COMSOL
@@ -46,7 +46,7 @@ study_list
 datasets_list
 ```
 
-`comsol_start` is non-blocking. Poll `comsol_status` until `connected=true`; do
+`comsol_start` is non-blocking. Poll `comsol_status` until `connected=true`. Do
 not call `comsol_start` again while `starting=true`.
 
 Treat the source `.mph` as immutable. Use a derived clone or a separately named
@@ -74,7 +74,7 @@ geometry_get_boundaries
 ```
 
 Geometry helper dimensions are numeric SI values. Probe domains and boundaries
-after every topology-changing build; never assume entity IDs from feature order.
+after every topology-changing build. Never assume entity IDs from feature order.
 
 For a dielectric electrostatics model:
 
@@ -167,7 +167,7 @@ set point -> pre-solve resource admission -> solve -> evaluate raw evidence
 Resume only exact matching point identities. Cancellation is terminal only
 after the worker, owned descendants, port, and lease are verified clean. Do not
 use `study_solve_async` or daemon-thread progress as a resumable or unattended
-workflow; those tools are experimental compatibility only.
+workflow. Those tools are experimental compatibility only.
 
 ## 6. Wave Optics evidence workflow
 
@@ -187,7 +187,7 @@ mesh state, and artifact manifests. Without a versioned caller policy it returns
 evidence only, not a scientific pass/fail decision.
 
 Use staged one-point solves for parameter or wavelength scans. Fixed-wavelength
-amplitudes do not establish angular convergence; track each configuration's own
+amplitudes do not establish angular convergence. Track each configuration's own
 peak when resonance motion matters.
 
 ## 7. Save and disconnect
@@ -198,7 +198,7 @@ peak when resonance motion matters.
 - `comsol_disconnect` clears models tracked by the MCP-owned session before
   releasing the client.
 - `session_reset` is destructive and is intended for an MCP-owned session.
-- Verify `solver_status` after cleanup; process activity alone does not prove
+- Verify `solver_status` after cleanup. Process activity alone does not prove
   progress or successful release.
 
 ## 8. Common diagnostics
@@ -226,5 +226,5 @@ peak when resonance motion matters.
 
 - Stop before starting another factorization when the caller's resource policy
   refuses it.
-- Check durable rows and exact worker identity; CPU or disk activity alone is
+- Check durable rows and exact worker identity. CPU or disk activity alone is
   not proof of progress.

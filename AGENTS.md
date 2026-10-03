@@ -3,7 +3,7 @@
 ## Project
 
 `comsol-mcp` is a safety-focused MCP stdio server for reproducible COMSOL
-Multiphysics 6.4 automation. It targets MPh 1.3.1 and the `model.java`
+Multiphysics 6.4 automation. It supports MPh 1.3.1 and 1.4.x through the `model.java`
 ClientAPI surface. The server provides profile-scoped tools for solver
 ownership, model inspection and derived edits, bounded one-point audits,
 durable jobs, evidence integrity, and offline manual lookup.
@@ -19,7 +19,7 @@ interpretation as separate outcomes.
 - `src/` is a repository-only legacy import compatibility layer and is not
   distributed in wheels.
 - `development_kit/` contains repository-only tests, fixtures, scripts, and
-  release documentation; it must not enter a wheel or sdist.
+  release documentation. It must not enter a wheel or sdist.
 - `config/` contains MCP client configuration examples.
 - `constraints/` defines reviewed dependency lanes.
 - `recipes/` contains standalone examples and is not imported by runtime code.
@@ -29,11 +29,24 @@ Read `development_kit/docs/layout.md` before broad exploration. Update that
 inventory in the same change whenever a tracked file is added, renamed, or
 removed.
 
+## Documentation language
+
+Use [asd-ste100](https://github.com/danyuchn/asd-ste100-skill) for documentation changes, including every file description in `development_kit/docs/layout.md`.
+Use strict writing for procedures and safety instructions. Use STE-flavored writing for explanations.
+Write one instruction per sentence. Name the actor. Use consistent technical terms.
+Aim for at most 20 English words per instruction and 25 per descriptive sentence.
+Apply the same clarity rules to Chinese. English dictionary rules do not certify Chinese text.
+Preserve requirement strength, uncertainty, conditions, exceptions, numbers, units, defaults, API names, paths, and code examples.
+Keep necessary precision when a shorter sentence would change the meaning. Record that exception during review.
+Check behavior against code. Distinguish implementation, tests, installed packages, native clients, and scientific acceptance.
+Keep English and Chinese facts consistent. Do not change historical receipts or quoted diagnostic strings for style.
+Use the skill linter as a structural check, not proof of preserved meaning or certified ASD-STE100 compliance.
+
 ## Engineering rules
 
 All agent terminal commands use PowerShell 7 (`pwsh`), not Windows PowerShell
 5.1. Legacy-shell subprocesses inside existing cross-shell acceptance tests
-are test scenarios; do not change the agent's shell or silently remove those
+are test scenarios. Do not change the agent's shell or silently remove those
 tests. Use current repository scripts and preserve their bounded execution.
 
 ### Dependency lane policy
@@ -57,14 +70,14 @@ declared reason. Do not widen a lane to absorb a drift report.
   reviewed code fix or a narrow documented exception. Never loosen a rule,
   widen an exclusion, or lower a threshold to make a tool upgrade pass.
 - Raising a declared minimum, dropping a supported lane, or excluding a major
-  requires an explicit recorded decision; it is never a side effect of a drift
+  requires an explicit recorded decision. It is never a side effect of a drift
   review.
 
 1. Support only the Python and dependency ranges declared in `pyproject.toml`.
    Do not claim a new COMSOL or MPh compatibility range without an acceptance
    gate and corresponding release evidence.
 2. Keep one COMSOL solver owner. Check ownership and preflight before creating
-   a client; never compete with an existing lease or external owner.
+   a client. Never compete with an existing lease or external owner.
 3. Treat source models as immutable. Mutate only provenance-tracked derived
    copies, retain source identity, and prove cleanup of owned clones.
 4. Serialize every call to one MCP stdio server, including capabilities and
@@ -75,7 +88,7 @@ declared reason. Do not widen a lane to absorb a drift report.
    simulation, and future autonomous-exploration experiment tools. Model
    orthogonal optional functionality as independent, explicit, default-off
    boolean feature gates that compose with every profile and with one another.
-   Changing a profile or feature gate requires an MCP host restart; GUI language
+   Changing a profile or feature gate requires an MCP host restart. GUI language
    and scale are presentation-only exceptions that apply immediately.
 7. Do not start COMSOL for unit, schema, packaging, documentation, lint, or
    process-only work. Licensed COMSOL checks are explicit and serial.
@@ -88,7 +101,7 @@ declared reason. Do not widen a lane to absorb a drift report.
    A successful native call, fixed-wavelength match, or S/P label alone is not
    physical validation.
 10. Keep evidence-integrity checks enabled unless an explicit exploration opt-out
-   is requested; preserve the resulting unverified state in the outcome.
+   is requested. Preserve the resulting unverified state in the outcome.
 11. Do not commit credentials, private assets, licensed manuals, `.mph` models,
     or unreviewed third-party data.
 12. Update public tool schemas, profile snapshots, documentation, and release
@@ -101,7 +114,7 @@ declared reason. Do not widen a lane to absorb a drift report.
    `comsol_mcp/tools/profiles.py`.
 2. Prefer narrow, typed, profile-compatible interfaces over generic property
    escape hatches. Preserve stable JSON schemas and bounded response contracts.
-3. Keep runtime code under `comsol_mcp/`; do not import `development_kit/` or
+3. Keep runtime code under `comsol_mcp/`. Do not import `development_kit/` or
    recipes.
 4. Add deterministic tests for observable behavior, safety invariants,
    resume/cleanup/provenance regressions, and schema changes.
@@ -121,13 +134,13 @@ declared reason. Do not widen a lane to absorb a drift report.
   model from an upstream example baseline containing `comp1`, `geom1`, and the
   `mf` interface with its required default features. It verifies the baseline
   hash, saves only to a distinct output model, and requires `--overwrite-output`
-  before replacing an existing output; do not represent the upstream model as
+  before replacing an existing output. Do not represent the upstream model as
   original work by this repository. Treat it only as an API-compatible baseline:
   the recipe uses linear air (`mu_r=1`) and does not trust upstream nonlinear
   material laws or numerical results as physical validation.
 - That recipe builds and saves by default. A real 1 kHz solve requires the
-  explicit `--solve` flag, a free licensed host, and a separate acceptance run;
-  no result is validated until that run supplies its evidence.
+  explicit `--solve` flag, a free licensed host, and a separate acceptance run.
+  No result is validated until that run supplies its evidence.
 
 ## Testing and release checks
 
@@ -149,15 +162,15 @@ Use a provisional 10-minute timeout for complete solver-free test, coverage,
 quality, and release-gate runs. Focused area suites use serial pytest unless a
 measured run justifies parallel execution. The local complete suite uses the
 explicit four-worker main command above plus the startup/process-inventory
-serial tail; do not use bare serial pytest or `-n auto` for the full local
-suite. Record current counts/durations from fresh receipts; old 2,000-test
+serial tail. Do not use bare serial pytest or `-n auto` for the full local
+suite. Record current counts/durations from fresh receipts. Old 2,000-test
 benchmarks and 2,750-test reassessment triggers are no longer current routing.
 Reassess parallelism only after identifying a real stall or isolation failure.
 
 On Windows, complete quality/release gates and their pytest basetemps must use
 a direct short child of `D:\mcp_tests` whose leaf is at most 12 characters, for
 example `D:\mcp_tests\a65b12q`. The gate adds deep run, xdist, test-name, job,
-and artifact components; descriptive nested roots can exceed Win32 path limits
+and artifact components. Descriptive nested roots can exceed Win32 path limits
 and cause misleading temporary-file `FileNotFoundError` failures. Treat a long
 artifact root as an invalid gate invocation, not as a test failure.
 
@@ -166,11 +179,11 @@ blocking tool waits bounded so progress can be communicated. If the ETA is
 exceeded, inspect once, classify progress/failure, and derive a new estimate.
 
 The quality gate applies the local split while collecting coverage. Hosted
-Python 3.14 uses the checked-in serial shard helpers instead of xdist; use
+Python 3.14 uses the checked-in serial shard helpers instead of xdist. Use
 the actual `.github/workflows/ci.yml` and gate scripts as authority for job
 timeouts and shard counts. Do not restore hosted xdist or edit timeouts merely
-to hide a failure. The release gate's own test mode is defined by its script;
-keep clean install and installed stdio verification distinct from source tests.
+to hide a failure. The release gate's own test mode is defined by its script.
+Keep clean install and installed stdio verification distinct from source tests.
 
 For a release candidate, use the locked dependency lane from a clean tree:
 
@@ -180,7 +193,7 @@ python development_kit/scripts/release_gate.py `
 ```
 
 Real COMSOL gates are opt-in, licensed, and serial. Follow
-`development_kit/docs/release_checklist.md`; hosted CI intentionally does not
+`development_kit/docs/release_checklist.md`. Hosted CI intentionally does not
 run them.
 
 A version-only release identity update does not require a new Settings GUI
@@ -196,13 +209,13 @@ focused diagnosis. `development_kit/tests/test_launcher_distribution.py` is
 the canonical pytest wrapper: on Windows it runs the accepted suite serially
 under both Windows PowerShell 5.1 and `pwsh`, so complete local pytest and the
 hosted Windows CI jobs exercise the same contract. Non-Windows collection
-skips the process tests; it does not emulate Windows behavior.
+skips the process tests. It does not emulate Windows behavior.
 
 ## MCP and evidence contracts
 
 - Use `capabilities` to discover the installed profile and tool surface without
   starting COMSOL. Restart the MCP host after profile, package, or settings
-  changes; live discovery is authoritative after restart.
+  changes. Live discovery is authoritative after restart.
 - For Wave Optics, preflight before a point audit. Require caller-declared
   scientific policy for pass/fail classification and preserve raw R/T/A,
   closure, wavelength synchronization, mesh state, and artifact identities.
@@ -222,7 +235,7 @@ The caller reports 0.7.5 published after independent acceptance at
 dependency drift including lint/dev tools and MCP SDK, formal MPh 1.4 support,
 native nonblocking Tasks with ordinary-job fallback, live `dbmodel://` Model
 Manager, and guarded Desktop/remote sessions. Python 3.14 remains the release
-lane; existing 3.15 preview CI is informational, not a migration target before
+lane. Existing 3.15 preview CI is informational, not a migration target before
 final release. Read `../Desktop/plans/comsol_mcp/ROADMAP.md`, the canonical
 0.7.6 plan, and its executor handoff. The details and decisions live there,
 not in this contributor guide. Publication does not imply deployment.
@@ -230,5 +243,5 @@ not in this contributor guide. Publication does not imply deployment.
 For file discovery, use the Everything HTTP service at `127.0.0.1:1145`
 before recursive PowerShell enumeration. Use PowerShell 7 for targeted reads
 and commands. Do not put development plans in AGENTS.md. For any authorized
-commit use the caller's configured `garbage-enzyme` identity; never substitute
+commit use the caller's configured `garbage-enzyme` identity. Never substitute
 an agent identity. Do not commit or push without task authorization.

@@ -11,7 +11,7 @@ second implementation tree.
 
 During the declared interval, readers accept legacy producer identifiers such
 as `src.jobs.worker` and current `comsol_mcp.jobs.worker`. New durable records
-write only the canonical identifier; accepted legacy records are not rewritten
+write only the canonical identifier. Accepted legacy records are not rewritten
 in place.
 
 Removal of the compatibility package is a separately reviewed future release

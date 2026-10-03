@@ -9,7 +9,7 @@ English | [中文](README_CN.md)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
-> A maintained fork of [wjc9011/COMSOL_Multiphysics_MCP](https://github.com/wjc9011/COMSOL_Multiphysics_MCP), accepted for the **`COMSOL 6.4.0.*` release line** and **MPh 1.3.1 standalone/clientapi**. Licensed reference evidence uses COMSOL **6.4.0.293**; a third numeric component change is a separate release family and requires new acceptance.
+> A maintained fork of [wjc9011/COMSOL_Multiphysics_MCP](https://github.com/wjc9011/COMSOL_Multiphysics_MCP), accepted for the **`COMSOL 6.4.0.*` release line** and **MPh 1.3.1 standalone/clientapi**. Licensed reference evidence uses COMSOL **6.4.0.293**. A third numeric component change is a separate release family and requires new acceptance.
 
 This server gives AI agents a safer, smaller interface for COMSOL inspection, controlled one-point validation, durable staged sweeps, and offline manual lookup. It is designed for the `model.java` clientapi object returned by `mph.Client()`, whose API differs materially from the direct `com.comsol.model.Model` API targeted by the upstream project.
 
@@ -43,14 +43,12 @@ release procedures remain in this repository's development kit.
 
 ## Client compatibility and deployment
 
-The installed MCPServer stdio server has been validated with Codex CLI and
-opencode. A Windows 11 acceptance run with Claude Code 2.1.220 completed stdio
-initialization, discovered the complete tested `wave_optics` tool surface, and
-called `capabilities`, `comsol_status`, and `solver_status` successfully. The
-server exited cleanly with no solver lease or COMSOL process created. This is
-client transport, schema, discovery, and non-starting status compatibility—not
-licensed runtime acceptance: Claude did not call `comsol_start`, run a model,
-exercise the complete error surface, or prove start/solve/cleanup behavior.
+Earlier installed-server tests covered Codex CLI and opencode. A Windows 11 test with Claude Code 2.1.220 covered stdio initialization and the tested `wave_optics` tool surface. It called `capabilities`, `comsol_status`, and `solver_status`. The server exited without creating a solver lease or COMSOL process.
+
+Those results cover transport, schemas, discovery, and status calls only. They do not prove `comsol_start`, licensed start/solve/cleanup behavior, or the complete error surface.
+
+For 0.7.6, the external-client review remains incomplete. The Claude Python SDK smoke is not evidence of native Claude Tasks support. A later durable sweep completed, but its solved wavelength did not match the requested wavelengths. That run does not validate the requested spectrum. OpenCode testing stopped after a connection failure. Neither client has complete native interoperability acceptance for this release.
+
 Hermes Agent remains configuration-level guidance without an end-to-end client
 test. Use the complete deployment guide for fresh installation, exact
 configuration paths, profile selection, restart behavior, and solver-free
@@ -101,7 +99,7 @@ The initialize response also carries a short safety instruction through the
 legacy MCP initialize schema: discover capabilities and preflight first, require
 an explicit user request before start/solve/mutation, keep source models
 read-only, and separate execution success from evidence integrity and scientific
-validation. Clients may use or ignore this hint; the server's enforced ownership
+validation. Clients may use or ignore this hint. The server's enforced ownership
 and validation checks remain the security boundary.
 
 ### Optional DeepSeek Harness bridge
@@ -130,39 +128,39 @@ in the same DSH session: the bridge owns the single serialized MCP connection.
 See the versioned
 [`DeepSeek compatibility contract`](dsh_bridge/DEEPSEEK_COMPATIBILITY.md) for
 installation, settings-change, verification, and recovery boundaries.
-Fake-server tests are solver-free; real DSH acceptance and licensed solves must
+Fake-server tests are solver-free. Real DSH acceptance and licensed solves must
 be reported separately.
-Restart recovery routes offline completions to the original session; notification
+Restart recovery routes offline completions to the original session. Notification
 persistence follows native DSH semantics and does not guarantee delivery across
 a crash before the session is saved.
 
 ## Highlights
 
-- **ClientAPI compatibility.** Geometry, physics, materials, meshes, studies, results, model cloning, and Unicode-safe `.mph` saving have licensed acceptance on COMSOL 6.4.0.293; final build changes within 6.4.0.* inherit the release-line conclusion, while other release families remain unknown.
+- **ClientAPI compatibility.** Licensed tests cover geometry, physics, materials, meshes, studies, results, model cloning, and Unicode-safe `.mph` saves on COMSOL 6.4.0.293. Final build changes within 6.4.0.* inherit that release-line conclusion. Other release families remain unknown.
 - **Typed Acoustics and PDE construction.** The `basic_fem` profile includes
   rollback-safe named Box/side selections, Pressure Acoustics, Coefficient,
   General, and Weak Form PDE interfaces, and atomic boundary batches with exact
   type and property allowlists.
 - **Safe solver ownership.** An ASCII-path lease, process identity checks, external-client detection, status, and preflight checks prevent accidental competing COMSOL clients.
-- **Durable background work.** Staged sweeps and adaptive spectral characterization run in detached workers with immutable specifications, atomic state, fsync'd evidence rows, checkpoints, validated resume, and verified same-host cancellation. A reusable [local launcher](launcher/README.md) provides the same point-boundary operating pattern for project drivers.
+- **Durable background work.** Detached workers run staged sweeps and adaptive spectral characterization. They preserve immutable specifications, atomic state, fsync'd evidence rows, checkpoints, validated resume, and verified same-host cancellation. The [local launcher](launcher/README.md) provides the same point-boundary pattern for project drivers.
 - **Bounded native adjoint optimization (experimental).** An `adjoint_optimization`
   durable job supports one allowlisted fixed-topology periodic-MIM adapter with
   validated COMSOL-native gradients and GCMMA. Every request must declare its
-  cores, solve/iteration/wall/commit/disk/review budgets; accepted results bind
+  cores, solve/iteration/wall/commit/disk/review budgets. Accepted results bind
   move limits, explicit solution/dataset identities, remeshed fresh-forward
   evidence, and immutable source bytes. It is not generic CAD, multi-state
   robust optimization, topology optimization, or a global-optimality claim.
 - **Python-free standalone execution.** A reviewed native Windows x64 launcher
   keeps the same three layers: an installed and licensed COMSOL 6.4, a
   COMSOL-compiled Java point driver, and the launcher EXE. The target does not
-  need Python, Conda, MPh, JPype, or an external Java installation; COMSOL
+  need Python, Conda, MPh, JPype, or an external Java installation. COMSOL
   itself is still required and is never bundled or replaced.
-- **Shared Desktop collaboration (default-off).** The independent `shared_server.enabled` feature can be combined with any tool profile to attach to a manually started local COMSOL Server, adopt exactly one server-held model, enforce non-owning leases and revision locks, run durable attached jobs, and detach without shutting down the user's Server, Desktop, listener, or model. At most two independent solver owners may run in parallel, each fixed to one core; multi-core solver use, a third owner, and cross-owner model access are refused.
-- **COMSOL Model Manager (default-off).** The independent `model_manager.enabled` feature adds bounded Model Manager tools that compose with every profile, and the further independent `model_manager.upload_enabled` setting gates saving back to the Model Manager. Opening, running, and downloading work with uploads disabled, and sharing a session never enables either switch. When an upload is enabled it still requires an explicit derived source identity, and any existing destination, revision mismatch, or overwrite is refused rather than forced. Every attempt, including a refused one, is journalled durably.
+- **Shared Desktop collaboration (default-off).** The independent `shared_server.enabled` feature works with every tool profile. It attaches to a manually started local COMSOL Server and adopts exactly one server-held model. It enforces non-owning leases and revision locks, and runs durable attached jobs. Detach preserves the user's Server, Desktop, listener, and model. At most two independent solver owners may run in parallel, each with one core. The server refuses multi-core solver use, a third owner, and cross-owner model access.
+- **COMSOL Model Manager (default-off).** `model_manager.enabled` adds bounded Model Manager tools to any profile. The separate `model_manager.upload_enabled` setting controls saving to Model Manager. Opening, running, and downloading remain available with uploads disabled. Session sharing enables neither switch. Uploads require an explicit derived source identity. The server refuses an existing destination, revision mismatch, or overwrite. A durable journal records every attempt, including refusals.
 - **Wave Optics validation.** A focused profile provides read-only model preflight and a one-wavelength evidence audit for periodic metasurfaces.
-- **Progressive discovery.** Cold start stays small: `capabilities` reports a compact identity and count view of the artifact-schema registry instead of all 193 entries, and the read-only `catalog` tool returns the domain/tool summary, one domain's tools with their full input schemas, one tool, or one named schema on demand. The full registry stays authoritative in the server and is bound to the same fingerprint the summary advertises, so an on-demand fetch cannot disagree with what was advertised. The separate, default-off `discovery.pagination_enabled` switch enables an experimental `tools/list` cursor adapter; with it off, clients that read only a first page receive the ordinary complete listing, and with it on every page states the true total so a partial page can never be mistaken for the whole surface.
-- **Bounded offline manuals (default-off).** `manuals.root` identifies the original COMSOL PDF tree, while the independent `lexical_docs.enabled` feature adds SQLite FTS5/BM25 search and page retrieval after the user generates a local index. It runs outside the COMSOL control process and returns compact source/page citations.
-- **Honest optional semantic retrieval.** The isolated `semantic_docs.enabled` feature is contained and composes with any tool profile, but its baseline model did not meet quality and memory promotion gates. Lexical manual search remains the recommended default.
+- **Progressive discovery.** `capabilities` returns compact registry identity and counts instead of all 193 artifact-schema entries. The read-only `catalog` tool returns domain/tool summaries, one domain with full tool input schemas, one tool, or one named schema. The server holds the authoritative registry. Its fingerprint binds the compact summary and on-demand results. The separate `discovery.pagination_enabled` switch enables experimental `tools/list` cursor pages. It defaults to off, so first-page-only clients receive the complete ordinary list. When enabled, each page states the total. Clients must use that metadata and fetch subsequent pages to discover all tools.
+- **Bounded offline manuals (default-off).** `manuals.root` identifies the original COMSOL PDF tree. After local index generation, `lexical_docs.enabled` adds SQLite FTS5/BM25 search and page retrieval. An isolated process returns bounded source/page citations.
+- **Optional semantic retrieval.** The isolated `semantic_docs.enabled` feature works with every profile. Its baseline model failed the quality and memory promotion gates. Lexical manual search remains the recommended default.
 
 ## Shared project settings
 
@@ -175,7 +173,7 @@ agents. The complete field meanings, defaults, and accepted values are in the
 [settings guide](docs/setting_guide/README.md).
 Missing entries use their documented safe defaults. An invalid entry keeps only
 that entry at its default and is reported by `capabilities` and
-`evidence_integrity_status`; malformed JSON falls back to the complete safe default
+`evidence_integrity_status`. Malformed JSON falls back to the complete safe default
 document and reports the error. Do not create a second agent-owned settings file.
 
 In a source checkout, the project-root file is writable. In an installed wheel,
@@ -204,7 +202,7 @@ ordinary user, call profile-independent `settings.start` once, tell the user
 that startup-setting changes apply after restarting Codex or the owning MCP
 client, stop further task output, and wait for the user's next message. Do not
 edit JSON while the GUI is open. Use `agent_edit` only when the user explicitly
-requests agent-managed or automated configuration; edit only the resolved
+requests agent-managed or automated configuration. Edit only the resolved
 writable file, validate it, and request the same restart.
 The installed `comsol-mcp-settings` command opens the GUI directly. Repository
 and source-distribution users can also run `./Open_Settings_GUI.ps1`. The script
@@ -212,22 +210,22 @@ discovers a supported standard-GIL Python 3.14/3.15 interpreter (preferring
 3.14 when using the Python launcher), or accepts explicit
 `-PythonPath` and `-SettingsPath` values. `-ValidateOnly` checks the manual
 launcher without opening the GUI or starting COMSOL. The server can report
-`agent_action_required: pause_for_user`; it cannot technically force arbitrary
+`agent_action_required: pause_for_user`. It cannot technically force arbitrary
 third-party agents to comply.
 The installed entry also accepts `--settings-path` and `--validate-only` and
 works with MCP stdio stopped. Its About page can explicitly create or remove the
-per-user `COMSOL MCP Settings.lnk`; installation and ordinary GUI actions never
+per-user `COMSOL MCP Settings.lnk`. Installation and ordinary GUI actions never
 create that shortcut automatically. The shortcut targets the installed
 `comsol-mcp-settings-gui` Windows GUI-subsystem entry, so it does not open a
-terminal window; the console `comsol-mcp-settings` entry remains available for
+terminal window. The console `comsol-mcp-settings` entry remains available for
 validation and scripted actions.
 
 ## Profiles
 
 Users select a profile in the Settings GUI before starting the server.
 Developers and agents may set the equivalent `profile.name` field in
-`settings.json`. A profile is fixed for the lifetime of that server process;
-restart after changing it.
+`settings.json`. A profile is fixed for the lifetime of that server process.
+Restart after changing it.
 
 | Profile | Intended use |
 | --- | --- |
@@ -239,22 +237,22 @@ restart after changing it.
 
 The `experimental` and `full` profiles expose three solver-free alpha7 research
 preparation tools. `research_campaign_compile` turns a complete goal, frozen
-design space, and explicit approval into a fingerprinted manifest; it never
+design space, and explicit approval into a fingerprinted manifest. It never
 starts a solver. `research_robustness_plan` creates a centered one-axis-at-a-time
 perturbation matrix and rejects candidates that would require bound clipping.
 `research_optimizer_advance` is a stateless checkpoint/feedback step for the
-experimental adaptive backend; clients own the returned checkpoint and can
+experimental adaptive backend. Clients own the returned checkpoint and can
 resume exact proposals after a restart.
-These tools prepare evidence-safe work; they do not start an autonomous
+These tools prepare evidence-safe work. They do not start an autonomous
 campaign, change materials, claim success without caller tolerances, or make
 RCWA mandatory when an independent adapter is not applicable.
 
 The same two profiles expose the alpha7.2 robust-shape workflow through four
 bounded experimental tools. `robust_shape_plan_preview` validates and
-summarizes a hash-pinned manifest without admission or solver startup;
-`robust_shape_job_submit` routes only through the durable job authority;
+summarizes a hash-pinned manifest without admission or solver startup.
+`robust_shape_job_submit` routes only through the durable job authority.
 `robust_shape_evidence_inspect` returns a path-redacted bounded journal
-summary; and `robust_shape_evidence_verify` checks immutable specification
+summary. And `robust_shape_evidence_verify` checks immutable specification
 identity, hash-chain ordering, condition completeness, validated gradients,
 fresh-forward optimizer evidence, finalist validation, checkpoints, and
 cleanup. They expose no generic Java property mutation and remain absent from
@@ -272,7 +270,7 @@ For a licensed robust run, optimizer configuration schema `1.1.0` keeps every
 condition solve and adjoint in COMSOL while driving the aggregate objective with
 an explicit outer-loop GCMMA state. The caller supplies an ASCII path and exact
 SHA-256 for the separately obtained pure-Python `mmapy 0.3.1` wheel. The wheel
-is hash-checked and loaded only on this experimental execution path; it is not
+is hash-checked and loaded only on this experimental execution path. It is not
 installed, bundled, imported by discovery, or silently replaced by MMA/CCSAQ.
 Every proposal, nonconservative inner revision, accepted fresh-forward result,
 move limit, and true condition-solve budget is durable and fingerprinted.
@@ -288,7 +286,7 @@ coordinate segregated steps when their constraints cross at oblique incidence,
 then reads back the single merged step and its caller-selected direct solver.
 The caller-owned mesh reference remains validation-fixture evidence, never an
 automatic coarsening rule or a substitute for independent finer-mesh finalist
-convergence; accepted gradients still require independent finite-difference and
+convergence. Accepted gradients still require independent finite-difference and
 directional reconciliation.
 
 Robust condition-controls schema `1.5.0` adds the mandatory
@@ -301,7 +299,7 @@ evaluated over the mesh vertices, the deformed radius is measured from the
 maximum-component vertex, and it is compared with the requested radius
 (relative tolerance declared by the caller) before any condition solve is
 trusted. The gradient path removes the staged step and regenerates the coupled
-sequence, so native adjoint receipts are unchanged; the `1.4.0` contract
+sequence, so native adjoint receipts are unchanged. The `1.4.0` contract
 remains readable.
 
 Profiles only control the visibility of COMSOL automation/simulation tools and
@@ -315,17 +313,17 @@ other:
 | `shared_server.enabled=true` | Protected shared Desktop/attached-Server workflow with explicit confirmation and exact process/listener/model identity. |
 | `semantic_docs.enabled=true` | Three isolated experimental vector-assisted manual-retrieval tools. |
 
-Call `capabilities` to discover the active profile, exact registered tools, target versions, disabled groups, and restart requirements without starting COMSOL. Its bounded `deployment_identity` reports source-tree versus installed-package loading plus frozen profile/schema and catalog hashes, so a host restart can detect same-version stale installs or source shadowing without exposing local paths.
+Call `capabilities` to discover the active profile, exact registered tools, target versions, disabled groups, and restart requirements without starting COMSOL. The bounded `deployment_identity` reports the loading source and frozen profile/schema and catalog hashes. After restart, compare these values to detect same-version stale installs or source shadowing. The response does not expose local paths.
 
 Enable shared Desktop/attached-Server work in the Settings GUI Profile tab. It
-is a default-off feature independent of the selected profile; the advanced JSON
+is a default-off feature independent of the selected profile. The advanced JSON
 equivalent is `shared_server.enabled=true`.
 The user must start COMSOL Server manually, connect Desktop to it, confirm
 the endpoint, and explicitly confirm each attach. The legacy `comsol_connect`
 tool remains an experimental compatibility surface and is not a substitute for
 the protected shared-session lifecycle.
 
-Control-plane responses from capabilities, solver ownership, durable jobs, and lexical manuals include a compact rolling `control_plane` block. It retains at most 256 samples per operation and reports success/busy/timeout/error counts plus p50/p95/max latency; full logs and unbounded telemetry are never returned inline.
+Control-plane responses from capabilities, solver ownership, durable jobs, and lexical manuals include a compact rolling `control_plane` block. It retains at most 256 samples per operation and reports success/busy/timeout/error counts plus p50/p95/max latency. Full logs and unbounded telemetry are never returned inline.
 
 ### Standalone Windows launcher
 
@@ -352,7 +350,7 @@ configured owned ASCII artifact root. The MCP host verifies the packaged source
 identity, build manifest, and EXE hash before execution. Once generated, the
 EXE can also be copied and operated directly without that Python MCP host.
 `standalone_start` and `standalone_resume` use an explicit `comsol_root` when
-provided; otherwise they use `comsol.installation_root` from shared settings.
+provided. Otherwise they use `comsol.installation_root` from shared settings.
 
 ## Recommended workflows
 
@@ -362,14 +360,14 @@ provided; otherwise they use `comsol.installation_root` from shared settings.
 2. Call `solver_preflight` before connecting, starting COMSOL, or submitting substantial work.
 3. Use the session/model tools or submit a durable staged sweep.
 
-The server fails closed when an external MPh/COMSOL owner or a valid lease is present. `solver_recover_stale_lease` only removes a lease that process identity evidence proves stale; it never terminates an unowned process.
+The server fails closed when an external MPh/COMSOL owner or a valid lease is present. `solver_recover_stale_lease` only removes a lease that process identity evidence proves stale. It never terminates an unowned process.
 
 ### Parallel-plate capacitor end-to-end example
 
 The source checkout includes a three-dimensional dielectric capacitor recipe.
 It identifies the two electrode faces from their measured centers and normals,
 applies Ground and Electric Potential conditions, and uses a stationary
-Electrostatics study. Build-only is the default; add `--solve` to compare the
+Electrostatics study. Build-only is the default. Add `--solve` to compare the
 energy-derived capacitance with `epsilon_0 * epsilon_r * area / separation`.
 
 ```powershell
@@ -387,7 +385,7 @@ unless `--overwrite-output` is explicit.
 
 The source checkout includes a physical two-dimensional air-duct recipe. It
 uses rigid sidewalls, a one-pascal inlet, and a zero-pressure outlet at a
-frequency below the first transverse cutoff. Build-only is the default; add
+frequency below the first transverse cutoff. Build-only is the default. Add
 `--solve` to compare the numerical center pressure with the analytical
 one-dimensional Helmholtz solution before the receipt is marked verified.
 
@@ -402,11 +400,11 @@ named side selections, saves to a unique staging model, clears the COMSOL client
 and lease, and only then publishes the final `.mph` file. It never overwrites an
 existing output unless `--overwrite-output` is explicit.
 
-Durable sweep controls are `job_submit`, `job_status`, `job_tail`, `job_cancel`, and `job_resume`. Each job has its own ASCII-only runtime directory containing its immutable specification, state, CSV journal, checkpoint, and log. Resume accepts only matching, finite, successful rows. Cancellation reaches a terminal cancelled state only after worker/process cleanup and lease release are verified. This coordination is for a shared runtime directory on one host; it is not distributed execution.
+Durable sweep controls are `job_submit`, `job_status`, `job_tail`, `job_cancel`, and `job_resume`. Each job has its own ASCII-only runtime directory containing its immutable specification, state, CSV journal, checkpoint, and log. Resume accepts only matching, finite, successful rows. Cancellation reaches a terminal cancelled state only after worker/process cleanup and lease release are verified. This coordination is for a shared runtime directory on one host. It is not distributed execution.
 
 The interactive `mesh_convergence_study` helper also writes a manifest beside
 its CSV. Any resume or append to an existing journal requires
-`source_model_path`; the source hash, study, expressions, parameter setting,
+`source_model_path`. The source hash, study, expressions, parameter setting,
 mesh identity, and each level's exact property map must match before a completed
 level can be skipped. CSV and checkpoint failures are terminal persistence
 outcomes for that level and never trigger another solve.
@@ -423,7 +421,7 @@ identity match.
 
 Execution status and scientific interpretation are separate. A job can finish
 with `status: "completed"` while its `scientific_disposition` is `residual` or
-`unresolved_at_declared_cap`; boundary peaks, missing brackets, fit sensitivity,
+`unresolved_at_declared_cap`. Boundary peaks, missing brackets, fit sensitivity,
 and exhausted expansion budgets are scientific non-acceptance outcomes, not
 worker failures. `accepted` requires complete hash-resolvable raw evidence.
 Partial interrupted or cancelled rows remain diagnostic, and cancellation is
@@ -439,7 +437,7 @@ polynomial, Lorentzian, and Fano fits in wavelength, frequency, angular-frequenc
 or energy coordinates, then maps peak and half-prominence crossings back to the
 original wavelength evidence. It reports fit diagnostics, support sensitivity,
 AIC, AICc when defined, BIC, deltas, and descriptive Akaike weights. These rank
-model support only; they do not prove Lorentzian physics, Fano interference,
+model support only. They do not prove Lorentzian physics, Fano interference,
 mode identity, or scientific acceptance.
 
 Three solver-free preview tools make configuration review explicit before any
@@ -449,7 +447,7 @@ layers, material state and loss sign, incidence and polarization, mesh keys,
 model-tree identities, solver termination, units, and artifact chains. It
 normalizes supported units and returns a content-bound fingerprint.
 `simulation_configuration_diff` classifies leaves as exact, within tolerance,
-semantic, label-only, or unavailable; labels never become physical identity.
+semantic, label-only, or unavailable. Labels never become physical identity.
 `job_spec_preview` reuses the exact discriminated input validator used by
 `job_submit` and reports its bounded point/stage inventory, path/resource
 checks, requirements, and declared submit-time side effects without admission,
@@ -474,7 +472,7 @@ spectral/temperature validity, uncertainty, measurement conditions, and whether
 the data are measured, fitted, or assumed. Typed entries cover n/k and complex
 permittivity tables plus Drude, Lorentz, TOLO, and thermo-optic models. State IDs
 remain distinct across carrier density, mobility, effective mass, and phase
-fraction; declared phase/discontinuity boundaries are never smoothed through.
+fraction. Declared phase/discontinuity boundaries are never smoothed through.
 The internal convention is `exp(-i*omega*t)` with passive `Im(epsilon)>=0`.
 COMSOL output is a mutation-free `exp(+i*omega*t)` conversion preview containing
 exact target property/function tags, units, interpolation/extrapolation policy,
@@ -483,7 +481,7 @@ table hashes, readback expectations, and rollback requirements.
 A licensed durable thermal-to-optical replay uses
 `job_type: "thermo_optomechanical_replay"` plus an ASCII JSON
 `specification_path` and exact `specification_sha256`. The bounded manifest is
-validated against the complete closed contract before submission; this keeps
+validated against the complete closed contract before submission. This keeps
 core MCP discovery bounded without accepting free-form configuration. It binds an
 immutable source, one validated thermal material state, exact Heat Transfer,
 Solid Mechanics, Moving Mesh, Wave Optics, study, selection, parameter, mesh,
@@ -503,10 +501,10 @@ identities. Every level runs the accepted adaptive spectral job, persists its
 complete hash-bound artifacts, and enters the offline convergence evaluator only
 at its own bracketed peak. The caller supplies metrics, units, tolerances,
 governing-pair and declared-cap rules, total point/wall-time caps, and any early-
-acceptance permission. One solver owner and client serve the whole campaign;
-the worker never invents an extra level and resumes only verified complete level
-rows. This release does not apply arbitrary parameter setters inside a campaign;
-prepare and verify derived model levels before submission.
+acceptance permission. One solver owner and client serve the whole campaign.
+The worker never invents an extra level and resumes only verified complete level
+rows. This release does not apply arbitrary parameter setters inside a campaign.
+Prepare and verify derived model levels before submission.
 
 A durable branch-continuation campaign uses
 `job_type: "branch_continuation_campaign"` and an immutable sequence of two to
@@ -518,7 +516,7 @@ hash-chained state row before the offline continuation planner can use it.
 Caller policy bounds the guard window, absolute wavelength domain, expansion
 count, total window, request grid, point count, wall time, and whether to stop at
 the first unresolved transition. Boundary-high and competing-candidate results
-remain residual or `unresolved_at_declared_cap`; the campaign never reports
+remain residual or `unresolved_at_declared_cap`. The campaign never reports
 physical branch disappearance or starts an undeclared coordinate. One solver
 owner and client serve the campaign, and resume reuses only complete verified
 state spectra. This release supports exact/prebuilt models only and does not
@@ -536,7 +534,7 @@ solver_status -> wave_optics_preflight -> wave_optics_reference_audit (optional)
 
 `wave_optics_point_audit` solves exactly one declared wavelength after ownership and source-hash checks. It writes a running manifest, one fsync'd CSV row, and a final manifest. Raw evidence can include requested/evaluated wavelength, frequency linkage, caller-provenanced R/T/A and flux direction, closure, loss expressions, bounded top-air field statistics, mesh state, and source/config/policy hashes.
 
-`wave_optics_reference_audit` is an experimental reference-power tool. It creates a fresh provenance-tracked clone, requires exact caller material/domain declarations, replaces clone component materials with lossless air, samples a bounded homogeneous region, and removes the clone before method evidence can pass. It never mutates the source model; licensed acceptance is version/model-specific.
+`wave_optics_reference_audit` is an experimental reference-power tool. It creates a fresh provenance-tracked clone and requires exact caller material/domain declarations. It replaces clone component materials with lossless air and samples a bounded homogeneous region. Method evidence cannot pass until the tool removes the clone. It never mutates the source model. Licensed acceptance is version/model-specific.
 
 Without a caller-supplied versioned validation policy, an audit is evidence-only: it does not declare a model pass/fail or recommend a long sweep. S/P labels and structure total fields stay explicitly qualified until an incident-reference artifact supports a stronger claim.
 
@@ -546,7 +544,7 @@ Without a caller-supplied versioned validation policy, an audit is evidence-only
 
 The Settings GUI Docs tab separates manual keyword search from semantic search. Choose a raw PDF root and an ASCII-only SQLite destination, then use **Generate Index**. The background dialog reports stage, current PDF, page counts, and percentage. It builds and validates a sibling temporary database, atomically publishes only a valid result, and preserves the previous index on cancellation or failure. Enable manual search only after a valid index exists.
 
-`semantic_docs.enabled` is opt-in and isolated from COMSOL control. Its isolated-worker vector retrieval is an English diagnostic baseline, not a multilingual or production-quality claim: the frozen benchmark improved exact-match recall but regressed paraphrase/multi-concept recall, returned no direct-Chinese matches, failed negative-query abstention, and grew substantially in memory during soak testing. The baseline model and its index assets have been removed; a replacement model would require a full benchmark gate before re-deployment. Keep lexical manual search for normal work.
+`semantic_docs.enabled` is opt-in and isolated from COMSOL control. The vector retrieval worker is an English diagnostic baseline, not a multilingual or production-quality result. The frozen benchmark improved exact-match recall but reduced paraphrase and multi-concept recall. It returned no direct-Chinese matches and failed negative-query abstention. Memory use grew substantially during soak tests. The baseline model and index assets were removed. A replacement requires a complete benchmark gate before deployment. Use lexical manual search for normal work.
 
 ## ClientAPI compatibility notes
 
@@ -560,7 +558,9 @@ The fork repairs the clientapi paths exercised by its test and real-COMSOL check
 - `model.java.save(full_path)` for Unicode-safe `.mph` saves and clientapi-safe clone cleanup.
 - Correct component-owned material and multiphysics construction.
 
-The electrostatics helper can create `ChargeConservation` and a material node because the default `fsp1` FreeSpace domain feature in COMSOL 6.3+/6.4 otherwise uses vacuum permittivity rather than a material's relative permittivity.
+The electrostatics helper can create `ChargeConservation` and a material node. In COMSOL 6.3+/6.4, the default `fsp1` FreeSpace domain feature otherwise uses vacuum permittivity instead of material relative permittivity.
+
+For a wavelength sweep, `record_wavelength_controls` records the requested value, evaluated `wl`, and `c_const/ewfd.freq`. It does not compare them. Configure the study step explicitly when the study does not follow the model parameter. Check all three values with a declared tolerance before accepting a spectrum. A job marked `completed` or a row marked `ok` does not establish wavelength agreement.
 
 ## Verification
 
@@ -571,14 +571,14 @@ receipt are maintained as release checks. Unit tests are side-effect-free:
 collection does not start COMSOL, and integration probes run only when explicitly
 requested in fresh, sequential subprocesses with exact process-tree cleanup.
 Repository-only tests, release fixtures, gates, and provenance are documented in
-`development_kit/README.md`; ordinary wheel/sdist artifacts exclude that directory.
+`development_kit/README.md`. Ordinary wheel/sdist artifacts exclude that directory.
 
 ```bash
 python -m pytest -q
 python -m pytest -q -m integration development_kit/tests/integration
 ```
 
-Real COMSOL checks include localized JSON transport; circle/union geometry; DXF import; parametric sweep properties; multiphysics coupling; clone cleanup; Unicode-path saving; solver ownership; durable interruption/restart/resume/cancellation; profile discovery; Wave Optics preflight and one-point audit; and bounded manual retrieval.
+Real COMSOL checks cover localized JSON transport, circle/union geometry, DXF import, parametric sweep properties, multiphysics coupling, clone cleanup, and Unicode-path saving. They also cover solver ownership, durable interruption/restart/resume/cancellation, profile discovery, Wave Optics preflight, one-point audit, and bounded manual retrieval.
 
 The Python 3.14 licensed parallel-plate regression returns **1.8593794419540677 pF**, versus the theoretical **1.8593794406880002 pF**, on COMSOL **6.4.0.293**.
 
@@ -589,10 +589,10 @@ The accepted 10-row spectrum found its interpolated own peak at
 **FWHM = 0.4807802607560452 um**, and **Q = 10.817464268472365**.
 Its raw rows span **R = 0.000428181826928114 to 0.506857218704363**,
 **T = 0.493142781295616 to 0.999571818173077**, and
-**max |A| = 2.985136902408465e-17**; maximum power-closure error is
+**max |A| = 2.985136902408465e-17**. Maximum power-closure error is
 **2.103241887902518e-14** and maximum wavelength-sync error is zero. A separate
 9-row boundary control expanded its declared window and completed normally as
-`unresolved_at_declared_cap`; its raw ranges are
+`unresolved_at_declared_cap`. Its raw ranges are
 **R = 0.113752050554409 to 0.697262752330585**,
 **T = 0.302737247669409 to 0.886247949445593**, and
 **max |A| = 1.695203805977834e-17**, with maximum closure error
@@ -602,13 +602,13 @@ the source SHA-256 and released the solver lease and client.
 Licensed convergence acceptance used three neutral periodic-port slab meshes:
 **2,386/560**, **4,798/1,039**, and **13,904/2,752** elements/vertices. Their
 own peaks were **5.200438265718366**, **5.200823291715278**, and
-**5.200959692754783 um**; fitted peak T values were
+**5.200959692754783 um**. Fitted peak T values were
 **0.9999455861474655**, **0.9999455828498416**, and
 **0.9999455989864663**. The governing medium-to-fine peak shift was
 **0.1364010395043668 nm**. Across 30 raw rows,
 **R = 0.000426677111557779 to 0.506857218704365**,
 **T = 0.493142781295614 to 0.999573322888467**, and
-**max |A| = 4.526776969362989e-17**; maximum closure error was
+**max |A| = 4.526776969362989e-17**. Maximum closure error was
 **2.48772546066357e-14** and wavelength-sync error was zero. A separate campaign
 with a declared **0.001 nm** peak-shift tolerance completed all three levels as
 `residual` while its amplitude check passed. Both campaigns preserved all source
@@ -619,12 +619,12 @@ Licensed branch-continuation acceptance used two immutable 4,798-element,
 incidence readback at **0 and 10 degrees**. Their own peaks were
 **5.200823291715293** and **5.195931563688228 um**, a measured shift of
 **4.891728027065 nm** within the caller's guard window. Peak T values were
-**0.9999455828498354** and **0.9999448178081717**; FWHM values were
-**0.4807802607560502** and **0.4836621446746728 um**; Q values were
+**0.9999455828498354** and **0.9999448178081717**. FWHM values were
+**0.4807802607560502** and **0.4836621446746728 um**. Q values were
 **10.817464268472143** and **10.742894851080779**. Across 20 raw rows,
 **R = 0.000422180032088570 to 0.512242443246136**,
 **T = 0.487757556753878 to 0.999577819967919**, and
-**max |A| = 3.015050383793419e-17**; maximum closure error was
+**max |A| = 3.015050383793419e-17**. Maximum closure error was
 **1.33935578502046e-14** and wavelength-sync error was zero. A separate 18-row
 boundary control consumed its one declared expansion and completed as
 `unresolved_at_declared_cap` with no additional request and no branch-
@@ -633,15 +633,15 @@ client, process, or lease residue.
 
 ## Requirements and installation
 
-- COMSOL Multiphysics 6.4; licensed acceptance is pinned to build 6.4.0.293
+- COMSOL Multiphysics 6.4. Licensed acceptance is pinned to build 6.4.0.293
 - Python 3.14 (standard GIL-enabled build, not the Windows Store build)
-- MPh 1.3.1, `mcp`, `pydantic`, and `psutil>=5.9.0`
+- MPh `>=1.3.1,<1.5`, MCP SDK `>=2.2.0,<2.3`, `pydantic`, and `psutil>=5.9.0`
 - COMSOL's Java 21 runtime in the verified configuration
 
 Python 3.14 remains the main development and production lane. Standard Windows
 x64 Python 3.15 has a separate experimental compatibility CI lane, currently
 pinned to 3.15.0rc2. It builds JPype 1.7.1, PyYAML 6.0.3 and the exact
-Pydantic 2.13.5/core 2.46.5 pair from source where wheels are unavailable;
+Pydantic 2.13.5/core 2.46.5 pair from source where wheels are unavailable.
 MSVC/Windows SDK, a JDK with Ant, and Rust are required for those builds.
 This lane excludes the experimental `semantic-docs` extra and does not establish
 licensed COMSOL compatibility or free-threaded Python support.
@@ -678,7 +678,7 @@ python -m pip install ".[semantic-docs]"
 #   semantic_docs.model_path = "D:/comsol_semantic/models/<model>/<revision>"
 ```
 
-On Windows accounts whose user path contains non-ASCII characters, avoid editable installs. Run `python -m pip install . --no-deps` after source changes, then restart the MCP host; the server does not hot-reload `comsol_mcp/tools/`.
+On Windows accounts whose user path contains non-ASCII characters, avoid editable installs. Run `python -m pip install . --no-deps` after source changes, then restart the MCP host. The server does not hot-reload `comsol_mcp/tools/`.
 
 Configure an MCP client, for example:
 
@@ -709,12 +709,12 @@ This is a COMSOL 6.4.0.293 standalone/clientapi compatibility and reliability fo
 | Area | Upstream orientation | This fork |
 | --- | --- | --- |
 | COMSOL API target | Direct `com.comsol.model.Model` API assumptions. | MPh 1.3.1 standalone `model.java` clientapi wrappers, including their different overloads, tags, lists, and Java-string transport. |
-| Tool surface | Broad feature discovery by default. | Compact `core` default; larger construction and compatibility surfaces require an explicit profile. |
+| Tool surface | Broad feature discovery by default. | Compact `core` default. Larger construction and compatibility surfaces require an explicit profile. |
 | Solver concurrency | No same-host ownership protocol. | Process-aware lease, external-client detection, status, preflight, and stale-lease recovery that never kills an unowned process. |
 | Long runs | Interactive/current-process workflows. | Detached durable sweeps and adaptive spectra with immutable specs, fsync'd evidence rows, frozen stages, validated resume, and verified cancellation cleanup. |
 | Wave Optics | General tools only. | A dedicated preflight plus one-point evidence audit for periodic metasurfaces, with raw evidence separated from caller policy. |
-| Manual search | No bounded manual retrieval. | Bounded isolated lexical manual retrieval is the production default; experimental semantic retrieval is isolated and explicitly not promoted. The legacy in-process ChromaDB path has been removed. |
-| Windows paths | No special guarantee for Unicode save paths. | Clientapi Java save path for Unicode `.mph` saves; ASCII-only runtime/index roots for native and durable artifacts. |
+| Manual search | No bounded manual retrieval. | Bounded isolated lexical manual retrieval is the production default. Experimental semantic retrieval is isolated and explicitly not promoted. The legacy in-process ChromaDB path has been removed. |
+| Windows paths | No special guarantee for Unicode save paths. | Clientapi Java save path for Unicode `.mph` saves. ASCII-only runtime/index roots for native and durable artifacts. |
 
 Use this fork when the upstream server fails under MPh standalone with errors such as `No matching overloads`, `Operation_cannot_be_created_in_this_context`, or client-list indexing errors. Use `full` only when compatibility with a broad legacy surface is genuinely required.
 
@@ -725,7 +725,7 @@ licensed manuals, third-party models, papers, and datasets are not relicensed by
 this repository. The optional external `mmapy` GCMMA/MMA wheel remains under
 GPL-3.0-or-later and is neither copied into nor distributed with this package.
 We thank Krister Svanberg for MMA/GCMMA and Arjen Deetman for the reviewed Python
-implementation; users of that execution path should retain their license and
+implementation. Users of that execution path should retain their license and
 citation notices.
 
 ## Publication and citation
