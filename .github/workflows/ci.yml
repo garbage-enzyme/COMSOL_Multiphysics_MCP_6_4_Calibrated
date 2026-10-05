@@ -417,7 +417,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ubuntu-settings-gui-evidence
-          path: /tmp/a77gui
+          path: |
+            /tmp/a77gui/tests.xml
+            /tmp/a77gui/visual
           if-no-files-found: warn
 
   paired-platform-coverage:

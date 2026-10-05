@@ -772,3 +772,29 @@ def test_transient_capture_recheck_is_bounded_and_keeps_uncertainty(monkeypatch,
     assert 2 <= len(observations) <= 3
     assert clock.elapsed <= 0.05
     assert result["capture_complete"] is False
+
+
+@pytest.mark.parametrize("eventual_state", ["stale", "uncertain"])
+def test_cleanup_verification_rechecks_uncertainty_without_extending_budget(
+    monkeypatch, eventual_state
+):
+    clock = FakeClock()
+    identity = FakeProcesses._identity(46001, "transient-inspection")
+    observations = []
+
+    def uncertain_verify(identities):
+        assert identities == [identity]
+        state = "uncertain" if len(observations) < 2 else eventual_state
+        observations.append(state)
+        return {"absent": state == "stale", "verdicts": [{"identity": identity, "state": state}]}
+
+    monkeypatch.setattr(cancel_worker.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(cancel_worker.time, "sleep", clock.sleep)
+    monkeypatch.setattr(cancel_worker, "verify_absent", uncertain_verify)
+    verified = cancel_worker._wait_for_process_absence([identity], 0.1)
+    assert verified["absent"] is (eventual_state == "stale")
+    assert len(observations) >= 3
+    assert 0 < clock.elapsed <= 0.1
+    if eventual_state == "uncertain":
+        assert clock.elapsed == pytest.approx(0.1)
+        assert verified["verdicts"][0]["state"] == "uncertain"

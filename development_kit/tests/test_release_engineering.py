@@ -1001,6 +1001,15 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     )
     assert "xvfb-run -a python -m pytest -q -W error settings_gui/tests" in ubuntu_gui
     assert "desktop-file-utils" in ubuntu_gui
+    gui_upload = next(
+        step
+        for step in jobs["experimental-ubuntu-settings-gui"]["steps"]
+        if step.get("name") == "Upload Ubuntu GUI evidence"
+    )
+    assert gui_upload["with"]["path"].splitlines() == [
+        "/tmp/a77gui/tests.xml",
+        "/tmp/a77gui/visual",
+    ]
     assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for _action, revision in action_references)
     assert "# actions/checkout v7.0.0" in workflow
     assert "# actions/setup-python v6.2.0" in workflow

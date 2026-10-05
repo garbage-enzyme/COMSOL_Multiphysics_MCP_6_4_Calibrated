@@ -507,13 +507,11 @@ def _wait_for_process_absence(
     identities: list[dict[str, Any]],
     timeout_seconds: float,
 ) -> dict[str, Any]:
-    """Poll boundedly after termination; uncertainty fails closed immediately."""
+    """Recheck exit within the budget; unresolved uncertainty never proves absence."""
     deadline = time.monotonic() + max(0.0, float(timeout_seconds))
     while True:
         verification = verify_absent(identities)
         if verification["absent"]:
-            return verification
-        if any(item.get("state") == "uncertain" for item in verification.get("verdicts", [])):
             return verification
         remaining = deadline - time.monotonic()
         if remaining <= 0:
