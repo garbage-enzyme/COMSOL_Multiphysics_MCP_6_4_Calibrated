@@ -57,7 +57,7 @@ def validate_comsol_root(value: str | Path) -> Path:
 
 
 def registry_comsol_roots(registry: Any | None = None) -> tuple[Path, ...]:
-    if os.name != "nt":
+    if os.name != "nt" and registry is None:
         return ()
     if registry is None:
         import winreg as registry

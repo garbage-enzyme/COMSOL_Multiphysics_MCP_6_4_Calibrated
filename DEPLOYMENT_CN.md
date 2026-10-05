@@ -1,5 +1,7 @@
 # COMSOL MCP 部署指南
 
+本文件说明 Windows 部署。Ubuntu 无求解器实验安装请阅读 [Linux 指南](docs/experimental_linux/README_CN.md)。
+
 本指南覆盖 COMSOL MCP 的全新安装，以及 Claude Code、Hermes Agent、Codex CLI
 和 opencode 配置。所有示例路径都必须替换为目标机器的实际路径。
 

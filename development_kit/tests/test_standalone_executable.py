@@ -161,6 +161,7 @@ def test_builder_rejects_nonempty_output_before_compiler_launch(
     assert (output / "owned.txt").read_text(encoding="utf-8") == "preserve"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows workstation product-type validation")
 def test_builder_rejects_windows_server_even_with_an_x64_compiler(
     ascii_tmp_path: Path, monkeypatch
 ) -> None:

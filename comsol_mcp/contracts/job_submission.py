@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from .structural import MAX_PUBLIC_NUMBER_MAGNITUDE, validate_public_structure
 from .thermo_optomechanical import ThermoOptomechanicalReplayInput
+from .wavelength_policy import StrictWavelengthPolicy
 
 MAX_PUBLIC_TEXT = 4096
 MAX_PUBLIC_PATH = 1024
@@ -65,11 +66,24 @@ class StagedSweepInput(_JobInput):
     version: BoundedText | None = None
     smoke_points: Literal[1, 2] | None = None
     record_wavelength_controls: bool | None = None
+    strict_wavelength_policy: StrictWavelengthPolicy | None = None
     resource_policy: BoundedObject | None = None
     execution_backend: BoundedObject | None = None
 
     @model_validator(mode="after")
     def validate_cross_field_contract(self) -> StagedSweepInput:
+        if self.strict_wavelength_policy is not None:
+            from .wavelength_policy import normalize_policy, requested_metres
+
+            normalize_policy(self.strict_wavelength_policy)
+            if not self.study_name or not self.study_step_tag:
+                raise ValueError("strict wavelength mode requires study and step tags")
+            if self.parameter_name not in {"wl", "wavelength"}:
+                raise ValueError("strict wavelength mode requires a wavelength parameter")
+            if self.record_wavelength_controls is False:
+                raise ValueError("strict wavelength mode requires recorded controls")
+            for value in self.parameter_values:
+                requested_metres(value, self.parameter_unit)
         if self.smoke_points is not None and self.smoke_points > len(self.parameter_values):
             raise ValueError("smoke_points must not exceed the parameter_values count")
         if self.physical_bounds is not None:

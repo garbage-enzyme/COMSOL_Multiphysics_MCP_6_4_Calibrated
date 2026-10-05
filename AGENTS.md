@@ -14,8 +14,7 @@ interpretation as separate outcomes.
 
 ## Repository structure
 
-- `comsol_mcp/` contains the package entry point and packaged settings resource.
-- `comsol_mcp/` contains the canonical runtime implementation.
+- `comsol_mcp/` contains the canonical runtime, entry point, and packaged settings resource.
 - `src/` is a repository-only legacy import compatibility layer and is not
   distributed in wheels.
 - `development_kit/` contains repository-only tests, fixtures, scripts, and
@@ -178,6 +177,13 @@ For long gates use a measured ETA and avoid frequent polling. Keep individual
 blocking tool waits bounded so progress can be communicated. If the ETA is
 exceeded, inspect once, classify progress/failure, and derive a new estimate.
 
+For paired Windows/Ubuntu acceptance, run each quality gate with
+`--defer-platform-coverage`. Only the native IO target can await paired evidence.
+Every other coverage target and the license gate must pass on each platform.
+Run `python -m development_kit.scripts.paired_coverage` with both receipts.
+The paired gate requires identical source content and unchanged policy hashes.
+An `awaiting_cross_platform_coverage` receipt is not an accepted quality result.
+
 The quality gate applies the local split while collecting coverage. Hosted
 Python 3.14 uses the checked-in serial shard helpers instead of xdist. Use
 the actual `.github/workflows/ci.yml` and gate scripts as authority for job
@@ -227,21 +233,16 @@ skips the process tests. It does not emulate Windows behavior.
   `derived_from_declared_convention`, `label_only`, `unknown`,
   `not_requested`, and `not_applicable`.
 
-## Current roadmap pointer (2026-09-29)
+## Roadmap and agent conventions
 
-The caller reports 0.7.5 published after independent acceptance at
-`a9e6c3a48d85356f473b712ce200e617bc1b49a2` and hosted CI run
-`36340627633` (seven jobs passed). 0.7.6 is the active planning track: full
-dependency drift including lint/dev tools and MCP SDK, formal MPh 1.4 support,
-native nonblocking Tasks with ordinary-job fallback, live `dbmodel://` Model
-Manager, and guarded Desktop/remote sessions. Python 3.14 remains the release
-lane. Existing 3.15 preview CI is informational, not a migration target before
-final release. Read `../Desktop/plans/comsol_mcp/ROADMAP.md`, the canonical
-0.7.6 plan, and its executor handoff. The details and decisions live there,
-not in this contributor guide. Publication does not imply deployment.
+The 0.7.6 track is closed. The next planning track is 0.7.7.
+Read `../Desktop/plans/comsol_mcp/ROADMAP.md` for current authority.
+Read the versioned canonical plan and handoff before implementation.
+Private plans and progress records belong outside this contributor guide.
+Do not infer implementation, publication, or deployment authorization from a roadmap.
 
-For file discovery, use the Everything HTTP service at `127.0.0.1:1145`
-before recursive PowerShell enumeration. Use PowerShell 7 for targeted reads
-and commands. Do not put development plans in AGENTS.md. For any authorized
-commit use the caller's configured `garbage-enzyme` identity. Never substitute
-an agent identity. Do not commit or push without task authorization.
+For file discovery, use Everything HTTP at `127.0.0.1:1145`.
+Use targeted `rg` searches when appropriate. Avoid recursive PowerShell searches.
+Use PowerShell 7 for agent commands.
+Authorized commits use the caller's configured `garbage-enzyme` identity.
+Do not commit or push without task authorization.

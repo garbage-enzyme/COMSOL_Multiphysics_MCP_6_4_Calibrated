@@ -750,3 +750,25 @@ def test_cancel_acceptance_rejects_early_wrong_and_unverified_terminal_states():
             "job",
             timeout_seconds=1.0,
         )
+
+
+@pytest.mark.parametrize("final", ["active", "stale", "uncertain"])
+def test_transient_capture_recheck_is_bounded_and_keeps_uncertainty(monkeypatch, final):
+    clock = FakeClock()
+    monkeypatch.setattr(cancel_worker.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(cancel_worker.time, "sleep", clock.sleep)
+    observations = []
+    worker = {"pid": 12, "process_create_time": 1.0, "command_signature": "exact"}
+
+    def capture(identity):
+        assert identity == worker
+        state = "uncertain" if not observations else final
+        observations.append(state)
+        return {"worker": {"state": state}, "descendants": [], "capture_complete": False}
+
+    monkeypatch.setattr(cancel_worker, "capture_owned_descendants", capture)
+    result = cancel_worker._capture_with_inspection_budget(worker, 0.05)
+    assert result["worker"]["state"] == final
+    assert 2 <= len(observations) <= 3
+    assert clock.elapsed <= 0.05
+    assert result["capture_complete"] is False

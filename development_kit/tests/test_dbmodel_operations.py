@@ -30,10 +30,12 @@ from comsol_mcp.shared_session.dbmodel_operations import (
     operation_receipt,
     parse_operation,
 )
+from development_kit.tests.platform_fixtures import platform_test_root
 
 VALID_URI = "dbmodel://library/models/cell"
 HASHED_URI = f"dbmodel://library/models/cell?sha256={'a' * 64}"
 DIGEST = "b" * 64
+DOWNLOAD_PATH = str(platform_test_root("downloads") / "cell.mph")
 
 
 def _failure(operation: str, **kwargs: object) -> DbmodelOperationError:
@@ -152,7 +154,7 @@ def test_read_operations_need_no_write_gate(operation: str) -> None:
     """Read/open/run/download must stay usable with the write gate off."""
     kwargs: dict[str, object] = {}
     if operation == "download":
-        kwargs["destination"] = "D:/downloads/cell.mph"
+        kwargs["destination"] = DOWNLOAD_PATH
     request = build_request(operation=operation, uri=VALID_URI, **kwargs)
     assert request.write_enabled is False
     assert request.operation in READ_ONLY_OPERATIONS
@@ -162,7 +164,7 @@ def test_read_operations_need_no_write_gate(operation: str) -> None:
 def test_a_read_operation_cannot_declare_a_derived_identity(operation: str) -> None:
     kwargs: dict[str, object] = {"derived_source_identity": {"revision": "r1"}}
     if operation == "download":
-        kwargs["destination"] = "D:/downloads/cell.mph"
+        kwargs["destination"] = DOWNLOAD_PATH
     with pytest.raises(DbmodelOperationError) as excinfo:
         build_request(operation=operation, uri=VALID_URI, **kwargs)
     assert excinfo.value.reason_code == "unexpected_identity"
@@ -201,7 +203,7 @@ def test_the_capability_document_distinguishes_read_from_write() -> None:
 
 def test_a_valid_download_destination_is_admitted() -> None:
     request = build_request(
-        operation="download", uri=VALID_URI, destination="D:/downloads/cell.mph"
+        operation="download", uri=VALID_URI, destination=DOWNLOAD_PATH
     )
     assert request.destination is not None
     assert request.destination.endswith(".mph")
@@ -230,7 +232,7 @@ def test_an_invalid_download_destination_is_refused(destination: object) -> None
 
 @pytest.mark.parametrize("operation", ["open", "run", "upload"])
 def test_only_a_download_may_declare_a_local_destination(operation: str) -> None:
-    kwargs: dict[str, object] = {"destination": "D:/downloads/cell.mph"}
+    kwargs: dict[str, object] = {"destination": DOWNLOAD_PATH}
     if operation == "upload":
         kwargs["write_enabled"] = True
         kwargs["derived_source_identity"] = {"revision": "r1"}
@@ -240,7 +242,7 @@ def test_only_a_download_may_declare_a_local_destination(operation: str) -> None
 
 
 def test_the_destination_normalizer_is_directly_testable() -> None:
-    assert normalize_local_destination("D:/a/b.mph") == "D:/a/b.mph"
+    assert normalize_local_destination(DOWNLOAD_PATH) == DOWNLOAD_PATH
     with pytest.raises(DbmodelOperationError):
         normalize_local_destination("b.mph")
 
@@ -431,9 +433,9 @@ def test_an_upload_receipt_records_the_gate_and_the_derived_identity() -> None:
 def test_the_receipt_never_serializes_a_local_destination_as_a_confirmed_write() -> None:
     """A download receipt records the destination; it does not claim a write."""
     request = build_request(
-        operation="download", uri=VALID_URI, destination="D:/downloads/cell.mph"
+        operation="download", uri=VALID_URI, destination=DOWNLOAD_PATH
     )
     receipt = operation_receipt(request, outcome="refused", detail={"reason": "destination_exists"})
-    assert receipt["local_destination"] == "D:/downloads/cell.mph"
+    assert receipt["local_destination"] == DOWNLOAD_PATH
     assert receipt["outcome"] == "refused"
     assert receipt["is_write_operation"] is False

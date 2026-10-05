@@ -211,6 +211,14 @@ class Deferral:
 #: The seam itself. Direct MPh/ClientAPI access here is the design, not a gap.
 BACKEND_BOUNDARY = (
     ModuleDisposition(
+        module="comsol_mcp/adapter/wavelength_controls.py",
+        disposition="retain_at_backend_boundary",
+        reason=(
+            "Resolve explicit study, step, dataset and solution identities at the ClientAPI "
+            "boundary. This module imports no MPh and starts no client."
+        ),
+    ),
+    ModuleDisposition(
         module="comsol_mcp/adapter/mph_backend.py",
         disposition="retain_at_backend_boundary",
         reason=(

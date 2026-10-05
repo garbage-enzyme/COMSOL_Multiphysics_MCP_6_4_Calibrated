@@ -246,7 +246,7 @@ def test_staging_manifest_collision_cleans_the_complete_owned_staging_bundle(tmp
 def test_bundle_commit_collision_preserves_the_competing_directory(tmp_path, monkeypatch):
     request, kwargs = _inputs(tmp_path)
     destination = tmp_path / request["views"][0]["view_fingerprint"]
-    real_rename = field_artifacts_module.os.rename
+    real_rename = field_artifacts_module.publish_directory_exclusive
 
     def competing_commit(source, target):
         assert Path(target) == destination
@@ -254,7 +254,7 @@ def test_bundle_commit_collision_preserves_the_competing_directory(tmp_path, mon
         (destination / "competitor.txt").write_bytes(b"competitor")
         return real_rename(source, target)
 
-    monkeypatch.setattr(field_artifacts_module.os, "rename", competing_commit)
+    monkeypatch.setattr(field_artifacts_module, "publish_directory_exclusive", competing_commit)
 
     with pytest.raises(FileExistsError, match="already exist"):
         write_field_evidence_artifacts(**kwargs)
@@ -270,3 +270,18 @@ def test_writer_supports_unicode_artifact_root_for_portable_development(tmp_path
     result = write_field_evidence_artifacts(**kwargs)
 
     assert (kwargs["artifact_root"] / result["array_artifact"]["relative_path"]).is_file()
+
+
+def test_exclusive_directory_commit_preserves_empty_competitor(tmp_path):
+    from comsol_mcp.durable.io import publish_directory_exclusive
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    (source / "receipt").write_bytes(b"owned")
+    identity = (destination.stat().st_dev, destination.stat().st_ino)
+    with pytest.raises(FileExistsError):
+        publish_directory_exclusive(source, destination)
+    assert (destination.stat().st_dev, destination.stat().st_ino) == identity
+    assert not list(destination.iterdir())
+    assert (source / "receipt").read_bytes() == b"owned"

@@ -25,6 +25,13 @@ from typing import Any, Callable, Optional, Sequence
 import numpy as np
 from mcp.server.mcpserver import MCPServer
 
+from comsol_mcp.strict_wavelength import (
+    StrictWavelengthPolicy,
+    requested_metres,
+    restore_strict_study_controls,
+    verify_metres,
+)
+
 from .results import _json_safe
 from .session import session_manager
 from .study import _resolve_study_tag
@@ -101,8 +108,16 @@ def _csv_value(value: Any) -> Any:
     return value
 
 
-def _evaluate_expressions(model, expressions: Sequence[str]) -> dict[str, Any]:
-    results = model.evaluate(list(expressions))
+def _evaluate_expressions(
+    model, expressions: Sequence[str], *, dataset_tag: str | None = None
+) -> dict[str, Any]:
+    from comsol_mcp.adapter.wavelength_controls import evaluate_on_dataset
+
+    results = (
+        evaluate_on_dataset(model, list(expressions), dataset_tag)
+        if dataset_tag is not None
+        else model.evaluate(list(expressions))
+    )
     if len(expressions) == 1:
         return {expressions[0]: _scalarize(results)}
     return {expr: _scalarize(value) for expr, value in zip(expressions, results)}
@@ -270,6 +285,7 @@ def _prepare_sweep_manifest(
     resume_csv: bool,
     append_csv: bool,
     allow_legacy_resume: bool,
+    strict_wavelength_policy: Optional[dict[str, Any]] = None,
 ) -> tuple[dict[str, Any], Optional[Path], bool]:
     model_identity = _model_identity(model, source_model_path)
     spec = {
@@ -288,6 +304,8 @@ def _prepare_sweep_manifest(
         "record_wavelength_controls": record_wavelength_controls,
         "physical_bounds": physical_bounds or {},
     }
+    if strict_wavelength_policy is not None:
+        spec["strict_wavelength_policy"] = strict_wavelength_policy
     canonical = json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     spec_fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     active_config_id = config_id or f"sweep-{spec_fingerprint[:16]}"
@@ -416,6 +434,21 @@ def _resume_completed_values(
                     valid = False
                     break
         parameter_value = row.get("parameter_value")
+        strict_policy = manifest["spec"].get("strict_wavelength_policy")
+        if strict_policy is not None:
+            if not valid or not parameter_value:
+                raise ValueError("strict CSV wavelength controls are invalid")
+            try:
+                if row.get("requested_wavelength") != parameter_value:
+                    raise ValueError("requested wavelength identity changed")
+                verify_metres(
+                    requested_metres(parameter_value, None),
+                    float(row["evaluated_wl"]),
+                    float(row["evaluated_c_const_over_ewfd_freq"]),
+                    strict_policy,
+                )
+            except (ValueError, TypeError, KeyError) as exc:
+                raise ValueError("strict CSV wavelength controls do not agree") from exc
         if valid and parameter_value:
             completed.add(parameter_value)
         else:
@@ -669,6 +702,7 @@ def _save_model(model, file_path: str, *, save_copy: bool = False) -> None:
         model.java.save(target)
 
 
+@restore_strict_study_controls
 def run_staged_parametric_sweep(
     model,
     parameter_name: str,
@@ -695,6 +729,7 @@ def run_staged_parametric_sweep(
     config_id: Optional[str] = None,
     allow_legacy_resume: bool = False,
     record_wavelength_controls: Optional[bool] = None,
+    strict_wavelength_policy: Optional[dict[str, Any]] = None,
     physical_bounds: Optional[dict[str, Sequence[float]]] = None,
     response_tail: int = DEFAULT_RESPONSE_TAIL,
     max_new_points: Optional[int] = None,
@@ -804,6 +839,7 @@ def run_staged_parametric_sweep(
             source_model_path=source_model_path,
             config_id=config_id,
             record_wavelength_controls=record_wavelength_controls,
+            strict_wavelength_policy=strict_wavelength_policy,
             physical_bounds=physical_bounds,
             resume_csv=resume_csv,
             append_csv=append_csv,
@@ -887,13 +923,18 @@ def run_staged_parametric_sweep(
         row: dict[str, Any]
         for attempt in range(1, max_retries + 2):
             solve_start = time.time()
+            evaluated_all: dict[str, Any] = {}
             try:
                 jm.param().set(parameter_name, parameter_value)
 
                 if study_step_tag:
                     step = jm.study(study_tag).feature(study_step_tag)
-                    step.set(study_step_property, _format_study_step_value(value))
-                    if study_step_unit:
+                    if strict_wavelength_policy is not None:
+                        step.set("plist", [requested_metres(value, parameter_unit)])
+                        step.set("punit", "m")
+                    else:
+                        step.set(study_step_property, _format_study_step_value(value))
+                    if study_step_unit and strict_wavelength_policy is None:
                         step.set(study_step_unit_property, study_step_unit)
 
                 jm.study(study_tag).run()
@@ -902,10 +943,40 @@ def run_staged_parametric_sweep(
                 if record_wavelength_controls:
                     evaluation_expressions.extend(
                         expression
-                        for expression in ("wl", "c_const/ewfd.freq")
+                        for expression in (
+                            parameter_name if strict_wavelength_policy is not None else "wl",
+                            "c_const/ewfd.freq",
+                        )
                         if expression not in evaluation_expressions
                     )
-                evaluated_all = _evaluate_expressions(model, evaluation_expressions)
+                evaluated_all = _evaluate_expressions(
+                    model,
+                    evaluation_expressions,
+                    dataset_tag=strict_wavelength_policy["dataset_tag"]
+                    if strict_wavelength_policy is not None
+                    else None,
+                )
+                if strict_wavelength_policy is not None:
+                    from comsol_mcp.adapter.wavelength_controls import evaluate_on_dataset
+
+                    for control, expression in (
+                        ("wl", parameter_name),
+                        ("c_const/ewfd.freq", "c_const/ewfd.freq"),
+                    ):
+                        evaluated_all[control] = _scalarize(
+                            evaluate_on_dataset(
+                                model,
+                                expression,
+                                strict_wavelength_policy["dataset_tag"],
+                                unit="m",
+                            )
+                        )
+                    verify_metres(
+                        requested_metres(value, parameter_unit),
+                        evaluated_all["wl"],
+                        evaluated_all["c_const/ewfd.freq"],
+                        strict_wavelength_policy,
+                    )
                 evaluated = {expression: evaluated_all[expression] for expression in expressions}
                 _validate_evaluated_values(
                     evaluated_all,
@@ -948,6 +1019,11 @@ def run_staged_parametric_sweep(
                 }
                 if record_wavelength_controls:
                     row["requested_wavelength"] = parameter_value
+                    if strict_wavelength_policy is not None:
+                        row["evaluated_wl"] = evaluated_all.get("wl")
+                        row["evaluated_c_const_over_ewfd_freq"] = evaluated_all.get(
+                            "c_const/ewfd.freq"
+                        )
                 terminal_error = exc
             break
 
@@ -1397,6 +1473,7 @@ def register_workflow_tools(mcp: MCPServer) -> None:
         config_id: Optional[str] = None,
         allow_legacy_resume: bool = False,
         record_wavelength_controls: Optional[bool] = None,
+        strict_wavelength_policy: Optional[StrictWavelengthPolicy] = None,
         physical_bounds: Optional[dict[str, Sequence[float]]] = None,
         response_tail: int = DEFAULT_RESPONSE_TAIL,
         model_name: Optional[str] = None,
@@ -1435,6 +1512,10 @@ def register_workflow_tools(mcp: MCPServer) -> None:
                 old rows are marked unverified and rerun.
             record_wavelength_controls: Record requested wavelength, evaluated wl,
                 and c_const/ewfd.freq. Defaults on for wl/wavelength parameters.
+            strict_wavelength_policy: Explicit SI tolerances and dataset tag. Strict mode
+                compares requested, evaluated, and solved wavelengths before committing rows.
+                It requires explicit study and Wavelength step tags. The default records
+                controls without verifying them. Original plist and punit are restored.
             physical_bounds: Optional expression bounds, e.g. {"A": [0, 1]}.
             response_tail: Number of recent rows returned in the MCP response (0-20).
             model_name: Model name (default: current).
@@ -1484,6 +1565,7 @@ def register_workflow_tools(mcp: MCPServer) -> None:
                 config_id=config_id,
                 allow_legacy_resume=allow_legacy_resume,
                 record_wavelength_controls=record_wavelength_controls,
+                strict_wavelength_policy=strict_wavelength_policy,
                 physical_bounds=physical_bounds,
                 response_tail=response_tail,
             )

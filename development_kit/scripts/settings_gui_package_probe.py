@@ -13,6 +13,7 @@ from packaging.utils import canonicalize_name, parse_wheel_filename
 
 LANGUAGES = ("en", "zh_CN", "zh_TW")
 ICON_MEMBER = "settings_gui/assets/comsol_mcp.ico"
+PNG_ICON_MEMBER = "settings_gui/assets/comsol_mcp.png"
 ROOT_LAUNCHER_MEMBER = "Open_Settings_GUI.ps1"
 SHORTCUT_MEMBER = "settings_gui/desktop_shortcut.py"
 ENTRY_POINT_MODULE_MEMBER = "settings_gui/__main__.py"
@@ -82,6 +83,8 @@ def inspect_settings_gui_distributions(dist: Path) -> dict:
         raise ValueError("source distribution is missing translator catalogs")
     if ICON_MEMBER not in wheel_names or ICON_MEMBER not in sdist_names:
         raise ValueError("distribution is missing the Settings GUI application icon")
+    if PNG_ICON_MEMBER not in wheel_names or PNG_ICON_MEMBER not in sdist_names:
+        raise ValueError("distribution is missing the portable Settings GUI PNG icon")
     if SHORTCUT_MEMBER not in wheel_names or SHORTCUT_MEMBER not in sdist_names:
         raise ValueError("distribution is missing the Settings GUI shortcut adapter")
     if ROOT_LAUNCHER_MEMBER not in sdist_names:
@@ -89,7 +92,9 @@ def inspect_settings_gui_distributions(dist: Path) -> dict:
     if ROOT_LAUNCHER_MEMBER in wheel_names:
         raise ValueError("wheel contains the repository root launcher")
     if any(
-        name.startswith("settings_gui/assets/") and name.casefold().endswith(".png")
+        name.startswith("settings_gui/assets/")
+        and name.casefold().endswith(".png")
+        and name != PNG_ICON_MEMBER
         for name in wheel_names | sdist_names
     ):
         raise ValueError("distribution contains the private source logo")

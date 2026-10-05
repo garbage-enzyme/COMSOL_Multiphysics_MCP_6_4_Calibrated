@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import tkinter as tk
 import webbrowser
 from functools import partial
@@ -46,6 +47,27 @@ from .storage import (
 )
 from .windows_lock import SettingsConflict
 
+
+def _platform_help_text(text: str, *, platform: str | None = None) -> str:
+    """Show native illustrative paths without changing translated instructions."""
+    if (sys.platform if platform is None else platform) != "linux":
+        return text
+    examples = {
+        r"C:\COMSOL64\Multiphysics\java\win64\jre": "/opt/comsol64/multiphysics/java/glnxa64/jre",
+        r"C:\COMSOL64\Multiphysics": "/opt/comsol64/multiphysics",
+        r"%PROGRAMDATA%\comsol_mcp\runtime\jobs": "/home/user/.local/state/comsol-mcp/runtime/jobs",
+        r"%PROGRAMDATA%\comsol_mcp\runtime": "/home/user/.local/state/comsol-mcp/runtime",
+        r"%PROGRAMDATA%\comsol_mcp\artifacts": "/home/user/.local/state/comsol-mcp/artifacts",
+        r"%LOCALAPPDATA%\comsol_mcp\semantic\models": (
+            "/home/user/.local/share/comsol-mcp/semantic/models"
+        ),
+        r"%LOCALAPPDATA%\comsol_mcp\models": "/home/user/.local/share/comsol-mcp/models",
+    }
+    for old, new in examples.items():
+        text = text.replace(old, new)
+    return text
+
+
 TAB_TITLES = {
     "general": "General",
     "profile": "Profile",
@@ -66,6 +88,7 @@ FIXED_LINKS = (
     ),
 )
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "comsol_mcp.ico"
+PNG_ICON_PATH = ICON_PATH.with_suffix(".png")
 INDEX_DIALOG_WIDTH = 620
 INDEX_DIALOG_HEIGHT = 260
 INDEX_DIALOG_MARGIN = 48
@@ -84,7 +107,10 @@ DOC_SECTIONS = (
 
 def _apply_window_icon(root: tk.Tk) -> bool:
     try:
-        root.iconbitmap(default=str(ICON_PATH))
+        if sys.platform == "win32":
+            root.iconbitmap(default=str(ICON_PATH))
+        else:
+            root.iconphoto(True, tk.PhotoImage(master=root, file=str(PNG_ICON_PATH)))
     except OSError, tk.TclError:
         return False
     return True
@@ -381,6 +407,16 @@ class SettingsApplication:
         title_row.pack(fill="x", pady=(0, 8))
         ttk.Label(title_row, text=_("COMSOL MCP Settings"), font="TkHeadingFont").pack(side="left")
         ttk.Label(title_row, text=f"{GUI_RELEASE}  |  {__version__}").pack(side="right")
+        if sys.platform == "linux":
+            ttk.Label(
+                outer,
+                text=_(
+                    "Experimental Linux: offline tools only. COMSOL execution is disabled. "
+                    "Semantic search is not accepted."
+                ),
+                style="Help.TLabel",
+                wraplength=900,
+            ).pack(fill="x", pady=(0, 8))
 
         self.banner = ttk.Label(
             outer,
@@ -569,7 +605,7 @@ class SettingsApplication:
             content_row = 2
         help_label = ttk.Label(
             frame,
-            text=self.controller.text(help_id),
+            text=_platform_help_text(self.controller.text(help_id)),
             style="Help.TLabel",
             wraplength=620,
             justify="left",
@@ -708,7 +744,7 @@ class SettingsApplication:
                     error = self.controller.model.errors.get(field.key, "")
                     if field.key in self.help_labels:
                         self.help_labels[field.key].configure(
-                            text=self.controller.text(field.help_id)
+                            text=_platform_help_text(self.controller.text(field.help_id))
                         )
                     if field.key in self.error_labels:
                         self.error_labels[field.key].configure(
@@ -737,7 +773,9 @@ class SettingsApplication:
                     variable.set(rendered)
                 help_id = profile_help_id(value) if field.key == "profile.name" else field.help_id
                 if field.key in self.help_labels:
-                    self.help_labels[field.key].configure(text=self.controller.text(help_id))
+                    self.help_labels[field.key].configure(
+                        text=_platform_help_text(self.controller.text(help_id))
+                    )
                 error = self.controller.model.errors.get(field.key, "")
                 if field.key in self.error_labels:
                     self.error_labels[field.key].configure(

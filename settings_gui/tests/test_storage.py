@@ -52,7 +52,14 @@ def test_store_saves_exact_canonical_bytes_and_updates_baseline(tmp_path):
         assert store.ownership.baseline.sha256 == digest
 
     assert not list(tmp_path.glob("*.tmp"))
-    assert not list(tmp_path.glob("*.gui-owner"))
+    if os.name == "nt":
+        assert not list(tmp_path.glob("*.gui-owner"))
+    else:
+        locks = list(tmp_path.glob("*.gui-owner"))
+        assert len(locks) == 1  # Stable flock inode; release must not unlink it.
+        assert locks[0].stat().st_mode & 0o777 == 0o600
+        with SettingsStore(target):
+            pass  # A persistent inode does not retain active ownership.
 
 
 def test_named_mutex_rejects_a_second_live_editor(tmp_path):
@@ -64,6 +71,7 @@ def test_named_mutex_rejects_a_second_live_editor(tmp_path):
             SettingsOwnership(target).acquire()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows removable sidecar and named mutex cleanup")
 def test_sidecar_cleanup_failure_still_releases_mutex_and_registration(tmp_path, monkeypatch):
     target = tmp_path / "settings.json"
     target.write_text(json.dumps(default_settings_document()), encoding="utf-8")
@@ -137,6 +145,7 @@ def test_named_mutex_rejects_a_second_process(tmp_path):
         assert process.returncode == 0, output + errors
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows deny-write file handle guarantee")
 def test_target_handle_denies_external_write(tmp_path):
     target = tmp_path / "settings.json"
     target.write_text(json.dumps(default_settings_document()), encoding="utf-8")
@@ -243,6 +252,7 @@ def test_post_replace_reacquire_failure_keeps_new_baseline(tmp_path, monkeypatch
         assert not list(tmp_path.glob("*.tmp"))
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows CreateMutexW failure handling")
 def test_mutex_creation_failure_cleans_process_registry(tmp_path):
     target = tmp_path / "settings.json"
     target.write_text(json.dumps(default_settings_document()), encoding="utf-8")
@@ -279,9 +289,8 @@ def test_rebuild_preserves_one_exact_damaged_copy(tmp_path, monkeypatch):
         assert backups[0].read_bytes() == damaged
         assert store.load()["schema_version"] == SETTINGS_VERSION
         assert (tmp_path / "models").is_dir()
-        program_root = program_data / "comsol_mcp"
-        assert (program_root / "runtime").is_dir()
-        assert (program_root / "artifacts").is_dir()
+        assert Path(store.load()["runtime"]["directory"]).is_dir()
+        assert Path(store.load()["paths"]["artifact_write_root"]).is_dir()
 
 
 @pytest.mark.parametrize(

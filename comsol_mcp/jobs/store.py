@@ -112,6 +112,10 @@ def process_identity(pid: int) -> dict[str, Any]:
     process = psutil.Process(int(pid))
     with process.oneshot():
         command = list(process.cmdline())
+        if not command:
+            if os.name != "nt" and process.status() == psutil.STATUS_ZOMBIE:
+                raise psutil.NoSuchProcess(process.pid, msg="worker has exited and awaits reaping")
+            raise OSError("process command line is temporarily unavailable")
         return {
             "pid": process.pid,
             "process_create_time": process.create_time(),
@@ -173,12 +177,32 @@ class JobLock:
         self._owned_bytes: bytes | None = None
         self._guard_path = self.path.with_name(f".{self.path.name}.guard")
         self._guard_handle = None
+        self._posix_guard: Any = None
         self._process_guard = _process_guard(self.path)
         self._process_guard_owned = False
 
     def _acquire_guard(self, *, deadline: float) -> None:
         if os.name != "nt":
-            raise RuntimeError("durable job mutation requires supported Windows locking")
+            from comsol_mcp.posix_lock import LockBusy, PosixFileLock
+
+            remaining = max(0.0, deadline - time.monotonic())
+            if not self._process_guard.acquire(timeout=remaining):
+                raise TimeoutError("in-process durable job lock guard is busy")
+            self._process_guard_owned = True
+            self._guard_path.parent.mkdir(parents=True, exist_ok=True)
+            self._posix_guard = PosixFileLock(self._guard_path)
+            try:
+                while True:
+                    try:
+                        self._posix_guard.acquire()
+                        return
+                    except LockBusy:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("durable job guard is busy") from None
+                        time.sleep(self.poll_interval)
+            except BaseException:
+                self._release_guard()
+                raise
         import msvcrt
 
         remaining = max(0.0, deadline - time.monotonic())
@@ -216,6 +240,16 @@ class JobLock:
             raise
 
     def _release_guard(self) -> None:
+        if os.name != "nt":
+            try:
+                if self._posix_guard is not None:
+                    self._posix_guard.close()
+                    self._posix_guard = None
+            finally:
+                if self._process_guard_owned:
+                    self._process_guard_owned = False
+                    self._process_guard.release()
+            return
         import msvcrt
 
         handle = self._guard_handle

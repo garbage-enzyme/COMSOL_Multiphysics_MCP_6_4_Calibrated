@@ -1,6 +1,6 @@
 # Generated deterministic gettext template for COMSOL MCP Settings.
 msgid ""
-msgstr "Project-Id-Version: comsol-mcp alpha7.6\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: \nPlural-Forms: nplurals=2; plural=(n != 1);\n"
+msgstr "Project-Id-Version: comsol-mcp alpha7.7\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: \nPlural-Forms: nplurals=2; plural=(n != 1);\n"
 
 msgid "COMSOL MCP Settings"
 msgstr ""
@@ -146,10 +146,13 @@ msgstr ""
 msgid "Language used by this Settings window."
 msgstr ""
 
-msgid "Size of text and controls. Following Windows is recommended. Other choices are previewed immediately and saved for the next opening."
+msgid "Size of text and controls. Following system display settings is recommended. Other choices are previewed immediately and saved for the next opening."
 msgstr ""
 
-msgid "Follow Windows display settings"
+msgid "Follow system display settings"
+msgstr ""
+
+msgid "Experimental Linux: offline tools only. COMSOL execution is disabled. Semantic search is not accepted."
 msgstr ""
 
 msgid "Safety-first default for new users. It offers fewer operations, which lowers the risk of an unintended change. Choose it while learning or when you only need to open and inspect models, manage jobs, run careful single-point checks, or search manuals."
@@ -381,4 +384,37 @@ msgid "Semantic search is not ready"
 msgstr ""
 
 msgid "Enable manual search and choose valid lexical, semantic-index, and model assets first."
+msgstr ""
+
+msgid "Application launcher"
+msgstr ""
+
+msgid "Create application launcher"
+msgstr ""
+
+msgid "Remove application launcher"
+msgstr ""
+
+msgid "Replace existing application launcher?"
+msgstr ""
+
+msgid "Application launcher ready"
+msgstr ""
+
+msgid "The application launcher now opens this exact settings file."
+msgstr ""
+
+msgid "Application launcher could not be created"
+msgstr ""
+
+msgid "Application launcher removed"
+msgstr ""
+
+msgid "The owned application launcher was removed."
+msgstr ""
+
+msgid "No owned application launcher was found."
+msgstr ""
+
+msgid "Application launcher not removed"
 msgstr ""

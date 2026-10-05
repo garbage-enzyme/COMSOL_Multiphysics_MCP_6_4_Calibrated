@@ -17,14 +17,32 @@ from typing import Any
 
 if __package__:
     from .dependency_license_gate import build_license_receipt
+    from .paired_coverage import source_identity
 else:
     from dependency_license_gate import build_license_receipt  # type: ignore[no-redef]
+    from paired_coverage import source_identity  # type: ignore[no-redef]
 
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = ROOT / "development_kit" / "release" / "coverage_policy.json"
 LICENSE_REVIEW_PATH = ROOT / "development_kit" / "release" / "dependency_license_review.json"
 LINT_TARGETS = (
+    "development_kit/scripts/paired_coverage.py",
+    "development_kit/tests/test_paired_coverage.py",
+    "comsol_mcp/adapter/wavelength_controls.py",
+    "comsol_mcp/jobs/tasks_public_engine.py",
+    "comsol_mcp/platform_support.py",
+    "comsol_mcp/posix_lock.py",
+    "comsol_mcp/strict_wavelength.py",
+    "comsol_mcp/xdg_paths.py",
+    "settings_gui/posix_ownership.py",
+    "settings_gui/xdg_shortcut.py",
+    "development_kit/tests/platform_fixtures.py",
+    "development_kit/tests/test_tasks_stdio_conformance.py",
+    "development_kit/tests/tasks_stdio_fixture.py",
+    "development_kit/tests/test_platform_support.py",
+    "development_kit/tests/test_posix_platform.py",
+    "development_kit/tests/test_strict_wavelength.py",
     "comsol_mcp/compatibility.py",
     "comsol_mcp/contracts",
     "comsol_mcp/durable",
@@ -164,6 +182,18 @@ LINT_TARGETS = (
 )
 MYPY_GROUPS = (
     (
+        "--follow-imports=skip",
+        "development_kit/scripts/paired_coverage.py",
+        "comsol_mcp/adapter/wavelength_controls.py",
+        "comsol_mcp/platform_support.py",
+        "comsol_mcp/posix_lock.py",
+        "comsol_mcp/strict_wavelength.py",
+        "comsol_mcp/xdg_paths.py",
+        "settings_gui/posix_ownership.py",
+        "settings_gui/xdg_shortcut.py",
+    ),
+    (
+        "comsol_mcp/contracts/wavelength_policy.py",
         "comsol_mcp/contracts/job_submission.py",
         "comsol_mcp/contracts/mph_inspection.py",
         "comsol_mcp/contracts/model_identity.py",
@@ -247,6 +277,7 @@ MYPY_GROUPS = (
         # diagnostics for transitively imported modules, so the modules stay
         # fully covered without weakening any rule for the rest of the tree.
         "--follow-imports=silent",
+        "comsol_mcp/jobs/tasks_public_engine.py",
         "comsol_mcp/jobs/tasks_bridge.py",
         "comsol_mcp/jobs/tasks_extension.py",
     ),
@@ -650,7 +681,9 @@ def evaluate_coverage(
     }
 
 
-def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
+def run_quality_gate(
+    artifact_root: Path, *, as_of: date, defer_platform_coverage: bool = False
+) -> dict[str, Any]:
     """Run every quality command and return one path-free receipt."""
     run_root = _create_quality_run_root(artifact_root)
     coverage_data = run_root / ".coverage"
@@ -663,6 +696,7 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
     try:
         validate_quality_target_inventory()
         _run([sys.executable, "-m", "ruff", "check", *LINT_TARGETS], stage="lint")
+        initial_source = source_identity(ROOT)
         _run(
             [sys.executable, "-m", "ruff", "format", "--check", *LINT_TARGETS],
             stage="format",
@@ -789,6 +823,8 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
         return receipt
 
     try:
+        if source_identity(ROOT) != initial_source:
+            raise ValueError("source changed during the quality gate")
         policy = load_coverage_policy(POLICY_PATH)
         coverage_receipt = evaluate_coverage(
             json.loads(coverage_json.read_text(encoding="utf-8")),
@@ -819,18 +855,30 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
         _write_quality_receipt(run_root, receipt)
         return receipt
     failures = []
+    deferred = False
     if coverage_receipt["status"] != "passed":
         failures.append("coverage")
     if license_receipt["status"] != "passed":
         failures.append("dependency_licenses")
+    if defer_platform_coverage and failures == ["coverage"]:
+        deferred = all(
+            item.get("path") == "comsol_mcp/durable/io.py"
+            and item.get("reason_code") == "coverage_target_regressed"
+            for item in coverage_receipt["failures"]
+        )
     receipt = {
         "schema_name": "comsol_mcp.quality_gate_receipt",
         "schema_version": "1.0.0",
         "as_of": as_of.isoformat(),
         "run_id": run_id,
-        "status": "passed" if not failures else "failed",
+        "status": "awaiting_cross_platform_coverage"
+        if deferred
+        else ("passed" if not failures else "failed"),
         "failures": failures,
         "coverage": coverage_receipt,
+        "platform": sys.platform,
+        "source_tree_sha256": source_identity(ROOT),
+        "coverage_json_sha256": _sha256(coverage_json),
         "dependency_licenses": license_receipt,
         "coverage_policy_sha256": _sha256(POLICY_PATH),
         "solver_started": False,
@@ -842,6 +890,7 @@ def run_quality_gate(artifact_root: Path, *, as_of: date) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--artifact-root", type=Path, default=_default_artifact_root())
+    parser.add_argument("--defer-platform-coverage", action="store_true")
     parser.add_argument("--as-of", type=date.fromisoformat, default=date.today())
     args = parser.parse_args()
 
@@ -849,9 +898,11 @@ def main() -> int:
     configured_pytest_root = os.environ.get("COMSOL_MCP_TEST_ASCII_ROOT")
     if configured_pytest_root:
         validate_windows_gate_root(configured_pytest_root, label="quality pytest root")
-    receipt = run_quality_gate(artifact_root, as_of=args.as_of)
+    receipt = run_quality_gate(
+        artifact_root, as_of=args.as_of, defer_platform_coverage=args.defer_platform_coverage
+    )
     print(json.dumps(receipt, sort_keys=True))
-    return 0 if receipt["status"] == "passed" else 1
+    return 0 if receipt["status"] in {"passed", "awaiting_cross_platform_coverage"} else 1
 
 
 if __name__ == "__main__":

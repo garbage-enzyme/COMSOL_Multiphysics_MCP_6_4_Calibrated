@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import os
 import re
+import stat
 import unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -118,7 +119,24 @@ def read_contained_file_snapshot(
 
     pin = validated_read_pin(path, root)
     with pin_validated_reads((pin,)):
-        payload = read_file_bytes_bounded(pin.path, max_bytes=max_bytes)
+        if os.name == "nt":
+            payload = read_file_bytes_bounded(pin.path, max_bytes=max_bytes)
+        else:
+            descriptor = _open_windows_read_pin(pin.path, directory=False)
+            try:
+                opened = os.fstat(descriptor)
+                if (opened.st_dev, opened.st_ino) != pin.path_identity:
+                    raise ReadPinError("snapshot input identity changed before read")
+                if max_bytes < 0 or opened.st_size > max_bytes:
+                    raise ValueError("snapshot exceeds its byte limit")
+                with os.fdopen(os.dup(descriptor), "rb") as stream:
+                    payload = stream.read(max_bytes + 1)
+                if len(payload) > max_bytes or _stat_snapshot(
+                    os.fstat(descriptor)
+                ) != _stat_snapshot(opened):
+                    raise ReadPinError("snapshot input changed during read")
+            finally:
+                os.close(descriptor)
     return {
         "path": pin.path,
         "payload": payload,
@@ -134,7 +152,8 @@ def _open_windows_read_pin(
     allow_writes: bool = False,
 ) -> int:
     if os.name != "nt":
-        raise ReadPinError("stable read-path pinning requires Windows")
+        del allow_writes
+        return os.open(path, os.O_RDONLY | os.O_NOFOLLOW | (os.O_DIRECTORY if directory else 0))
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     create_file = kernel32.CreateFileW
     create_file.argtypes = (
@@ -174,6 +193,9 @@ def _open_windows_read_pin(
 
 
 def _close_windows_handle(handle: int) -> None:
+    if os.name != "nt":
+        os.close(handle)
+        return
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     close_handle = kernel32.CloseHandle
     close_handle.argtypes = (ctypes.c_void_p,)
@@ -181,11 +203,45 @@ def _close_windows_handle(handle: int) -> None:
     close_handle(ctypes.c_void_p(handle))
 
 
+def _stat_snapshot(value: os.stat_result) -> tuple[int, ...]:
+    return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
+
+
+def _verify_posix_pins(snapshots: dict[Path, tuple[int, os.stat_result]]) -> None:
+    """Detect persistent path replacement and in-place file changes.
+
+    POSIX descriptors do not deny mutation by noncooperating processes.
+    Directory contents can change, but directory identities must remain stable.
+    """
+    try:
+        for path, (descriptor, initial) in snapshots.items():
+            current = path.lstat()
+            opened = os.fstat(descriptor)
+            if (
+                path.resolve(strict=True) != path
+                or (current.st_dev, current.st_ino) != (initial.st_dev, initial.st_ino)
+                or (opened.st_dev, opened.st_ino) != (initial.st_dev, initial.st_ino)
+                or (
+                    stat.S_ISREG(initial.st_mode)
+                    and (
+                        _stat_snapshot(current) != _stat_snapshot(initial)
+                        or _stat_snapshot(opened) != _stat_snapshot(initial)
+                    )
+                )
+            ):
+                raise ReadPinError("validated path changed during use")
+    except OSError as exc:
+        if isinstance(exc, ReadPinError):
+            raise
+        raise ReadPinError("validated path disappeared during use") from exc
+
+
 @contextmanager
 def pin_validated_reads(pins: tuple[ValidatedReadPin, ...]) -> Iterator[None]:
-    """Deny mutation or ancestor replacement while validated files are consumed."""
+    """Deny replacement on Windows and detect identity conflicts on POSIX."""
     handles: list[int] = []
     opened: set[Path] = set()
+    snapshots: dict[Path, tuple[int, os.stat_result]] = {}
     try:
         for pin in pins:
             ancestors: list[Path] = []
@@ -201,15 +257,21 @@ def pin_validated_reads(pins: tuple[ValidatedReadPin, ...]) -> Iterator[None]:
                 if directory not in opened:
                     handles.append(_open_windows_read_pin(directory, directory=True))
                     opened.add(directory)
+                    if os.name != "nt":
+                        snapshots[directory] = (handles[-1], os.fstat(handles[-1]))
             if pin.path not in opened:
                 handles.append(_open_windows_read_pin(pin.path, directory=False))
                 opened.add(pin.path)
+                if os.name != "nt":
+                    snapshots[pin.path] = (handles[-1], os.fstat(handles[-1]))
             if (
                 pin.path.resolve(strict=True) != pin.path
                 or _file_identity(pin.path) != pin.path_identity
                 or _file_identity(pin.root) != pin.root_identity
             ):
                 raise ReadPinError("validated read path identity changed before use")
+        if os.name != "nt":
+            _verify_posix_pins(snapshots)
     except (OSError, RuntimeError, ValueError) as exc:
         for handle in reversed(handles):
             _close_windows_handle(handle)
@@ -220,6 +282,8 @@ def pin_validated_reads(pins: tuple[ValidatedReadPin, ...]) -> Iterator[None]:
         ) from exc
     try:
         yield
+        if os.name != "nt":
+            _verify_posix_pins(snapshots)
     finally:
         for handle in reversed(handles):
             _close_windows_handle(handle)
@@ -227,9 +291,10 @@ def pin_validated_reads(pins: tuple[ValidatedReadPin, ...]) -> Iterator[None]:
 
 @contextmanager
 def pin_validated_writes(pins: tuple[ValidatedWritePin, ...]) -> Iterator[None]:
-    """Prevent replacement of validated write ancestors during native writes."""
+    """Deny Windows ancestor replacement; detect POSIX ancestor conflicts."""
     handles: list[int] = []
     opened: set[Path] = set()
+    snapshots: dict[Path, tuple[int, os.stat_result]] = {}
     try:
         for pin in pins:
             ancestors: list[Path] = []
@@ -251,11 +316,15 @@ def pin_validated_writes(pins: tuple[ValidatedWritePin, ...]) -> Iterator[None]:
                         )
                     )
                     opened.add(directory)
+                    if os.name != "nt":
+                        snapshots[directory] = (handles[-1], os.fstat(handles[-1]))
             if (
                 _file_identity(pin.root) != pin.root_identity
                 or _file_identity(pin.ancestor) != pin.ancestor_identity
             ):
                 raise ReadPinError("validated write ancestor identity changed before use")
+        if os.name != "nt":
+            _verify_posix_pins(snapshots)
     except (OSError, RuntimeError, ValueError) as exc:
         for handle in reversed(handles):
             _close_windows_handle(handle)
@@ -266,6 +335,8 @@ def pin_validated_writes(pins: tuple[ValidatedWritePin, ...]) -> Iterator[None]:
         ) from exc
     try:
         yield
+        if os.name != "nt":
+            _verify_posix_pins(snapshots)
     finally:
         for handle in reversed(handles):
             _close_windows_handle(handle)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import subprocess
 from copy import deepcopy
 from datetime import date
@@ -64,6 +65,7 @@ def test_configured_pytest_roots_remain_direct_short_siblings(monkeypatch) -> No
     assert {observed_main, observed_serial}.isdisjoint({second_main, second_serial})
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows native path length budget")
 def test_local_windows_gate_roots_fail_fast_before_deep_path_generation() -> None:
     accepted = validate_windows_gate_root(
         Path("D:/mcp_tests/a65b13q"),

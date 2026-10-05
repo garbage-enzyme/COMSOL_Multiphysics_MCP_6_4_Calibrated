@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import subprocess
 import sys
 from contextlib import nullcontext
@@ -484,6 +485,7 @@ class _FakeWinFunction:
         return self.implementation(*args)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows user32 callback ABI and pointer signatures")
 def test_user32_calls_declare_pointer_safe_signatures(monkeypatch):
     api = SimpleNamespace(
         EnumWindows=_FakeWinFunction(),
@@ -560,6 +562,7 @@ class _FakeVersionApi:
         ("bad_signature", None),
     ],
 )
+@pytest.mark.skipif(os.name != "nt", reason="Windows version.dll ABI and pointer signatures")
 def test_windows_file_version_validates_pointer_length_signature_and_api_types(
     monkeypatch,
     mode,

@@ -56,7 +56,7 @@ def _default_csc_path(environ: dict[str, str] | None = None) -> Path:
 def _validate_build_host(csc_path: Path) -> None:
     if os.name != "nt" or struct.calcsize("P") != 8:
         raise PlatformError("standalone builds require Windows x64")
-    version = sys.getwindowsversion()
+    version = getattr(sys, "getwindowsversion")()
     if version.major != 10 or version.build < 10240 or version.product_type != 1:
         raise PlatformError("standalone builds require Windows 10 or 11 workstation")
     if not csc_path.is_file() or csc_path.is_symlink():

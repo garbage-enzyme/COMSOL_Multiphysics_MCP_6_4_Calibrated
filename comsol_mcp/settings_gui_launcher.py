@@ -45,9 +45,12 @@ class SettingsGuiInstanceLock:
 
     def __init__(self, target: Path) -> None:
         if os.name != "nt":
-            raise RuntimeError("Settings GUI is supported only on Windows")
+            from comsol_mcp.posix_lock import PosixFileLock
+
+            self._posix_lock = PosixFileLock(target.with_name(f".{target.name}.gui-instance.lock"))
+            return
         self.name = settings_mutex_name(target)
-        self._kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self._kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
         self._handle: Any = None
         self._acquired = False
         self._configure()
@@ -65,13 +68,21 @@ class SettingsGuiInstanceLock:
         self._kernel32.CloseHandle.restype = wintypes.BOOL
 
     def acquire(self) -> "SettingsGuiInstanceLock":
+        if os.name != "nt":
+            from comsol_mcp.posix_lock import LockBusy
+
+            try:
+                self._posix_lock.acquire()
+            except LockBusy as exc:
+                raise GuiAlreadyRunning("settings GUI is already running") from exc
+            return self
         handle = self._kernel32.CreateMutexW(None, False, self.name)
         if not handle:
-            raise OSError(ctypes.get_last_error(), "CreateMutexW failed")
+            raise OSError(getattr(ctypes, "get_last_error")(), "CreateMutexW failed")
         self._handle = handle
         wait = self._kernel32.WaitForSingleObject(handle, 0)
         if wait == 0xFFFFFFFF:
-            error = ctypes.get_last_error()
+            error = getattr(ctypes, "get_last_error")()
             self.close()
             raise OSError(error, "WaitForSingleObject failed")
         if wait not in (0x00000000, 0x00000080):
@@ -81,6 +92,9 @@ class SettingsGuiInstanceLock:
         return self
 
     def close(self) -> None:
+        if os.name != "nt":
+            self._posix_lock.close()
+            return
         if self._handle is None:
             return
         if self._acquired:
@@ -184,8 +198,6 @@ def launch_settings_gui(
     token_factory: Callable[[], Any] = uuid.uuid4,
     timeout_seconds: float = HANDSHAKE_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    if os.name != "nt":
-        return _result("gui_runtime_unavailable")
     handshake: Path | None = None
     try:
         target = resolve_settings_location(environ).writable_path
@@ -228,7 +240,8 @@ def launch_settings_gui(
             stderr=subprocess.DEVNULL,
             env=environment,
             close_fds=True,
-            creationflags=flags,
+            creationflags=flags if os.name == "nt" else 0,
+            start_new_session=os.name != "nt",
         )
         _track_process(process)
         deadline = clock() + max(0.1, min(timeout_seconds, 10.0))

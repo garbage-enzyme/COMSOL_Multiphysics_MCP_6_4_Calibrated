@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import _winapi
 import hashlib
 import json
 import re
@@ -11,6 +10,7 @@ import sys
 import threading
 import tomllib
 from concurrent.futures import ThreadPoolExecutor
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,6 +21,7 @@ from src.compatibility import load_runtime_compatibility
 from src.tools.capabilities import get_capabilities, startup_capability_summary
 from src.tools.profiles import PROFILE_NAMES, ProfileSelection
 
+from development_kit.tests.platform_fixtures import create_directory_link, remove_directory_link
 from src import __version__
 
 ROOT = Path(__file__).parents[2]
@@ -280,12 +281,12 @@ def test_build_identity_rejects_package_junctions(tmp_path):
     outside.mkdir()
     (outside / "hidden.py").write_text("hidden = True\n", encoding="utf-8")
     junction = package / "linked"
-    _winapi.CreateJunction(str(outside), str(junction))
+    create_directory_link(str(outside), str(junction))
     try:
         with pytest.raises(ValueError, match="symlinks or junctions"):
             package_content_sha256(package)
     finally:
-        junction.rmdir()
+        remove_directory_link(junction)
 
 
 def test_build_identity_rejects_a_junction_in_package_root_ancestry(tmp_path):
@@ -294,12 +295,12 @@ def test_build_identity_rejects_a_junction_in_package_root_ancestry(tmp_path):
     package.mkdir(parents=True)
     (package / "module.py").write_text("value = 1\n", encoding="utf-8")
     junction = tmp_path / "linked"
-    _winapi.CreateJunction(str(outside), str(junction))
+    create_directory_link(str(outside), str(junction))
     try:
         with pytest.raises(ValueError, match="symlink or junction"):
             package_content_sha256(junction / "package")
     finally:
-        junction.rmdir()
+        remove_directory_link(junction)
 
 
 def test_build_identity_rejects_content_changed_during_read(tmp_path, monkeypatch):
@@ -383,7 +384,7 @@ def test_capabilities_report_exact_runtime_compatibility_without_future_inferenc
     assert capabilities["targets"] == {
         "comsol": "6.4.0.293",
         "mph": "1.3.1",
-        "acceptance": "exact_licensed_acceptance",
+        "acceptance": "exact_licensed_acceptance" if os.name == "nt" else "windows_reference_lane_only",
     }
     assert compatibility["dependency_compatibility"]["comsol_builds"] == []
     assert compatibility["unknown_compatibility"]["status"] == "unknown"
@@ -402,9 +403,9 @@ def test_resolved_package_root_revalidated_without_false_positive(tmp_path):
     build_identity_module._reject_linked_components(resolved)
 
     linked = tmp_path / "linked"
-    _winapi.CreateJunction(str(package), str(linked))
+    create_directory_link(str(package), str(linked))
     try:
         with pytest.raises(ValueError, match="symlink or junction"):
             build_identity_module._reject_linked_components(linked)
     finally:
-        linked.rmdir()
+        remove_directory_link(linked)

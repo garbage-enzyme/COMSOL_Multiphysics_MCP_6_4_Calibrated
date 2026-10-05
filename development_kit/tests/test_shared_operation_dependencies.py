@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import queue
+import os
 import threading
 import time
 from pathlib import Path
@@ -221,8 +222,11 @@ def test_shared_snapshot_path_stress_has_no_external_write(tmp_path, ascii_root)
         str(write_root / "shared_snapshots" / "CON.mph"),
         str(write_root / "shared_snapshots" / "结果.mph"),
         r"\\?\D:\shared_snapshots\device.mph",
-        str(write_root / "shared_snapshots" / "existing.mph"),
+        str(write_root / "shared_snapshots" / "Existing.mph"),
     ]
+
+    if os.name == "nt":
+        candidates.append(str(write_root / "shared_snapshots" / "existing.mph"))
 
     for candidate in candidates:
         with pytest.raises(ValueError):

@@ -62,7 +62,7 @@ PROFILE_HELP_IDS = {
     ),
 }
 GUI_SCALE_HELP_ID = (
-    "Size of text and controls. Following Windows is recommended. "
+    "Size of text and controls. Following system display settings is recommended. "
     "Other choices are previewed immediately and saved for the next opening."
 )
 GUI_IMMEDIATE_FIELDS = frozenset({"gui.language", "gui.scale"})

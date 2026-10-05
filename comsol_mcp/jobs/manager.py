@@ -24,7 +24,6 @@ from .process_control import inspect_identity
 from .resource_admission import normalize_resource_policy
 from .robust_shape_optimization import expand_robust_shape_manifest
 from .spectral_characterization import normalize_spectral_characterization_job_spec
-from .surrogate_training import normalize_surrogate_training_spec
 from .store import (
     ACTIVE_STATES,
     JOB_SCHEMA_VERSION,
@@ -38,6 +37,7 @@ from .store import (
     process_identity_state,
     read_json,
 )
+from .surrogate_training import normalize_surrogate_training_spec
 from .thermo_optomechanical_replay import normalize_thermo_optomechanical_replay_spec
 from .validation_matrix import normalize_validation_matrix_spec
 
@@ -146,6 +146,7 @@ def validate_staged_sweep_spec(raw: dict[str, Any]) -> dict[str, Any]:
         "version",
         "smoke_points",
         "record_wavelength_controls",
+        "strict_wavelength_policy",
         "resource_policy",
         "execution_backend",
     }
@@ -154,6 +155,23 @@ def validate_staged_sweep_spec(raw: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"Unsupported staged_sweep fields: {unknown}")
     if spec.get("job_type") != "staged_sweep":
         raise ValueError("Production jobs require job_type='staged_sweep'")
+    if spec.get("strict_wavelength_policy") is not None:
+        from comsol_mcp.strict_wavelength import normalize_policy, requested_metres
+
+        spec["strict_wavelength_policy"] = normalize_policy(spec["strict_wavelength_policy"])
+        if spec.get("parameter_name") not in {"wl", "wavelength"}:
+            raise ValueError("strict wavelength mode requires a wavelength parameter")
+        if not spec.get("study_name") or not spec.get("study_step_tag"):
+            raise ValueError("strict wavelength mode requires study and step tags")
+        if spec.get("record_wavelength_controls") is False:
+            raise ValueError("strict wavelength mode requires recorded controls")
+        if (
+            spec.get("study_step_property", "plist") != "plist"
+            or spec.get("study_step_unit_property", "punit") != "punit"
+        ):
+            raise ValueError("strict wavelength mode requires plist and punit controls")
+        for value in spec.get("parameter_values", []):
+            requested_metres(value, spec.get("parameter_unit"))
     required_strings = ("source_model_path", "parameter_name")
     for key in required_strings:
         if not isinstance(spec.get(key), str) or not spec[key].strip():
@@ -627,9 +645,7 @@ class JobManager:
             if spec.get(name) != value:
                 blockers.append(f"{name}_not_bound")
 
-        ineligible = {
-            item["row_id"] for item in (dataset.get("ineligible_rows") or [])
-        }
+        ineligible = {item["row_id"] for item in (dataset.get("ineligible_rows") or [])}
         assignments = split_plan.get("assignments") or []
         holdout = [item for item in assignments if item.get("split") == "scientific_holdout"]
         if not assignments:
@@ -675,16 +691,40 @@ class JobManager:
                 start_new_session=(os.name != "nt"),
             )
         _track_detached_process(process)
+        expected_signature = hashlib.sha256(
+            "\0".join(command).encode("utf-8", errors="replace")
+        ).hexdigest()
         deadline = time.monotonic() + 2.0
         while True:
             try:
-                return process_identity(process.pid)
-            except psutil.NoSuchProcess:
-                if time.monotonic() >= deadline:
-                    raise RuntimeError(
-                        "Detached test worker exited before its identity was recorded"
-                    )
-                time.sleep(0.01)
+                observed = process_identity(process.pid)
+                if os.name == "nt" or observed["command_signature"] == expected_signature:
+                    return observed
+            except psutil.NoSuchProcess, psutil.ZombieProcess, OSError:
+                pass
+            # A fast child can bind and exit before the parent samples /proc.
+            # Use only its persisted, exact launched-command identity.
+            state = self.store.read_state(job_id)
+            if (
+                state.get("worker_pid") == process.pid
+                and state.get("worker_command_signature") == expected_signature
+            ):
+                created = state.get("worker_process_create_time")
+                if (
+                    isinstance(created, (int, float))
+                    and not isinstance(created, bool)
+                    and math.isfinite(created)
+                ):
+                    return {
+                        "pid": process.pid,
+                        "process_create_time": created,
+                        "command_signature": expected_signature,
+                    }
+            if time.monotonic() >= deadline or process.poll() is not None:
+                raise RuntimeError(
+                    "Detached worker identity could not be verified before launch acknowledgement"
+                )
+            time.sleep(0.01)
 
     def _arm_robust_wall_watchdog_if_required(
         self,
@@ -962,6 +1002,19 @@ class JobManager:
                             )
                         )
                     )
+                    if (
+                        isinstance(capture, dict)
+                        and capture.get("capture_method") == "controlled_leaf_worker"
+                    ):
+                        from .process_control import controlled_leaf_worker_proved
+
+                        capture_proved = (
+                            isinstance(worker, dict)
+                            and cancel.get("descendants") == []
+                            and controlled_leaf_worker_proved(
+                                self.store.read_spec(job_id), state, worker
+                            )
+                        )
 
                     if (
                         state.get("status") == "cancelling"
@@ -1313,9 +1366,7 @@ class JobManager:
                 try:
                     from .bounded_steps import summarize_bounded_steps
 
-                    state["bounded_steps"] = summarize_bounded_steps(
-                        self.store.job_dir(job_id)
-                    )
+                    state["bounded_steps"] = summarize_bounded_steps(self.store.job_dir(job_id))
                 except Exception:
                     logger.warning("bounded step summary was unreadable", exc_info=True)
                     state["bounded_steps"] = {

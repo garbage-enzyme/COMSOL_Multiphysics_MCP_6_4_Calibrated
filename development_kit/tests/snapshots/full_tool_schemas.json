@@ -2726,6 +2726,17 @@
             "title": "Source Model Path",
             "type": "string"
           },
+          "strict_wavelength_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/StrictWavelengthPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "study_name": {
             "anyOf": [
               {
@@ -2819,6 +2830,37 @@
           "expressions"
         ],
         "title": "StagedSweepInput",
+        "type": "object"
+      },
+      "StrictWavelengthPolicy": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "absolute_tolerance_m": {
+            "maximum": 1e+308,
+            "minimum": 0,
+            "title": "Absolute Tolerance M",
+            "type": "number"
+          },
+          "dataset_tag": {
+            "maxLength": 16384,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$",
+            "title": "Dataset Tag",
+            "type": "string"
+          },
+          "relative_tolerance": {
+            "maximum": 1e+308,
+            "minimum": 0,
+            "title": "Relative Tolerance",
+            "type": "number"
+          }
+        },
+        "required": [
+          "relative_tolerance",
+          "absolute_tolerance_m",
+          "dataset_tag"
+        ],
+        "title": "StrictWavelengthPolicy",
         "type": "object"
       },
       "ThermoOptomechanicalReplayInput": {
@@ -3483,6 +3525,17 @@
             "title": "Source Model Path",
             "type": "string"
           },
+          "strict_wavelength_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/StrictWavelengthPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "study_name": {
             "anyOf": [
               {
@@ -3576,6 +3629,37 @@
           "expressions"
         ],
         "title": "StagedSweepInput",
+        "type": "object"
+      },
+      "StrictWavelengthPolicy": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "absolute_tolerance_m": {
+            "maximum": 1e+308,
+            "minimum": 0,
+            "title": "Absolute Tolerance M",
+            "type": "number"
+          },
+          "dataset_tag": {
+            "maxLength": 16384,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$",
+            "title": "Dataset Tag",
+            "type": "string"
+          },
+          "relative_tolerance": {
+            "maximum": 1e+308,
+            "minimum": 0,
+            "title": "Relative Tolerance",
+            "type": "number"
+          }
+        },
+        "required": [
+          "relative_tolerance",
+          "absolute_tolerance_m",
+          "dataset_tag"
+        ],
+        "title": "StrictWavelengthPolicy",
         "type": "object"
       },
       "ThermoOptomechanicalReplayInput": {
@@ -11440,6 +11524,39 @@
     "type": "object"
   },
   "study_staged_parametric_sweep": {
+    "$defs": {
+      "StrictWavelengthPolicy": {
+        "additionalProperties": false,
+        "maxProperties": 256,
+        "properties": {
+          "absolute_tolerance_m": {
+            "maximum": 1e+308,
+            "minimum": 0,
+            "title": "Absolute Tolerance M",
+            "type": "number"
+          },
+          "dataset_tag": {
+            "maxLength": 16384,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$",
+            "title": "Dataset Tag",
+            "type": "string"
+          },
+          "relative_tolerance": {
+            "maximum": 1e+308,
+            "minimum": 0,
+            "title": "Relative Tolerance",
+            "type": "number"
+          }
+        },
+        "required": [
+          "relative_tolerance",
+          "absolute_tolerance_m",
+          "dataset_tag"
+        ],
+        "title": "StrictWavelengthPolicy",
+        "type": "object"
+      }
+    },
     "additionalProperties": false,
     "maxProperties": 256,
     "properties": {
@@ -11654,6 +11771,17 @@
         ],
         "default": null,
         "title": "Source Model Path"
+      },
+      "strict_wavelength_policy": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/StrictWavelengthPolicy"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
       },
       "study_name": {
         "anyOf": [

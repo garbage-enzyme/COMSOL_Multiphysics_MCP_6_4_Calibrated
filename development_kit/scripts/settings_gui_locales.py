@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from settings_gui import GUI_RELEASE
-from settings_gui.i18n import MESSAGE_IDS
+from settings_gui.i18n import MESSAGE_IDS, _LAUNCHER_MESSAGES
 
 LOCALE_ROOT = ROOT / "settings_gui" / "locales"
 DOMAIN = "settings_gui"
@@ -68,8 +68,9 @@ ZH_CN = {
     "Internal settings format name. You do not need to change it.": "设置文件内部使用的格式名称，不需要修改。",
     "Settings format version used when this file is saved.": "保存文件时使用的设置格式版本。",
     "Language used by this Settings window.": "此设置窗口使用的语言。",
-    "Size of text and controls. Following Windows is recommended. Other choices are previewed immediately and saved for the next opening.": "文字和控件的大小。建议跟随 Windows；其他选项会立即预览，并在下次打开时继续使用。",
-    "Follow Windows display settings": "跟随 Windows 显示设置",
+    "Size of text and controls. Following system display settings is recommended. Other choices are previewed immediately and saved for the next opening.": "文字和控件的大小。建议跟随系统显示设置。其他选项会立即预览，并在下次打开时继续使用。",
+    "Follow system display settings": "跟随系统显示设置",
+    "Experimental Linux: offline tools only. COMSOL execution is disabled. Semantic search is not accepted.": "Linux 为实验性支持，仅提供离线工具。COMSOL 执行已禁用。语义搜索尚未通过验收。",
     "Safety-first default for new users. It offers fewer operations, which lowers the risk of an unintended change. Choose it while learning or when you only need to open and inspect models, manage jobs, run careful single-point checks, or search manuals.": "面向新手的安全默认选项。它提供的操作较少，可降低误操作风险。学习阶段，或只需要打开和查看模型、管理任务、进行谨慎的单点检查或搜索手册时，请选择此项。",
     "Recommended for most users. It covers ordinary FEM model building and result export, and includes tools for making a Windows standalone package. Choose it for general simulation work that does not need a specialist profile.": "推荐大多数用户选择。它覆盖常规 FEM 建模和结果导出，也包含制作 Windows standalone 包的工具。一般仿真不需要专用 profile 时，请选择此项。",
     "For optical and metasurface work. Adds materials, field review, Wave Optics checks, point audits, and staged parameter workflows to Core.": "适合光学和超表面工作。在 Core 基础上增加材料、场结果查看、Wave Optics 检查、单点审计和分阶段参数流程。",
@@ -198,8 +199,9 @@ ZH_TW = {
     "Internal settings format name. You do not need to change it.": "設定檔內部使用的格式名稱，不需要修改。",
     "Settings format version used when this file is saved.": "儲存檔案時使用的設定格式版本。",
     "Language used by this Settings window.": "此設定視窗使用的語言。",
-    "Size of text and controls. Following Windows is recommended. Other choices are previewed immediately and saved for the next opening.": "文字和控制項的大小。建議跟隨 Windows；其他選項會立即預覽，並在下次開啟時繼續使用。",
-    "Follow Windows display settings": "跟隨 Windows 顯示設定",
+    "Size of text and controls. Following system display settings is recommended. Other choices are previewed immediately and saved for the next opening.": "文字和控制項的大小。建議跟隨系統顯示設定。其他選項會立即預覽，並在下次開啟時繼續使用。",
+    "Follow system display settings": "跟隨系統顯示設定",
+    "Experimental Linux: offline tools only. COMSOL execution is disabled. Semantic search is not accepted.": "Linux 為實驗性支援，僅提供離線工具。COMSOL 執行已停用。語意搜尋尚未通過驗收。",
     "Safety-first default for new users. It offers fewer operations, which lowers the risk of an unintended change. Choose it while learning or when you only need to open and inspect models, manage jobs, run careful single-point checks, or search manuals.": "面向新手的安全預設選項。它提供的操作較少，可降低誤操作風險。學習階段，或只需要開啟和查看模型、管理工作、進行謹慎的單點檢查或搜尋手冊時，請選擇此項。",
     "Recommended for most users. It covers ordinary FEM model building and result export, and includes tools for making a Windows standalone package. Choose it for general simulation work that does not need a specialist profile.": "建議大多數使用者選擇。它涵蓋一般 FEM 建模和結果匯出，也包含製作 Windows standalone 套件的工具。一般模擬不需要專用 profile 時，請選擇此項。",
     "For optical and metasurface work. Adds materials, field review, Wave Optics checks, point audits, and staged parameter workflows to Core.": "適合光學和超表面工作。在 Core 基礎上增加材料、場結果查看、Wave Optics 檢查、單點稽核和分階段參數流程。",
@@ -278,6 +280,11 @@ ZH_TW = {
     "Semantic search is not ready": "語意搜尋尚未就緒",
     "Enable manual search and choose valid lexical, semantic-index, and model assets first.": "請先啟用手冊搜尋，並選擇有效的詞彙索引、語意索引和模型資源。",
 }
+
+
+for _table in (ZH_CN, ZH_TW):
+    for _old, _new in _LAUNCHER_MESSAGES.items():
+        _table[_new] = _table[_old].replace("桌面快捷方式", "应用启动器").replace("桌面捷徑", "應用程式啟動器")
 
 
 def _header(language: str) -> str:

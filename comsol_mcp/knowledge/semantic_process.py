@@ -1,4 +1,4 @@
-"""Stdlib-only parent client and exact-child manager for the semantic retrieval worker."""
+"""Bounded parent client and exact-child manager for the semantic retrieval worker."""
 
 from __future__ import annotations
 
@@ -24,6 +24,15 @@ from .semantic_contracts import (
 )
 
 CREATE_TIME_TOLERANCE_SECONDS = 0.05
+
+
+def _posix_process_create_time(pid: int) -> float | None:
+    import psutil
+
+    try:
+        return float(psutil.Process(pid).create_time())
+    except (psutil.Error, OSError):
+        return None
 
 
 def _command_signature(command: list[str]) -> str:
@@ -290,7 +299,7 @@ class SemanticWorkerManager:
         actual = (
             _windows_process_create_time(int(self._process._handle))
             if os.name == "nt"
-            else self._identity.get("process_create_time")
+            else _posix_process_create_time(self._process.pid)
         )
         if (
             actual is None
@@ -359,7 +368,7 @@ class SemanticWorkerManager:
             created = (
                 _windows_process_create_time(int(process._handle))
                 if os.name == "nt"
-                else time.time()
+                else _posix_process_create_time(process.pid)
             )
             if created is None:
                 error = {

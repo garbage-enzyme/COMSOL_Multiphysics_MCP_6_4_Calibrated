@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import _winapi
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -24,6 +23,7 @@ from src.path_policy import ARTIFACT_WRITE_ROOT_ENV
 from src.tools.evidence_integrity import register_evidence_integrity_tools
 
 import comsol_mcp.evidence.integrity_controls as integrity_controls_module
+from development_kit.tests.platform_fixtures import create_directory_link, remove_directory_link
 from development_kit.tests.test_portfolio_verifier import _fixture, _rehash_request
 
 
@@ -422,7 +422,7 @@ def test_mcp_verify_tool_rejects_external_and_junction_artifact_roots(
     outside = tmp_path / "outside"
     outside.mkdir()
     junction = owned / "linked"
-    _winapi.CreateJunction(str(outside), str(junction))
+    create_directory_link(str(outside), str(junction))
     monkeypatch.delenv(EVIDENCE_SETTINGS_ENV, raising=False)
     monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(owned))
     server = MCPServer("evidence-integrity-path-negative-test")
@@ -437,4 +437,4 @@ def test_mcp_verify_tool_rejects_external_and_junction_artifact_roots(
         assert result["verification_state"] == "blocked"
         assert result["artifact_root_validation"]["accepted"] is False
         assert str(outside) not in json.dumps(result)
-    junction.rmdir()
+    remove_directory_link(junction)

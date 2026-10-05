@@ -79,6 +79,13 @@ def path_has_linked_component(path: Path) -> bool:
 class SettingsOwnership:
     """Hold the named mutex, sidecar, and delete-denying target handle."""
 
+    def __new__(cls, target: Path) -> Any:
+        if os.name != "nt":
+            from .posix_ownership import PosixSettingsOwnership
+
+            return PosixSettingsOwnership(target)
+        return super().__new__(cls)
+
     def __init__(self, target: Path) -> None:
         if os.name != "nt":
             raise RuntimeError("settings ownership is supported only on Windows")

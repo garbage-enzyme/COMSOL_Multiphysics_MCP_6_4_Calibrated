@@ -23,6 +23,16 @@ _RESUMABLE_PHASES = {"terminate", "force_kill", "verifying"}
 _PROCESS_IDENTITY_FIELDS = ("pid", "process_create_time", "command_signature")
 
 
+def _capture_with_inspection_budget(worker: dict[str, Any], budget: float) -> dict[str, Any]:
+    """Recheck transient inspection failure; never treat uncertainty as exit."""
+    deadline = time.monotonic() + budget
+    while True:
+        captured = capture_owned_descendants(worker)
+        if captured["worker"]["state"] != "uncertain" or time.monotonic() >= deadline:
+            return captured
+        time.sleep(min(0.025, max(0.0, deadline - time.monotonic())))
+
+
 def _same_process_identity(left: Any, right: Any) -> bool:
     return (
         isinstance(left, dict)
@@ -589,7 +599,12 @@ def run(
         current: list[dict[str, Any]],
         phase: str,
     ) -> list[dict[str, Any]] | None:
-        captured = capture_owned_descendants(worker)
+        captured = _capture_with_inspection_budget(worker, cleanup_verify_seconds)
+        from .process_control import controlled_leaf_worker_proved
+
+        controlled_leaf = controlled_leaf_worker_proved(
+            store.read_spec(job_id), store.read_state(job_id), worker
+        )
         if captured["worker"]["state"] == "uncertain":
             _record_blocker(
                 store,
@@ -605,6 +620,9 @@ def run(
                 captured["worker"].get("state") == "active",
             )
         )
+        if controlled_leaf and not captured.get("descendants"):
+            capture_complete = True
+            captured["capture_complete"] = True
         previous_capture = cancel_evidence.get("descendant_capture")
         previous_complete_capture = bool(
             isinstance(previous_capture, dict)
@@ -636,10 +654,26 @@ def run(
         capture_record = {
             **captured,
             "captured_at_epoch": time.time(),
-            "capture_method": ("live_enumeration" if capture_complete else "contained_worker_exit"),
+            "capture_method": (
+                "controlled_leaf_worker"
+                if controlled_leaf
+                else "live_enumeration"
+                if capture_complete
+                else "contained_worker_exit"
+                if process_tree_contained
+                else "worker_exit_after_live_capture"
+            ),
             "process_tree_contained": process_tree_contained,
         }
         history.append(capture_record)
+        # Retain the last proved live enumeration when an uncontained worker
+        # exits. An incomplete exit observation is history, not a replacement
+        # for the enumeration required by coordinator restart reconciliation.
+        authoritative_capture = (
+            previous_capture
+            if not capture_complete and not process_tree_contained and previous_complete_capture
+            else capture_record
+        )
         if not _checkpoint(
             store,
             job_id,
@@ -648,13 +682,13 @@ def run(
             phase,
             patch={
                 "descendants": merged,
-                "descendant_capture": capture_record,
+                "descendant_capture": authoritative_capture,
                 "descendant_captures": history,
             },
         ):
             return None
         cancel_evidence["descendant_captures"] = history
-        cancel_evidence["descendant_capture"] = capture_record
+        cancel_evidence["descendant_capture"] = authoritative_capture
         cancel_evidence["descendants"] = merged
         return merged
 
@@ -720,7 +754,7 @@ def run(
                 return 0
             time.sleep(min(0.025, max(0.0, deadline - time.monotonic())))
 
-    captured = capture_owned_descendants(worker)
+    captured = _capture_with_inspection_budget(worker, cleanup_verify_seconds)
     if captured["worker"]["state"] == "uncertain":
         _record_blocker(
             store,

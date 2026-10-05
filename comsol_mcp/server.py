@@ -108,7 +108,7 @@ def register_all_resources(server: MCPServer | None = None) -> None:
     logger.info("Registered all resources")
 
 
-def _tasks_extensions() -> list:
+def _tasks_extensions(engine) -> list:
     """Build the enabled MCP extensions for one server instance.
 
     The Tasks extension is registered unconditionally rather than behind a
@@ -126,11 +126,9 @@ def _tasks_extensions() -> list:
     from comsol_mcp.settings import OWNER_ENV
     from comsol_mcp.utils.runtime_paths import default_runtime_dir
 
-    from .tools.jobs import job_manager
-
     owner = os.environ.get(OWNER_ENV) or "local"
     store = TasksMappingStore(default_runtime_dir() / "tasks")
-    bridge = TasksBridge(engine=job_manager, store=store, owner=owner)
+    bridge = TasksBridge(engine=engine, store=store, owner=owner)
     return [build_tasks_extension(bridge)]
 
 
@@ -166,14 +164,18 @@ def create_server(
     profile: str | ProfileSelection | None = None,
 ) -> MCPServer:
     """Create a fully registered server without starting its transport."""
+    from comsol_mcp.jobs.tasks_public_engine import ProfiledTasksEngine
+
     apply_java_settings()
+    engine = ProfiledTasksEngine()
     server = MCPServer(
         name,
         instructions=SERVER_INSTRUCTIONS,
         version=__version__,
-        extensions=_tasks_extensions(),
+        extensions=_tasks_extensions(engine),
     )
     register_all_tools(server, profile)
+    engine.bind(server)
     register_all_resources(server)
     _install_discovery_pagination(server)
     return server

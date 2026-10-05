@@ -10,7 +10,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `AGENTS.md` — The file provides repository development, testing, and safety guidance for coding agents.
 - `CLAUDE.md` — The file provides repository development, testing, and safety guidance for Claude Code.
 - `CITATION.cff` — The file provides machine-readable software and preferred-paper citation metadata.
-- `.github/workflows/ci.yml` — This unified workflow runs the blocking backend, dependency, security, package, and independent Windows Settings GUI jobs under one solver-free run.
+- `.github/workflows/ci.yml` — This unified workflow runs the blocking backend, dependency, security, package, Windows GUI, and experimental Ubuntu backend and GUI jobs under one solver-free run.
 - `.github/workflows/dependency_report.yml` — The workflow produces the scheduled information-only dependency report.
 - `LICENSE` — The file contains the repository MIT license.
 - `Open_Settings_GUI.ps1` — The script opens or validates the Settings GUI through the bounded Python launcher.
@@ -821,3 +821,33 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `comsol_mcp/utils/runtime_paths.py` — The module defines shared ASCII-safe runtime artifact locations.
 - `comsol_mcp/utils/validation.py` — The module provides strict dependency-free JSON scalar validation.
 - `comsol_mcp/utils/versioning.py` — The module creates and parses versioned model filenames.
+
+## Experimental Ubuntu and strict wavelength support
+
+- `comsol_mcp/adapter/wavelength_controls.py` — The module binds study and solution identities and resolves exact MPh dataset nodes for wavelength evaluation.
+- `comsol_mcp/contracts/wavelength_policy.py` — The module defines the closed strict wavelength policy and finite SI comparison rules.
+- `comsol_mcp/platform_support.py` — The module reports platform support and refuses unavailable actions before solver imports or filesystem changes.
+- `comsol_mcp/posix_lock.py` — The module owns stable private POSIX advisory locks and rejects unsafe lock files.
+- `comsol_mcp/strict_wavelength.py` — The module validates explicit wavelength controls and restores typed study properties.
+- `comsol_mcp/xdg_paths.py` — The module resolves absolute XDG roots without creating directories.
+- `constraints/release_locked_ubuntu_py314.txt` — The file locks the default Ubuntu Python 3.14 runtime dependencies with binary wheel hashes.
+- `development_kit/release/ubuntu_lock_review.json` — The file records retained Ubuntu runtime versions, wheel identities, dependency metadata, and lock provenance.
+- `development_kit/tests/platform_fixtures.py` — The module provides native test paths, directory links, and a test-only synthetic lease lock.
+- `development_kit/tests/test_platform_support.py` — The tests verify native-action refusal, registered callback boundaries, and Linux cold imports.
+- `development_kit/tests/test_posix_platform.py` — The tests verify XDG defaults, advisory ownership, source changes, and conditional cleanup conflicts.
+- `development_kit/tests/test_strict_wavelength.py` — The tests verify three-way wavelength agreement, restoration, resume identity, and public job transport.
+- `docs/experimental_linux/README.md` — The guide defines experimental Ubuntu installation, offline scope, XDG paths, GUI ownership, and acceptance limits in English.
+- `docs/experimental_linux/README_CN.md` — The guide defines the same experimental Ubuntu scope, paths, ownership, and acceptance limits in Chinese.
+- `docs/strict_wavelength/README.md` — The guide defines explicit wavelength inputs, SI tolerances, restoration, resume, and scientific-success limits in English.
+- `docs/strict_wavelength/README_CN.md` — The guide defines the same explicit wavelength inputs and validation limits in Chinese.
+- `settings_gui/assets/comsol_mcp.png` — The file contains the unchanged PNG frame extracted from the existing icon for the shared Linux GUI.
+- `settings_gui/posix_ownership.py` — The module provides advisory settings ownership and baseline identity checks on POSIX.
+- `settings_gui/tests/test_xdg_shortcut.py` — The tests verify launcher quoting, actual argv, ownership, collision, and publication failure recovery.
+- `settings_gui/xdg_shortcut.py` — The module creates, verifies, restores, and removes exact owned XDG launchers without foreign-file overwrite.
+
+- `comsol_mcp/jobs/tasks_public_engine.py` — The module routes Tasks through registered public job guards and preserves cancellation attempt identity.
+- `development_kit/tests/tasks_stdio_fixture.py` — The private fixture persists fixed fake jobs and completes them only after a test-owned barrier.
+- `development_kit/tests/test_tasks_stdio_conformance.py` — The tests verify real modern stdio, acknowledgement timing, restart, duplicate submission, cancellation, TTL retention, and refusal boundaries.
+
+- `development_kit/scripts/paired_coverage.py` — The gate combines Windows and Linux branch evidence only when source identities and policy hashes match.
+- `development_kit/tests/test_paired_coverage.py` — The tests reject mismatched measurements and retain uncovered branches in paired evidence.

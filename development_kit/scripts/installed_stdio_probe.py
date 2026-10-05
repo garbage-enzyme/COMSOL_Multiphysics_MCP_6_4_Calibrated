@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from mcp import ClientSession, StdioServerParameters
+from mcp import Client, ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.shared.exceptions import MCPError
 
@@ -255,8 +255,16 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
         raise RuntimeError(f"malformed request matrix did not fail closed: {malformed}")
     if capabilities.get("profile") != "core":
         raise RuntimeError("installed stdio probe did not activate the core profile")
-    if preflight.get("control_plane", {}).get("operation") != "solver_preflight":
-        raise RuntimeError("installed cold solver_preflight call omitted timing evidence")
+    if os.name == "nt":
+        if preflight.get("control_plane", {}).get("operation") != "solver_preflight":
+            raise RuntimeError("installed cold solver_preflight call omitted timing evidence")
+    elif (
+        preflight.get("classification") != "unsupported_platform"
+        or preflight.get("reason_code") != "linux_solver_not_enabled"
+        or preflight.get("solver_started") is not False
+        or preflight.get("filesystem_modified") is not False
+    ):
+        raise RuntimeError("installed Linux preflight did not refuse before native work")
     comsol_client_started = _validate_passive_evidence(capabilities, spectral)
     names_payload = json.dumps(tool_names, separators=(",", ":")).encode("utf-8")
     return {
@@ -283,10 +291,11 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
         },
         "cold_solver_preflight": {
             "ready": preflight.get("ready"),
+            "classification": preflight.get("classification"),
             "blocker_count": len(preflight.get("blockers", [])),
-            "latency_seconds": preflight["control_plane"]["latency_seconds"],
+            "latency_seconds": preflight.get("control_plane", {}).get("latency_seconds"),
             "transport_wall_seconds": preflight_wall,
-            "outcome": preflight["control_plane"]["outcome"],
+            "outcome": preflight.get("control_plane", {}).get("outcome"),
         },
         "cold_native_tool_matrix": {
             "spectral_characterize": {
@@ -304,6 +313,47 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
     }
 
 
+async def _probe_modern(command: Path, workdir: Path) -> dict[str, Any]:
+    """Use the current public SDK client and its discover-first core path."""
+    parameters = StdioServerParameters(
+        command=str(command), args=[], cwd=str(workdir), env=_stdio_environment(workdir)
+    )
+    async with Client(parameters, mode="auto", read_timeout_seconds=15.0) as client:
+        if client.protocol_version != "2026-07-28":
+            raise RuntimeError("installed modern client did not select the target revision")
+        listed = await client.list_tools()
+        names = sorted(tool.name for tool in listed.tools)
+        capabilities = _tool_payload(await client.call_tool("capabilities", {}))
+        spectral = _tool_payload(
+            await client.call_tool("spectral_characterize", _spectral_arguments())
+        )
+        if spectral.get("success") is not True:
+            raise RuntimeError("installed modern offline spectral call failed")
+        started = _validate_passive_evidence(capabilities, spectral)
+        if capabilities["deployment_identity"]["source_classification"] != "installed_site_package":
+            raise RuntimeError("installed modern stdio loaded source-tree code")
+        rejected = await _expect_rejection(
+            client,
+            case_id="invalid_modern_job_id",
+            tool_name="job_status",
+            arguments={"job_id": []},
+        )
+        if not rejected["rejected"]:
+            raise RuntimeError("modern malformed request was not rejected")
+        return {
+            "protocol_version": client.protocol_version,
+            "initialize_handshake": False,
+            "tool_count": len(names),
+            "tool_names_sha256": hashlib.sha256(
+                json.dumps(names, separators=(",", ":")).encode()
+            ).hexdigest(),
+            "package_version": capabilities["deployment_identity"]["package_version"],
+            "source_classification": "installed_site_package",
+            "comsol_client_started": started,
+            "malformed_request": rejected,
+        }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--command", type=Path, required=True)
@@ -315,6 +365,9 @@ def main() -> int:
     workdir.mkdir(parents=True, exist_ok=True)
     stderr_path = workdir / "server-stderr.log"
     result = asyncio.run(_probe(command, workdir, stderr_path))
+    modern_root = workdir / "modern"
+    modern_root.mkdir()
+    result["modern_stdio"] = asyncio.run(_probe_modern(command, modern_root))
     args.output.write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

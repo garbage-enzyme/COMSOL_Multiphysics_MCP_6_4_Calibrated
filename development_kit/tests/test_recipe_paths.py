@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from development_kit.tests.platform_fixtures import platform_test_root
+
 
 def _load_recipe_paths():
     path = Path(__file__).parents[2] / "recipes" / "_paths.py"
@@ -46,8 +48,8 @@ def test_recipe_output_rejects_nonportable_runtime_root(monkeypatch, configured)
 
 def test_recipe_output_rejects_source_checkout(monkeypatch):
     module = _load_recipe_paths()
-    monkeypatch.setattr(module, "__file__", "D:/portable-checkout/recipes/_paths.py")
-    monkeypatch.setenv("COMSOL_MCP_RUNTIME_DIR", "D:/portable-checkout/output")
+    monkeypatch.setattr(module, "__file__", str(platform_test_root("portable-checkout/recipes/_paths.py")))
+    monkeypatch.setenv("COMSOL_MCP_RUNTIME_DIR", str(platform_test_root("portable-checkout/output")))
 
     with pytest.raises(ValueError, match="outside the source checkout"):
         module.recipe_output_dir()

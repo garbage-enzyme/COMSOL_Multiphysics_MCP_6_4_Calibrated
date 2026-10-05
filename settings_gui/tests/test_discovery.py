@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -144,6 +145,7 @@ def test_java_fallback_order_is_java_home_then_jdk_then_path(tmp_path: Path) -> 
     ) == (path_home.resolve(), "system_path")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows JAVA_HOME trailing backslash syntax")
 def test_quoted_java_home_is_normalized(tmp_path: Path) -> None:
     java_home = tmp_path / "Java Home"
     (java_home / "bin").mkdir(parents=True)

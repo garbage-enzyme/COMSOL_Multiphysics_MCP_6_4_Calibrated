@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -213,9 +214,7 @@ print(json.dumps({"receipt": receipt, "native_image_count": len(after)}))
 
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
-    assert set(result["receipt"]) == {
-        "jpype",
-        "mph",
+    expected = {
         "numpy",
         "psutil",
         "pydantic_core",
@@ -224,4 +223,7 @@ print(json.dumps({"receipt": receipt, "native_image_count": len(after)}))
         "scipy.optimize",
         "scipy.spatial",
     }
+    if os.name == "nt":
+        expected |= {"jpype", "mph"}
+    assert set(result["receipt"]) == expected
     assert result["native_image_count"] > 0

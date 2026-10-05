@@ -253,7 +253,9 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
     if not math.isfinite(minimum_relative_jacobian) or minimum_relative_jacobian < 0.0:
         raise ValueError("minimum_relative_jacobian must be caller supplied and nonnegative")
     child_roots = {stage: root.with_name(root.name + suffix) for stage, suffix in _SUFFIXES.items()}
-    if any(len(path.name) > 12 or path.parent != approved for path in child_roots.values()):
+    if os.name == "nt" and any(
+        len(path.name) > 12 or path.parent != approved for path in child_roots.values()
+    ):
         raise ValueError("derived stage roots exceed the Windows path budget")
     return {
         "root": root,

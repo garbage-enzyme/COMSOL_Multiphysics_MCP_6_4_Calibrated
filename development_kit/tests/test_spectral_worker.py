@@ -121,7 +121,7 @@ def test_injected_worker_reuses_ownership_resource_and_cleanup_paths(
 ):
     store, spec, job_id = _created_job(tmp_path, ascii_root)
     ownership = _Ownership()
-    client = _Client(spec["source_model_path"], attempt_mutation=True)
+    client = _Client(spec["source_model_path"], attempt_mutation=os.name == "nt")
     original_completed = spectral_worker_module.completed_spectral_point_fingerprints
     completed_scans = 0
 
@@ -154,7 +154,7 @@ def test_injected_worker_reuses_ownership_resource_and_cleanup_paths(
     assert state["spectral_summary"]["scientific_disposition"] == "accepted"
     assert state["cleanup"]["lease_released"] is True
     assert client.cleared is True
-    assert client.mutation_blocked is True
+    assert client.mutation_blocked is (os.name == "nt")
     assert ownership.released is True
     assert len(store.read_resource_journal(job_id)) > 0
     assert completed_scans == 1
@@ -408,3 +408,20 @@ def test_manager_resumes_spectral_worker_without_changing_spec(tmp_path, ascii_r
     assert (
         manager.store.read_spec(submitted["job_id"])["spec_fingerprint"] == spec["spec_fingerprint"]
     )
+
+
+def test_posix_source_mutation_rejects_spectral_success(tmp_path, ascii_root):
+    if os.name == "nt":
+        pytest.skip("POSIX mutation detection")
+    store, spec, job_id = _created_job(tmp_path, ascii_root)
+    ownership = _Ownership()
+    client = _Client(spec["source_model_path"], attempt_mutation=True)
+    def collect(point, _collector, artifact_dir):
+        return write_fake_point_audit(artifact_dir, spec, point, absorption=0.5)
+    code = _run(str(store.root), job_id,
+        ownership_factory=lambda *_: ownership, client_factory=lambda _: client,
+        collector_executor=collect, telemetry_provider=_telemetry, native_cancel_enabled=False)
+    assert code != 0
+    assert store.read_state(job_id)["status"] != "completed"
+    assert ownership.released is True
+    assert client.cleared is True

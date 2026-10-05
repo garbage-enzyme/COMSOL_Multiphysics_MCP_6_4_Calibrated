@@ -310,6 +310,7 @@ def test_launcher_cleanup_error_does_not_replace_ready_result(
     original_unlink(handshake)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows mutex WaitForSingleObject failure")
 def test_instance_mutex_distinguishes_wait_api_failure(monkeypatch, tmp_path) -> None:
     class Kernel:
         def CreateMutexW(self, *_args):

@@ -15,6 +15,8 @@ from src.shared_session.locking import (
     normalize_shared_model_identity,
 )
 
+from development_kit.tests.platform_fixtures import platform_test_root
+
 
 def _server():
     return normalize_attached_server_identity(
@@ -178,7 +180,10 @@ def test_lock_binds_server_session_model_revision_source_and_mcp_process():
         model=model,
         revision=revision,
         collaboration_mode="interactive_inspection",
-        immutable_source={"path": "C:/models/source.mph", "sha256": "c" * 64},
+        immutable_source={
+            "path": str(platform_test_root("models") / "source.mph"),
+            "sha256": "c" * 64,
+        },
         lock_created_at_epoch=3456.7,
         mcp_process={
             "pid": 5000,
@@ -209,7 +214,10 @@ def test_lock_hash_binds_every_serialized_leaf_independently():
         model=model,
         revision=revision,
         collaboration_mode="interactive_inspection",
-        immutable_source={"path": "C:/models/source.mph", "sha256": "c" * 64},
+        immutable_source={
+            "path": str(platform_test_root("models") / "source.mph"),
+            "sha256": "c" * 64,
+        },
         lock_created_at_epoch=3456.7,
         mcp_process={
             "pid": 5000,

@@ -4,6 +4,10 @@
 # Ruff formatting is byte-stable only when Python sources keep LF on Windows.
 *.py text eol=lf
 
+# These exact-hash cross-platform inputs must retain identical checkout bytes.
+development_kit/release/coverage_policy.json text eol=lf
+constraints/release_locked_ubuntu_py314.txt text eol=lf
+
 # Gettext source catalogs are byte-reproducible across Windows checkouts.
 settings_gui/locales/settings_gui.pot text eol=lf
 settings_gui/locales/**/settings_gui.po text eol=lf

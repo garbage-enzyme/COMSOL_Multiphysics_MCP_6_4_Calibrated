@@ -8,6 +8,7 @@ from comsol_mcp.research.gradient_contracts import (
     normalize_gradient_record,
     normalize_native_optimizer_configuration,
 )
+from development_kit.tests.platform_fixtures import platform_test_root
 from development_kit.tests.test_derivative_support import _support
 
 
@@ -89,7 +90,7 @@ def _outer_optimizer() -> dict:
                 "package_version": "0.3.1",
                 "distribution_license": "GPL-3.0-or-later",
                 "distribution_sha256": "4" * 64,
-                "distribution_path": "D:\\mcp_tests\\mmapy.whl",
+                "distribution_path": str(platform_test_root() / "mmapy.whl"),
                 "objective_direction": "maximize",
                 "max_inner_iterations": 15,
             },

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import inspect
 import json
 import subprocess
@@ -321,6 +322,10 @@ def _profiled_preflight_server() -> MCPServer:
 
 
 def test_public_solver_preflight_runs_entire_callback_off_event_loop(monkeypatch):
+    from comsol_mcp import platform_support
+
+    # Exercise callback transport through an admitted synthetic Windows lane.
+    monkeypatch.setattr(platform_support, "native_solver_enabled", lambda: True)
     import src.tools.session as session_module
 
     entered = threading.Event()
@@ -404,6 +409,10 @@ def test_measured_call_records_callback_exception_before_reraising():
 
 
 def test_public_solver_preflight_worker_exception_is_transported(monkeypatch):
+    from comsol_mcp import platform_support
+
+    # Exercise callback transport through an admitted synthetic Windows lane.
+    monkeypatch.setattr(platform_support, "native_solver_enabled", lambda: True)
     """An unexpected worker failure must surface, never be swallowed as success.
 
     Under the reviewed SDK 2.2.x lane an unanticipated handler exception is
@@ -512,6 +521,7 @@ def test_lightweight_job_summaries_find_active_jobs_older_than_recent_limit(tmp_
     assert [item["job_id"] for item in result["active"]] == ["active-oldest"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows registry COMSOL discovery")
 def test_standard_library_comsol_discovery_matches_mph_windows_shape(tmp_path, monkeypatch):
     import winreg
 

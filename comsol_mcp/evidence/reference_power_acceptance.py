@@ -159,7 +159,12 @@ def _coordinate_range(value: Any) -> dict[str, list[float]]:
 def _relative_repo_path(value: Any, label: str) -> str:
     text = _text(value, label, 512)
     path = Path(text)
-    if path.is_absolute() or ".." in path.parts or re.match(r"^[A-Za-z]:", text):
+    if (
+        path.is_absolute()
+        or "\\" in text
+        or any(part in {"", ".", ".."} for part in text.split("/"))
+        or re.match(r"^[A-Za-z]:", text)
+    ):
         raise ValueError(f"{label} must be a sanitized repository-relative path")
     return path.as_posix()
 

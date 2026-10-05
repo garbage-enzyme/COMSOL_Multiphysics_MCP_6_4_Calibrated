@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import os
 from pathlib import Path
 
 import numpy as np
@@ -464,10 +465,15 @@ def test_query_pins_lexical_model_and_vector_snapshots(retrieval_assets, monkeyp
 
     monkeypatch.setattr(retriever, "_vector_candidates", attempt_replacement)
 
-    result = retriever.query("CopyFace", retrieval_mode="vector")
-
-    assert result["count"] >= 1
-    assert blocked == ["manuals.sqlite3", "model.bin", "embeddings.npy"]
+    if os.name == "nt":
+        result = retriever.query("CopyFace", retrieval_mode="vector")
+        assert result["count"] >= 1
+        assert blocked == ["manuals.sqlite3", "model.bin", "embeddings.npy"]
+    else:
+        with pytest.raises(RuntimeError, match="changed"):
+            retriever.query("CopyFace", retrieval_mode="vector")
+        assert not blocked
+        assert all(Path(path).read_bytes() == b"replacement" for path in targets)
 
 
 def test_model_manifest_identity_mismatch_refuses_cache(retrieval_assets):

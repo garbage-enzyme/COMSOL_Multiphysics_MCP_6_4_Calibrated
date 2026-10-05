@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import subprocess
 import threading
@@ -194,6 +195,7 @@ def test_reflection_distinguishes_boxed_integer_from_primitive_int(monkeypatch):
     assert result["required_methods_present"] is False
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows COMSOL JVM installation verification")
 def test_running_jvm_must_match_selected_installation(monkeypatch):
     profile = _profile()
     environment = _matching_environment(profile)
@@ -212,6 +214,7 @@ def test_running_jvm_must_match_selected_installation(monkeypatch):
     )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows COMSOL JVM candidate signatures")
 def test_running_jvm_requires_exact_selected_candidate_signatures(monkeypatch):
     profile = _profile()
     environment = _matching_environment(profile)
@@ -245,6 +248,7 @@ def test_running_jvm_requires_exact_selected_candidate_signatures(monkeypatch):
     )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows COMSOL JVM installation and signatures")
 def test_running_jvm_accepts_matching_installation_and_signatures(monkeypatch):
     profile = _profile()
     environment = _matching_environment(profile)
@@ -278,6 +282,7 @@ def test_running_jvm_accepts_matching_installation_and_signatures(monkeypatch):
     )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows COMSOL JVM candidate JAR origin")
 def test_running_jvm_rejects_candidate_loaded_from_another_jar(monkeypatch):
     profile = _profile()
     environment = _matching_environment(profile)

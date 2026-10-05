@@ -12,7 +12,9 @@ def _ascii_temp_candidates() -> tuple[Path, ...]:
     configured = os.environ.get("COMSOL_MCP_TEST_ASCII_ROOT")
     if configured:
         return (Path(configured),)
-    return (Path("D:/mcp_tests"),)
+    from development_kit.tests.platform_fixtures import platform_test_root
+
+    return (platform_test_root(),)
 
 
 def _create_ascii_temp_dir(*, candidates=None) -> Path:

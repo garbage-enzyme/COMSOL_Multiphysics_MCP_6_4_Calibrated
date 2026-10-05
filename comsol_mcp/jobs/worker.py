@@ -93,6 +93,7 @@ def _runner_kwargs(spec: dict[str, Any], directory: Path) -> dict[str, Any]:
         "source_model_path": spec["source_model_path"],
         "config_id": spec["spec_fingerprint"],
         "record_wavelength_controls": spec.get("record_wavelength_controls"),
+        "strict_wavelength_policy": spec.get("strict_wavelength_policy"),
         "physical_bounds": spec.get("physical_bounds"),
         "response_tail": 2,
     }

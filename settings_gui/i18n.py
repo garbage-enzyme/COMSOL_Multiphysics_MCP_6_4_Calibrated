@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gettext
 import struct
+import sys
 from pathlib import Path
 
 from comsol_mcp.settings import GUI_LANGUAGES, GUI_SCALES
@@ -68,7 +69,8 @@ MESSAGE_IDS = (
     "Settings format version used when this file is saved.",
     "Language used by this Settings window.",
     GUI_SCALE_HELP_ID,
-    "Follow Windows display settings",
+    "Follow system display settings",
+    "Experimental Linux: offline tools only. COMSOL execution is disabled. Semantic search is not accepted.",
     *PROFILE_HELP_IDS.values(),
     (
         "Folder for working files and locks. Use an ASCII-only path. "
@@ -194,6 +196,15 @@ MESSAGE_IDS = (
     "Enable manual search and choose valid lexical, semantic-index, and model assets first.",
 )
 
+_LAUNCHER_MESSAGES = {
+    message: message.replace("desktop shortcut", "application launcher").replace(
+        "Desktop shortcut", "Application launcher"
+    )
+    for message in MESSAGE_IDS
+    if "desktop shortcut" in message or "Desktop shortcut" in message
+}
+MESSAGE_IDS = (*MESSAGE_IDS, *_LAUNCHER_MESSAGES.values())
+
 
 class Translator:
     def __init__(self, language: str) -> None:
@@ -213,6 +224,8 @@ class Translator:
                 self.warning = "The selected language catalog is unavailable; English is active."
 
     def get(self, message: str) -> str:
+        if sys.platform == "linux":
+            message = _LAUNCHER_MESSAGES.get(message, message)
         return self._catalog.gettext(message)
 
     __call__ = get
@@ -225,7 +238,7 @@ def language_option_labels(translator: Translator) -> dict[str, str]:
 def scale_option_labels(translator: Translator) -> dict[str, str]:
     return {
         key: (
-            f"{translator('Follow Windows display settings')} (system)"
+            f"{translator('Follow system display settings')} (system)"
             if key == "system"
             else f"{key}%"
         )

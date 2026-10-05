@@ -129,7 +129,7 @@ def _collector_for(spec, *, fail_configuration=None):
 def test_worker_uses_one_owner_and_client_for_all_exact_levels(tmp_path, ascii_tmp_path):
     store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
     ownership = _Ownership()
-    client = _Client(attempt_mutation=True)
+    client = _Client(attempt_mutation=os.name == "nt")
     factory_calls = {"ownership": 0, "client": 0}
 
     def ownership_factory(*_args):
@@ -158,7 +158,7 @@ def test_worker_uses_one_owner_and_client_for_all_exact_levels(tmp_path, ascii_t
     assert ownership.acquired is True and ownership.released is True
     assert factory_calls == {"ownership": 1, "client": 1}
     assert len(client.loaded) == 3
-    assert client.mutation_blocked == 3
+    assert client.mutation_blocked == (3 if os.name == "nt" else 0)
     assert client.clear_count == 4
     assert all(
         Path(level["spectral_job"]["source_model_path"]).read_bytes().startswith(b"model-level-")
@@ -615,3 +615,24 @@ def test_final_source_mismatch_after_worker_error_is_cleanup_only(
     assert state["cleanup_errors"] == [
         "final_source_verification:Immutable convergence source changed after execution"
     ]
+
+
+def test_posix_source_mutation_refuses_campaign_success(tmp_path, ascii_tmp_path):
+    """POSIX detects mutation; it does not claim Windows write-denying handles."""
+    if os.name == "nt":
+        import pytest
+        pytest.skip("POSIX source-change detection")
+    store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
+    ownership = _Ownership()
+    client = _Client(attempt_mutation=True)
+    code = _run(
+        str(store.root), job_id,
+        ownership_factory=lambda *_: ownership,
+        client_factory=lambda _: client,
+        collector_executor=_collector_for(spec),
+        telemetry_provider=_telemetry, native_cancel_enabled=False,
+    )
+    assert code != 0
+    assert store.read_state(job_id)["status"] != "completed"
+    assert ownership.released is True
+    assert client.mutation_blocked == 0

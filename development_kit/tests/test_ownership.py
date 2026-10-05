@@ -24,10 +24,21 @@ from src.tools.ownership import (
     _configured_java_home_is_usable,
 )
 
+from development_kit.tests.platform_fixtures import fake_lease_artifact_lock, platform_test_root
+
+
+@pytest.fixture(autouse=True)
+def synthetic_lease_lock_on_posix(monkeypatch):
+    # These fake process inventories exercise lease state logic on both hosts.
+    # Windows still uses its real lock. Linux uses a test-only artifact lock.
+    # The production Linux refusal is tested separately in test_platform_support.
+    if os.name != "nt":
+        monkeypatch.setattr(ownership_module, "_lease_operation_lock", fake_lease_artifact_lock)
+
 
 @pytest.fixture()
 def runtime_dir():
-    path = Path("D:/comsol_runtime_test") / uuid.uuid4().hex
+    path = platform_test_root("ownership") / uuid.uuid4().hex
     path.mkdir(parents=True)
     try:
         yield path
@@ -141,6 +152,11 @@ import time
 import psutil
 
 from comsol_mcp.tools.ownership import SolverOwnership
+
+if os.name != "nt":
+    import comsol_mcp.tools.ownership as ownership
+    from development_kit.tests.platform_fixtures import fake_lease_artifact_lock
+    ownership._lease_operation_lock = fake_lease_artifact_lock
 
 runtime = Path(sys.argv[1])
 token = sys.argv[2]

@@ -5,6 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
+
 from comsol_mcp.knowledge.lexical_manual import build_index_from_records
 from comsol_mcp.settings import GUI_LANGUAGES, default_settings_document
 from comsol_mcp.tools.catalog import PROFILE_NAMES
@@ -546,3 +548,29 @@ def test_save_apply_and_initialization_never_create_a_shortcut() -> None:
     assert controller.apply() is True
 
     assert shortcut_calls == []
+
+
+@pytest.mark.parametrize("method", ["ask_file", "ask_save_file"])
+def test_native_dialog_all_files_includes_extensionless_names(monkeypatch, method):
+    from settings_gui import dialogs
+
+    calls = []
+    native = "askopenfilename" if method == "ask_file" else "asksaveasfilename"
+    monkeypatch.setattr(dialogs.filedialog, native, lambda **kwargs: calls.append(kwargs) or "")
+    getattr(dialogs.Dialogs(), method)(title="Choose a file")
+    assert calls[0]["filetypes"][-1] == ("All files", "*")
+
+
+@pytest.mark.parametrize("language", ["en", "zh-cn", "zh-tw"])
+def test_linux_help_examples_are_native_and_keep_translated_instructions(language):
+    from settings_gui.app import _platform_help_text
+    from settings_gui.i18n import Translator
+
+    translator = Translator(language)
+    for field in FIELDS:
+        text = translator.get(field.help_id)
+        linux = _platform_help_text(text, platform="linux")
+        assert _platform_help_text(text, platform="win32") == text
+        assert "%PROGRAMDATA%" not in linux and "%LOCALAPPDATA%" not in linux
+        assert "C:\\COMSOL64" not in linux
+        assert linux.split("\n")[0] == text.split("\n")[0]
