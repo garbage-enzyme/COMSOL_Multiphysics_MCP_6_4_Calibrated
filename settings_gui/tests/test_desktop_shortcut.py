@@ -388,6 +388,7 @@ def test_initial_create_refuses_a_shortcut_that_appears_at_publish(
 
 
 def test_powershell_timeout_is_normalized(monkeypatch) -> None:
+    monkeypatch.setattr(shortcut_module, "_powershell_executable", lambda: Path("pwsh"))
     monkeypatch.setattr(
         shortcut_module.subprocess,
         "run",
