@@ -325,7 +325,12 @@ jobs:
         run: |
           python -m pip install --require-hashes --only-binary=:all: -r constraints/release_locked_ubuntu_py314.txt
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          python -m pip install ".[dev,manuals]" -c constraints/release_locked_ubuntu_py314.txt "pymupdf==1.28.0"
+          # Hash verification above applies to runtime wheels. Local source cannot use hash mode.
+          $versionConstraints = Join-Path $env:RUNNER_TEMP 'ubuntu-runtime-versions.txt'
+          Get-Content constraints/release_locked_ubuntu_py314.txt | ForEach-Object {
+            if ($_ -match '^[A-Za-z0-9][A-Za-z0-9_.-]*==[^\s]+') { $Matches[0] }
+          } | Set-Content -Encoding utf8NoBOM $versionConstraints
+          python -m pip install ".[dev,manuals]" -c $versionConstraints "pymupdf==1.28.0"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python -m pip check
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -390,7 +395,12 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python -m pip install --require-hashes --only-binary=:all: -r constraints/release_locked_ubuntu_py314.txt
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          python -m pip install ".[dev,manuals]" -c constraints/release_locked_ubuntu_py314.txt "pymupdf==1.28.0"
+          # Hash verification above applies to runtime wheels. Local source cannot use hash mode.
+          $versionConstraints = Join-Path $env:RUNNER_TEMP 'ubuntu-runtime-versions.txt'
+          Get-Content constraints/release_locked_ubuntu_py314.txt | ForEach-Object {
+            if ($_ -match '^[A-Za-z0-9][A-Za-z0-9_.-]*==[^\s]+') { $Matches[0] }
+          } | Set-Content -Encoding utf8NoBOM $versionConstraints
+          python -m pip install ".[dev,manuals]" -c $versionConstraints "pymupdf==1.28.0"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python -m pip check
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

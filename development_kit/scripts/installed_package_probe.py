@@ -253,8 +253,13 @@ def _probe_owned_shortcut(output_parent: Path) -> dict:
                 raise AssertionError("installed XDG launcher cleanup failed")
             if settings.exists():
                 raise AssertionError("launcher modified settings")
-            return {"created": True, "target_is_gui_entry": True, "removed": True,
-                    "contains_local_path": False, "stable_lock_retained": True}
+            return {
+                "created": True,
+                "target_is_gui_entry": True,
+                "removed": True,
+                "contains_local_path": False,
+                "stable_lock_retained": True,
+            }
         observed = inspect_windows_shortcut(desktop / SHORTCUT_NAME)
         if os.path.normcase(os.path.abspath(observed.target)) != os.path.normcase(
             os.path.abspath(gui_entry)

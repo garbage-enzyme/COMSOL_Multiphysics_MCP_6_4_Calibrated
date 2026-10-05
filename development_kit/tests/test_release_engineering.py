@@ -985,6 +985,9 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         commands = "\n".join(str(step.get("run", "")) for step in ubuntu["steps"])
         assert "--require-hashes --only-binary=:all:" in commands
         assert "constraints/release_locked_ubuntu_py314.txt" in commands
+        assert "-c $versionConstraints" in commands
+        assert "Set-Content -Encoding utf8NoBOM $versionConstraints" in commands
+        assert '".[dev,manuals]" -c constraints/release_locked_ubuntu_py314.txt' not in commands
         assert "pip check" in commands
         assert "run_real_release_gate" not in commands
     ubuntu_backend = "\n".join(

@@ -70,7 +70,10 @@ MESSAGE_IDS = (
     "Language used by this Settings window.",
     GUI_SCALE_HELP_ID,
     "Follow system display settings",
-    "Experimental Linux: offline tools only. COMSOL execution is disabled. Semantic search is not accepted.",
+    (
+        "Experimental Linux: offline tools only. COMSOL execution is disabled. "
+        "Semantic search is not accepted."
+    ),
     *PROFILE_HELP_IDS.values(),
     (
         "Folder for working files and locks. Use an ASCII-only path. "

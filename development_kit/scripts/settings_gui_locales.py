@@ -284,7 +284,9 @@ ZH_TW = {
 
 for _table in (ZH_CN, ZH_TW):
     for _old, _new in _LAUNCHER_MESSAGES.items():
-        _table[_new] = _table[_old].replace("桌面快捷方式", "应用启动器").replace("桌面捷徑", "應用程式啟動器")
+        _table[_new] = (
+            _table[_old].replace("桌面快捷方式", "应用启动器").replace("桌面捷徑", "應用程式啟動器")
+        )
 
 
 def _header(language: str) -> str:
