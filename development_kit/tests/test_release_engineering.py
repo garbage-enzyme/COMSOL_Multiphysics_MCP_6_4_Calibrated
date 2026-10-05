@@ -592,7 +592,11 @@ def test_support_matrix_matches_frozen_profile_counts_and_declared_dependencies(
     assert any(
         item.startswith("build>=") for item in pyproject["project"]["optional-dependencies"]["dev"]
     )
-    assert pyproject["build-system"]["requires"] == ["hatchling==1.31.0"]
+    # The build backend tracks the newest reviewed release; bind the declared pin
+    # to the reviewed manifest instead of a literal that silently goes stale.
+    reviewed = _json(ROOT / "constraints" / "tested_versions.json")
+    hatchling = reviewed["production_python_3_14"]["build_tooling"]["hatchling"]
+    assert pyproject["build-system"]["requires"] == [f"hatchling=={hatchling}"]
     assert pyproject["project"]["optional-dependencies"]["manuals"] == ["pymupdf>=1.24.0,<2"]
     assert pyproject["project"]["requires-python"] == ">=3.14,<3.16"
     assert pyproject["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"] == [
@@ -1333,13 +1337,18 @@ def test_minimum_supported_lane_matches_reviewed_manifest_and_package_ranges():
     assert lane["gil_mode"] == "standard"
     assert pins == lane["direct_dependencies"]
     assert lane["local_resolution_result"] == "non-editable package install and pip check passed"
-    assert lane["hosted_ci_result"] == "passed"
+    # The lane set changed for 0.7.6, so it cannot inherit the predecessor's CI
+    # result. A pending lane must say so rather than reusing a passing run.
+    assert lane["hosted_ci_result"] in {"passed", "pending"}
     hosted = manifest["hosted_dependency_ci"]
     assert hosted["workflow"] == "solver-free-ci"
     assert hosted["result"] == "passed"
     assert re.fullmatch(r"[0-9a-f]{40}", hosted["source_commit"])
     assert isinstance(hosted["run_id"], int) and hosted["run_id"] > 0
     assert set(hosted["jobs"].values()) == {"passed"}
+    if lane["hosted_ci_result"] == "pending":
+        assert hosted["scope"] == "predecessor_0_7_5_lanes"
+        assert hosted["source_commit"] != "" and lane["hosted_ci_note"]
     release_lock = manifest["release_lock"]
     lock_path = ROOT / release_lock["path"]
     canonical_lock = lock_path.read_bytes().replace(b"\r\n", b"\n")

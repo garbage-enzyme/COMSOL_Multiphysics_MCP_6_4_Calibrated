@@ -402,6 +402,49 @@ def test_double_matrix_properties_read_as_numbers_and_round_trip():
     assert result["new_value"] == [[1.0, 2.0], [3.0, 4.0]]
 
 
+def test_selection_properties_read_through_the_array_reader():
+    """A geometry ``Block`` carries ``Selection`` properties that ``getString`` rejects.
+
+    Measured on COMSOL 6.4: an ordinary Block's ``input`` property is declared
+    ``Selection`` and ``getString`` raises FlException ("property 'input' cannot be
+    converted to a string"), while ``getStringArray`` succeeds. That exception used
+    to abort every geometry feature snapshot, so ``derived_geometry_clone``/
+    ``apply`` could not snapshot any geometry containing a Block.
+    """
+
+    class SelectionFeature(FakeFeature):
+        def getString(self, name):
+            raise RuntimeError("property 'input' cannot be converted to a string")
+
+    feature = SelectionFeature({"input": ["geom1_b_air_dom"]}, {"input": "Selection"})
+
+    read = get_existing_property(
+        FakeModel(feature), "comp1", "geometry_feature", "parent1/child1", "input"
+    )
+
+    assert read["success"] is True
+    assert read["value_type"] == "Selection"
+    assert read["value"] == ["geom1_b_air_dom"]
+
+
+def test_selection_properties_report_an_empty_selection_honestly():
+    """An unset selection reads back as an empty list, not a failure or a guess."""
+
+    class SelectionFeature(FakeFeature):
+        def getString(self, name):
+            raise RuntimeError("property 'posvertex' cannot be converted to a string")
+
+    feature = SelectionFeature({"posvertex": []}, {"posvertex": "Selection"})
+
+    read = get_existing_property(
+        FakeModel(feature), "comp1", "geometry_feature", "parent1/child1", "posvertex"
+    )
+
+    assert read["success"] is True
+    assert read["value_type"] == "Selection"
+    assert read["value"] == []
+
+
 def test_set_failure_payload_includes_old_value_and_restore_detail():
     class LockedFeature(FakeFeature):
         def set(self, name, value):

@@ -13,11 +13,11 @@ agent must ask about the target environment instead of guessing.
 
 | Mode | Use it when | Execution computer needs | Interruption behavior | Main output |
 | --- | --- | --- | --- | --- |
-| `interactive` | Model edits and results need short, immediate feedback | The normal COMSOL MCP Python environment and licensed COMSOL | The live session is not a checkpoint; save a derived MPH or evidence artifact explicitly | Live model plus explicit saves/exports |
-| `inline` | A dry run, smoke test, or short self-contained simulation is conservatively estimated below 1 hour | Local Python, the selected COMSOL API, and licensed COMSOL | No automatic resume; the script owns any files it writes | Script-defined MPH/data/log files |
-| `launcher` | A long local campaign needs unattended monitoring and restart from completed points | Local Python, licensed COMSOL, and the repository launcher | One validated point is flushed before the next; pause and resume occur between points | Append-only rows, status, logs, artifacts, and optional MPH checkpoints |
+| `interactive` | Model edits and results need short, immediate feedback | The normal COMSOL MCP Python environment and licensed COMSOL | The live session is not a checkpoint. Save a derived MPH or evidence artifact explicitly | Live model plus explicit saves/exports |
+| `inline` | A dry run, smoke test, or short self-contained simulation is conservatively estimated below 1 hour | Local Python, the selected COMSOL API, and licensed COMSOL | No automatic resume. The script owns any files it writes | Script-defined MPH/data/log files |
+| `launcher` | A long local campaign needs unattended monitoring and restart from completed points | Local Python, licensed COMSOL, and the repository launcher | One validated point is flushed before the next. Pause and resume occur between points | Append-only rows, status, logs, artifacts, and optional MPH checkpoints |
 | `standalone` | Another Windows workstation must run the same durable campaign without a Python environment | Windows 10/11 x64 and installed/licensed COMSOL 6.4 with its bundled Java runtime | Same pointwise journal and exact-attempt pause/resume model as the launcher | Result journal, status, logs, and generated result files |
-| `mphonly` | A commercial cluster, Linux cloud, or other COMSOL environment accepts a single portable model file | A compatible licensed COMSOL installation and the target scheduler/license features | COMSOL-native checkpoints may recover to the latest checkpoint; exact per-point durability is not promised | One final solved MPH deliverable |
+| `mphonly` | A commercial cluster, Linux cloud, or other COMSOL environment accepts a single portable model file | A compatible licensed COMSOL installation and the target scheduler/license features | COMSOL-native checkpoints may recover to the latest checkpoint. The contract states that exact per-point durability is not promised | One final solved MPH deliverable |
 
 The 1-hour `inline` boundary is a conservative default for agent planning, not
 a timeout or success guarantee. The user may choose another mode after the
@@ -47,17 +47,17 @@ the current Python-equipped workstation belongs to `launcher`.
 
 Before writing a `standalone` package or an `mphonly` model, ask for:
 
-- target operating system and architecture;
-- exact COMSOL version/build and installed modules;
-- license type, license-server reachability, and batch/cluster entitlements;
+- target operating system and architecture.
+- exact COMSOL version/build and installed modules.
+- license type, license-server reachability, and batch/cluster entitlements.
 - whether Python is available and whether only COMSOL's bundled Java may be
-  used;
+  used.
 - scheduler and submission interface, such as SLURM, PBS, LSF, or a vendor
-  portal;
-- shared-storage, working-directory, path, quota, and file-transfer rules;
+  portal.
+- shared-storage, working-directory, path, quota, and file-transfer rules.
 - network restrictions and whether the compute nodes can reach the license
-  server;
-- required live status, pause, restart, per-point export, and final output;
+  server.
+- required live status, pause, restart, per-point export, and final output.
 - wall-time, memory, core/node, and maximum file-size limits.
 
 Missing answers produce a target-information request, not a guessed package.
@@ -72,7 +72,7 @@ evidence by itself.
 When the user also wants to edit the same model in COMSOL Desktop, use the
 separate default-off [Desktop/Server collaboration guide](../interactive_shared_session/README.md).
 That shared topology adds explicit turns, server/model adoption, and revision
-locks; it is not required for ordinary interactive MCP work.
+locks. It is not required for ordinary interactive MCP work.
 
 ## `inline`
 
@@ -80,11 +80,11 @@ Inline mode means the agent writes a bounded Python script and runs it directly
 from a shell. It is suitable for syntax checks, build-only runs, one-point
 smokes, and short simulations. The script must still:
 
-- refuse another COMSOL/Java/MPh owner;
-- use explicit inputs and an ASCII-safe output directory;
-- keep caller-owned source models immutable;
-- write logs and the intended output before exiting;
-- clear owned models and verify process cleanup;
+- refuse another COMSOL/Java/MPh owner.
+- use explicit inputs and an ASCII-safe output directory.
+- keep caller-owned source models immutable.
+- write logs and the intended output before exiting.
+- clear owned models and verify process cleanup.
 - label a finite result as execution evidence, not automatic physical
   validation.
 
@@ -95,7 +95,7 @@ estimate is at least 1 hour.
 ## `launcher`
 
 Launcher mode uses the reusable [launcher package](../../launcher/README.md).
-The driver owns the scientific loop; the PowerShell module owns preflight,
+The driver owns the scientific loop. The PowerShell module owns preflight,
 start, monitor, pause requests, duplicate detection, terminal presentation, and
 resource checks.
 
@@ -125,12 +125,12 @@ installation step.
 MPH-only mode prepares one model whose study/job configuration and parameters
 are complete before handoff. The final deliverable is one solved MPH file. The
 target run may still create temporary, log, status, synchronization, or recovery
-files; "one MPH" describes the final deliverable, not an impossible no-temporary
+files. "one MPH" describes the final deliverable, not an impossible no-temporary
 I/O promise.
 
 The accepted COMSOL 6.4 host stored a three-point analytical capacitor sweep in
 one MPH. A fresh process reopened the file and recovered all three parameter
-values and capacitances with relative errors of about `6.81e-10`; the file hash
+values and capacitances with relative errors of about `6.81e-10`. The file hash
 was unchanged by inspection. This verifies solved-point storage and reload for
 that host. It does not verify interruption recovery.
 
@@ -139,12 +139,12 @@ parameter per group, save a recovery file at each checkpoint, and recover
 progress up to the latest checkpoint. It can also save the synchronized solved
 model to an MPH file. This is useful, but it is weaker than launcher mode:
 
-- recovery is checkpoint-granular, not necessarily one parameter at a time;
-- completed values after the last checkpoint can be lost;
+- recovery is checkpoint-granular, not necessarily one parameter at a time.
+- completed values after the last checkpoint can be lost.
 - distributed execution, restart count, alive-time handling, schedulers, and
-  file paths depend on the target COMSOL license and cluster setup;
+  file paths depend on the target COMSOL license and cluster setup.
 - a normal Study Parametric Sweep does not by itself prove the Job
-  Configuration checkpoint contract;
+  Configuration checkpoint contract.
 - a final MPH file does not provide the launcher's exact point journal,
   attempt-bound pause acknowledgment, or live monitor.
 
@@ -160,7 +160,7 @@ claiming it will solve there.
 ## Rules shared by all modes
 
 - Keep one solver owner and serialize MCP calls.
-- Treat input models as immutable; save to distinct outputs.
+- Treat input models as immutable. Save to distinct outputs.
 - Validate requested parameters and read back applied values before solving.
 - Preserve raw results, units, source identity, mesh/study identity, and cleanup
   evidence before interpretation.

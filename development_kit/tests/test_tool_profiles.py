@@ -12,7 +12,13 @@ from src.server import create_server, register_all_tools
 from src.settings import RUNTIME_ENV, SETTINGS_PATH_ENV
 from src.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
 from src.tools.catalog import FEATURE_NAMES, PROFILE_NAMES, TOOL_METADATA, snapshot_tool_schemas
-from src.tools.profiles import DEFAULT_PROFILE, PROFILE_ENV_VAR, ProfileSelection, resolve_profile
+from src.tools.profiles import (
+    DEFAULT_PROFILE,
+    FEATURE_ENVIRONMENT_VARIABLES,
+    PROFILE_ENV_VAR,
+    ProfileSelection,
+    resolve_profile,
+)
 
 from development_kit.tests.mcp_test_support import decode_tool_result
 
@@ -47,7 +53,7 @@ def test_default_profile_is_core_after_h3_cutover(monkeypatch):
     server = create_server("default-core-profile-test")
 
     assert DEFAULT_PROFILE == "core"
-    assert len(_tool_names(server)) == 55
+    assert len(_tool_names(server)) == 56
     names = set(_tool_names(server))
     assert {"solver_status", "job_cancel", "model_load", "study_solve"} <= names
     assert "spectral_characterize" in names
@@ -73,7 +79,7 @@ def test_invalid_profile_falls_back_to_core_with_explicit_provenance():
     assert selection.fallback_used is True
     assert selection.requested_name == "not-real"
     assert selection.source == "explicit_argument_invalid_profile_fallback"
-    assert len(_tool_names(server)) == 55
+    assert len(_tool_names(server)) == 56
 
 
 def test_environment_profile_is_normalized(monkeypatch):
@@ -86,7 +92,7 @@ def test_environment_profile_is_normalized(monkeypatch):
     assert selection.environment_variable == PROFILE_ENV_VAR
 
     server = create_server("environment-wave-profile-test")
-    assert len(_tool_names(server)) == 84
+    assert len(_tool_names(server)) == 85
     assert "wave_optics_field_datasets" in _tool_names(server)
     assert "wave_optics_field_extract" in _tool_names(server)
     assert "wave_optics_material_expression_preview" in _tool_names(server)
@@ -114,6 +120,29 @@ def test_profile_name_and_schema_snapshots_are_exact():
         assert actual_schemas == {name: full_schemas[name] for name in expected_names[profile]}
 
 
+def test_every_feature_gate_has_exactly_one_enabling_variable() -> None:
+    """A gate with no variable is unreachable; a stray variable is dead config.
+
+    This guards a real regression: the installed-package release probe kept its
+    own copy of this map, which fell behind when ``model_manager`` was added, so
+    the release gate failed with a KeyError instead of an honest assertion. The
+    map is now the single source of truth and both directions are asserted.
+    """
+    assert set(FEATURE_ENVIRONMENT_VARIABLES) == set(FEATURE_NAMES)
+    for feature, variable in FEATURE_ENVIRONMENT_VARIABLES.items():
+        assert variable.startswith("COMSOL_MCP_ENABLE_"), feature
+        # Enabling exactly this variable must enable exactly this gate.
+        selection = resolve_profile("core", environ={variable: "true"})
+        assert selection.enabled_features == (feature,), feature
+        assert selection.feature_enabled(feature) is True
+        for other in FEATURE_NAMES:
+            if other != feature:
+                assert selection.feature_enabled(other) is False, (feature, other)
+
+    # The variables must be distinct, or two gates would move together.
+    assert len(set(FEATURE_ENVIRONMENT_VARIABLES.values())) == len(FEATURE_NAMES)
+
+
 def test_feature_tool_name_snapshot_is_exact() -> None:
     expected = json.loads((SNAPSHOT_DIR / "feature_tool_names.json").read_text(encoding="utf-8"))
 
@@ -136,10 +165,10 @@ def test_profile_registration_has_no_cross_server_leakage():
     semantic = create_server("isolated-semantic", profile=semantic_selection)
     experimental = create_server("isolated-experimental", profile="experimental")
 
-    assert len(_tool_names(core)) == 55
-    assert len(_tool_names(full)) == 165
-    assert len(_tool_names(semantic)) == 58
-    assert len(_tool_names(experimental)) == 109
+    assert len(_tool_names(core)) == 56
+    assert len(_tool_names(full)) == 166
+    assert len(_tool_names(semantic)) == 59
+    assert len(_tool_names(experimental)) == 110
     assert _tool_names(core) != _tool_names(experimental)
     assert {"semantic_search", "semantic_status", "semantic_worker_reset"} <= set(
         _tool_names(semantic)
@@ -345,10 +374,10 @@ def test_capabilities_are_bound_to_each_server_profile(monkeypatch):
     wave_result = _call_tool(wave, "capabilities", {})
 
     assert core_result["active_profile"] == "core"
-    assert core_result["tool_count"] == 55
+    assert core_result["tool_count"] == 56
     assert core_result["profile_source"]["source"] == "explicit_argument"
     assert wave_result["active_profile"] == "wave_optics"
-    assert wave_result["tool_count"] == 84
+    assert wave_result["tool_count"] == 85
 
 
 @pytest.mark.parametrize("profile", ["core", "basic_fem", "wave_optics"])

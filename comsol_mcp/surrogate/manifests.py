@@ -2,7 +2,7 @@
 
 This module never imports COMSOL, Java, MPh, or network clients. It only
 normalizes versioned JSON-compatible manifests and deterministic hashes used
-by the 0.7.5 surrogate lifecycle.
+by the current surrogate lifecycle.
 """
 
 from __future__ import annotations

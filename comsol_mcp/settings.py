@@ -25,6 +25,9 @@ JOBS_ENV = "COMSOL_MCP_JOBS_DIR"
 MODEL_READ_ROOTS_ENV = "COMSOL_MCP_MODEL_READ_ROOTS"
 ARTIFACT_WRITE_ROOT_ENV = "COMSOL_MCP_ARTIFACT_WRITE_ROOT"
 SHARED_SERVER_ENV = "COMSOL_MCP_ENABLE_SHARED_SERVER"
+MODEL_MANAGER_ENABLED_ENV = "COMSOL_MCP_ENABLE_MODEL_MANAGER"
+MODEL_MANAGER_UPLOAD_ENV = "COMSOL_MCP_ENABLE_MODEL_MANAGER_UPLOAD"
+DISCOVERY_PAGINATION_ENV = "COMSOL_MCP_ENABLE_DISCOVERY_PAGINATION"
 LEXICAL_DOCS_ENABLED_ENV = "COMSOL_MCP_ENABLE_LEXICAL_DOCS"
 MANUALS_ROOT_ENV = "COMSOL_MANUALS_ROOT"
 LEXICAL_DOCS_INDEX_ENV = "COMSOL_LEXICAL_DOCS_INDEX_PATH"
@@ -75,6 +78,13 @@ _DEFAULT_SETTINGS = {
         "artifact_write_root": f"{_DEFAULT_PROGRAM_ROOT}/artifacts",
     },
     "shared_server": {"enabled": False},
+    # Experimental discovery transport. It changes only how schemas are
+    # delivered, never which tools or side effects the profile permits.
+    "discovery": {"pagination_enabled": False},
+    # One feature switch plus one write switch. The feature enables the Model
+    # Manager surface; upload_enabled separately permits saving back to it, so a
+    # caller can open, run, and download while writes stay refused.
+    "model_manager": {"enabled": False, "upload_enabled": False},
     "evidence_integrity": {
         "checks": {name: True for name in _EVIDENCE_CHECKS},
     },
@@ -310,6 +320,12 @@ def _migrate_legacy_document(document: Any) -> Any:
     if not isinstance(shared, dict):
         shared = {}
         migrated["shared_server"] = shared
+    model_manager = migrated.get("model_manager")
+    if not isinstance(model_manager, dict):
+        # A migrated file predates the Model Manager gate, so it gets the
+        # default rather than inheriting any other feature's state.
+        model_manager = {}
+        migrated["model_manager"] = model_manager
 
     if normalized_profile == "semantic_docs":
         migrated.setdefault("profile", {})["name"] = "core"
@@ -506,11 +522,49 @@ def _normalize(
         defaults=_DEFAULT_SETTINGS["shared_server"],
         errors=errors,
     )
+    discovery = _object(
+        top["discovery"],
+        location="settings.discovery",
+        defaults=_DEFAULT_SETTINGS["discovery"],
+        errors=errors,
+    )
+    discovery_pagination_enabled = _read_value(
+        discovery["pagination_enabled"],
+        location="settings.discovery.pagination_enabled",
+        default=_DEFAULT_SETTINGS["discovery"]["pagination_enabled"],
+        parser=lambda value: _parse_bool(value, location="settings.discovery.pagination_enabled"),
+        errors=errors,
+    )
     shared_enabled = _read_value(
         shared["enabled"],
         location="settings.shared_server.enabled",
         default=_DEFAULT_SETTINGS["shared_server"]["enabled"],
         parser=lambda value: _parse_bool(value, location="settings.shared_server.enabled"),
+        errors=errors,
+    )
+
+    # The Model Manager is independently switchable, like the other optional
+    # features. `enabled` turns the surface on; `upload_enabled` separately
+    # permits saving back to the manager, so opening, running, and downloading
+    # stay available while writes are refused.
+    model_manager = _object(
+        top["model_manager"],
+        location="settings.model_manager",
+        defaults=_DEFAULT_SETTINGS["model_manager"],
+        errors=errors,
+    )
+    model_manager_enabled = _read_value(
+        model_manager["enabled"],
+        location="settings.model_manager.enabled",
+        default=_DEFAULT_SETTINGS["model_manager"]["enabled"],
+        parser=lambda value: _parse_bool(value, location="settings.model_manager.enabled"),
+        errors=errors,
+    )
+    model_manager_upload_enabled = _read_value(
+        model_manager["upload_enabled"],
+        location="settings.model_manager.upload_enabled",
+        default=_DEFAULT_SETTINGS["model_manager"]["upload_enabled"],
+        parser=lambda value: _parse_bool(value, location="settings.model_manager.upload_enabled"),
         errors=errors,
     )
 
@@ -719,6 +773,11 @@ def _normalize(
             "artifact_write_root": artifact_root,
         },
         "shared_server": {"enabled": shared_enabled},
+        "discovery": {"pagination_enabled": discovery_pagination_enabled},
+        "model_manager": {
+            "enabled": model_manager_enabled,
+            "upload_enabled": model_manager_upload_enabled,
+        },
         "evidence_integrity": {"checks": normalized_checks},
         "manuals": {"root": manuals_root},
         "lexical_docs": {
@@ -1051,6 +1110,18 @@ def settings_environment(environ: Mapping[str, str] | None = None) -> dict[str, 
     set_default(PROFILE_ENV, settings["profile"]["name"])
     set_default(SHARED_SERVER_ENV, str(settings["shared_server"]["enabled"]).lower())
     set_default(
+        DISCOVERY_PAGINATION_ENV,
+        str(settings["discovery"]["pagination_enabled"]).lower(),
+    )
+    set_default(
+        MODEL_MANAGER_ENABLED_ENV,
+        str(settings["model_manager"]["enabled"]).lower(),
+    )
+    set_default(
+        MODEL_MANAGER_UPLOAD_ENV,
+        str(settings["model_manager"]["upload_enabled"]).lower(),
+    )
+    set_default(
         LEXICAL_DOCS_ENABLED_ENV,
         str(settings["lexical_docs"]["enabled"]).lower(),
     )
@@ -1105,6 +1176,9 @@ __all__ = [
     "SETTINGS_READABLE_VERSIONS",
     "SETTINGS_VERSION",
     "SHARED_SERVER_ENV",
+    "MODEL_MANAGER_ENABLED_ENV",
+    "MODEL_MANAGER_UPLOAD_ENV",
+    "DISCOVERY_PAGINATION_ENV",
     "SettingsError",
     "SettingsLocation",
     "apply_java_settings",

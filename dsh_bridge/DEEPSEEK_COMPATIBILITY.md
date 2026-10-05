@@ -2,7 +2,7 @@
 
 This is the versioned compatibility note for the optional
 `@local/dsh-comsol-bridge` component in the COMSOL MCP repository. The
-bridge is a repository-only Node.js client adapter; it is not a feature of the
+bridge is a repository-only Node.js client adapter. It is not a feature of the
 Python `comsol-mcp` server.
 
 ## Version and support boundary
@@ -28,7 +28,7 @@ explicitly called the public `sessions.flush` before the final restart.
 This verifies recovery after session persistence, not crash-proof delivery.
 Native non-COMSOL background jobs also lose an unflushed notice on abrupt
 restart, while a flushed notice survives. The accepted notification boundary
-follows native session persistence; crash-proof acknowledgement is outside it.
+follows native session persistence. Crash-proof acknowledgement is outside it.
 Real-host negative checks also cover unavailable owners/controllers, legacy
 rows, controller delay/loss, foreign progress/cancellation access, four terminal
 outcomes, transport loss, state-write failure, stale attempts and owner disposal.
@@ -42,7 +42,7 @@ DSH Cordis plugin -> one serialized MCP stdio connection
 ```
 
 The bridge owns one connection and registers discovered tools with clean DSH
-names. `job_submit` creates a `ctx.jobs` mirror; status and tail use the same
+names. `job_submit` creates a `ctx.jobs` mirror. Status and tail use the same
 single-flight queue. The server's durable journal, lease, process identity,
 cleanup, and evidence rules remain authoritative.
 
@@ -77,7 +77,7 @@ executable, an ASCII runtime directory, and the shared settings locator:
 
 `config.enabled` is a DSH client-plugin switch. It must not be added to the
 COMSOL Settings GUI or Python server settings schema. Profile or executable
-changes require the DSH host lifecycle to reload/restart; do not assume HMR is
+changes require the DSH host lifecycle to reload/restart. Do not assume HMR is
 a server restart or a capabilities re-verification.
 
 ## Verification sequence
@@ -87,7 +87,7 @@ a server restart or a capabilities re-verification.
 3. Verify `capabilities` and discovered tool names before any solver call.
 4. Verify `solver_status`/preflight and the configured ASCII runtime path.
 5. For durable jobs, compare bridge notifications and `job_tail` with durable
-   server state; never infer completion from CPU or disk activity.
+   server state. Never infer completion from CPU or disk activity.
 6. After a profile/settings change, restart the owning DSH host and repeat
    capabilities and ownership checks. The user has independently accepted this
    settings-change path for the current deployment.
@@ -107,11 +107,11 @@ authorized acceptance receipt.
   lease evidence are available.
 - Never replace the installed server while a solver lease, durable job, COMSOL
   process, or Java owner remains.
-- Keep server evidence and bridge state; do not rewrite receipts to match a
+- Keep server evidence and bridge state. Do not rewrite receipts to match a
   DSH notification.
 - A server-terminal row found at startup still needs delivery to its original
   live Agent/controller. Missing owners or failed mirror starts retain the row
-  for bounded retry or a later restart; never bind an arbitrary current session.
+  for bounded retry or a later restart. Never bind an arbitrary current session.
 - Native job completion and session persistence are separate boundaries. A
   notification in memory is not proof that it survives an immediate crash.
 - A known attempt that differs from current server status blocks recovery and

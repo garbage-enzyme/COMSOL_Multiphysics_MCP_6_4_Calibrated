@@ -36,21 +36,50 @@ def _require(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
+#: The exact COMSOL build this gate certifies.
+EXPECTED_COMSOL_RELEASE = "6.4"
+EXPECTED_COMSOL_BUILD = 293
+
+
+def _parse_runtime_release(java_version: str) -> tuple[str, int] | None:
+    """Return ``(release, build)`` from a COMSOL version string, or ``None``.
+
+    Positional parsing of four numbers is not portable. A Chinese-localized
+    installation reports ``COMSOL Multiphysics 6.4 (开发版本: 293)`` -- the literal
+    rendering on the acceptance host -- which carries only three numbers, so
+    ``findall(r"\\d+")[:4]`` yields ``['6', '4', '293']`` and the comparison
+    against ``(6, 4, 0, 293)`` failed even though the build *was* 293.
+
+    Read the release from the leading ``major.minor`` pair and the build from the
+    last integer in the string instead. This still rejects a different build: a
+    genuine ``6.4.0.292`` reports build 292.
+    """
+    release = re.search(r"(\d+\.\d+)", java_version)
+    builds = re.findall(r"\d+", java_version)
+    if release is None or not builds:
+        return None
+    return release.group(1), int(builds[-1])
+
+
 def _verify_runtime_release(client) -> dict[str, object]:
     mph_version = str(client.version)
     java_version = str(client.java.getComsolVersion())
-    numbers = tuple(int(value) for value in re.findall(r"\d+", java_version)[:4])
+    parsed = _parse_runtime_release(java_version)
     _require(
-        mph_version.startswith("6.4"), f"MPh selected unexpected COMSOL release: {mph_version}"
+        mph_version.startswith(EXPECTED_COMSOL_RELEASE),
+        f"MPh selected unexpected COMSOL release: {mph_version}",
     )
     _require(
-        numbers == (6, 4, 0, 293),
-        f"connected COMSOL runtime is not 6.4.0.293: {java_version}",
+        parsed == (EXPECTED_COMSOL_RELEASE, EXPECTED_COMSOL_BUILD),
+        f"connected COMSOL runtime is not {EXPECTED_COMSOL_RELEASE}.0.{EXPECTED_COMSOL_BUILD}: "
+        f"{java_version}",
     )
     return {
         "mph_client_version": mph_version,
         "java_reported_version": java_version,
-        "expected_build": "6.4.0.293",
+        "expected_build": f"{EXPECTED_COMSOL_RELEASE}.0.{EXPECTED_COMSOL_BUILD}",
+        "parsed_release": parsed[0],
+        "parsed_build": parsed[1],
         "verified": True,
     }
 
@@ -64,7 +93,7 @@ def _round_trip_case(
     container: str,
     feature_tag: str,
     property_name: str,
-    temporary_value: str,
+    temporary_value,
 ) -> dict[str, object]:
     before = get_existing_property(model, "comp1", container, feature_tag, property_name)
     _require(bool(before.get("success")), f"property read failed: {before}")
@@ -152,7 +181,12 @@ def _run_gate(client, artifact_dir: Path) -> dict[str, object]:
         ("geometry_feature", "geom1/blk1", "base", "center"),
         ("physics_feature", "es/ep1", "V0", "2[V]"),
         ("mesh_feature", "mesh1/size1", "custom", "on"),
-        ("study_step", "std1/step1", "plist", "2[um]"),
+        # `plist` is declared DoubleArray, not String. Measured on COMSOL 6.4:
+        # writing the string "2[um]" is accepted but stored as the numeric array
+        # [2.0], so a string can never round-trip and the setter rightly refuses
+        # to claim it did. A numeric list round-trips exactly ([2.0] -> [2.0]),
+        # which is what this case is meant to prove.
+        ("study_step", "std1/step1", "plist", [2.0]),
     )
     results = []
     for container, feature_tag, property_name, temporary_value in cases:

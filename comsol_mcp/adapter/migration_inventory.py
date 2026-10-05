@@ -1,6 +1,6 @@
 """S4A direct-call inventory and disposition ledger.
 
-The canonical 0.7.5 gate requires two things that a prose inventory cannot
+The adapter gate requires two things that a prose inventory cannot
 provide: a disposition for **every** direct MPh/ClientAPI call site, and a
 disposition that can be checked rather than asserted.  This module is that
 ledger.  It holds

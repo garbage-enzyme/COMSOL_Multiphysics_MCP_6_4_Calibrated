@@ -17,6 +17,13 @@
   "shared_server": {
     "enabled": false
   },
+  "discovery": {
+    "pagination_enabled": false
+  },
+  "model_manager": {
+    "enabled": false,
+    "upload_enabled": false
+  },
   "evidence_integrity": {
     "checks": {
       "outcome_contract_validation": true,

@@ -40,12 +40,12 @@
     {
       "path": "development_kit/tests/test_schema_registry.py",
       "match_count": 1,
-      "match_sha256": "babbb765b2c46daf533ebc741a578d179f917374f5a0c449e1ea19b86e16b021"
+      "match_sha256": "a79b88fb0ce7b3b414d9ece592974663afb5d7b0ba3c94634407f109617a789d"
     },
     {
       "path": "pyproject.toml",
       "match_count": 3,
-      "match_sha256": "84b587acb020a9f4e872fd37ade9b2ef6536e75db05d131800fc964dcfe87886"
+      "match_sha256": "ad0bbf748aaba70c8342cd40a712af7dce998c36f2f90ee8750c33a1c534e5af"
     }
   ]
 }

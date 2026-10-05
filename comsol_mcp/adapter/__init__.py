@@ -27,6 +27,7 @@ from comsol_mcp.adapter.conversion import (
 )
 from comsol_mcp.adapter.protocol import (
     ADAPTER_ERROR_CODES,
+    DEFAULT_MPH_LANE,
     DNN_FEATURE_METHODS,
     JAVA_WRITE_KINDS,
     OPERATIONS,
@@ -94,6 +95,7 @@ def make_backend(lane: str | None = None, **kwargs: Any) -> ComsolAdapter:
 __all__ = [
     "ADAPTER_ERROR_CODES",
     "CONVERSION_FORMS",
+    "DEFAULT_MPH_LANE",
     "DNN_FEATURE_METHODS",
     "JAVA_WRITE_KINDS",
     "MAX_MATRIX_ELEMENTS",

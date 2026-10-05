@@ -159,11 +159,25 @@ def main() -> None:
             "expected_study_tag": study_tag,
             "expected_mesh_tag": mesh_tag,
         }
+        # The audit early-returns with `integrity_blocked` when the caller
+        # declares an expected source identity but does not attest the bytes that
+        # were loaded, because "only the current on-disk file can be measured".
+        # This probe loads `source_path` itself in this process, so it can attest
+        # that identity honestly. `model_registration` is the capture label the
+        # session manager uses for a file loaded from disk; omitting this made
+        # every periodic group unreachable and reported
+        # `declare_unambiguous_periodic_groups` for a model that has them.
+        loaded_source_identity = {
+            "source_path": str(source_path),
+            "source_sha256": source_hash,
+            "capture": "model_registration",
+        }
         audit = collect_periodic_mesh_audit(
             source_model,
             model_name=source_model.name(),
             expected_source_path=str(source_path),
             expected_source_sha256=source_hash,
+            loaded_source_identity=loaded_source_identity,
             **common,
         )
         result["compatible_audit_probe"] = {
@@ -207,6 +221,15 @@ def main() -> None:
             model_name=broken_model.name(),
             expected_source_path=str(broken_path),
             expected_source_sha256=broken_hash,
+            # Attest the *broken* file, not the healthy source: reusing the
+            # earlier identity here would either block this audit or attest bytes
+            # this model was not loaded from, which would make the negative case
+            # meaningless. The probe wrote and loaded `broken_path` itself.
+            loaded_source_identity={
+                "source_path": str(broken_path),
+                "source_sha256": broken_hash,
+                "capture": "model_registration",
+            },
             **common,
         )
         if broken_audit["summary"]["mesh_recipe_present"]:

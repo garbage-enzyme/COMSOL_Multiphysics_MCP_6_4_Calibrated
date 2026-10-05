@@ -144,6 +144,15 @@ async def _legacy_stdio_exchange(protocol_version: str, runtime_root: Path) -> d
             {"jsonrpc": "2.0", "id": 3, "method": "resources/list", "params": {}},
         )
         resources = await _read_response(process, 3)
+        # A legacy client cannot speak the Tasks extension. Asking for a task
+        # method must fail as an unknown method rather than silently succeeding,
+        # and the ordinary durable-job tools must still be advertised so the
+        # legacy fallback path is real rather than nominal.
+        await _write_message(
+            process,
+            {"jsonrpc": "2.0", "id": 4, "method": "tasks/get", "params": {"taskId": "x"}},
+        )
+        task_method = await _read_response(process, 4)
     finally:
         active_error = sys.exception()
         if process.stdin is not None:
@@ -167,19 +176,20 @@ async def _legacy_stdio_exchange(protocol_version: str, runtime_root: Path) -> d
         "listed": listed,
         "called": called,
         "resources": resources,
+        "task_method": task_method,
     }
 
 
 def test_mcp_dependency_and_package_identity_are_the_conservative_2_0_lane() -> None:
-    assert "mcp>=2.0.0,<2.1" in _runtime_dependencies()
-    assert __version__ == "0.7.5"
+    assert "mcp>=2.2.0,<2.3" in _runtime_dependencies()
+    assert __version__ == "0.7.6"
 
 
 def test_server_uses_official_mcpserver_and_preserves_wire_schema_aliases() -> None:
     server = create_server("MCP SDK 2 compatibility", profile="core")
     assert isinstance(server, MCPServer)
     tools = asyncio.run(server.list_tools())
-    assert len(tools) == 55
+    assert len(tools) == 56
     capabilities = next(tool for tool in tools if tool.name == "capabilities")
     serialized = capabilities.model_dump(mode="json", by_alias=True, exclude_none=True)
     assert serialized["inputSchema"] == capabilities.input_schema
@@ -205,12 +215,12 @@ def test_sdk2_server_preserves_legacy_stdio_protocols(
     assert initialized["protocolVersion"] == protocol_version
     assert initialized["serverInfo"] == {
         "name": "COMSOL MCP legacy compatibility",
-        "version": "0.7.5",
+        "version": "0.7.6",
     }
     assert initialized["instructions"] == SERVER_INSTRUCTIONS
 
     listed = exchange["listed"]["result"]
-    assert len(listed["tools"]) == 55
+    assert len(listed["tools"]) == 56
     assert {tool["name"] for tool in listed["tools"]} >= {
         "capabilities",
         "solver_preflight",
@@ -218,15 +228,31 @@ def test_sdk2_server_preserves_legacy_stdio_protocols(
     }
     assert all("inputSchema" in tool for tool in listed["tools"])
     assert "resultType" not in listed
+    # Ordinary-tool fallback: a legacy client keeps the full durable-job
+    # control surface even though it cannot speak the Tasks extension.
+    assert {tool["name"] for tool in listed["tools"]} >= {
+        "job_submit",
+        "job_status",
+        "job_tail",
+        "job_cancel",
+        "job_resume",
+    }
 
     called = exchange["called"]["result"]
     assert called.get("isError", False) is False
     assert "resultType" not in called
     capabilities = _response_payload(called)
     assert capabilities["profile"] == "core"
-    assert capabilities["tool_count"] == 55
+    assert capabilities["tool_count"] == 56
     assert capabilities["session"] == {"connected": False, "starting": False}
 
     resources = exchange["resources"]["result"]
     assert resources["resources"]
     assert "resultType" not in resources
+
+    # A legacy wire cannot address the extension's methods, so dispatch must
+    # report an unknown method rather than returning a task-shaped result.
+    task_method = exchange["task_method"]
+    assert "result" not in task_method, task_method
+    assert task_method["error"]["code"] == -32601
+    assert "taskId" not in task_method.get("error", {}).get("data", {})

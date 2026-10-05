@@ -131,7 +131,7 @@ def _scenario_constructs_every_tab_and_field() -> None:
             for child in row.winfo_children()
             if child.winfo_class() == "TLabel"
         }
-        assert "alpha7.5  |  0.7.5" in header_labels
+        assert "alpha7.6  |  0.7.6" in header_labels
         assert set(app.variables) == {
             "schema_name",
             "schema_version",
@@ -146,6 +146,9 @@ def _scenario_constructs_every_tab_and_field() -> None:
             "java.java_home",
             "java.jdk_home",
             "shared_server.enabled",
+            "model_manager.enabled",
+            "model_manager.upload_enabled",
+            "discovery.pagination_enabled",
             "evidence_integrity.checks.outcome_contract_validation",
             "evidence_integrity.checks.artifact_chain_verification",
             "evidence_integrity.checks.summary_claim_verification",
@@ -159,7 +162,13 @@ def _scenario_constructs_every_tab_and_field() -> None:
             "ownership.owner",
         }
         assert "shared" not in TAB_IDS
-        assert _field_keys(app, "profile") == ["profile.name", "shared_server.enabled"]
+        assert _field_keys(app, "profile") == [
+            "profile.name",
+            "shared_server.enabled",
+            "discovery.pagination_enabled",
+            "model_manager.enabled",
+            "model_manager.upload_enabled",
+        ]
         assert _field_keys(app, "docs")[:6] == [
             "manuals.root",
             "lexical_docs.enabled",

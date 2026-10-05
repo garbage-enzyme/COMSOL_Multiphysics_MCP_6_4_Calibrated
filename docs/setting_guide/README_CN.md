@@ -29,7 +29,7 @@ comsol-mcp-settings --settings-path "D:\settings\settings.json" --validate-only
 用 `--settings-path` 把它绑定到 MCP client 实际使用的同一设置文件。`--validate-only`
 只验证 package、设置目标、GUI runtime 和快捷方式前提，不导入 Tk，也不写文件。
 
-“关于”页提供明确的“创建桌面快捷方式”和“移除桌面快捷方式”操作；等价命令为：
+“关于”页提供明确的“创建桌面快捷方式”和“移除桌面快捷方式”操作。等价命令为：
 
 ```powershell
 comsol-mcp-settings --settings-path "D:\settings\settings.json" --create-desktop-shortcut
@@ -40,7 +40,7 @@ comsol-mcp-settings --settings-path "D:\settings\settings.json" --remove-desktop
 每用户快捷方式固定命名为 `COMSOL MCP Settings.lnk`，并持续绑定创建时的准确设置文件。
 安装、部署、MCP 启动、`settings.start`、首次打开、“保存”和“应用”都不会自动创建它。
 同名快捷方式若已过期或属于其他程序，只有用户在 GUI 中确认，或在创建命令中明确追加
-`--replace-existing-shortcut` 后才会替换；移除操作只删除本应用拥有的快捷方式，并保留
+`--replace-existing-shortcut` 后才会替换。移除操作只删除本应用拥有的快捷方式，并保留
 外来或损坏的桌面项目。
 
 从仓库源码或解压后的源码分发包运行时，也可以使用根目录手动启动器：
@@ -55,7 +55,7 @@ comsol-mcp-settings --settings-path "D:\settings\settings.json" --remove-desktop
 未指定 `-PythonPath` 时，脚本依次检查当前虚拟环境、`comsol-mcp-settings` 所在环境、
 `PATH` 中的 `python.exe`，以及 Windows Python launcher 提供的 CPython 3.14。明确指定的
 `-SettingsPath` 必须是绝对文件路径，而且父目录必须已经存在。`-ValidateOnly` 只验证
-Python、package import 和可选 settings 定位器，输出不含路径的 JSON receipt；它不会创建
+Python、package import 和可选 settings 定位器，输出不含路径的 JSON receipt。它不会创建
 settings 文件、打开 Tk 或启动 COMSOL。
 
 打开设置界面不会启动 COMSOL，也不会开始计算。agent 打开界面后应暂停，让用户完成设置，
@@ -78,25 +78,25 @@ settings 文件、打开 Tk 或启动 COMSOL。
 如果还没有设置 COMSOL 路径，界面会直接打开 `COMSOL/Java` 页，并尝试查找本机的
 COMSOL 6.4 和它自带的 Java：
 
-- 只找到一个可用安装时，路径会填入输入框，但不会自动保存；
-- 没有找到时，输入框保持空白，不会编造一个默认路径，也不会报错打断使用；
-- 找到多个安装时，由用户选择，界面不会猜测；
-- 安装或移动 COMSOL 后，可以点击“自动检测”重新查找；
+- 只找到一个可用安装时，路径会填入输入框，但不会自动保存。
+- 没有找到时，输入框保持空白，不会编造一个默认路径，也不会报错打断使用。
+- 找到多个安装时，由用户选择，界面不会猜测。
+- 安装或移动 COMSOL 后，可以点击“自动检测”重新查找。
 - 也可以点击“浏览”手动选择目录。
 
 ## 设置界面怎么用
 
 每个选项旁边都会显示它在 JSON 中的完整名称。路径选项带有例子，也可以用“浏览”选择。
 
-- “应用”：检查并保存，窗口继续保持打开；
-- “保存并退出”：检查并保存，然后关闭窗口；
-- “取消”：直接关闭，不保存本次修改；
-- 输入不合要求时，该项会标红，而且不能保存；
-- 修改任何会影响 MCP 的选项后，界面会提醒需要重启；
-- 自动找到 COMSOL 或 Java 时，只显示持续可见的重启提示，不会一打开就弹出重启窗口；
+- “应用”：检查并保存，窗口继续保持打开。
+- “保存并退出”：检查并保存，然后关闭窗口。
+- “取消”：直接关闭，不保存本次修改。
+- 输入不合要求时，该项会标红，而且不能保存。
+- 修改任何会影响 MCP 的选项后，界面会提醒需要重启。
+- 自动找到 COMSOL 或 Java 时，只显示持续可见的重启提示，不会一打开就弹出重启窗口。
 - 切换界面语言不会丢失尚未保存的内容，也不会跳回其他页面。
-- 调整界面大小会立即预览。一般选择“跟随 Windows 显示设置”；需要固定大小时可选
-  100%、125%、150% 或 200%；
+- 调整界面大小会立即预览。一般选择“跟随 Windows 显示设置”。需要固定大小时可选
+  100%、125%、150% 或 200%。
 - `profile.name` 下方的说明会随选择变化，直接说明该 profile 能做什么、适合什么情况，
   以及何时不应选择。
 
@@ -117,9 +117,9 @@ English (en)
 
 程序按下面顺序寻找设置：
 
-1. `COMSOL_MCP_SETTINGS_PATH` 指定的绝对文件；
-2. 从源码运行时，仓库根目录的 `settings.json`；
-3. 安装版的 `%LOCALAPPDATA%\comsol_mcp\settings.json`；
+1. `COMSOL_MCP_SETTINGS_PATH` 指定的绝对文件。
+2. 从源码运行时，仓库根目录的 `settings.json`。
+3. 安装版的 `%LOCALAPPDATA%\comsol_mcp\settings.json`。
 4. 安装包内的只读模板，它只用于第一次创建设置。
 
 设置界面不会写入 `site-packages`。设置文件本身可以位于中文路径，但必须是普通文件，路径
@@ -127,13 +127,13 @@ English (en)
 
 文件必须使用 UTF-8 编码，只包含一个 JSON 对象，不能有重复 key，大小不能超过 64 KiB。
 未知字段和非法值会出现在 `capabilities.project_settings.settings_errors` 中，但返回结果
-不会暴露本机路径。缺少某个字段时只补该字段的默认值；某一项非法时只回退该项；整个 JSON
+不会暴露本机路径。缺少某个字段时只补该字段的默认值。某一项非法时只回退该项。整个 JSON
 损坏时才使用完整默认配置。
 
 ## 路径怎么选
 
 读取设置时，程序会展开开头的 `%LOCALAPPDATA%` 和 `%PROGRAMDATA%`。其他环境变量写法
-不会自动展开。所有路径都必须是绝对路径；空字符串、相对路径和控制字符都不允许。
+不会自动展开。所有路径都必须是绝对路径。空字符串、相对路径和控制字符都不允许。
 
 | 路径用途 | 是否支持中文 | 默认位置 |
 | --- | --- | --- |
@@ -146,7 +146,7 @@ English (en)
 | 可选语义资产 | 取决于所用后端，建议用 ASCII | `null` |
 
 模型读取目录可以包含中文。运行目录、durable job 目录和产物目录如果包含中文，设置界面会
-在保存前标红；直接修改 JSON 时，后端也会拒绝这些值，不会等到开始计算后才报错。
+在保存前标红。直接修改 JSON 时，后端也会拒绝这些值，不会等到开始计算后才报错。
 
 ## 全部设置项
 
@@ -155,18 +155,18 @@ English (en)
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
 | `schema_name` | `"comsol_mcp.settings"` | 设置格式名称，只读，必须完全一致。 |
-| `schema_version` | `"1.2.0"` | 新保存的文件使用 `1.2.0`；旧版 `1.0.0` 和 `1.1.0` 可以读取，并在内存中转换。 |
+| `schema_version` | `"1.2.0"` | 新保存的文件使用 `1.2.0`。旧版 `1.0.0` 和 `1.1.0` 可以读取，并在内存中转换。 |
 | `gui.language` | `"zh-cn"` | 只能是 `"en"`、`"zh-cn"` 或 `"zh-tw"`。 |
-| `gui.scale` | `"system"` | 可选 `"system"`、`"100"`、`"125"`、`"150"` 或 `"200"`；界面把数字显示为百分比。 |
+| `gui.scale` | `"system"` | 可选 `"system"`、`"100"`、`"125"`、`"150"` 或 `"200"`。界面把数字显示为百分比。 |
 
 ### 工具范围
 
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
-| `profile.name` | `"core"` | 可选 `core`、`basic_fem`、`wave_optics`、`electro_chemistry`、`experimental`、`full` 或 `comsolless_read_only`；保存为小写。不支持的值会回落到 `core` 并报告来源。 |
+| `profile.name` | `"core"` | 可选 `core`、`basic_fem`、`wave_optics`、`electro_chemistry`、`experimental`、`full` 或 `comsolless_read_only`。保存为小写。不支持的值会回落到 `core` 并报告来源。 |
 
 新手在重视安全、希望减少可用操作时，可以从 `core` 开始。大多数进行常规仿真的用户应
-选择 `basic_fem`。Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性；手册
+选择 `basic_fem`。Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性。手册
 检索、语义检索和共享协作使用独立 Boolean 开关，可用于任意 profile，也可同时启用。
 
 | Profile | 适用情况 |
@@ -175,17 +175,17 @@ English (en)
 | `basic_fem` | 推荐大多数用户选择：常规 FEM 建模、结果导出和 Windows standalone 包。 |
 | `wave_optics` | 光学与超表面、场结果查看、Wave Optics 检查、单点审计和分阶段参数流程。 |
 | `experimental` | 范围更广或尚未成熟、需要仔细检查输出的额外工具。 |
-| `full` | 需要几乎全部非 feature 工具且接受较弱文件范围保护的旧流程迁移；不建议新用户使用。 |
+| `full` | 需要几乎全部非 feature 工具且接受较弱文件范围保护的旧流程迁移。不建议新用户使用。 |
 | `comsolless_read_only` | 未安装 COMSOL 的电脑：仅提供离线模型/证据探查工具，无法启动 COMSOL 或 Java。 |
-| `electro_chemistry` | 隔离的电化学模块 profile：在 Core 基础上增加电化学发现、接口创建、电极反应与电解质工具；不并入默认或 `full`。 |
+| `electro_chemistry` | 隔离的电化学模块 profile：在 Core 基础上增加电化学发现、接口创建、电极反应与电解质工具。不并入默认或 `full`。 |
 
 ### 运行与文件范围
 
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
 | `runtime.directory` | `%PROGRAMDATA%\comsol_mcp\runtime` | MCP 的运行记录和锁目录。自定义值必须是只含 ASCII 的绝对路径。`null` 只用于兼容旧的平台默认行为。 |
-| `runtime.jobs_directory` | `null` | 可选的 durable job 单独目录。`null` 表示从实际运行目录推导；自定义值必须是只含 ASCII 的绝对路径。 |
-| `paths.model_read_roots` | `[%LOCALAPPDATA%\comsol_mcp\models]` | 允许读取且不得原地修改的源模型目录。每项必须是不同的绝对路径，可以包含中文；`[]` 表示拒绝读取任何模型。 |
+| `runtime.jobs_directory` | `null` | 可选的 durable job 单独目录。`null` 表示从实际运行目录推导。自定义值必须是只含 ASCII 的绝对路径。 |
+| `paths.model_read_roots` | `[%LOCALAPPDATA%\comsol_mcp\models]` | 允许读取且不得原地修改的源模型目录。每项必须是不同的绝对路径，可以包含中文。`[]` 表示拒绝读取任何模型。 |
 | `paths.artifact_write_root` | `%PROGRAMDATA%\comsol_mcp\artifacts` | MCP 自有的结果、manifest 和证据目录。自定义值必须是只含 ASCII 的绝对路径。`null` 只用于兼容旧的推导方式。 |
 
 设置文件接受某个路径，不代表所有工具都能立刻使用它。实际操作仍会检查文件是否存在、
@@ -206,8 +206,11 @@ Java 查找顺序是：COMSOL 自带且可用的 Java、`JAVA_HOME`、`JDK_HOME`
 
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
-| `shared_server.enabled` | `false` | 独立控制本机 Desktop/Server 交互协作流程；可与任意 profile 组合，也不会启动或关闭用户自己的 COMSOL Server。 |
-| `ownership.owner` | `null` | 可选的所有者名称。最多 256 个字符，不能为空且不能含控制字符；`null` 时从父进程生成有限长度的名称。 |
+| `shared_server.enabled` | `false` | 独立控制本机 Desktop/Server 交互协作流程。可与任意 profile 组合，也不会启动或关闭用户自己的 COMSOL Server。 |
+| `model_manager.enabled` | `false` | 独立控制可选 COMSOL Model Manager 工具的布尔开关。它可与任意 profile 组合，并与 `shared_server.enabled` 双向独立，因此共享会话绝不会顺带授予 Model Manager 访问权限。关闭时这些工具根本不会注册。 |
+| `model_manager.upload_enabled` | `false` | 独立控制写回 Model Manager 的布尔开关。它与 `model_manager.enabled` 双向独立，因此启用该功能并不授予写入权限。关闭时 open、run、download 仍可使用。开启后 upload 仍需显式声明派生来源身份，且目标已存在、revision 不匹配或任何 overwrite 都会被拒绝。 |
+| `discovery.pagination_enabled` | `false` | 独立控制实验性 `tools/list` 游标分页适配器的布尔开关。它只改变工具列表的下发方式，绝不改变 profile 允许的工具或副作用。关闭时 `tools/list` 返回常规的完整列表，这正是只读取首页的客户端所依赖的契约。开启后列表按有界分页返回，且 `_meta` 会声明真实总数，客户端必须读取该总数并继续获取后续页面，才能发现全部工具。 |
+| `ownership.owner` | `null` | 可选的所有者名称。最多 256 个字符，不能为空且不能含控制字符。`null` 时从父进程生成有限长度的名称。 |
 
 ### 证据检查
 
@@ -226,10 +229,10 @@ Java 查找顺序是：COMSOL 自带且可用的 Java、`JAVA_HOME`、`JDK_HOME`
 | --- | --- | --- |
 | `manuals.root` | `null` | “生成索引”递归扫描的原始 COMSOL PDF 根目录。 |
 | `lexical_docs.enabled` | `false` | 独立控制 `manual_search` 和 `manual_read_pages`。 |
-| `lexical_docs.index_path` | `null` | SQLite 文件或目标文件夹的仅含 ASCII 字符路径；文件夹会解析为其中的 `lexical_manuals.sqlite3`。 |
+| `lexical_docs.index_path` | `null` | SQLite 文件或目标文件夹的仅含 ASCII 字符路径。文件夹会解析为其中的 `lexical_manuals.sqlite3`。 |
 
 “文档”页通过隔离后台进程生成索引。进度弹窗显示当前阶段、PDF 文件、已处理
-PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数验证后才原子替换；
+PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数验证后才原子替换。
 取消或失败会清理精确临时文件并保留原有有效索引。成功建库不会自动开启手册或
 语义搜索。
 
@@ -237,7 +240,7 @@ PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数�
 
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
-| `semantic_docs.enabled` | `false` | 独立控制隔离式语义工具；可与任意 profile 以及 `shared_server.enabled` 组合。 |
+| `semantic_docs.enabled` | `false` | 独立控制隔离式语义工具。可与任意 profile 以及 `shared_server.enabled` 组合。 |
 | `semantic_docs.root` | `null` | 已准备语义向量索引的可选根目录，与 SQLite 词法索引分开。 |
 | `semantic_docs.model_path` | `null` | 可选的本地语义模型版本目录。 |
 
@@ -248,7 +251,7 @@ PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数�
 
 开发者或 agent 需要可复现自动化、设置由安装器/部署脚本统一管理、界面无法使用，或需要
 恢复时，可以直接编辑 JSON。Agent 编辑必须获得用户明确请求。编辑前先停止 MCP host 并
-关闭设置界面；只修改上文解析出的可写文件，验证后重启真正拥有 MCP 的客户端。
+关闭设置界面。只修改上文解析出的可写文件，验证后重启真正拥有 MCP 的客户端。
 
 完整默认模板如下：
 
@@ -266,6 +269,7 @@ PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数�
     "artifact_write_root": "%PROGRAMDATA%/comsol_mcp/artifacts"
   },
   "shared_server": {"enabled": false},
+  "discovery": {"pagination_enabled": false},
   "evidence_integrity": {
     "checks": {
       "outcome_contract_validation": true,
@@ -290,7 +294,7 @@ PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数�
 
 现有的 `COMSOL_MCP_*`、`COMSOL_SEMANTIC_*`、`JAVA_HOME` 和 `JDK_HOME` 环境变量仍
 保留兼容覆盖能力。如果某个变量在 MCP 进程启动前已经存在，它优先于 JSON 转换出的同名
-环境值。普通用户的新安装应使用设置界面；开发者和 agent 自动化可使用同一份 JSON，但
+环境值。普通用户的新安装应使用设置界面。开发者和 agent 自动化可使用同一份 JSON，但
 不要再建立一套只靠环境变量的独立配置。
 
 ## 更新与恢复
@@ -303,9 +307,9 @@ PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数�
 | 工具 | 用途 |
 | --- | --- |
 | `mph_inspect` | 对单个 `.mph` 归档做有界离线检查：声明版本、节点/可运行/求解/预览状态、参数、标签、存档点、确定性的体积分解。 |
-| `mph_diff` | 双归档的元数据/标签/参数/条目差异对比，并证明输入未被修改；零差异不是科学等价性证明。 |
-| `model_identity` | 源/派生文件的只读身份与检查点就绪状态；活动会话身份默认返回结构化"不可用"，仅在显式请求且会话已连接时读取。 |
-| `runtime_compatibility_status` | 当前 Python/MPh/JPype 身份、支持范围、profile 与技能层哈希；仅显式请求时读取已绑定 COMSOL 身份；绝不选择回退运行时。 |
+| `mph_diff` | 双归档的元数据/标签/参数/条目差异对比，并证明输入未被修改。零差异不是科学等价性证明。 |
+| `model_identity` | 源/派生文件的只读身份与检查点就绪状态。活动会话身份默认返回结构化"不可用"，仅在显式请求且会话已连接时读取。 |
+| `runtime_compatibility_status` | 当前 Python/MPh/JPype 身份、支持范围、profile 与技能层哈希。仅显式请求时读取已绑定 COMSOL 身份。绝不选择回退运行时。 |
 | `offline_export_validate` | 完全离线地校验导出清单及其 VTU/CSV/TXT 文件（路径、ID、顺序、单位、字节数、哈希）。 |
 
 `comsolless_read_only` profile 只暴露这五个工具，因此未安装 COMSOL 的轻量

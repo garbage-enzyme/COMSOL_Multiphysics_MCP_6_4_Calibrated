@@ -1,11 +1,15 @@
 # COMSOL 6.4 surrogate-training and DNN capability matrix (S0)
 
-Status: proven on a licensed isolated session; gate satisfied.
+Status: proven on a licensed isolated session. Gate satisfied.
 Release: `0.7.5` / `alpha7.5`
 Evidence root: `D:\mcp_tests\a75s0p06`
 Primary receipt: `s0_capability.json`
 Receipt SHA-256: `9581c9ef32eba3e012ead3f63c7a17ed19a65e04accc7d5fec735edfbc604678`
 Probe source: `development_kit/scripts/surrogate_dnn_capability_probe.py`
+
+This document records historical gate findings and their measured version identities.
+It does not override current dependency declarations in `pyproject.toml`.
+Later findings retain the versions and test counts from their own runs.
 
 ## 1. Proven environment identity
 
@@ -55,7 +59,7 @@ that are not enumerated choices: `innermostparameter`,
 
 ## 4. Training-lifecycle methods — decisive architectural finding
 
-The **study step owns only data generation and study execution**; the
+The **study step owns only data generation and study execution**. The
 **training lifecycle belongs to the DNN function**:
 
 | Method | DNN function | Study step |
@@ -72,12 +76,12 @@ The **study step owns only data generation and study execution**; the
 
 Consequence: the S4 adapter must attach train/test/continue/export to the DNN
 function object, not to the study step. No `trainModel`, `testModel`, or
-`onnx*` method exists; ONNX export is the `export(path)` call on the DNN
+`onnx*` method exists. ONNX export is the `export(path)` call on the DNN
 function. `continueRun()` exists and takes no arguments.
 
 `set` is heavily overloaded (12 signatures: `String`, `double`, `int`,
 `boolean`, and their array/matrix forms). `setIndex` and `setEntry` likewise.
-A bare method name is not a binding; the adapter must select the typed
+A bare method name is not a binding. The adapter must select the typed
 overload explicitly.
 
 ## 5. Determinism and split control — reproducibility resolved
@@ -144,12 +148,12 @@ single unreadable property.
 
 ## 8. Explicitly unsupported / not present
 
-- No `trainModel`, `testModel`, or any method containing `onnx` exists; ONNX
+- No `trainModel`, `testModel`, or any method containing `onnx` exists. ONNX
   export is `export(String)` on the DNN function.
 - No custom, convolutional, or recurrent layer type.
 - No property-based epistemic uncertainty output was observed.
 - `exportfilename` is not readable.
-- GPU training is a boolean switch (`gputraining`); no device enumeration or
+- GPU training is a boolean switch (`gputraining`). No device enumeration or
   memory readback was observed. S9 stays deferred.
 
 ## 9. Gate disposition
@@ -161,7 +165,7 @@ frozen into the public contract:
 
 1. `exportfilename` is not readable, so export evidence must hash the produced
    file rather than trust a stored filename property.
-2. Enumeration is by reflection over the Java object; the reference tables and
+2. Enumeration is by reflection over the Java object. The reference tables and
    the live surface disagree (75 vs 30 documented DNN properties), so the live
    readback is authoritative.
 
@@ -181,10 +185,10 @@ could reveal:
 | Finding | Consequence |
 | --- | --- |
 | JPype cannot resolve `set(String,int)` against `set(String,boolean)` for a Python `int` and raises an ambiguous-overload error. | Numeric and boolean scalars must be wrapped in explicit Java types (`JInt`, `JDouble`, `JBoolean`, `JString`). |
-| `model.java.func(tag)` returns the feature, while `model.java.func()` returns a non-callable list container. | Tag lookup must use the tag overload directly; the zero-argument form is only for `tags()`. |
+| `model.java.func(tag)` returns the feature, while `model.java.func()` returns a non-callable list container. | Tag lookup must use the tag overload directly. The zero-argument form is only for `tags()`. |
 | `args` is an alternating key/value property written through `setEntry`, and COMSOL refuses it until data columns exist. | The `args` write is **deferred** with an explicit `data_source_not_bound` reason instead of being approximated, then resolved after import. |
 | `globaldnnfunction` rejects the nested-array form and accepts the flat alternating form. | Keyed string maps use a separate writer selected from the property's declared value type. |
-| COMSOL derives its own column keys (`col1, col2, col3`) and classifies them (`arg, arg, value`); the file header is not reused as the key. | Argument binding is positional when names do not match, and observed keys, declared columns, and binding mode are all recorded as evidence. |
+| COMSOL derives its own column keys (`col1, col2, col3`) and classifies them (`arg, arg, value`). The file header is not reused as the key. | Argument binding is positional when names do not match, and observed keys, declared columns, and binding mode are all recorded as evidence. |
 | A repeated `importData()` raises "Unsupported function operation" although the columns are present. | Import failure is tolerated when COMSOL still reports column keys. |
 | `getString` on a JPype Java string yields a character-iterable object. | Readback rendering is chosen from the accessor name, not by duck-typing. |
 
@@ -192,9 +196,9 @@ Verified on the licensed run: all 17 readback properties landed exactly as
 written (`activation=tanh`, `layertype=input, dense, dense`,
 `outfeatures=2, 4, 1`, `lr=0.001`, `batchsize=8`, `epochs=3`,
 `useseed=manual`, `rndseed=17`, `validation=table`, `test=table`,
-`gputraining=off`); save/reload preserved both tags and both node types; an
-injected mid-batch failure rolled back every created node leaving zero tags; a
-duplicate-tag apply was refused with zero nodes created; and the owned session,
+`gputraining=off`). Save/reload preserved both tags and both node types. An
+injected mid-batch failure rolled back every created node leaving zero tags. A
+duplicate-tag apply was refused with zero nodes created. And the owned session,
 lease, descendants, and listeners were all released.
 
 ## 11. S6 training lifecycle findings — resolved against live COMSOL
@@ -225,13 +229,13 @@ Verified on the licensed training run:
   `trained_chksum`, and seed 29 produced a different one, so the seed provably
   controls the trained artifact.
 - Continuation: identical contract identities permitted `continueRun`, which
-  produced a new `trained_chksum`; a changed `comsol_build` was refused as a
+  produced a new `trained_chksum`. A changed `comsol_build` was refused as a
   `nonidentical_continuation` that creates a new lineage.
 - Historical baseline comparison withdrawn: the original gate compared an
   uncalibrated internal test loss with a baseline scored on different rows.
   Current gates compute RMSE directly from COMSOL predictions on seven frozen
   external test rows, using identical training rows for constant and linear
-  baselines. The 48-row synthetic fixture uses 34/7/7 rows; it demonstrates API
+  baselines. The 48-row synthetic fixture uses 34/7/7 rows. It demonstrates API
   behavior and does not establish campaign-level scientific acceptance.
 - Cleanup: session, lease, descendants, and listeners were all released with
   zero active durable jobs.
@@ -286,7 +290,7 @@ Validation environment: the licensed export gate requires the optional ONNX
 package for its checker and ReferenceEvaluator. This is a development-only
 oracle, not a new production dependency. Missing validation dependencies fail
 the gate rather than falling back to weight-byte comparison. Use an isolated
-validation environment; retain evaluator version and artifact identities.
+validation environment. Retain evaluator version and artifact identities.
 COMSOL function predictions use a tiny solved one-dimensional dataset because
 a geometry-free numerical evaluator returns no samples. This scaffold is not
 physical validation of the synthetic training function.
@@ -301,22 +305,22 @@ Three findings determined the accepted design:
 
 | Finding | Consequence |
 | --- | --- |
-| A trained COMSOL DNN function **cannot be evaluated** in a geometry-free surrogate model: `model.evaluate` fails with "Could not determine default dataset", a Point dataset cannot be created ("在这个情景中不能创建本操作"), and an `Eval` numerical node silently returns an empty array. | Screening predictions are produced by evaluating the network's own **exported ONNX artifact** with a pure-standard-library evaluator (`onnx_runtime.py`). This also proves the export is a working network rather than inert bytes. |
+| A trained COMSOL DNN function **cannot be evaluated** in a geometry-free surrogate model. `model.evaluate` fails with "Could not determine default dataset". Creating a Point dataset fails with "在这个情景中不能创建本操作". An `Eval` numerical node silently returns an empty array. | Screening evaluates the network's **exported ONNX artifact** with the standard-library evaluator (`onnx_runtime.py`). This proves that the export is a working network, not just inert bytes. |
 | COMSOL exports PyTorch-convention ONNX: one batched input tensor named `input`, Gemm nodes carrying `transB=1` (weights stored `[out, in]`), and explicit `Mul`/`Add` input-normalization nodes. | The evaluator decodes node attributes, honours `transB`, binds the caller's ordered feature names to the single batched input, and applies the scale/bias nodes. A `transB` misreading or a mis-bound input would produce predictions unrelated to the target, so the real-artifact regression test would fail. |
-| A COMSOL result dataset **retains the parameters it was solved at**. Evaluating a stored dataset after changing parameters returns the *first* solve's value for every candidate, which looked like a successful escalation while silently reporting one number three times. | Every escalated candidate triggers its own `study.run()` before evaluation, and the gate independently verifies that each measurement reproduces the analytic target at *its own* coordinates and that all measurements are distinct. Without that check the false pass would have been reported as verified evidence. |
+| A COMSOL result dataset **retains the parameters it was solved at**. Changing model parameters does not change its stored solution. Evaluation returned the *first* solve's value for every candidate. Three identical values appeared to show successful escalation. | Every escalated candidate calls `study.run()` before evaluation. The gate independently checks each measurement against the analytic target at *its own* coordinates. It also checks that the measurements differ. Without these checks, the result could falsely pass as verified evidence. |
 
 Verified on the licensed campaign run:
 
 - Screening produced seven `predicted`-state records and no record claimed FEM
-  evidence; all seven were scored by the exported ONNX network.
+  evidence. All seven were scored by the exported ONNX network.
 - Ranking selected a bounded top-3 and escalated the out-of-domain candidate
-  (a1=9, a2=9) regardless of rank, with reason `out_of_domain`; ranking and
+  (a1=9, a2=9) regardless of rank, with reason `out_of_domain`. Ranking and
   selection are explicitly marked as not evidence.
 - Each escalated candidate received a fresh COMSOL solve. The measured values
   were distinct and each matched its own coordinates exactly:
   `(3.5, 4.5) → 1.648944`, `(9.0, 9.0) → 7.724506`, `(3.0, 4.0) → 1.107758`.
 - The invariant check proved no prediction was promoted without verified FEM
-  evidence and an artifact hash; `verified_requires_fresh_fem` is true and
+  evidence and an artifact hash. `verified_requires_fresh_fem` is true and
   `upgrades_fem_evidence` is false in both the invariant and the summary.
 - The surrogate's error was measured against those fresh FEM results and
   reported honestly: mean absolute error 2.59 and worst 6.86, with all three
@@ -329,7 +333,7 @@ Verified on the licensed campaign run:
 Frozen limitation: the verification model is a genuine solvable 1D
 coefficient-form PDE model, and the evaluated expression is the analytic target
 the surrogate was trained on. This proves the escalation, evidence-separation,
-and error-measurement machinery on real COMSOL; it is not a physical validation
+and error-measurement machinery on real COMSOL. It is not a physical validation
 of any metasurface or device model.
 
 ## 14. S10 public surface findings — resolved without a solver
@@ -343,11 +347,11 @@ JPype, ONNX, or a numerical stack.
 
 | Finding | Consequence for this repository |
 | --- | --- |
-| Contained-path enforcement is driven by **per-tool flat argument-name tables** in `path_policy.py`, not by type annotations or by walking a request object. | A path nested inside a request object would silently bypass containment. Every surrogate path is therefore a top-level string argument, and all five tools are listed in both `_ARTIFACT_READ_ARGUMENTS` and `_ALWAYS_ENFORCED_TOOLS` so they cannot inherit the full profile's legacy broad-path behaviour. |
-| A surrogate model card carries its identities **nested** under `identities` and seals itself with `entry_sha256`; a registry entry maps artifact names to hashes; an export manifest lists artifacts and seals with `manifest_sha256`. | The evidence layer resolves identities from either layout and collects artifact hashes from both shapes. An expectation the document cannot satisfy is reported `unavailable`, never as satisfied, so verification cannot pass vacuously. |
-| `evaluate_onnx_model` bound each per-feature graph input to a **bare string** (`dict(zip(graph_inputs, names))`), so the consumer iterated the string's characters and failed with `KeyError: 'a'`. | A real latent defect in already-committed S7 code. The COMSOL single-batched layout masked it entirely. Fixed to bind a one-element list per tensor, with a regression test whose tensor names deliberately differ from the feature names so the branch is reachable. |
+| `path_policy.py` enforces containment through **per-tool flat argument-name tables**. It does not use type annotations or traverse request objects. | A nested path would bypass containment. Every surrogate path is therefore a top-level string argument. All five tools appear in `_ARTIFACT_READ_ARGUMENTS` and `_ALWAYS_ENFORCED_TOOLS`. They cannot inherit the full profile's legacy broad-path behavior. |
+| A surrogate model card carries its identities **nested** under `identities` and seals itself with `entry_sha256`. A registry entry maps artifact names to hashes. An export manifest lists artifacts and seals with `manifest_sha256`. | The evidence layer resolves identities from either layout and collects artifact hashes from both shapes. An expectation the document cannot satisfy is reported `unavailable`, never as satisfied, so verification cannot pass vacuously. |
+| `evaluate_onnx_model` bound each per-feature graph input to a **bare string** (`dict(zip(graph_inputs, names))`). The consumer iterated its characters and failed with `KeyError: 'a'`. | This defect existed in committed S7 code. The COMSOL single-batched layout hid it. The fix binds a one-element list per tensor. The regression uses tensor names that differ from feature names to exercise this branch. |
 | A decoded graph with **no nodes** raised `NameError` because the output tensor name was assigned inside the node loop. | Also fixed: an empty graph is now refused as an unsupported model ("graph produced no output") instead of crashing with an internal error. |
-| The frozen quality-target exclusion digests cover only the modules that were registered as targets. | The S1–S8 surrogate modules had never been added to the lint/type target lists, so the inventory test failed on a clean tree. Every surrogate module plus the new S10 modules are now lint- and `--strict` mypy-clean and registered, and the recomputed exclusion digests equal the frozen literals exactly — proving the classification was restored rather than rubber-stamped. |
+| Frozen quality-target exclusion digests cover only modules registered as targets. | The S1–S8 surrogate modules were absent from the lint/type target lists. The inventory test therefore failed on a clean tree. All surrogate modules and new S10 modules now pass lint and `--strict` mypy, and are registered. Recomputed exclusion digests match the frozen literals. This checks the restored classification instead of merely accepting a new digest. |
 
 Gate evidence, all solver-free:
 
@@ -366,12 +370,12 @@ Gate evidence, all solver-free:
   verdict restates that the result remains a prediction requiring a fresh FEM
   run.
 - The frozen `comsolless_read_only` surface remains exactly its five predecessor
-  tools; the surrogate tools are added to every other profile and to `core`.
+  tools. The surrogate tools are added to every other profile and to `core`.
 
 Frozen limitation: `dbmodel://` is validated as syntax and evidence only — an
 authority, a resource path, and an optional sha256, with traversal and non-ASCII
 refused. No live Model Manager operation is added in 0.7.5. This slice is bounded
-tooling and evidence separation; it is not model quality or scientific
+tooling and evidence separation. It is not model quality or scientific
 acceptance.
 
 ## 15. S11 findings — making the freeze reachable, and a registry blind spot
@@ -383,17 +387,17 @@ Both are now closed, still without a solver.
 | Finding | Consequence for this repository |
 | --- | --- |
 | The `dbmodel://` contract was **unreachable through the MCP surface**: no public tool accepted a source kind, so `validate_source_reference` was exercised only by its own unit test. | `surrogate_dataset_validate` now takes `source_kind` and `source_uri`. A `dbmodel` source routes to `resolve_dbmodel_source`, which parses the URI, reports `resolution_state: unavailable`, and never reads, connects, or authenticates. The dataset path becomes optional only because the source representation is now explicit. |
-| The schema-registry completeness test scanned **only** the `"schema_name"` dict key, while the surrogate modules declare identity with `"schema"`. | The scan now accepts either spelling, and a dedicated test pins the scanner against a synthetic source using both spellings plus both `dict(...)` forms. Widening the scan exposed exactly 20 emitted-but-unregistered surrogate schemas; all 20 are now registered (`entry_count` 161 → 181) and a second test asserts every emitted surrogate schema resolves at the version it emits. |
-| Two different vocabularies share the name `source_kind`: the **source-reference** kinds (`file`/`directory`/`dbmodel`) and the dataset manifest's **provenance** kind (for example `campaign`). | An attempt to enforce `SOURCE_KINDS` inside `build_dataset_manifest` rejected three legitimate existing tests. The enforcement belongs where a caller selects a representation, so the manifest keeps provenance as a required non-empty string and both vocabularies are documented at the point of use. A test asserts provenance values such as `campaign` still round-trip. |
-| Path containment runs **before** the tool body, so a nonexistent path is refused by policy before the contract can speak. | Tests that intend to exercise the contract must point at real files, and a separate test asserts that a nonexistent path is refused by containment instead. A refused source is never read even when a readable path was supplied. |
+| The schema-registry completeness test scanned **only** the `"schema_name"` dict key, while the surrogate modules declare identity with `"schema"`. | The scan now accepts either spelling, and a dedicated test pins the scanner against a synthetic source using both spellings plus both `dict(...)` forms. Widening the scan exposed exactly 20 emitted-but-unregistered surrogate schemas. All 20 are now registered (`entry_count` 161 → 181) and a second test asserts every emitted surrogate schema resolves at the version it emits. |
+| Two vocabularies use `source_kind`. **Source-reference** kinds are `file`/`directory`/`dbmodel`. Dataset **provenance** kinds include `campaign`. | Enforcing `SOURCE_KINDS` in `build_dataset_manifest` rejected three valid existing tests. Validation belongs at representation selection. The manifest retains a required non-empty provenance string. Documentation distinguishes the vocabularies at their use sites. A test checks that values such as `campaign` still round-trip. |
+| Path containment runs **before** the tool body. Policy refuses a nonexistent path before contract validation. | Contract tests must use real files. A separate test checks that containment refuses a nonexistent path. The tool never reads a refused source, even when the supplied path is readable. |
 | The `source_uri` schema bound and the contract's `MAX_URI_LENGTH` were separate literals. | The tool signature now uses the contract constant, so a URI can never be schema-legal yet rejected as over-long for a different reason. An over-long URI is refused at the schema bound, which is the intended layering and is asserted as such. |
 
 Gate evidence for this slice, all solver-free: `dbmodel` dispatch returns
 `success: true` with `read`, `filesystem_access`, `live_model_manager_access`,
-and `upgrades_fem_evidence` all `False`; traversal, non-ASCII, wrong scheme,
+and `upgrades_fem_evidence` all `False`. Traversal, non-ASCII, wrong scheme,
 authority-only, missing-URI, `dbmodel`-with-local-path, file-with-URI, and
-unknown-kind requests are each refused with `surrogate_dataset_rejected`; a real
-file source still reports its rows, header, and identity; and the surrogate
+unknown-kind requests are each refused with `surrogate_dataset_rejected`. A real
+file source still reports its rows, header, and identity. And the surrogate
 suites pass with no heavy module imported.
 
 Frozen limitation, unchanged: `dbmodel://` remains syntax and evidence only. The
@@ -411,24 +415,24 @@ backend class instead of to the installed MPh version.
 
 | Finding | Consequence for this repository |
 | --- | --- |
-| **The adapter assumed one "1.3 lane" when the declared range has two.** `pyproject.toml` declares `mph>=1.3.1,<1.4` and **1.3.2 is published**, so CI's eager-upgrade lane installs 1.3.2. MPh **1.3.2 already generalizes the `DoubleRowMatrix` read**, exactly as 1.4.0 does, so the 1.3.1 refusal text is absent there. | Capability is now keyed on the installed version through one shared table `MATRIX_READ_ROW_LIMIT_BY_VERSION = {"1.3.1": 2, "1.3.2": None, "1.4.0": None}`. `matrix_read_row_limit` raises on an unknown version rather than guessing; `observed_lane()` reports the installed version; `SUPPORTED_MPH_LANES` is `("1.3.1", "1.3.2")`; and `lane_capabilities()` reports 1.3.2 as generalized. The suite passes 67/67 on the 1.3.2 lane where CI failed. |
-| `model.evaluate` returns a **numpy array** even for a scalar expression: `array(1.5)` for a parameter and an empty `array([], dtype=float64)` for an expression the model cannot evaluate. | Evaluation is normalized through a duck-typed `tolist` instead of a numpy import, so it stays dependency-free and still accepts a plain list. An empty result is refused with `conversion_not_representable` rather than reported as `0`, because substituting a value the model never produced is the fabrication the protocol exists to prevent. |
+| **The adapter assumed one "1.3 lane" when the declared range has two.** `pyproject.toml` declares `mph>=1.3.1,<1.4` and **1.3.2 is published**, so CI's eager-upgrade lane installs 1.3.2. MPh **1.3.2 already generalizes the `DoubleRowMatrix` read**, exactly as 1.4.0 does, so the 1.3.1 refusal text is absent there. | Capability is now keyed on the installed version through one shared table `MATRIX_READ_ROW_LIMIT_BY_VERSION = {"1.3.1": 2, "1.3.2": None, "1.4.0": None}`. `matrix_read_row_limit` raises on an unknown version rather than guessing. `observed_lane()` reports the installed version. `SUPPORTED_MPH_LANES` is `("1.3.1", "1.3.2")`. And `lane_capabilities()` reports 1.3.2 as generalized. The suite passes 67/67 on the 1.3.2 lane where CI failed. |
+| `model.evaluate` returns a **numpy array**, even for a scalar. A parameter can return `array(1.5)`. An unevaluable expression returns an empty `array([], dtype=float64)`. | Conversion uses duck-typed `tolist`, without importing numpy. It remains dependency-free and also accepts plain lists. An empty result produces `conversion_not_representable`, not `0`. Substitution would invent a value that the model never produced. |
 | `Model.name` and `Model.file` are **methods**, not attributes. | `getattr(model, "name")` returned the bound method, so a receipt recorded `<bound method Model.name of Model('s4a_probe')>`. Each accessor is called when callable, and an unreadable value is reported unknown rather than stringified. |
-| The high-level MPh `Node` view is unusable on this localized install: `components()` returns the label `组件 1` rather than the tag `comp1`, `Node.exists()` is False for a created component, and `Node.children()` raises `AttributeError: 'NoneType' object has no attribute 'tags'`. | The adapter resolves through the Java ClientAPI accessor chain the runtime jobs already use, addressing nodes by an explicit kind-prefixed tag path such as `("component", "comp1", "geom1")`. Representable shapes are declared as data and validated **before** the model is touched, so an unsupported shape is refused without needing a session. |
+| The high-level MPh `Node` view fails on this localized installation. `components()` returns the label `组件 1`, not tag `comp1`. `Node.exists()` is False for a created component. `Node.children()` raises `AttributeError: 'NoneType' object has no attribute 'tags'`. | The adapter uses the Java ClientAPI accessor chain already used by runtime jobs. It addresses nodes with explicit kind-prefixed tag paths, such as `("component", "comp1", "geom1")`. It declares representable shapes as data and validates them **before** model access. Refusal of unsupported shapes needs no session. |
 | COMSOL returns **JVM proxies**: `getString` yields a JPype `java.lang.String` (`jpype._jstring`), so `isinstance(value, str)` is False on a value that prints as a string. | Backend-produced values are unwrapped by exact Java type name before strict conversion. Caller-supplied values remain strictly checked, so this does not reintroduce the implicit coercion the protocol forbids. |
 
 Licensed evidence (receipt
 `D:\mcp_tests\a75s4lic\s4a_licensed_receipt.json`, sha256
 `a7cddfffb312105cc634128bd295bb8100ce541dda6a2f3f7ba572c33102ffb2`): a real 1D
-coefficient-form PDE model was built and solved; `evaluate("a1")` returned `1.5`
-as a float; node lookup resolved real types (`Component`, `solid`, `Interval`,
-`CoefficientFormPDE`, `Stationary`); typed property read/write with rollback was
-verified on real COMSOL state (read `''` → wrote `'1'` → restored exactly `''`);
+coefficient-form PDE model was built and solved. `evaluate("a1")` returned `1.5`
+as a float. Node lookup resolved real types (`Component`, `solid`, `Interval`,
+`CoefficientFormPDE`, `Stationary`). Typed property read/write with rollback was
+verified on real COMSOL state (read `''` → wrote `'1'` → restored exactly `''`).
 a write whose previous value cannot be read was refused `property_not_found`
-rather than left half-applied; four implicit coercions were refused on the
-licensed lane; unrepresentable paths and missing nodes were refused
-`node_not_found`; model identity reported `s4a_probe` with `content_sha256` null
-(unknown, not invented); and the session was released with no solver lease left
+rather than left half-applied. Four implicit coercions were refused on the
+licensed lane. Unrepresentable paths and missing nodes were refused
+`node_not_found`. Model identity reported `s4a_probe` with `content_sha256` null
+(unknown, not invented). And the session was released with no solver lease left
 behind.
 
 Frozen limitation, unchanged: only the MPh **1.3.1 reference lane** is supported,
@@ -443,12 +447,12 @@ lanes.
 **Measured correction (2026-09-26), after running the 1.4 lane for real.** The
 `dbmodel://` difference is real but is a *client-library* difference only. Read
 from the installed sources: 1.3.1 `Client.load` calls `Path(file).resolve()`
-unconditionally, mangling the URI into a local path; 1.4.0 branches on
+unconditionally, mangling the URI into a local path. Version 1.4.0 branches on
 `str.startswith('dbmodel://')` and passes the URI to `self.java.load` untouched.
 Against a **standalone** COMSOL both lanes still refuse the load with the same
 `FlException`/`InvalidPathException`, with no demonstrated cause attribution. The exception alone does not establish
 the Model Manager configuration. So "1.4.0 accepts `dbmodel://`" must not be read as end-to-end
-acceptance; demonstrating that would require a connected database server, which
+acceptance. Demonstrating that would require a connected database server, which
 is not claimed. Receipts:
 `D:\mcp_tests\a75lanediff\ref131.json` and `lane140.json`. Parity and smoke
 detail: `Desktop\plans\comsol_mcp\records\COMSOL_MCP_0.7.5_mph140_parity_and_smoke.md`.

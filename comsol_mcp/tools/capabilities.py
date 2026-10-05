@@ -6,6 +6,7 @@ import json
 import time
 from importlib.metadata import PackageNotFoundError, distribution, version
 from pathlib import Path
+from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
@@ -16,6 +17,7 @@ from comsol_mcp.environment_identity import get_environment_identity
 from comsol_mcp.path_policy import PathPolicy
 from comsol_mcp.settings import (
     LEXICAL_DOCS_ENABLED_ENV,
+    MODEL_MANAGER_ENABLED_ENV,
     SEMANTIC_ENABLED_ENV,
     SETTINGS_PATH_ENV,
     load_settings,
@@ -220,7 +222,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
     """Describe supported, experimental, and disabled behavior without startup."""
     from comsol_mcp.evidence.integrity_controls import evidence_integrity_capability
     from comsol_mcp.knowledge.semantic_runtime import semantic_capability_status
-    from comsol_mcp.schema_registry import get_schema_registry
+    from comsol_mcp.schema_registry import summarize_schema_registry
 
     started = time.perf_counter()
     active_selection = selection or resolve_profile()
@@ -257,7 +259,10 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
         "runtime_compatibility": compatibility,
         "compatibility_registry": _compatibility_registry_summary(active_selection),
         "environment_identity": get_environment_identity(),
-        "schema_registry": get_schema_registry(),
+        # Cold discovery carries only the compact identity/count view. The full
+        # 193-entry registry is ~60 kB and is fetched on demand through `catalog`;
+        # embedding it here made startup scale with the artifact surface.
+        "schema_registry": summarize_schema_registry(),
         "artifact_chain_verification": {
             "schema_name": ARTIFACT_CHAIN_SCHEMA,
             "schema_version": ARTIFACT_CHAIN_SCHEMA_VERSION,
@@ -370,6 +375,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "wave_optics_recommended_profile": "wave_optics",
             "independent_feature_gates": {
                 "lexical_docs": LEXICAL_DOCS_ENABLED_ENV,
+                "model_manager": MODEL_MANAGER_ENABLED_ENV,
                 "semantic_docs": SEMANTIC_ENABLED_ENV,
                 "shared_server": SHARED_SERVER_FEATURE_ENV,
             },

@@ -267,8 +267,6 @@ def main() -> int:
     import comsol_mcp
     import settings_gui
     from comsol_mcp.server import create_server
-    from comsol_mcp.settings import LEXICAL_DOCS_ENABLED_ENV, SEMANTIC_ENABLED_ENV
-    from comsol_mcp.shared_session.contracts import SHARED_SERVER_FEATURE_ENV
     from comsol_mcp.tools.capabilities import get_capabilities
     from comsol_mcp.tools.catalog import FEATURE_NAMES, PROFILE_NAMES, snapshot_tool_schemas
     from comsol_mcp.tools.profiles import resolve_profile
@@ -306,11 +304,15 @@ def main() -> int:
             profile=profile,
         )
 
-    feature_environments = {
-        "lexical_docs": LEXICAL_DOCS_ENABLED_ENV,
-        "semantic_docs": SEMANTIC_ENABLED_ENV,
-        "shared_server": SHARED_SERVER_FEATURE_ENV,
-    }
+    # Import the canonical gate-to-variable map rather than re-listing the gates
+    # here: a duplicated copy silently fell behind when ``model_manager`` was
+    # added and broke this probe with a KeyError instead of an honest failure.
+    from comsol_mcp.tools.profiles import FEATURE_ENVIRONMENT_VARIABLES
+
+    feature_environments = dict(FEATURE_ENVIRONMENT_VARIABLES)
+    missing_gates = [feature for feature in FEATURE_NAMES if feature not in feature_environments]
+    if missing_gates:
+        raise AssertionError(f"feature gates have no enabling variable: {missing_gates}")
     for feature in FEATURE_NAMES:
         selection = resolve_profile(
             "core",
@@ -334,13 +336,11 @@ def main() -> int:
             profile=f"core+{feature}",
         )
 
+    # Compose every independent gate at once. Built from the canonical map so a
+    # newly added gate is exercised here automatically instead of being missed.
     composed = resolve_profile(
         "full",
-        environ={
-            LEXICAL_DOCS_ENABLED_ENV: "true",
-            SEMANTIC_ENABLED_ENV: "true",
-            SHARED_SERVER_FEATURE_ENV: "true",
-        },
+        environ={variable: "true" for variable in feature_environments.values()},
     )
     composed_schemas = asyncio.run(
         snapshot_tool_schemas(create_server("installed-full-with-features", profile=composed))

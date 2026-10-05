@@ -192,6 +192,34 @@ FIELDS = (
         ),
     ),
     FieldDescriptor(
+        "discovery.pagination_enabled",
+        "profile",
+        "boolean",
+        help_id=(
+            "Experimental progressive tool-schema delivery. It is off by default and only "
+            "changes discovery pagination; it does not enable tools or change permissions."
+        ),
+    ),
+    FieldDescriptor(
+        "model_manager.enabled",
+        "profile",
+        "boolean",
+        help_id=(
+            "Enable the COMSOL Model Manager tools for the selected profile. This is a "
+            "separate optional feature and stays off unless you enable it here."
+        ),
+    ),
+    FieldDescriptor(
+        "model_manager.upload_enabled",
+        "profile",
+        "boolean",
+        help_id=(
+            "Allow saving a derived copy back to the COMSOL Model Manager. This is separate "
+            "from shared Desktop collaboration. Opening, running, and downloading models "
+            "work without it."
+        ),
+    ),
+    FieldDescriptor(
         "evidence_integrity.checks.outcome_contract_validation",
         "evidence",
         "boolean",

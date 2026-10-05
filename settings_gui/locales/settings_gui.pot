@@ -1,6 +1,6 @@
 # Generated deterministic gettext template for COMSOL MCP Settings.
 msgid ""
-msgstr "Project-Id-Version: comsol-mcp alpha7.5\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: \nPlural-Forms: nplurals=2; plural=(n != 1);\n"
+msgstr "Project-Id-Version: comsol-mcp alpha7.6\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage: \nPlural-Forms: nplurals=2; plural=(n != 1);\n"
 
 msgid "COMSOL MCP Settings"
 msgstr ""
@@ -195,6 +195,15 @@ msgid "JDK folder used by COMSOL. Auto-detect can fill this value. \nExample: C:
 msgstr ""
 
 msgid "Enable optional interactive collaboration with a COMSOL Desktop connected to a local Server. This feature composes with every tool profile."
+msgstr ""
+
+msgid "Experimental progressive tool-schema delivery. It is off by default and only changes discovery pagination; it does not enable tools or change permissions."
+msgstr ""
+
+msgid "Enable the COMSOL Model Manager tools for the selected profile. This is a separate optional feature and stays off unless you enable it here."
+msgstr ""
+
+msgid "Allow saving a derived copy back to the COMSOL Model Manager. This is separate from shared Desktop collaboration. Opening, running, and downloading models work without it."
 msgstr ""
 
 msgid "Check that execution results and scientific conclusions are reported separately."

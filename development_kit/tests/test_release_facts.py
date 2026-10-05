@@ -51,6 +51,7 @@ def test_release_facts_have_bounded_deterministic_identity_fields():
     assert all(profile["tool_count"] > 0 for profile in facts["profiles"].values())
     assert facts["features"] == {
         "lexical_docs": {"tool_count": 2, "default_enabled": False},
+        "model_manager": {"tool_count": 5, "default_enabled": False},
         "semantic_docs": {"tool_count": 3, "default_enabled": False},
         "shared_server": {"tool_count": 10, "default_enabled": False},
     }

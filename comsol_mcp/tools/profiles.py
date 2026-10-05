@@ -11,6 +11,7 @@ from comsol_mcp.contracts import bounded_public_schema, structurally_guarded
 from comsol_mcp.operation_arbiter import guard_tool_call
 from comsol_mcp.settings import (
     LEXICAL_DOCS_ENABLED_ENV,
+    MODEL_MANAGER_ENABLED_ENV,
     PROFILE_ENV,
     SEMANTIC_ENABLED_ENV,
     SETTINGS_PATH_ENV,
@@ -23,6 +24,18 @@ from .catalog import FEATURE_NAMES, PROFILE_NAMES, TOOL_METADATA
 PROFILE_ENV_VAR = PROFILE_ENV
 DEFAULT_PROFILE = "core"
 _PROFILE_SELECTION_TOKEN = object()
+
+# The single source of truth mapping each independent feature gate to the
+# environment variable that enables it. Callers outside this module (the release
+# probe, tests) must import this instead of re-listing the gates: a duplicated
+# copy silently fell behind when ``model_manager`` was added, which broke the
+# installed-package release probe with a KeyError rather than an honest failure.
+FEATURE_ENVIRONMENT_VARIABLES = {
+    "lexical_docs": LEXICAL_DOCS_ENABLED_ENV,
+    "model_manager": MODEL_MANAGER_ENABLED_ENV,
+    "semantic_docs": SEMANTIC_ENABLED_ENV,
+    "shared_server": SHARED_SERVER_ENV,
+}
 
 PROFILE_DESCRIPTIONS = {
     "core": ("Default mature ownership, job, session, inspection, and one-point solve surface."),
@@ -124,11 +137,7 @@ def resolve_profile(
         name = DEFAULT_PROFILE
         source = f"{source}_invalid_profile_fallback"
         fallback_used = True
-    feature_environment = {
-        "lexical_docs": LEXICAL_DOCS_ENABLED_ENV,
-        "semantic_docs": SEMANTIC_ENABLED_ENV,
-        "shared_server": SHARED_SERVER_ENV,
-    }
+    feature_environment = FEATURE_ENVIRONMENT_VARIABLES
     enabled_features: list[str] = []
     feature_sources: list[tuple[str, str]] = []
     for feature in FEATURE_NAMES:
@@ -205,6 +214,17 @@ class ProfiledRegistrar:
         self._enabled_names = enabled_names
         self.profile_selection = profile_selection
 
+    def advertised_input_schemas(self) -> dict[str, dict[str, Any]]:
+        """Return the input schema of every currently registered tool.
+
+        Read from the same tool manager the MCP client is served from, so
+        progressive discovery cannot advertise a schema the client would never
+        receive. Deliberately a method rather than a snapshot: registrars run in
+        sequence, so a caller that needs the complete surface must ask after
+        registration has finished.
+        """
+        return {name: tool.parameters for name, tool in self._server._tool_manager._tools.items()}
+
     def tool(self, *args: Any, **kwargs: Any) -> Callable:
         real_decorator = self._server.tool(*args, **kwargs)
 
@@ -249,6 +269,7 @@ def register_profiled(
 
 __all__ = [
     "DEFAULT_PROFILE",
+    "FEATURE_ENVIRONMENT_VARIABLES",
     "PROFILE_DESCRIPTIONS",
     "PROFILE_ENV_VAR",
     "PROFILE_MATURITY",

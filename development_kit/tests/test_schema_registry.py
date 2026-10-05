@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 from pathlib import Path
 
-from src.schema_registry import check_schema_support, get_schema_registry
+from src.schema_registry import (
+    check_schema_support,
+    get_schema_registry,
+    select_schema_entry,
+)
 from src.tools.capabilities import get_capabilities
 from src.tools.profiles import ProfileSelection
 
@@ -171,7 +176,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert registry["producer"] == {"package": "comsol-mcp", "version": __version__}
     # These are deliberate public release snapshots. A registry change updates
     # both literals and development_kit/release/release_facts.json together.
-    assert registry["entry_count"] == len(entries) == 182
+    assert registry["entry_count"] == len(entries) == 193
     assert names == sorted(names)
     assert len(names) == len(set(names))
     emitted = _emitted_schemas_in_source()
@@ -203,7 +208,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert set(names) == emitted | registry_only
     assert re.fullmatch(r"[0-9a-f]{64}", registry["registry_sha256"])
     assert registry["registry_sha256"] == (
-        "bdd2c379dc3ad776619a7b94c9e696917b727487c6c02e548c0ad126dfb9bfde"
+        "00ecd1d7c2f19118ea79ff7a981c96c74934929b9fadc7bc6daf91f16afc772e"
     )
     assert registry["registry_sha256"] == get_schema_registry()["registry_sha256"]
     assert check_schema_support("comsol_mcp.session_startup_state", "1.0.0")["supported"] is True
@@ -375,9 +380,121 @@ def test_support_resolution_accepts_current_and_rejects_future_without_mutation(
     assert registry_after is not registry_before
 
 
-def test_capabilities_embed_the_complete_schema_registry():
+def test_select_schema_entry_distinguishes_blank_from_unknown_names():
+    """Both refusals are explicit and neither ever substitutes another schema.
+
+    ``catalog`` rejects a blank selector before reaching this function, so the
+    two refusal paths are asserted here directly: a caller that asked for a
+    malformed or unknown name must never receive a plausible-looking entry.
+    """
+    for blank in ("", "   ", "\t\n"):
+        refused = select_schema_entry(blank)
+        assert refused["found"] is False
+        assert refused["reason_code"] == "invalid_schema_name"
+        assert "entry" not in refused
+        assert "registry_sha256" not in refused
+
+    for non_string in (None, 7, ["comsol_mcp.physical_evidence"], {"a": 1}):
+        refused = select_schema_entry(non_string)
+        assert refused["found"] is False
+        assert refused["reason_code"] == "invalid_schema_name"
+        assert refused["schema_name"] is None
+
+    unknown = select_schema_entry("comsol_mcp.not_a_schema")
+    assert unknown["found"] is False
+    assert unknown["reason_code"] == "unknown_schema_name"
+    assert unknown["schema_name"] == "comsol_mcp.not_a_schema"
+    assert "entry" not in unknown
+
+    # Surrounding whitespace is normalized, not treated as a different name.
+    found = select_schema_entry("  comsol_mcp.physical_evidence  ")
+    assert found["found"] is True
+    assert found["reason_code"] == "found"
+    assert found["entry"]["schema_name"] == "comsol_mcp.physical_evidence"
+    assert found["registry_sha256"] == get_schema_registry()["registry_sha256"]
+
+
+def test_select_schema_entry_never_hands_out_mutable_registry_state():
+    """An on-demand entry is a copy; editing it must not corrupt the registry."""
+    selected = select_schema_entry("comsol_mcp.physical_evidence")
+    selected["entry"]["schema_name"] = "tampered"
+    selected["entry"]["readable_versions"].append("9.9.9")
+
+    again = select_schema_entry("comsol_mcp.physical_evidence")
+    assert again["entry"]["schema_name"] == "comsol_mcp.physical_evidence"
+    assert "9.9.9" not in again["entry"]["readable_versions"]
+    assert again["entry"] == next(
+        entry
+        for entry in get_schema_registry()["entries"]
+        if entry["schema_name"] == "comsol_mcp.physical_evidence"
+    )
+
+
+def test_capabilities_carry_the_compact_registry_view_not_the_full_registry():
+    """Cold discovery must not embed the full registry.
+
+    Embedding it made bootstrap scale with the artifact surface: at 0.7.5 the
+    193-entry registry was 60,293 B of an 81,845 B capabilities response. The
+    bootstrap now carries the same identity as a compact summary, and the full
+    entries are fetched on demand from ``catalog``. This assertion is the
+    regression guard for that boundary.
+    """
     capabilities = get_capabilities(_selection())
-    assert capabilities["schema_registry"] == get_schema_registry()
+    summary = capabilities["schema_registry"]
+    full = get_schema_registry()
+
+    assert "entries" not in summary
+    assert summary["view"] == "summary"
+    # Identity is preserved exactly: the fingerprint is computed over the same
+    # body the full registry hashes, so the two views cannot disagree.
+    assert summary["registry_sha256"] == full["registry_sha256"]
+    assert summary["entry_count"] == full["entry_count"]
+    assert summary["producer"] == full["producer"]
+    assert summary["full_registry_available"] is True
+    assert summary["on_demand_operation"] == "catalog"
+    # Bounded: the summary must stay small even as the registry grows.
+    assert len(json.dumps(summary, sort_keys=True).encode("utf-8")) < 2048
+    assert json.dumps(capabilities, sort_keys=True).encode("utf-8").__len__() <= 32 * 1024
+
+
+def test_on_demand_schema_fetch_returns_exactly_one_entry():
+    """``catalog`` is the on-demand half and never guesses at a name."""
+    from src.tools.discovery import get_tool_catalog
+
+    found = get_tool_catalog(_selection(), schema="comsol_mcp.physical_evidence")
+    assert found["success"] is True
+    assert found["entry"]["schema_name"] == "comsol_mcp.physical_evidence"
+    assert found["entry"]["writable_version"] == "1.1.0"
+    assert found["registry_sha256"] == get_schema_registry()["registry_sha256"]
+
+    missing = get_tool_catalog(_selection(), schema="comsol_mcp.not_a_schema")
+    assert missing["success"] is False
+    assert missing["reason_code"] == "unknown_schema_name"
+    assert "entry" not in missing
+
+
+def test_summary_and_full_registry_agree_on_every_count():
+    """The compact view must describe the whole registry, never a truncation."""
+    from collections import Counter
+
+    from src.schema_registry import summarize_schema_registry
+
+    full = get_schema_registry()
+    summary = summarize_schema_registry()
+    entries = full["entries"]
+
+    assert summary["entry_count"] == len(entries)
+    assert summary["artifact_kind_counts"] == dict(
+        sorted(Counter(entry["artifact_kind"] for entry in entries).items())
+    )
+    assert summary["writable_entry_count"] == sum(
+        1 for entry in entries if entry["writable_version"] is not None
+    )
+    assert summary["migration_capable_entry_count"] == sum(
+        1 for entry in entries if entry["migration"]["available"]
+    )
+    versions = Counter(str(len(entry["readable_versions"])) for entry in entries)
+    assert summary["readable_version_count_histogram"] == dict(sorted(versions.items()))
 
 
 def test_every_advertised_capability_schema_pair_is_readable():

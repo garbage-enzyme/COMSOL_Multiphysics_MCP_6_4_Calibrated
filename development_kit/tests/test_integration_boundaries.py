@@ -3,12 +3,14 @@
 import ast
 import asyncio
 import inspect
+import json
 import runpy
 from pathlib import Path
 from types import SimpleNamespace
 
 import mph
 import pytest
+from mcp.types import PaginatedRequestParams
 
 from development_kit.tests.integration import clientapi_property_acceptance as property_gate
 from development_kit.tests.integration import derived_geometry_acceptance as derived_gate
@@ -146,6 +148,7 @@ def test_property_acceptance_verifies_exact_runtime_and_observes_solution_tags()
 
     assert release["verified"] is True
     assert release["expected_build"] == "6.4.0.293"
+    assert release["parsed_build"] == 293
     with pytest.raises(RuntimeError, match="not 6.4.0.293"):
         property_gate._verify_runtime_release(
             type(
@@ -166,6 +169,130 @@ def test_property_acceptance_verifies_exact_runtime_and_observes_solution_tags()
     assert property_gate._solution_tags(java_model) == ["sol1", "sol2"]
 
 
+def test_property_acceptance_accepts_a_localized_version_string_and_still_pins_the_build():
+    """A localized COMSOL reports the build without the zero patch component.
+
+    Measured on the acceptance host: the Chinese installation reports
+    ``COMSOL Multiphysics 6.4 (开发版本: 293)``. Positional four-number parsing made
+    this gate fail while the build genuinely was 293.
+    """
+    localized = "COMSOL Multiphysics 6.4 (开发版本: 293)"
+    assert property_gate._parse_runtime_release(localized) == ("6.4", 293)
+
+    client = type(
+        "Client",
+        (),
+        {
+            "version": "6.4",
+            "java": type("J", (), {"getComsolVersion": lambda _self: localized})(),
+        },
+    )()
+    release = property_gate._verify_runtime_release(client)
+    assert release["verified"] is True
+    assert release["parsed_build"] == 293
+
+    # The build pin must still reject a genuinely different build.
+    with pytest.raises(RuntimeError, match="not 6.4.0.293"):
+        property_gate._verify_runtime_release(
+            type(
+                "Client",
+                (),
+                {
+                    "version": "6.4",
+                    "java": type(
+                        "J", (), {"getComsolVersion": lambda _self: "COMSOL 6.4 (开发版本: 292)"}
+                    )(),
+                },
+            )()
+        )
+
+
+def test_property_acceptance_release_parse_rejects_unparseable_versions():
+    assert property_gate._parse_runtime_release("") is None
+    assert property_gate._parse_runtime_release("COMSOL Multiphysics") is None
+    assert property_gate._parse_runtime_release("6.4") == ("6.4", 4)
+
+
+def test_live_profile_launches_the_installed_distribution_not_the_source_tree():
+    """The gate asserts ``installed_site_package``, so it must start packaged code.
+
+    ``src`` is a repository-only shim and is not packaged, so ``-m src.server``
+    could never satisfy this gate's own identity requirement.
+    """
+    parameters = live_profile_gate._server("core")
+
+    assert parameters.args == ["-m", "comsol_mcp.server"]
+    assert "src.server" not in parameters.args
+    assert parameters.cwd == live_profile_gate.RUNTIME
+    assert parameters.env["COMSOL_MCP_PROFILE"] == "core"
+    assert "PYTHONPATH" not in parameters.env
+
+
+def test_live_profile_counts_stay_pinned_to_the_frozen_snapshot():
+    """Keep the gate's expectations independent *and* impossible to silently rot.
+
+    The numbers stay written out in the probe so it asserts an independent value
+    rather than echoing the artifact it checks. This test is the drift alarm: it
+    fails the moment they disagree with the frozen snapshot.
+    """
+    snapshot = json.loads(
+        (ROOT / "development_kit/tests/snapshots/profile_tool_names.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert live_profile_gate.PROFILE_COUNTS, "the gate must assert at least one profile"
+    for profile, expected in live_profile_gate.PROFILE_COUNTS.items():
+        assert profile in snapshot, f"{profile} is not a known profile"
+        assert len(snapshot[profile]) == expected, (
+            f"{profile}: gate expects {expected}, frozen snapshot has {len(snapshot[profile])}"
+        )
+        assert expected > 0
+
+
+def test_live_profile_collects_every_page_of_a_cursored_listing(monkeypatch):
+    """One ``tools/list`` call is not the whole surface when a cursor is served."""
+    pages = [
+        SimpleNamespace(
+            tools=[SimpleNamespace(name="alpha")],
+            next_cursor="tools-v1:1",
+        ),
+        SimpleNamespace(
+            tools=[SimpleNamespace(name="beta"), SimpleNamespace(name="gamma")],
+            next_cursor=None,
+        ),
+    ]
+    seen_params = []
+
+    class Session:
+        async def list_tools(self, *, params=None):
+            seen_params.append(params)
+            return pages.pop(0)
+
+    names, page_count = asyncio.run(live_profile_gate._list_every_tool(Session()))
+
+    assert sorted(names) == ["alpha", "beta", "gamma"]
+    assert page_count == 2
+    assert seen_params[0] is None
+    assert seen_params[1] == PaginatedRequestParams(cursor="tools-v1:1")
+
+
+def test_live_profile_cursor_walk_is_bounded():
+    """A server that never stops handing back a cursor must not loop forever."""
+
+    class Session:
+        async def list_tools(self, *, params=None):
+            return SimpleNamespace(
+                tools=[SimpleNamespace(name="looping")],
+                next_cursor="tools-v1:never-ends",
+            )
+
+    names, page_count = asyncio.run(live_profile_gate._list_every_tool(Session()))
+
+    assert page_count == live_profile_gate.MAX_DISCOVERY_PAGES
+    assert len(names) == live_profile_gate.MAX_DISCOVERY_PAGES
+
+
 def test_live_profile_cleanup_continues_and_reports_every_failure():
     class Session:
         def __init__(self):
@@ -173,6 +300,15 @@ def test_live_profile_cleanup_continues_and_reports_every_failure():
 
         async def call_tool(self, name, arguments, **_kwargs):
             self.calls.append((name, arguments))
+            if name == "comsol_status":
+                payload = {
+                    "success": True,
+                    "models": [
+                        {"name": "first", "revision_sha256": "a" * 64},
+                        {"name": "second", "revision_sha256": "b" * 64},
+                    ],
+                }
+                return SimpleNamespace(isError=False, structuredContent=payload)
             if name == "model_remove" and arguments["model_name"] == "first":
                 raise OSError("injected removal failure")
             payload = {"success": name != "comsol_disconnect"}
@@ -181,14 +317,48 @@ def test_live_profile_cleanup_continues_and_reports_every_failure():
     session = Session()
     cleanup = asyncio.run(live_profile_gate._cleanup_live_session(session, ["first", "second"]))
 
-    assert session.calls == [
-        ("model_remove", {"model_name": "second"}),
-        ("model_remove", {"model_name": "first"}),
+    # `model_remove` is destructive_session, so it is guarded by the required
+    # model-revision contract; the cleanup must read and declare the revision
+    # before each removal. Only the removals and the disconnect are asserted
+    # here; the preceding revision reads are filtered out.
+    assert [call for call in session.calls if call[0] != "comsol_status"] == [
+        ("model_remove", {"model_name": "second", "expected_model_revision": "b" * 64}),
+        ("model_remove", {"model_name": "first", "expected_model_revision": "a" * 64}),
         ("comsol_disconnect", {}),
     ]
     assert cleanup["passed"] is False
     assert cleanup["steps"]["model_remove:first"]["error_type"] == "OSError"
     assert cleanup["steps"]["comsol_disconnect"]["passed"] is False
+
+
+def test_live_profile_declares_the_model_revision_for_every_guarded_call():
+    """Both guarded call sites must declare the revision, so the gate measures
+    the real contract instead of failing closed with
+    "expected_model_revision does not match current model state."
+    """
+
+    class Session:
+        async def call_tool(self, name, _arguments, **_kwargs):
+            assert name == "comsol_status"
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "success": True,
+                    "models": [{"name": "m", "revision_sha256": "c" * 64}],
+                },
+            )
+
+    assert asyncio.run(live_profile_gate._model_revision(Session(), "m")) == "c" * 64
+
+    class Missing:
+        async def call_tool(self, _name, _arguments, **_kwargs):
+            return SimpleNamespace(isError=False, structuredContent={"success": True, "models": []})
+
+    with pytest.raises(RuntimeError, match="absent from the session status"):
+        asyncio.run(live_profile_gate._model_revision(Missing(), "m"))
+
+    source = inspect.getsource(live_profile_gate)
+    assert source.count('"expected_model_revision"') >= 2
 
 
 def test_live_profile_call_timeout_is_bounded_by_absolute_deadline(monkeypatch):
@@ -273,6 +443,9 @@ def test_unicode_cleanup_continues_after_unlink_failure():
     calls = []
 
     class Client:
+        # A still-connected client, so the disconnect step is exercised here.
+        port = 20320
+
         def clear(self):
             calls.append("clear")
 
@@ -296,6 +469,48 @@ def test_unicode_cleanup_continues_after_unlink_failure():
     assert exit_code == 1
     assert result["success"] is False
     assert result["cleanup"]["steps"]["output_unlink"]["error_type"] == "OSError"
+
+
+def test_unicode_cleanup_skips_disconnect_once_clear_has_torn_the_server_down():
+    """``clear()`` disconnects a standalone client, so ``disconnect()`` would raise.
+
+    MPh's ``Client.disconnect`` only acts ``if self.port``; after ``clear()`` on a
+    standalone client ``port`` is ``None`` and calling it raises "The client is not
+    connected to a server." Measured on real COMSOL: that spurious failure was the
+    only reason this probe failed after saving its model successfully.
+    """
+    namespace = runpy.run_path(
+        str(Path(__file__).parents[2] / "development_kit/tests/integration/probes/unicode_save.py"),
+        run_name="unicode_cleanup_test",
+    )
+    calls = []
+
+    class Client:
+        port = None
+
+        def clear(self):
+            calls.append("clear")
+
+        def disconnect(self):  # pragma: no cover - must never be called
+            calls.append("disconnect")
+            raise AssertionError("disconnect must not run once clear() has disconnected")
+
+    class Output:
+        def unlink(self, *, missing_ok):
+            assert missing_ok is True
+            calls.append("unlink")
+
+    class Directory:
+        def rmdir(self):
+            calls.append("rmdir")
+
+    result = {"success": True}
+    exit_code = namespace["_cleanup_probe"](Client(), Output(), Directory(), result)
+
+    assert calls == ["clear", "unlink", "rmdir"]
+    assert "client_disconnect" not in result["cleanup"]["steps"]
+    assert exit_code == 0
+    assert result["success"] is True
 
 
 @pytest.mark.parametrize(

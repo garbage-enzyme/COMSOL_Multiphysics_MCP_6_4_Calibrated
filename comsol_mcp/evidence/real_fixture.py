@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp.settings import MODEL_READ_ROOTS_ENV
 from comsol_mcp.utils.validation import strict_json_number
 
 MODEL_ENV = "COMSOL_REAL_TEST_MODEL"
@@ -136,9 +137,10 @@ def controlled_fixture_environment_from_reference_power_spec(
     if not source_candidate.is_absolute():
         raise ValueError("reference-power spec source_model_path must be an absolute path")
     environment = dict(base_environment if base_environment is not None else os.environ)
+    resolved_source = source_candidate.resolve()
     environment.update(
         {
-            MODEL_ENV: str(source_candidate.resolve()),
+            MODEL_ENV: str(resolved_source),
             SOURCE_SHA256_ENV: _source_sha256(raw.get("expected_source_sha256")),
             WAVELENGTH_ENV: format(_positive_wavelength(wavelength.get("value")), ".17g"),
             DOMAINS_ENV: json.dumps(
@@ -151,6 +153,20 @@ def controlled_fixture_environment_from_reference_power_spec(
             ),
         }
     )
+    # The MCP `model_load` path policy only admits files under its configured
+    # read roots, which come from settings and are not overridden once set. A
+    # fixture that lives outside those roots therefore cannot be loaded by a
+    # probe that goes through the real tool surface. Add the fixture's own
+    # directory as an additional read root, preserving any caller-configured
+    # roots instead of replacing them, so the tool is allowed to read exactly the
+    # file this spec declares and nothing more broadly.
+    fixture_root = resolved_source.parent
+    existing_roots = [
+        item for item in environment.get(MODEL_READ_ROOTS_ENV, "").split(os.pathsep) if item
+    ]
+    if str(fixture_root) not in existing_roots:
+        existing_roots.append(str(fixture_root))
+    environment[MODEL_READ_ROOTS_ENV] = os.pathsep.join(existing_roots)
     controlled_fixture_from_environment(environment, verify_file=True)
     return environment
 

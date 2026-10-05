@@ -46,6 +46,20 @@ LINT_TARGETS = (
     # S4A: the project-owned COMSOL adapter seam is lint-clean and stays covered.
     "comsol_mcp/adapter",
     "comsol_mcp/native_runtime.py",
+    # The separated SDK/protocol/extension identity surface and the Tasks
+    # adapter are lint- and strict-typing-clean and stay covered.
+    "comsol_mcp/protocol_identity.py",
+    "comsol_mcp/jobs/tasks_bridge.py",
+    "comsol_mcp/jobs/tasks_extension.py",
+    "comsol_mcp/shared_session/dbmodel_operations.py",
+    "comsol_mcp/shared_session/model_manager.py",
+    "comsol_mcp/shared_session/solver_owners.py",
+    "comsol_mcp/durable/operation_ledger.py",
+    "comsol_mcp/tools/model_manager.py",
+    # P0: the progressive-discovery surface is lint-clean and stays covered.
+    "comsol_mcp/tools/discovery.py",
+    "comsol_mcp/tools/discovery_tools.py",
+    "comsol_mcp/tools/tools_list_pagination.py",
     "comsol_mcp/schema_registry.py",
     "comsol_mcp/settings_gui_handshake.py",
     "comsol_mcp/settings_gui_launcher.py",
@@ -92,6 +106,9 @@ LINT_TARGETS = (
     "development_kit/scripts/robust_gradient_ladder_licensed_gate.py",
     "development_kit/scripts/verify_robust_gradient_ladder_receipt.py",
     "development_kit/scripts/standalone_licensed_gate.py",
+    # 0.7.6: the controlled engineering fixture builder is lint-clean and covered.
+    "development_kit/scripts/build_engineering_fixture.py",
+    "development_kit/tests/test_engineering_fixture_builder.py",
     "development_kit/benchmarks/research_campaign.py",
     "development_kit/tests/conftest.py",
     "development_kit/tests/test_alpha73_public_surface.py",
@@ -214,6 +231,7 @@ MYPY_GROUPS = (
         "comsol_mcp/settings_gui_handshake.py",
         "comsol_mcp/settings_gui_launcher.py",
         "comsol_mcp/compatibility.py",
+        "comsol_mcp/protocol_identity.py",
         "comsol_mcp/tools/session_status.py",
         "comsol_mcp/tools/settings_gui.py",
         "comsol_mcp/knowledge/lexical_build_worker.py",
@@ -221,6 +239,29 @@ MYPY_GROUPS = (
         "comsol_mcp/standalone",
         "comsol_mcp/research",
         "src/__init__.py",
+    ),
+    (
+        # The Tasks adapter subclasses SDK base classes and pydantic models whose
+        # types resolve only when imports are followed as far as the checker
+        # needs. `silent` type-checks these files strictly while not reporting
+        # diagnostics for transitively imported modules, so the modules stay
+        # fully covered without weakening any rule for the rest of the tree.
+        "--follow-imports=silent",
+        "comsol_mcp/jobs/tasks_bridge.py",
+        "comsol_mcp/jobs/tasks_extension.py",
+    ),
+    (
+        "--follow-imports=silent",
+        "comsol_mcp/shared_session/dbmodel_operations.py",
+        "comsol_mcp/shared_session/model_manager.py",
+        "comsol_mcp/shared_session/solver_owners.py",
+        "comsol_mcp/durable/operation_ledger.py",
+        "comsol_mcp/tools/model_manager.py",
+        # P0: the discovery surface handles SDK result shapes whose types resolve
+        # only when imports are followed as far as the checker needs.
+        "comsol_mcp/tools/discovery.py",
+        "comsol_mcp/tools/discovery_tools.py",
+        "comsol_mcp/tools/tools_list_pagination.py",
     ),
 )
 PRODUCTION_ROOTS = ("comsol_mcp", "src")

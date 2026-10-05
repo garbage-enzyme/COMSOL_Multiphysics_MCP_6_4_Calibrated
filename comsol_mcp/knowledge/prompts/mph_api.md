@@ -9,14 +9,14 @@ their own compatibility checks.
 - One Python process can construct only one MPh client because JPype permits one
   JVM lifecycle.
 - When using this MCP server, call `solver_status` and `solver_preflight` before
-  `comsol_start`; do not instantiate a separate `mph.Client` in parallel.
+  `comsol_start`. Do not instantiate a separate `mph.Client` in parallel.
 - Treat loaded source models as immutable. Work on a derived copy and save to a
   separate path.
 - A direct `mph.Client(port=...)` connection does not by itself provide safe
   shared Desktop ownership, model locking, or detach-preservation semantics.
   Use the explicit default-off `shared_server.enabled` feature with any suitable
   tool profile, plus its preflight, exact adoption, revision lock, Save Copy, and detach tools for the supported
-  local shared lifecycle; see `docs/interactive_shared_session/`.
+  local shared lifecycle. See `docs/interactive_shared_session/`.
 
 ## Installation
 
@@ -64,7 +64,7 @@ client.models()      # loaded model names
 
 Use `client.create(name)`, `client.load(path)`, `client.remove(model)`, and
 `client.clear()` for client-owned models. `client.disconnect()` is for a Server
-connection; it is not a substitute for verified cleanup of an MCP-owned
+connection. It is not a substitute for verified cleanup of an MCP-owned
 standalone worker.
 
 ## Model wrapper
@@ -107,8 +107,8 @@ outer_indices, outer_values = model.outer(dataset="Study 1//Solution 1")
 ```
 
 Specify the dataset and inner solution when more than one solution exists.
-Multi-point outer sweeps are not reliably indexed by every clientapi path;
-staged one-point solves are preferred for durable work.
+Multi-point outer sweeps are not reliably indexed by every clientapi path.
+Staged one-point solves are preferred for durable work.
 
 ## Model tree nodes
 
@@ -143,10 +143,10 @@ feature = physics.feature().create("bc1", "FeatureType", 2)
 ```
 
 - Convert Java tag arrays explicitly with `list(collection.tags())`.
-- Resolve an item by string tag; integer `get(index)` is commonly unsupported.
+- Resolve an item by string tag. Integer `get(index)` is commonly unsupported.
 - Use `feature().size()` rather than `len(feature())`.
-- Physics-interface creation takes a string spatial dimension such as `"3"`;
-  child features take an integer entity dimension.
+- Physics-interface creation takes a string spatial dimension such as `"3"`.
+  Child features take an integer entity dimension.
 - Run a study with `jm.study("std1").run()`.
 - Use exact capitalization such as `getSDim()`, `getNumElem()`, and
   `getNumVertex()`.
@@ -179,7 +179,7 @@ so derived models and checkpoints should use unique paths.
   type, or entity dimension.
 - List indexing errors: iterate tags and call `.get(tag)`.
 - Unexpected vacuum electrostatics: the default `FreeSpace` feature ignores a
-  material's relative permittivity; add `ChargeConservation` with
+  material's relative permittivity. Add `ChargeConservation` with
   `materialType="from_mat"`.
 - Wrong transient results: select the intended dataset and inner solution
   explicitly.

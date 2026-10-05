@@ -1,121 +1,120 @@
 # Repository layout
 
-This document is the complete tracked-file map for developers and coding agents.
-Generated files, caches, local runtime artifacts, licensed manuals, and private
-models are intentionally absent.
+This document lists tracked files and their purposes for developers and coding agents.
+The map excludes untracked generated files, caches, local runtime artifacts, licensed manuals, and private models.
 
 ## Repository root and automation
 
-- `.gitattributes` — This file defines repository text and line-ending attributes.
-- `.gitignore` — This file excludes generated, local, and sensitive artifacts from Git.
-- `AGENTS.md` — This file provides repository development, testing, and safety guidance for coding agents.
-- `CLAUDE.md` — This file provides repository development, testing, and safety guidance for Claude Code.
-- `CITATION.cff` — This file provides machine-readable software and preferred-paper citation metadata.
+- `.gitattributes` — The file defines repository text and line-ending attributes.
+- `.gitignore` — The file excludes generated, local, and sensitive artifacts from Git.
+- `AGENTS.md` — The file provides repository development, testing, and safety guidance for coding agents.
+- `CLAUDE.md` — The file provides repository development, testing, and safety guidance for Claude Code.
+- `CITATION.cff` — The file provides machine-readable software and preferred-paper citation metadata.
 - `.github/workflows/ci.yml` — This unified workflow runs the blocking backend, dependency, security, package, and independent Windows Settings GUI jobs under one solver-free run.
-- `.github/workflows/dependency_report.yml` — This workflow produces the scheduled information-only dependency report.
-- `LICENSE` — This file contains the repository MIT license.
-- `Open_Settings_GUI.ps1` — This script opens or validates the Settings GUI through the bounded Python launcher.
-- `README.md` — This file is the primary English project introduction and usage guide.
-- `README_CN.md` — This file is the Chinese project introduction and usage guide.
-- `DEPLOYMENT.md` — This file explains the supported English deployment procedure.
-- `DEPLOYMENT_CN.md` — This file explains the supported Chinese deployment procedure.
-- `pyproject.toml` — This file defines package metadata, dependencies, build settings, tests, and the console entry point.
-- `settings.json` — This file stores the shared grouped startup settings and safe defaults.
+- `.github/workflows/dependency_report.yml` — The workflow produces the scheduled information-only dependency report.
+- `LICENSE` — The file contains the repository MIT license.
+- `Open_Settings_GUI.ps1` — The script opens or validates the Settings GUI through the bounded Python launcher.
+- `README.md` — The file is the primary English project introduction and usage guide.
+- `README_CN.md` — The file is the Chinese project introduction and usage guide.
+- `DEPLOYMENT.md` — The file explains the supported English deployment procedure.
+- `DEPLOYMENT_CN.md` — The file explains the supported Chinese deployment procedure.
+- `pyproject.toml` — The file defines package metadata, dependencies, build settings, tests, and the console entry point.
+- `settings.json` — The file stores the shared grouped startup settings and safe defaults.
 
 ## Client configuration and dependency constraints
 
-- `config/claude-code-mcp.example.json` — This file provides an example Claude Code stdio MCP configuration.
-- `config/codex-mcp.example.toml` — This file provides an example Codex stdio MCP configuration.
-- `config/hermes-mcp.example.yaml` — This file provides an example Hermes Agent stdio MCP configuration.
-- `config/opencode-mcp.example.json` — This file provides an example opencode stdio MCP configuration.
-- `constraints/release_locked_py314.txt` — This file locks the complete Python 3.14 runtime dependency set with hashes.
-- `constraints/minimum_supported_py314.txt` — This file pins the reviewed minimum binary-installable Python 3.14 direct dependencies.
-- `constraints/tested_versions.json` — This file records the human-reviewed direct dependency versions and compatibility lane.
-- `docs/profile_migration.md` — This file explains static profile selection and migration from broader tool surfaces.
-- `docs/setting_guide/README.md` — This file defines every English project settings field, default, and accepted value.
-- `docs/setting_guide/README_CN.md` — This file defines every Chinese project settings field, default, and accepted value.
-- `docs/evidence_integrity/README.md` — This file is the complete English evidence-integrity and anti-hallucination user guide.
-- `docs/evidence_integrity/README_CN.md` — This file is the complete Chinese evidence-integrity and anti-hallucination user guide.
-- `docs/evidence_integrity/default_settings.json` — This file is the tested all-checks-enabled evidence-integrity settings example.
-- `docs/evidence_integrity/exploration_settings.json` — This file is the tested single-check opt-out exploration example.
-- `docs/interactive_shared_session/README.md` — This file is the complete English interactive Desktop/Server collaboration guide.
-- `docs/interactive_shared_session/README_CN.md` — This file is the complete Chinese interactive Desktop/Server collaboration guide.
-- `docs/simulation_execution_modes/README.md` — This file defines the five supported simulation execution modes and the English selection contract.
-- `docs/simulation_execution_modes/README_CN.md` — This file defines the five supported simulation execution modes and the Chinese selection contract.
+- `config/claude-code-mcp.example.json` — The file provides an example Claude Code stdio MCP configuration.
+- `config/codex-mcp.example.toml` — The file provides an example Codex stdio MCP configuration.
+- `config/hermes-mcp.example.yaml` — The file provides an example Hermes Agent stdio MCP configuration.
+- `config/opencode-mcp.example.json` — The file provides an example opencode stdio MCP configuration.
+- `constraints/release_locked_py314.txt` — The file locks the complete Python 3.14 runtime dependency set with hashes.
+- `constraints/minimum_supported_py314.txt` — The file pins the reviewed minimum binary-installable Python 3.14 direct dependencies.
+- `constraints/tested_versions.json` — The file records the human-reviewed direct dependency versions and compatibility lane.
+- `docs/profile_migration.md` — The file explains static profile selection and migration from broader tool surfaces.
+- `docs/setting_guide/README.md` — The file defines every English project settings field, default, and accepted value.
+- `docs/setting_guide/README_CN.md` — The file defines every Chinese project settings field, default, and accepted value.
+- `docs/evidence_integrity/README.md` — The file is the complete English evidence-integrity and anti-hallucination user guide.
+- `docs/evidence_integrity/README_CN.md` — The file is the complete Chinese evidence-integrity and anti-hallucination user guide.
+- `docs/evidence_integrity/default_settings.json` — The file is the tested all-checks-enabled evidence-integrity settings example.
+- `docs/evidence_integrity/exploration_settings.json` — The file is the tested single-check opt-out exploration example.
+- `docs/interactive_shared_session/README.md` — The file is the complete English interactive Desktop/Server collaboration guide.
+- `docs/interactive_shared_session/README_CN.md` — The file is the complete Chinese interactive Desktop/Server collaboration guide.
+- `docs/simulation_execution_modes/README.md` — The file defines the five supported simulation execution modes and the English selection contract.
+- `docs/simulation_execution_modes/README_CN.md` — The file defines the five supported simulation execution modes and the Chinese selection contract.
 
 ## Durable local launcher
 
-- `launcher/README.md` — This file explains the English durable local launcher workflow and safety contract.
-- `launcher/README_CN.md` — This file explains the Chinese durable local launcher workflow and safety contract.
-- `launcher/powershell/DurableLauncher.psm1` — This module implements portable Windows PowerShell start, status, pause, resume, monitoring, and cleanup operations.
-- `launcher/python/durable_control.py` — This helper applies atomic file-based pause, resume, and stop control inside a compatible Python driver.
+- `launcher/README.md` — The file explains the English durable local launcher workflow and safety contract.
+- `launcher/README_CN.md` — The file explains the Chinese durable local launcher workflow and safety contract.
+- `launcher/powershell/DurableLauncher.psm1` — The module implements portable Windows PowerShell start, status, pause, resume, monitoring, and cleanup operations.
+- `launcher/python/durable_control.py` — The helper applies atomic file-based pause, resume, and stop control inside a compatible Python driver.
 - `launcher/templates/Run_DurableJob.template.ps1` — This parameterized template launches one portable durable local job.
 - `launcher/tests/fake_durable_driver.py` — This synthetic driver exercises durable point commits and file-based control without COMSOL.
-- `launcher/tests/Test_DurableLauncher.ps1` — This script tests the main start, status, pause, resume, identity, and cleanup workflow.
-- `launcher/tests/Test_MonitorRefreshFailure.ps1` — This script tests bounded monitor behavior after a refresh failure.
-- `launcher/tests/Test_PreflightFailure.ps1` — This script tests fail-closed resource and configuration preflight behavior.
+- `launcher/tests/Test_DurableLauncher.ps1` — The script tests the main start, status, pause, resume, identity, and cleanup workflow.
+- `launcher/tests/Test_MonitorRefreshFailure.ps1` — The script tests bounded monitor behavior after a refresh failure.
+- `launcher/tests/Test_PreflightFailure.ps1` — The script tests fail-closed resource and configuration preflight behavior.
 - `launcher/tests/Test_RefreshFailureChild.ps1` — This child script supplies a controlled monitor-refresh failure.
-- `launcher/tests/Test_TerminalBanner.ps1` — This script tests terminal-state banner presentation.
+- `launcher/tests/Test_TerminalBanner.ps1` — The script tests terminal-state banner presentation.
 - `launcher/tests/Test_TerminalBannerChild.ps1` — This child script supplies terminal banner fixture state.
-- `launcher/tests/Test_TerminalHold.ps1` — This script tests that terminal state remains visible until explicit acknowledgement.
+- `launcher/tests/Test_TerminalHold.ps1` — The script tests that terminal state remains visible until explicit acknowledgement.
 - `launcher/tests/Test_TerminalHoldChild.ps1` — This child script supplies terminal hold fixture state.
-- `launcher/tests/Test_TerminalPresentation.ps1` — This script tests terminal summary formatting and durable result presentation.
+- `launcher/tests/Test_TerminalPresentation.ps1` — The script tests terminal summary formatting and durable result presentation.
 
 ## Standalone recipes
 
-- `recipes/_paths.py` — This module provides shared ASCII-safe paths for standalone recipes.
-- `recipes/_mim_safety.py` — This module provides fail-closed topology, property, sweep, result, and save contracts for standalone MIM recipes.
-- `recipes/acoustic_duct_2d.py` — This script builds and optionally validates a minimal analytical two-dimensional Pressure Acoustics duct.
-- `recipes/acdc_2d_differential_coils.py` — This script builds a two-coil Induction Currents model from a caller-supplied baseline.
-- `recipes/mim_drude_sweep.py` — This script demonstrates a durable Drude-material parameter sweep.
-- `recipes/mim_lml_continuous.py` — This script demonstrates a continuous layered-metal workflow.
-- `recipes/mim_patch_partition.py` — This script demonstrates partitioned patch-metasurface construction.
-- `recipes/parallel_plate_capacitor.py` — This script builds and optionally validates an analytical three-dimensional parallel-plate capacitor.
+- `recipes/_paths.py` — The module provides shared ASCII-safe paths for standalone recipes.
+- `recipes/_mim_safety.py` — The module provides fail-closed topology, property, sweep, result, and save contracts for standalone MIM recipes.
+- `recipes/acoustic_duct_2d.py` — The script builds and optionally validates a minimal analytical two-dimensional Pressure Acoustics duct.
+- `recipes/acdc_2d_differential_coils.py` — The script builds a two-coil Induction Currents model from a caller-supplied baseline.
+- `recipes/mim_drude_sweep.py` — The script demonstrates a durable Drude-material parameter sweep.
+- `recipes/mim_lml_continuous.py` — The script demonstrates a continuous layered-metal workflow.
+- `recipes/mim_patch_partition.py` — The script demonstrates partitioned patch-metasurface construction.
+- `recipes/parallel_plate_capacitor.py` — The script builds and optionally validates an analytical three-dimensional parallel-plate capacitor.
 
 ## DSH native bridge (repo-only)
 
-- `dsh_bridge/.gitignore` — This file excludes local node_modules, temp, job-state, and desktop shortcut artifacts from Git.
-- `dsh_bridge/README.md` — This file explains the optional DeepSeek Harness native compat layer, why it bypasses dsh-mcp-client, and the production wiring contract.
-- `dsh_bridge/DEEPSEEK_COMPATIBILITY.md` — This file records the alpha7.2/0.7.2 DSH compatibility contract, version boundary, installation, verification, recovery, and evidence limits.
-- `dsh_bridge/package.json` — This file declares the zero-dependency `@local/dsh-comsol-bridge` package metadata and engines.
-- `dsh_bridge/install.ps1` — This script links the bridge package root into a DSH profile node_modules as a junction.
-- `dsh_bridge/.github/workflows/ci.yml` — This workflow runs the bridge regression tests on Windows and Ubuntu.
+- `dsh_bridge/.gitignore` — The file excludes local node_modules, temp, job-state, and desktop shortcut artifacts from Git.
+- `dsh_bridge/README.md` — The file explains the optional DeepSeek Harness native compat layer, why it bypasses dsh-mcp-client, and the production wiring contract.
+- `dsh_bridge/DEEPSEEK_COMPATIBILITY.md` — The file defines the DSH compatibility contract, version boundary, installation, verification, recovery, and evidence limits.
+- `dsh_bridge/package.json` — The file declares the zero-dependency `@local/dsh-comsol-bridge` package metadata and engines.
+- `dsh_bridge/install.ps1` — The script links the bridge package root into a DSH profile node_modules as a junction.
+- `dsh_bridge/.github/workflows/ci.yml` — The workflow runs the bridge regression tests on Windows and Ubuntu.
 - `dsh_bridge/fixtures/fake-comsol-server.mjs` — This fixture provides the solver-free fake comsol-mcp server with ten failure modes.
-- `dsh_bridge/lib/index.js` — This module is the cordis plugin entry that registers native tool names and wires the job mirror.
-- `dsh_bridge/lib/mcp-client-core.mjs` — This module implements the ctx-independent MCP stdio client with single-flight serialization and reconnect.
-- `dsh_bridge/lib/job-mirror.mjs` — This module mirrors comsol durable jobs into ctx.jobs with a persistent state store.
-- `dsh_bridge/scripts/smoke.mjs` — This script runs the end-to-end bridge smoke demonstration against the fake server.
-- `dsh_bridge/tests/core.test.mjs` — This module tests connection, discovery, serialization, abort, timeout, reconnect, and paging.
-- `dsh_bridge/tests/failures.test.mjs` — This module tests missing servers, crashes, garbage frames, unsupported versions, and cancel ambiguity.
-- `dsh_bridge/tests/helpers.mjs` — This module supplies shared harness helpers for bridge regression tests.
-- `dsh_bridge/tests/mirror.test.mjs` — This module tests terminal detection, completion, cancellation, loss of contact, and progress streams.
-- `dsh_bridge/tests/occupancy.test.mjs` — This module tests single-flight occupancy after request timeout and abort.
-- `dsh_bridge/tests/plugin.test.mjs` — This module tests tool-name normalization, config merging, and textual projection.
+- `dsh_bridge/lib/index.js` — The module is the cordis plugin entry that registers native tool names and wires the job mirror.
+- `dsh_bridge/lib/mcp-client-core.mjs` — The module implements the ctx-independent MCP stdio client with single-flight serialization and reconnect.
+- `dsh_bridge/lib/job-mirror.mjs` — The module mirrors comsol durable jobs into ctx.jobs with a persistent state store.
+- `dsh_bridge/scripts/smoke.mjs` — The script runs the end-to-end bridge smoke demonstration against the fake server.
+- `dsh_bridge/tests/core.test.mjs` — The tests cover connection, discovery, serialization, abort, timeout, reconnect, and paging.
+- `dsh_bridge/tests/failures.test.mjs` — The tests cover missing servers, crashes, garbage frames, unsupported versions, and cancel ambiguity.
+- `dsh_bridge/tests/helpers.mjs` — The module supplies shared harness helpers for bridge regression tests.
+- `dsh_bridge/tests/mirror.test.mjs` — The tests cover terminal detection, completion, cancellation, loss of contact, and progress streams.
+- `dsh_bridge/tests/occupancy.test.mjs` — The tests cover single-flight occupancy after request timeout and abort.
+- `dsh_bridge/tests/plugin.test.mjs` — The tests cover tool-name normalization, config merging, and textual projection.
 
 ## Development kit entry points
 
-- `development_kit/__init__.py` — This file marks the repository-only development assets as a Python package.
-- `development_kit/README.md` — This file is the starting guide for tests, release gates, fixtures, and handoff work.
-- `development_kit/benchmarks/__init__.py` — This file marks repository-only benchmark drivers as a Python package.
-- `development_kit/benchmarks/semantic_benchmark.py` — This script runs the frozen lexical and semantic retrieval benchmark.
-- `development_kit/benchmarks/research_campaign.py` — This module defines the frozen solver-free research-campaign suite, fake MIM evaluator, and multi-seed optimizer baseline comparison.
-- `development_kit/docs/layout.md` — This file maps every tracked repository file to one concise purpose statement.
-- `development_kit/docs/legacy_phase_compatibility.md` — This file records the frozen compatibility allowlist for historical aliases.
-- `development_kit/docs/release_checklist.md` — This file gives the ordered dependency, package, licensed, install, and restart release checklist.
-- `development_kit/docs/surrogate_dnn_capability_matrix.md` — This file records the proven COMSOL 6.4 surrogate-training and DNN ClientAPI capability matrix, including the exact creation hierarchy, training-lifecycle methods, split and seed controls, and frozen limitations.
+- `development_kit/__init__.py` — The file marks the repository-only development assets as a Python package.
+- `development_kit/README.md` — The file is the starting guide for tests, release gates, fixtures, and handoff work.
+- `development_kit/benchmarks/__init__.py` — The file marks repository-only benchmark drivers as a Python package.
+- `development_kit/benchmarks/semantic_benchmark.py` — The script runs the frozen lexical and semantic retrieval benchmark.
+- `development_kit/benchmarks/research_campaign.py` — The module defines the frozen solver-free research-campaign suite, fake MIM evaluator, and multi-seed optimizer baseline comparison.
+- `development_kit/docs/layout.md` — The file lists tracked repository files and explains their purposes and limits.
+- `development_kit/docs/legacy_phase_compatibility.md` — The file records the frozen compatibility allowlist for historical aliases.
+- `development_kit/docs/release_checklist.md` — The file gives the ordered dependency, package, licensed, install, and restart release checklist.
+- `development_kit/docs/surrogate_dnn_capability_matrix.md` — The file records proven COMSOL 6.4 surrogate-training and DNN ClientAPI capabilities. It covers the exact creation hierarchy, training-lifecycle methods, split and seed controls, and frozen limitations.
 
 ## Release contracts and fixtures
 
-- `development_kit/release/support_matrix.json` — This file declares release identity sources, profile states, and licensed-gate requirements.
+- `development_kit/release/support_matrix.json` — The file declares release identity sources, profile states, and licensed-gate requirements.
 - `development_kit/release/release_facts.json` — This generated view records live tool, profile, schema, and compatibility identities.
 - `development_kit/release/profile_migration.json` — This receipt records the exact recommended-profile tool diff and compatibility replacement.
-- `development_kit/release/vulnerability_allowlist.json` — This file records exact reviewed vulnerabilities with mandatory expiry dates.
-- `development_kit/release/dependency_license_review.json` — This file records accepted license metadata for every declared runtime dependency.
-- `development_kit/release/research_optimizer_dependency_review.json` — This file freezes the uncertainty-aware optimizer dependency decision and isolation gates.
+- `development_kit/release/vulnerability_allowlist.json` — The file records exact reviewed vulnerabilities with mandatory expiry dates.
+- `development_kit/release/dependency_license_review.json` — The file records accepted license metadata for every declared runtime dependency.
+- `development_kit/release/research_optimizer_dependency_review.json` — The file freezes the uncertainty-aware optimizer dependency decision and isolation gates.
 - `development_kit/release/native_gradient_support_matrix.json` — This redacted matrix records the alpha7.1 licensed native-gradient and bounded optimizer validation boundary.
-- `development_kit/release/coverage_policy.json` — This file records the non-decreasing global coverage floor and owned per-file safety targets.
-- `development_kit/release/planning_code_allowlist.json` — This file freezes historical planning-code matches by path, count, and hash.
-- `development_kit/release/integration_fixtures/manifest.json` — This file inventories sanitized integration contracts and their canonical hashes.
+- `development_kit/release/coverage_policy.json` — The file records the non-decreasing global coverage floor and owned per-file safety targets.
+- `development_kit/release/planning_code_allowlist.json` — The file freezes historical planning-code matches by path, count, and hash.
+- `development_kit/release/integration_fixtures/manifest.json` — The file inventories sanitized integration contracts and their canonical hashes.
 - `development_kit/release/integration_fixtures/capacitor_clientapi_regression.json` — This contract defines the analytic capacitor clientapi regression.
 - `development_kit/release/integration_fixtures/job_recovery_cancellation.json` — This contract defines durable recovery and cancellation acceptance.
 - `development_kit/release/integration_fixtures/lexical_manual_retrieval.json` — This contract defines bounded lexical manual retrieval acceptance.
@@ -128,68 +127,69 @@ models are intentionally absent.
 
 ## Development and release scripts
 
-- `development_kit/scripts/__init__.py` — This file marks repository-only release utilities as a Python package.
-- `development_kit/scripts/acceptance_cleanup.py` — This module records independent licensed-gate cleanup steps and makes them part of final success.
-- `development_kit/scripts/dependency_license_gate.py` — This script emits a path-free receipt and fails on expired, missing, stale, or unmatched runtime dependency license reviews.
-- `development_kit/scripts/dependency_drift_report.py` — This script builds the deterministic information-only dependency report with declared scopes, project ranges, exact-pair constraints, and complete release-lock drift.
-- `development_kit/scripts/quality_gate.py` — This script runs the ratcheted lint, format, typing, property, coverage, license, cold-start, and response-budget gates, using four isolated pytest workers locally and deterministic plain-pytest file shards on GitHub-hosted Python 3.14 (no xdist), plus a serial process-inventory tail and a unique evidence directory per run.
-- `development_kit/scripts/serial_test_shards.py` — This helper runs deterministic pytest file shards as independent serial processes for hosted CI without using xdist.
-- `development_kit/scripts/generate_release_lock.py` — This script generates the complete hashed Windows Python release lock.
-- `development_kit/scripts/installed_package_probe.py` — This script verifies installed discovery, schemas, profiles, and deployment identity without COMSOL startup.
-- `development_kit/scripts/installed_stdio_probe.py` — This script verifies the installed console entry point over real MCP stdio transport.
+- `development_kit/scripts/__init__.py` — The file marks repository-only release utilities as a Python package.
+- `development_kit/scripts/acceptance_cleanup.py` — The module records independent licensed-gate cleanup steps and makes them part of final success.
+- `development_kit/scripts/build_engineering_fixture.py` — This repository-only builder creates the controlled periodic Wave Optics fixture for licensed integration probes. It acquires a solver lease and uses exactly one core and a private output directory. It reads the top-air domain identity and coordinate extent from the model it builds. It refuses to overwrite an existing model. After client release, it publishes through an atomic link and writes the SHA-256-bound fixture spec. The lossless dielectric placeholder tests interfaces and gates only. It makes no published-structure or real-metal claim.
+- `development_kit/scripts/dependency_license_gate.py` — The script emits a path-free receipt and fails on expired, missing, stale, or unmatched runtime dependency license reviews.
+- `development_kit/scripts/dependency_drift_report.py` — The script builds the deterministic information-only dependency report with declared scopes, project ranges, exact-pair constraints, and complete release-lock drift.
+- `development_kit/scripts/quality_gate.py` — The script runs the ratcheted lint, format, typing, property, coverage, license, cold-start, and response-budget gates. Local tests use four isolated pytest workers. GitHub-hosted Python 3.14 uses deterministic plain-pytest file shards without xdist. Each run includes a serial process-inventory tail and a unique evidence directory.
+- `development_kit/scripts/serial_test_shards.py` — The helper runs deterministic pytest file shards as independent serial processes for hosted CI without using xdist.
+- `development_kit/scripts/generate_release_lock.py` — The script generates the complete hashed Windows Python release lock.
+- `development_kit/scripts/installed_package_probe.py` — The script verifies installed discovery, schemas, profiles, and deployment identity without COMSOL startup.
+- `development_kit/scripts/installed_stdio_probe.py` — The script verifies the installed console entry point over real MCP stdio transport.
 - `development_kit/scripts/native_adjoint_licensed_gate.py` — This repository-only alpha7.1 gate applies the trusted native adjoint structure on an immutable derived model and emits separate path-redacted and private receipts.
-- `development_kit/scripts/native_gradient_licensed_gate.py` — This repository-only licensed runner executes one-variable or full-vector native adjoint derivatives, freezes all wavelength controls, validates generated solution/dataset identities, and emits bounded public/private receipts.
+- `development_kit/scripts/native_gradient_licensed_gate.py` — This repository-only licensed runner computes one-variable or full-vector native adjoint derivatives. It freezes wavelength controls, validates generated solution/dataset identities, and emits bounded public/private receipts.
 - `development_kit/scripts/native_gradient_fd_licensed_gate.py` — This repository-only licensed runner performs fresh-model three-step central finite-difference validation for every native-gradient component with durable point rows and independent error checks.
 - `development_kit/scripts/native_gradient_directional_licensed_gate.py` — This repository-only licensed runner validates the full native gradient with an independently solved deterministic two-variable directional perturbation and durable point rows.
 - `development_kit/scripts/native_optimizer_licensed_gate.py` — This repository-only licensed runner enforces caller-owned solver, iteration, move, per-model element, baseline/finalist mesh-quality, wall, and artifact budgets with fresh-forward finalist validation.
 - `development_kit/scripts/robust_shape_adapter_licensed_gate.py` — This repository-only alpha7.2 gate creates, reloads, and failure-rolls-back trusted Deformed Geometry controls on an immutable derived periodic-MIM model without solving.
-- `development_kit/scripts/robust_gradient_ladder_licensed_gate.py` — This repository-only alpha7.2 S4 gate owns one shared lease while serial fresh processes run native, finite-difference, directional, GCMMA, and optionally explicit MMA validation with caller-only budgets.
+- `development_kit/scripts/robust_gradient_ladder_licensed_gate.py` — This repository-only alpha7.2 S4 gate holds one shared lease. Fresh processes run serial native, finite-difference, directional, and GCMMA validation with caller-only budgets. MMA validation requires explicit selection.
 - `development_kit/scripts/robust_pedot_fixture.py` — This repository-only compiler audits private OX/MR CSV tensor conventions and emits a path-redacted hash-bound 24-condition acceptance manifest.
 - `development_kit/scripts/lin2025_pedot_shape_licensed_gate.py` — This repository-only licensed gate saves, reloads, and audits derived Lin2025 PEDOT-cylinder shape controls without solving.
 - `development_kit/scripts/lin2025_robust_manifest.py` — This repository-only compiler assembles and self-validates a hash-pinned licensed Lin2025 robust-shape submission from explicit caller artifacts.
 - `development_kit/scripts/pedot_material_ownership_probe.py` — This repository-only licensed probe reads material tags, domain selections, and bounded property identities without solving or mutating the source model.
-- `development_kit/scripts/verify_robust_gradient_ladder_receipt.py` — This repository-only alpha7.2 S4 verifier independently reopens every licensed ladder receipt and log, recomputes canonical gradient and optimizer evidence, and rejects identity, ordering, budget, cleanup, fallback, or artifact drift.
-- `development_kit/scripts/research_adapter_template_probe.py` — This repository-only licensed probe launches the current source tree with isolated settings, audits one immutable COMSOL template read-only over serial stdio, and emits separate path-redacted and private receipts.
-- `development_kit/scripts/research_adapter_gate_server.py` — This repository-only candidate server adds two private calls that bind the trusted periodic-MIM backend to a provenance-tracked derived model during the licensed S4 gate.
-- `development_kit/scripts/research_adapter_licensed_gate.py` — This isolated serial stdio gate applies one trusted MIM candidate to a derived copy, collects one-point Wave Optics evidence, and proves source and solver cleanup.
+- `development_kit/scripts/verify_robust_gradient_ladder_receipt.py` — This repository-only alpha7.2 S4 verifier independently reads every licensed ladder receipt and log again. It recomputes canonical gradient and optimizer evidence. It rejects drift in identity, ordering, budget, cleanup, fallback, or artifacts.
+- `development_kit/scripts/research_adapter_template_probe.py` — This repository-only licensed probe starts the current source tree with isolated settings. It audits one immutable COMSOL template read-only over serial stdio. It emits separate path-redacted and private receipts.
+- `development_kit/scripts/research_adapter_gate_server.py` — This repository-only candidate server adds two private calls for the licensed S4 gate. They bind the trusted periodic-MIM backend to a provenance-tracked derived model.
+- `development_kit/scripts/research_adapter_licensed_gate.py` — This isolated serial stdio gate applies one trusted MIM candidate to a derived copy. It collects one-point Wave Optics evidence and checks source preservation and solver cleanup.
 - `development_kit/scripts/research_campaign_licensed_gate.py` — This isolated serial gate runs frozen feasible or impossible adaptive MIM campaign acceptance with provenance-bound peak and quality-factor evidence.
-- `development_kit/scripts/planning_code_gate.py` — This script verifies the exact frozen planning-code compatibility surface.
-- `development_kit/scripts/python_compatibility_licensed_gate.py` — This script runs the pinned Python and COMSOL compatibility regression on a licensed host.
-- `development_kit/scripts/reference_power_gate_preflight.py` — This script validates reference-power gate inputs without starting COMSOL.
-- `development_kit/scripts/surrogate_dnn_capability_probe.py` — This repository-only licensed probe resolves the exact COMSOL 6.4 surrogate-training study-step and DNN function property, method, default, allowed-value, seed, and save/reload surface into a bounded capability receipt without generic mutation.
-- `development_kit/scripts/adopted_client_licensed_preflight.py` — This repository-only licensed preflight proves the adopted-client path against real MPh 1.3.1: it records that a created `Model` exposes no client back-reference, that the bridge accepts an explicitly supplied client, that a stale model is refused, and that a node resolves through the adopted client, then releases the client it created.
-- `development_kit/scripts/mph14_lane_probe.py` — This repository-only lane runner exercises the solver-free adapter and surrogate suites against an MPh 1.4.0 overlay on the existing interpreter, and records why a venv must not be used for that measurement: a venv `python.exe` re-execs, so the parent and child disagree on the worker PID and the durable-job tests fail on an environment artifact rather than a lane defect.
-- `development_kit/scripts/surrogate_dnn_licensed_gate.py` — This repository-only licensed gate applies the typed surrogate DNN adapter to real COMSOL, proving construction, full default readback, data-source argument binding, save/reload identity, duplicate refusal, mid-batch rollback, and owned cleanup.
-- `development_kit/scripts/surrogate_dnn_data_diagnostic.py` — This repository-only licensed diagnostic resolves the exact accepted DNN training-data encoding and split-mode contract by bounded experiment, because neither the reference tables nor the error messages state them.
-- `development_kit/scripts/surrogate_gate_oracles.py` — Independent frozen-split, COMSOL prediction, ONNX reference-evaluation and semantic-mutation oracles for licensed gates; never packaged.
-- `development_kit/scripts/surrogate_training_licensed_gate.py` — This repository-only licensed gate trains, tests, and continues a COMSOL-native DNN surrogate on real COMSOL, proving real losses and trained identity, seed-controlled reproducibility, continuation identity refusal, non-DNN baselines on the identical split, and owned cleanup.
-- `development_kit/scripts/surrogate_export_licensed_gate.py` — This repository-only licensed gate exports a trained COMSOL DNN surrogate to ONNX, proving deterministic byte-stable export, a real ONNX graph with its weight initializers, extension-independent format, content-hash manifest binding, consistency refusal, and out-of-domain escalation.
-- `development_kit/scripts/surrogate_campaign_licensed_gate.py` — This repository-only licensed gate runs the full prediction-to-FEM escalation on real COMSOL, proving prediction-only screening, forced out-of-domain escalation, per-candidate fresh solves, and measured surrogate error.
+- `development_kit/scripts/planning_code_gate.py` — The script verifies the exact frozen planning-code compatibility surface.
+- `development_kit/scripts/python_compatibility_licensed_gate.py` — The script runs the pinned Python and COMSOL compatibility regression on a licensed host.
+- `development_kit/scripts/reference_power_gate_preflight.py` — The script validates reference-power gate inputs without starting COMSOL.
+- `development_kit/scripts/surrogate_dnn_capability_probe.py` — This repository-only licensed probe inspects COMSOL 6.4 surrogate-training study steps and DNN functions. A bounded receipt records exact properties, methods, defaults, allowed values, seeds, and save/reload behavior. The probe performs no generic mutation.
+- `development_kit/scripts/adopted_client_licensed_preflight.py` — This repository-only licensed probe tests adopted clients with real MPh 1.3.1. It checks that a created `Model` has no client back-reference. It checks explicit client adoption, refusal of stale models, and node resolution through the adopted client. It then releases the client it created.
+- `development_kit/scripts/mph14_lane_probe.py` — This repository-only runner tests the solver-free adapter and surrogate suites with an MPh 1.4.0 overlay on the existing interpreter. It records why this measurement must not use a venv. A venv `python.exe` re-execs. Parent and child then disagree on the worker PID. This environment difference causes durable-job test failures and does not establish an MPh defect.
+- `development_kit/scripts/surrogate_dnn_licensed_gate.py` — This repository-only licensed gate applies the typed surrogate DNN adapter in real COMSOL. It checks construction, all default readbacks, data-source argument binding, and save/reload identity. It also checks duplicate refusal, mid-batch rollback, and cleanup of owned resources.
+- `development_kit/scripts/surrogate_dnn_data_diagnostic.py` — This repository-only licensed diagnostic determines the accepted DNN training-data encoding and split-mode contract through bounded experiments. Neither reference tables nor error messages specify them.
+- `development_kit/scripts/surrogate_gate_oracles.py` — Independent frozen-split, COMSOL prediction, ONNX reference-evaluation and semantic-mutation oracles for licensed gates. Never packaged.
+- `development_kit/scripts/surrogate_training_licensed_gate.py` — This repository-only licensed gate trains, tests, and continues a COMSOL-native DNN surrogate in real COMSOL. It checks real losses, trained identity, seed-controlled reproducibility, and refusal of continuation identity mismatches. It also checks non-DNN baselines on the identical split and cleanup of owned resources.
+- `development_kit/scripts/surrogate_export_licensed_gate.py` — This repository-only licensed gate exports a trained COMSOL DNN surrogate to ONNX. It checks deterministic byte-stable export, the ONNX graph and weight initializers, and format independence from the filename extension. It also checks content-hash manifest binding, consistency refusal, and out-of-domain escalation.
+- `development_kit/scripts/surrogate_campaign_licensed_gate.py` — This repository-only licensed gate runs prediction-to-FEM escalation in real COMSOL. It checks prediction-only screening, forced out-of-domain escalation, fresh solves for each candidate, and measured surrogate error.
 - `development_kit/scripts/surrogate_prediction_eval_probe.py` — This repository-only licensed probe resolves which COMSOL call can evaluate a trained DNN function, recording each attempted evaluation path and its exact outcome.
 - `development_kit/scripts/surrogate_point_eval_probe.py` — This repository-only licensed probe resolves the Point-dataset and numerical-evaluation chain a geometry-free surrogate model would require, recording why it cannot be built.
-- `development_kit/scripts/surrogate_fem_eval_probe.py` — This repository-only licensed probe resolves which numerical evaluation node returns a real value from a solved model, distinguishing a working Global node from an Eval node that silently returns an empty array.
-- `development_kit/scripts/release_gate.py` — This script runs compile, test, package, clean-install, and installed-discovery gates.
-- `development_kit/scripts/release_facts.py` — This script generates and checks the durable release-facts view from live implementation data.
-- `development_kit/scripts/regenerate_tool_snapshots.py` — This script regenerates frozen tool-schema, profile-name, feature-name, deployment-identity, release-facts, and support-matrix counts after a public surface change.
-- `development_kit/scripts/run_real_release_gate.py` — This script orchestrates the explicit serial licensed COMSOL release gate.
-- `development_kit/scripts/sbom_probe.py` — This script generates a deterministic CycloneDX SBOM from the locked installed runtime.
-- `development_kit/scripts/security_gate.py` — This script evaluates pip-audit findings against the exact expiring review policy.
-- `development_kit/scripts/settings_gui_locales.py` — This script generates and checks deterministic English, Simplified Chinese, and Traditional Chinese gettext catalogs.
-- `development_kit/scripts/settings_gui_icon.py` — This script crops, pads, and PNG-compresses a user-supplied high-resolution logo into the packaged multi-size Windows icon.
-- `development_kit/scripts/settings_gui_package_probe.py` — This script verifies Settings GUI wheel and source-distribution membership.
-- `development_kit/scripts/settings_gui_visual_capture.py` — This script captures real Tk locale, DPI, and state screenshots in isolated processes.
-- `development_kit/scripts/standalone_licensed_gate.py` — This script runs the explicit serial COMSOL 6.4 standalone build, pause, exact-resume, physical, and cleanup acceptance.
-- `development_kit/scripts/thermo_optomechanical_licensed_gate.py` — This script generates and validates the serial licensed COMSOL 6.4 thermal-structural-moving-mesh-optical replay fixture.
-- `development_kit/scripts/shared_interactive_licensed_gate.py` — This script runs bounded non-owning shared Desktop/Server prepare and readback acceptance phases.
+- `development_kit/scripts/surrogate_fem_eval_probe.py` — This repository-only licensed probe determines which numerical evaluation node returns a real value from a solved model. It distinguishes a working Global node from an Eval node that silently returns an empty array.
+- `development_kit/scripts/release_gate.py` — The script runs compile, test, package, clean-install, and installed-discovery gates.
+- `development_kit/scripts/release_facts.py` — The script generates and checks the durable release-facts view from live implementation data.
+- `development_kit/scripts/regenerate_tool_snapshots.py` — The script regenerates frozen tool-schema, profile-name, feature-name, deployment-identity, release-facts, and support-matrix counts after a public surface change.
+- `development_kit/scripts/run_real_release_gate.py` — The script orchestrates the explicit serial licensed COMSOL release gate.
+- `development_kit/scripts/sbom_probe.py` — The script generates a deterministic CycloneDX SBOM from the locked installed runtime.
+- `development_kit/scripts/security_gate.py` — The script evaluates pip-audit findings against the exact expiring review policy.
+- `development_kit/scripts/settings_gui_locales.py` — The script generates and checks deterministic English, Simplified Chinese, and Traditional Chinese gettext catalogs.
+- `development_kit/scripts/settings_gui_icon.py` — The script crops, pads, and PNG-compresses a user-supplied high-resolution logo into the packaged multi-size Windows icon.
+- `development_kit/scripts/settings_gui_package_probe.py` — The script verifies Settings GUI wheel and source-distribution membership.
+- `development_kit/scripts/settings_gui_visual_capture.py` — The script captures real Tk locale, DPI, and state screenshots in isolated processes.
+- `development_kit/scripts/standalone_licensed_gate.py` — The script runs the explicit serial COMSOL 6.4 standalone build, pause, exact-resume, physical, and cleanup acceptance.
+- `development_kit/scripts/thermo_optomechanical_licensed_gate.py` — The script generates and validates the serial licensed COMSOL 6.4 thermal-structural-moving-mesh-optical replay fixture.
+- `development_kit/scripts/shared_interactive_licensed_gate.py` — The script runs bounded non-owning shared Desktop/Server prepare and readback acceptance phases.
 
 ## Test fixtures and frozen snapshots
 
-- `development_kit/tests/__init__.py` — This file marks the dependency and process test suite as a Python package.
-- `development_kit/tests/test_native_adjoint_licensed_gate.py` — This module verifies the alpha7.1 licensed gate's solver-free preflight, caller-declared budgets, host admission, and redacted receipt boundary.
-- `development_kit/tests/test_native_gradient_licensed_gate.py` — This module verifies the native-gradient runner's solver-free modes, caller-relative commit admission, exact derivative identity, redaction, and cleanup contracts.
-- `development_kit/tests/test_native_gradient_fd_licensed_gate.py` — This module verifies the finite-difference runner's frozen step policy, exact native receipt binding, bounded point count, and solver-free behavior.
-- `development_kit/tests/test_native_gradient_directional_licensed_gate.py` — This module verifies deterministic normalized direction generation, bounded directional steps, exact native identity binding, and solver-free preview.
-- `development_kit/tests/test_native_optimizer_licensed_gate.py` — This module verifies solver-node iteration/move limits, caller-owned mesh admission, finite objective normalization, and absence of host-resource defaults.
+- `development_kit/tests/__init__.py` — The file marks the dependency and process test suite as a Python package.
+- `development_kit/tests/test_native_adjoint_licensed_gate.py` — The module verifies the alpha7.1 licensed gate's solver-free preflight, caller-declared budgets, host admission, and redacted receipt boundary.
+- `development_kit/tests/test_native_gradient_licensed_gate.py` — The module verifies the native-gradient runner's solver-free modes, caller-relative commit admission, exact derivative identity, redaction, and cleanup contracts.
+- `development_kit/tests/test_native_gradient_fd_licensed_gate.py` — The module verifies the finite-difference runner's frozen step policy, exact native receipt binding, bounded point count, and solver-free behavior.
+- `development_kit/tests/test_native_gradient_directional_licensed_gate.py` — The module verifies deterministic normalized direction generation, bounded directional steps, exact native identity binding, and solver-free preview.
+- `development_kit/tests/test_native_optimizer_licensed_gate.py` — The module verifies solver-node iteration/move limits, caller-owned mesh admission, finite objective normalization, and absence of host-resource defaults.
 - `development_kit/tests/fixtures/semantic_retrieval_evaluation.json` — This fixture contains the frozen judged semantic retrieval queries.
 - `development_kit/tests/snapshots/baseline_tool_schemas.json` — This snapshot freezes the baseline public tool schemas.
 - `development_kit/tests/snapshots/full_tool_schemas.json` — This snapshot freezes every registered public tool schema.
@@ -198,11 +198,11 @@ models are intentionally absent.
 
 ## Licensed and subprocess integration tests
 
-- `development_kit/tests/integration/__init__.py` — This file marks explicit subprocess-isolated integration tests as a Python package.
-- `development_kit/tests/integration/acceptance_resources.py` — This module requires caller-declared host resources for licensed integration entry points.
+- `development_kit/tests/integration/__init__.py` — The file marks explicit subprocess-isolated integration tests as a Python package.
+- `development_kit/tests/integration/acceptance_resources.py` — The module requires caller-declared host resources for licensed integration entry points.
 - `development_kit/tests/integration/probes/acoustics_pde.py` — This probe validates analytical Pressure Acoustics and Poisson PDE models plus the typed interface surface.
 - `development_kit/tests/integration/clientapi_property_acceptance.py` — This gate checks constrained clientapi property round trips without solving.
-- `development_kit/tests/integration/coordinator_claim_kill.py` — This helper stops only the exact coordinator process after a durable claim.
+- `development_kit/tests/integration/coordinator_claim_kill.py` — The helper stops only the exact coordinator process after a durable claim.
 - `development_kit/tests/integration/convergence_campaign_acceptance.py` — This runner executes one explicit licensed durable convergence campaign.
 - `development_kit/tests/integration/branch_continuation_campaign_acceptance.py` — This runner executes one explicit licensed durable branch-continuation campaign.
 - `development_kit/tests/integration/derived_geometry_acceptance.py` — This gate checks typed derived-geometry edits on controlled COMSOL input.
@@ -219,7 +219,7 @@ models are intentionally absent.
 - `development_kit/tests/integration/semantic_retrieval_acceptance.py` — This gate checks isolated semantic retrieval against a pinned local index.
 - `development_kit/tests/integration/semantic_worker_containment.py` — This gate checks semantic worker hang and crash containment.
 - `development_kit/tests/integration/test_native_cancel_candidate.py` — This gate checks the native cancellation candidate across fresh processes.
-- `development_kit/tests/integration/test_real_comsol.py` — This module collects opt-in fresh-process COMSOL probes.
+- `development_kit/tests/integration/test_real_comsol.py` — The module collects opt-in fresh-process COMSOL probes.
 - `development_kit/tests/integration/wave_optics_point_audit_acceptance.py` — This gate checks the controlled one-point Wave Optics evidence matrix.
 - `development_kit/tests/integration/wave_optics_preflight_acceptance.py` — This gate checks read-only Wave Optics preflight evidence.
 - `development_kit/tests/integration/probes/capacitor.py` — This probe solves the standalone analytic capacitor fixture.
@@ -228,575 +228,596 @@ models are intentionally absent.
 
 ## Dependency and process tests
 
-- `development_kit/tests/test_acceptance_cleanup.py` — This module tests licensed-gate cleanup accounting without starting COMSOL.
-- `development_kit/tests/test_acceptance_resources.py` — This module tests caller-declared, live-bounded licensed acceptance resources.
-- `development_kit/tests/test_acoustic_duct_recipe.py` — This module tests staging, cleanup ordering, collision refusal, and sharing retries for the acoustic recipe.
-- `development_kit/tests/test_acoustics_pde.py` — This module tests bounded Acoustics and mathematical PDE interface and boundary transactions without COMSOL.
-- `development_kit/tests/test_electro_chemistry.py` — This module tests the isolated electrochemistry profile surface, rollback, and offline catalog without COMSOL.
-- `development_kit/tests/test_alpha73_public_surface.py` — This module tests the alpha7.3 public surface: frozen comsolless dispatch, cold discovery, and package boundaries.
-- `development_kit/tests/test_artifact_chain.py` — This module tests bounded solver-free artifact hash-chain verification.
-- `development_kit/tests/test_surrogate_campaign.py` — This module tests solver-free bounded campaign specification, prediction-only screening, ranking escalation rules, fresh-FEM promotion, and the no-prediction-promotion invariant.
+- `development_kit/tests/test_acceptance_cleanup.py` — The tests cover licensed-gate cleanup accounting without starting COMSOL.
+- `development_kit/tests/test_acceptance_resources.py` — The tests cover caller-declared, live-bounded licensed acceptance resources.
+- `development_kit/tests/test_acoustic_duct_recipe.py` — The tests cover staging, cleanup ordering, collision refusal, and sharing retries for the acoustic recipe.
+- `development_kit/tests/test_acoustics_pde.py` — The tests cover bounded Acoustics and mathematical PDE interface and boundary transactions without COMSOL.
+- `development_kit/tests/test_electro_chemistry.py` — The tests cover the isolated electrochemistry profile surface, rollback, and offline catalog without COMSOL.
+- `development_kit/tests/test_alpha73_public_surface.py` — The tests cover the alpha7.3 public surface: frozen comsolless dispatch, cold discovery, and package boundaries.
+- `development_kit/tests/test_artifact_chain.py` — The tests cover bounded solver-free artifact hash-chain verification.
+- `development_kit/tests/test_surrogate_campaign.py` — The tests cover solver-free bounded campaign specification, prediction-only screening, ranking escalation rules, fresh-FEM promotion, and the no-prediction-promotion invariant.
 - `development_kit/tests/test_surrogate_gate_oracles.py` — Regression tests for exact lane identity, worker propagation, disjoint test rows, table corruption and independently computed RMSE.
-- `development_kit/tests/test_surrogate_dnn_adapter.py` — This module tests solver-free surrogate DNN configuration sealing, typed write-plan derivation, deferred argument binding, failure-atomic rollback, and the solver-free/licensed module boundary, including a structural check that the licensed bridge reaches Java only through the adapter.
-- `development_kit/tests/test_surrogate_export.py` — This module tests solver-free surrogate export-artifact content hashing, sealed export manifests, prediction-consistency tolerances, and out-of-domain registry integration.
-- `development_kit/tests/test_surrogate_fields_and_splits.py` — This module tests solver-free surrogate field-schema, transform round-trip, deterministic split, and adversarial leakage contracts.
-- `development_kit/tests/test_surrogate_manifests.py` — This module tests solver-free surrogate dataset, schema, split, and transform manifest contracts.
-- `development_kit/tests/test_surrogate_onnx_runtime.py` — This module tests solver-free ONNX protobuf decoding, operator coverage, transB weight layout, input binding, refusal paths, and regression against a real COMSOL export.
-- `development_kit/tests/test_surrogate_registry.py` — This module tests solver-free surrogate model-card sealing, lifecycle transitions, drift detection, out-of-domain policy, and prediction-evidence separation.
-- `development_kit/tests/test_surrogate_rows.py` — This module tests solver-free surrogate row-provenance binding, ineligible-row retention, ledger summarization, and deterministic Latin-hypercube design reproducibility.
-- `development_kit/tests/test_surrogate_training_metrics.py` — This module tests solver-free surrogate physical-unit metrics, deterministic non-DNN baselines, baseline comparison, continuation identity rules, and multi-seed stability reporting.
-- `development_kit/tests/test_acdc_differential_coils_recipe.py` — This module tests static portability and input contracts for the differential-coil recipe.
-- `development_kit/tests/test_attached_job_backend.py` — This module tests immutable attached-job targets, handoff, worker execution, resume, cancellation, and preservation.
-- `development_kit/tests/test_async_solver.py` — This module tests asynchronous solver thread state with fake studies.
-- `development_kit/tests/test_basic.py` — This module tests basic server helpers and registration assumptions.
-- `development_kit/tests/test_bounded_steps.py` — This module solver-free tests bounded-step receipts, checkpoint usability, crash/cancel/replay decisions, and job-status surfacing.
-- `development_kit/tests/test_branch_continuation.py` — This module tests ordered solver-free branch-continuation state binding and planning.
-- `development_kit/tests/test_branch_continuation_acceptance_runner.py` — This module tests the explicit licensed continuation runner without starting COMSOL.
-- `development_kit/tests/test_branch_continuation_campaign_job.py` — This module tests immutable bounded durable branch-continuation campaign specifications.
-- `development_kit/tests/test_branch_continuation_campaign_rows.py` — This module tests hash-chained continuation state evidence and artifact replay.
-- `development_kit/tests/test_branch_continuation_campaign_runner.py` — This module tests continuation composition, stopping, ambiguity, and exact resume.
-- `development_kit/tests/test_branch_continuation_campaign_worker.py` — This module tests continuation worker ownership, later-state recovery, and cleanup failure.
-- `development_kit/tests/test_cancel_state_machine.py` — This module tests deterministic cancellation state transitions without wall-clock sleeps.
-- `development_kit/tests/test_clientapi_properties.py` — This module tests constrained clientapi property access with mocks.
-- `development_kit/tests/test_control_plane_metrics.py` — This module tests bounded control-plane latency, overload, and fairness evidence.
-- `development_kit/tests/test_control_plane_startup.py` — This module tests solver-free cold discovery and startup budgets.
-- `development_kit/tests/conftest.py` — This module prepares the shared ASCII runtime parent for dependency-only tests.
-- `development_kit/tests/mcp_test_support.py` — This module decodes public in-process MCP tool results consistently across the legacy SDK 1.x and conservative SDK 2.0 base.
-- `development_kit/tests/semantic_test_support.py` — This module provides sanitized subprocess environments for semantic isolation tests.
-- `development_kit/tests/test_convergence_campaign_job.py` — This module tests immutable bounded durable convergence campaign specifications.
-- `development_kit/tests/test_convergence_campaign_rows.py` — This module tests hash-chained durable convergence level evidence and artifact replay.
-- `development_kit/tests/test_convergence_campaign_runner.py` — This module tests composed spectral-level execution, convergence stopping, and exact resume.
-- `development_kit/tests/test_convergence_campaign_worker.py` — This module tests convergence worker ownership, later-level recovery, and cleanup failure.
-- `development_kit/tests/test_convergence_acceptance_runner.py` — This module tests the licensed convergence runner contract without starting COMSOL.
-- `development_kit/tests/test_convergence_evaluation.py` — This module tests ordered solver-free convergence evidence and policy evaluation.
-- `development_kit/tests/test_compatibility_registry.py` — This module solver-free tests the compatibility/skill registry matrix, hashes, and cold discovery.
-- `development_kit/tests/test_deployment_identity.py` — This module tests package version, build identity, and fresh-process deployment consistency.
-- `development_kit/tests/test_derived_geometry.py` — This module tests typed derived-geometry edits without COMSOL.
-- `development_kit/tests/test_durable_job_control_plane.py` — This module tests durable submission, reconciliation, status, cancellation, and resume behavior.
-- `development_kit/tests/test_durable_primitives.py` — This module tests versioned canonical bytes, bounded hashing, atomic writes, and row recovery.
-- `development_kit/tests/test_dependency_license_gate.py` — This module tests deterministic dependency-license receipts and fail-closed review behavior.
-- `development_kit/tests/test_dependency_drift_report.py` — This module tests dependency scopes, PEP 503 names, project-range exclusions, exact dependency pairs, bootstrap tools, and complete lock drift.
-- `development_kit/tests/test_environment_identity.py` — This module tests redacted solver-free environment identity.
-- `development_kit/tests/test_evidence_contracts.py` — This module tests physical evidence, policies, and immutable migration contracts.
-- `development_kit/tests/test_evidence_integrity_controls.py` — This module tests default-on settings, explicit per-check opt-out, and fail-closed disclosure.
-- `development_kit/tests/test_evidence_integrity_stdio.py` — This module discovers and invokes both evidence guard tools over real solver-free MCP stdio.
-- `development_kit/tests/test_evidence_integrity_verifier.py` — This module tests settings-aware formal evidence verification and resume identity checks.
-- `development_kit/tests/test_user_guides.py` — This module checks documented settings, tool names, warnings, and bilingual guide contracts.
-- `development_kit/tests/test_field_artifacts.py` — This module tests bounded durable scalar field serialization.
-- `development_kit/tests/test_field_bundle.py` — This module tests field-evidence request normalization and identity.
-- `development_kit/tests/test_field_dataset.py` — This module tests read-only dataset adaptation to field evidence.
-- `development_kit/tests/test_field_discovery.py` — This module tests locale-safe field dataset discovery.
-- `development_kit/tests/test_field_interpolation.py` — This module tests bounded field interpolation onto declared grids.
-- `development_kit/tests/test_field_manifest.py` — This module tests versioned field-evidence manifests and hashes.
-- `development_kit/tests/test_field_matrix.py` — This module tests validation-matrix binding to field requests.
-- `development_kit/tests/test_field_pipeline.py` — This module tests the raw-sample to durable field-evidence pipeline.
-- `development_kit/tests/test_field_render.py` — This module tests isolated bounded field PNG rendering.
-- `development_kit/tests/test_field_review.py` — This module tests paired field-review bundle assembly.
-- `development_kit/tests/test_field_sampling.py` — This module tests bounded slice selection from raw field samples.
-- `development_kit/tests/test_field_tools.py` — This module tests public field discovery and extraction adapters.
-- `development_kit/tests/test_geometry.py` — This module tests geometry helpers without a COMSOL client.
-- `development_kit/tests/test_geometry_selections.py` — This module tests bounded named Box and rectangular-side selection transactions without COMSOL.
-- `development_kit/tests/test_geometry_tools.py` — This module tests structured input contracts for the difference/union geometry tools.
-- `development_kit/tests/test_incidence_config.py` — This module tests typed periodic incidence preview and mutation gates.
-- `development_kit/tests/test_integration_boundaries.py` — This module tests isolation and safety boundaries for integration probes.
-- `development_kit/tests/test_installed_stdio_probe.py` — This module tests installed stdio probe result decoding.
-- `development_kit/tests/test_research_adapter_template_probe.py` — This module solver-free tests candidate-probe isolation, path bounds, settings, redaction, and atomic receipt behavior.
-- `development_kit/tests/test_research_adapter_licensed_gate.py` — This module solver-free tests the S4 licensed gate's dry-run binding and isolated strict settings.
-- `development_kit/tests/test_job_state_stress.py` — This module stress-tests durable state readers and writers without COMSOL.
-- `development_kit/tests/test_launcher_distribution.py` — This module tests launcher portability and runs its PowerShell 5.1 and pwsh acceptance suite on Windows.
-- `development_kit/tests/test_lexical_manual.py` — This module tests bounded SQLite lexical manual search and page reading.
-- `development_kit/tests/test_material_expressions.py` — This module tests solver-free dispersive material-expression previews.
-- `development_kit/tests/test_mcp_sdk2_compatibility.py` — This module locks the conservative MCP SDK 2.0 lane, unchanged wire schemas, absent modern-protocol opt-in, and legacy stdio revisions.
-- `development_kit/tests/test_mesh.py` — This module tests mesh helpers without a COMSOL client.
-- `development_kit/tests/test_mim_patch.py` — This module tests patch-metasurface helper behavior without a COMSOL client.
-- `development_kit/tests/test_mim_recipe_contracts.py` — This module tests solver-free safety contracts shared by the standalone MIM recipes.
-- `development_kit/tests/test_mph_inspection.py` — This module solver-free tests bounded offline `.mph` archive inspection, summaries, and refusals.
-- `development_kit/tests/test_model_identity.py` — This module solver-free tests the offline model-identity contract, checkpoint readiness, and passive session lanes.
-- `development_kit/tests/test_model.py` — This module tests model management helpers without a COMSOL client.
-- `development_kit/tests/test_outcome_contract.py` — This module tests orthogonal execution, evidence, and scientific outcome contracts.
-- `development_kit/tests/test_offline_export.py` — This module solver-free tests offline export-manifest construction, tamper rejection, and dispatch.
-- `development_kit/tests/test_observation.py` — This module solver-free tests observation outcomes, PID reuse detection, and exact-owner cleanup decisions.
-- `development_kit/tests/test_operation_arbiter.py` — This module tests durable serialization and responsive control-plane operation classes.
-- `development_kit/tests/test_native_cancel_probe.py` — This module tests native cancellation discovery and allowlisting without COMSOL.
-- `development_kit/tests/test_namespace_compatibility.py` — This module tests canonical package identity and the bounded legacy import interval.
-- `development_kit/tests/test_native_runtime.py` — This module tests the native-runtime manifest, main-thread preload, and representative lazy native calls.
-- `development_kit/tests/test_ownership.py` — This module tests solver ownership, leases, and collision detection.
-- `development_kit/tests/test_parameters.py` — This module tests parameter tools without a COMSOL client.
-- `development_kit/tests/test_path_policy.py` — This module tests configured model-read and owned-artifact path containment.
-- `development_kit/tests/test_surrogate_public_tools.py` — This module solver-free tests the five bounded public surrogate tools: typed contracts, the frozen `dbmodel://` source kind, document verification, dataset shape, evidence separation, real dispatch, cold discovery, and path containment.
-- `development_kit/tests/test_parallel_plate_capacitor_recipe.py` — This module tests the standalone capacitor recipe without starting COMSOL.
-- `development_kit/tests/test_periodic_mesh_audit.py` — This module tests periodic mesh evidence and clone-only smoke logic.
-- `development_kit/tests/test_physics.py` — This module tests physics helpers without a COMSOL client.
-- `development_kit/tests/test_portfolio_verifier.py` — This module tests policy-free summary citations against exact hashed evidence chains.
-- `development_kit/tests/test_power_audit.py` — This module tests solver-free declared physical-power evidence.
-- `development_kit/tests/test_process_control.py` — This module tests exact-identity process inspection and termination policy.
-- `development_kit/tests/test_process_inventory_stress.py` — This module stress-tests host inventory under PID churn without COMSOL.
-- `development_kit/tests/test_python_compatibility_gate.py` — This module tests the compatibility gate's raced-worker identity tolerance.
-- `development_kit/tests/test_public_error_redaction.py` — This module tests stable path-free public failures across tools, resources, and integrity receipts.
-- `development_kit/tests/test_property_transport.py` — This module tests bounded JSON transport for clientapi properties.
-- `development_kit/tests/test_public_input_contracts.py` — This module tests bounded discovery schemas and matching pre-side-effect runtime limits.
-- `development_kit/tests/test_quality_properties.py` — This module provides seeded property tests and exhaustive safety-decision branch cases for foundation contracts.
-- `development_kit/tests/test_quality_gate.py` — This module tests exact coverage floors and fail-closed quality-policy evaluation.
-- `development_kit/tests/test_real_fixture_contract.py` — This module tests portable contracts for controlled licensed fixtures.
-- `development_kit/tests/test_recipe_paths.py` — This module tests standalone recipe output path policy.
-- `development_kit/tests/test_reference_power_acceptance.py` — This module tests reference-power acceptance contracts and preflight.
-- `development_kit/tests/test_reference_power_gate.py` — This module tests pure reference-power receipt evaluation.
-- `development_kit/tests/test_reference_power_release_orchestrator.py` — This module tests mandatory serial release orchestration with fake processes.
-- `development_kit/tests/test_reference_power_runner.py` — This module tests reference-power coordinator and worker process boundaries.
-- `development_kit/tests/test_release_engineering.py` — This module tests repository, dependency, fixture, archive, and release policies.
-- `development_kit/tests/test_release_facts.py` — This module tests the generated release-facts view against live implementation data.
-- `development_kit/tests/test_release_receipts.py` — This module tests deterministic SBOM and release inventory receipts.
-- `development_kit/tests/test_research_contracts.py` — This module tests closed goal and design-space normalization, identities, and the first MIM campaign bounds.
-- `development_kit/tests/test_research_benchmarks.py` — This module proves the frozen feasible, impossible, multi-objective, material, and crash-resume benchmark fixtures.
-- `development_kit/tests/test_research_workflow.py` — This module tests passive workflow claims, ambiguity review, canonical identity, and baseline readiness.
-- `development_kit/tests/test_research_materials.py` — This module tests provenance, validity, approval, strict verification, and campaign material binding.
-- `development_kit/tests/test_research_candidates.py` — This module tests pre-side-effect candidate normalization, bounds, lifecycle, and deduplication.
-- `development_kit/tests/test_research_decisions.py` — This module tests hash-chained adaptive decisions, exact references, and derived budget exhaustion.
-- `development_kit/tests/test_research_state.py` — This module tests backend-neutral checkpoints and bounded evidence-separated candidate portfolios.
-- `development_kit/tests/test_research_journal.py` — This module tests fsync'd appends, stale-tail rejection, partial-tail truncation, and exact hash-chain recovery.
-- `development_kit/tests/test_research_evaluations.py` — This module tests durable started and terminal evaluation authority and journal replay.
-- `development_kit/tests/test_research_coordinator.py` — This module tests solver-free budget admission, duplicate suppression, cancellation, and exact crash replay.
-- `development_kit/tests/test_research_campaign_loop.py` — This module tests optimizer-to-coordinator execution, per-point checkpoints, measured success, and honest budget exhaustion.
-- `development_kit/tests/test_research_objectives.py` — This module tests exact evidence pointers, deterministic losses, and threshold disposition separation.
-- `development_kit/tests/test_research_robustness.py` — This module tests bounded axis perturbations, exact evidence coverage, and optional robustness thresholds.
-- `development_kit/tests/test_research_tools.py` — This module tests real dispatch for experimental solver-free campaign compilation and robustness planning.
-- `development_kit/tests/test_research_adapters.py` — This module tests exact trusted-template manifests, closed x/y mutation scope, and live-tree drift rejection.
-- `development_kit/tests/test_adjoint_adapter.py` — This module tests native adapter readback, unit canonicalization, and rollback on mutation failure.
-- `development_kit/tests/test_adapter_protocol.py` — This module solver-free tests the project-owned COMSOL adapter protocol, explicit conversion, failure-atomic rollback, error translation, the step-6 typed Java and feature-lifecycle surface, and MPh 1.3.1/1.4 behavior parity.
-- `development_kit/tests/test_adapter_migration_inventory.py` — This module enforces the S4A direct-call inventory: every measured module needs a declared disposition, a migrated module must measure no direct site, and each ledger rule is exercised against a synthetic tree so a rule that never fires cannot pass unnoticed.
-- `development_kit/tests/test_derivative_support.py` — This module tests strict derivative-support identities, variable mappings, objective contracts, and immutable normalization.
-- `development_kit/tests/test_gradient_contracts.py` — This module tests caller-budgeted native optimizer and exact gradient-row contracts.
-- `development_kit/tests/test_gradient_validation.py` — This module tests independent finite-difference, sign, cosine, directional, and step-sensitivity gradient checks.
-- `development_kit/tests/test_external_validation.py` — This module tests independent COMSOL-first validation and explicitly authorized RCWA fallback receipts.
-- `development_kit/tests/test_robust_conditions.py` — This module tests complete or explicitly sparse configurable multi-condition and material-state tables.
-- `development_kit/tests/test_robust_gradient_acceptance.py` — This module tests joint component, cosine, sign, three-step, and directional gradient acceptance.
-- `development_kit/tests/test_robust_material_mapping.py` — This module tests diagonal optical tensor axes, source columns, time convention, and no-extrapolation identity.
-- `development_kit/tests/test_robust_pedot_fixture.py` — This module tests private-data-redacted OX/MR CSV auditing and complete 24-condition fixture compilation.
-- `development_kit/tests/test_pedot_material_ownership_probe.py` — This module tests source-bound dry run, bounded material selection/property inspection, redaction, and cleanup for the read-only licensed probe.
-- `development_kit/tests/test_robust_finalist_validation.py` — This module tests caller-owned finalist validation policy and no-fallback/no-host-default boundaries.
-- `development_kit/tests/test_robust_finalist_evidence.py` — This module tests independent finalist manufacturability, remesh, convergence, branch, off-design, and external-fidelity promotion evidence.
-- `development_kit/tests/test_robust_gradient_ladder_licensed_gate.py` — This module tests required caller budgets, startup-only admission, shared-lease sequencing, exact gradient thresholds, and explicit non-fallback MMA disposition.
-- `development_kit/tests/test_robust_objectives.py` — This module tests smooth absolute two-state contrast and weighted smooth worst-case scalarization.
-- `development_kit/tests/test_robust_optimizer_policy.py` — This module tests method-bound manual GCMMA/MMA selection and rejects automatic fallback.
-- `development_kit/tests/test_robust_outer_gcmma.py` — This module tests the fingerprinted external GCMMA state, normalized move limits, true condition-solve budgets, conservative acceptance, and visible inner revisions without importing the optional backend.
-- `development_kit/tests/test_shape_support.py` — This module tests geometry-derived minimum gap, per-model mesh admission, invariant guards, and model retention.
-- `development_kit/tests/test_research_adaptive_acquisition.py` — This module tests bounded deterministic GP/EI selection, invalid evidence rejection, and heavy-import isolation.
-- `development_kit/tests/test_research_optimizers.py` — This module tests deterministic ask/tell/checkpoint replay, mixed domains, and dependency isolation.
-- `development_kit/tests/test_native_gradient_support_matrix.py` — This module validates the redacted alpha7.1 native-gradient capability matrix and receipt boundary.
-- `development_kit/tests/test_resource_admission.py` — This module tests resource policy normalization, telemetry, and admission decisions.
-- `development_kit/tests/test_results.py` — This module tests result normalization without a COMSOL client.
-- `development_kit/tests/test_runtime_paths.py` — This module tests shared ASCII-safe runtime and lease paths.
-- `development_kit/tests/test_schema_registry.py` — This module tests named schema coverage and version support resolution.
-- `development_kit/tests/test_security_gate.py` — This module tests vulnerability report parsing and expiring allowlist policy.
-- `development_kit/tests/test_semantic_contracts.py` — This module tests semantic benchmark contracts, limits, and import safety.
-- `development_kit/tests/test_semantic_index.py` — This module tests immutable semantic index construction and publication.
-- `development_kit/tests/test_semantic_retrieval.py` — This module tests deterministic vector retrieval, filtering, fusion, and cache identity.
-- `development_kit/tests/test_semantic_tools.py` — This module tests semantic feature schemas, configuration, and degradation behavior.
-- `development_kit/tests/test_semantic_worker_protocol.py` — This module tests isolated semantic worker protocol and containment.
-- `development_kit/tests/test_server.py` — This module tests server construction and capabilities without starting a transport.
-- `development_kit/tests/test_settings.py` — This module tests grouped settings defaults, validation, and fallback errors.
-- `development_kit/tests/test_alpha6_settings_gui_contract.py` — This module locks the alpha6 settings schema, location, launcher, and packaging contracts.
-- `development_kit/tests/test_settings_gui_launcher.py` — This module tests detached Settings GUI launch, handshake, profile discovery, and Tk import isolation.
-- `development_kit/tests/test_settings_gui_direct_entry.py` — This module tests the installed Settings GUI exact-path, validate-only, and explicit shortcut command contract.
-- `development_kit/tests/test_settings_gui_package.py` — This module tests Settings GUI distribution membership receipts.
-- `development_kit/tests/test_settings_gui_root_launcher.py` — This module tests the repository-root manual Settings GUI launcher under both supported PowerShell hosts.
-- `development_kit/tests/test_shared_attach_request.py` — This module tests the complete pre-lease shared-server attach gate.
-- `development_kit/tests/test_shared_cleanup_contracts.py` — This module tests non-owning detach and owned-cleanup outcome semantics.
-- `development_kit/tests/test_shared_interactive_licensed_gate.py` — This module tests the licensed shared interactive gate's solver-free specification path.
-- `development_kit/tests/test_shared_model_locking.py` — This module tests bounded shared-model revisions and exact enforcement locks.
-- `development_kit/tests/test_shared_operation_dependencies.py` — This module tests shared operations against the reused arbiter and path-containment dependencies.
-- `development_kit/tests/test_shared_process_probe.py` — This module tests redacted Windows process, listener, window, and version inventory.
-- `development_kit/tests/test_shared_session_contracts.py` — This module tests default-off feature and loopback endpoint contracts.
-- `development_kit/tests/test_shared_session_identity.py` — This module tests attached-server and exact model-selector identities.
-- `development_kit/tests/test_shared_session_lifecycle.py` — This module tests fake-client attach, failure cleanup, and external-resource-preserving detach.
-- `development_kit/tests/test_shared_session_preflight.py` — This module tests shared-preflight version gates and process identity hashing.
-- `development_kit/tests/test_shared_session_registration.py` — This module tests registration-time tolerance of the shared-session feature gate.
-- `development_kit/tests/test_shared_session_tools.py` — This module tests the public default-off shared lifecycle tools and capability surface.
-- `development_kit/tests/test_shared_server_preflight.py` — This module tests two-probe Desktop, listener, collision, and COMSOL release-line classification.
-- `development_kit/tests/test_spectral_characterization.py` — This module tests provenance-bound offline spectral validation and measurements.
-- `development_kit/tests/test_spectral_model_comparison.py` — This module tests identical-support line-shape comparison, coordinate transforms, information criteria, and public dispatch.
-- `development_kit/tests/test_simulation_configuration.py` — This module tests typed configuration normalization, classified diffs, and solver-free durable-job previews.
-- `development_kit/tests/test_thermal_radiation.py` — This module tests Kirchhoff applicability, Planck/Jacobian integration, angular and polarization handling, detector kernels, and public dispatch.
-- `development_kit/tests/test_thermal_material.py` — This module tests typed material states, analytic/table models, phase boundaries, extrapolation, conversion previews, and public dispatch.
-- `development_kit/tests/test_surrogate_training_job.py` — This module tests durable surrogate-training spec binding, epoch journaling, resume without duplicates, deduplication, and solver-free preflight.
-- `development_kit/tests/test_thermo_optomechanical_replay.py` — This module tests the closed thermo-optomechanical specification, durable stage replay, result binding, save semantics, evidence validation, and cleanup.
-- `development_kit/tests/test_spectral_audit.py` — This module tests strict projection of point-audit artifacts into durable spectral rows.
-- `development_kit/tests/test_spectral_acceptance_runner.py` — This module tests the licensed spectral runner contract without starting COMSOL.
-- `development_kit/tests/test_spectral_characterization_job.py` — This module tests immutable bounded durable spectral job specifications.
-- `development_kit/tests/test_spectral_progress.py` — This module tests adaptive spectral transitions and policy-separated scientific outcomes.
-- `development_kit/tests/test_spectral_rows.py` — This module tests hash-chained durable spectral rows and exact artifact-bound resume.
-- `development_kit/tests/spectral_job_fixtures.py` — This module creates sanitized fake point-audit artifacts for durable spectral tests.
-- `development_kit/tests/test_spectral_runner.py` — This module tests the adaptive spectral point loop, summaries, and fault recovery.
-- `development_kit/tests/test_spectral_level_execution.py` — This module tests loaded-model spectral execution with shared resource and collector machinery.
-- `development_kit/tests/test_spectral_stages.py` — This module tests immutable spectral stage planning, freezing, and replay.
-- `development_kit/tests/test_spectral_worker.py` — This module tests injected spectral worker ownership, resources, state, and cleanup.
-- `development_kit/tests/test_study.py` — This module tests study helpers without a COMSOL client.
-- `development_kit/tests/test_standalone_executable.py` — This module tests the reviewed Python-free Windows launcher build, deployment identity, durable inspection, and fixed launch contract.
-- `development_kit/tests/test_standalone_acceptance_runner.py` — This module tests the explicit licensed standalone acceptance orchestration without starting COMSOL.
-- `development_kit/tests/test_standalone_tools.py` — This module tests the standalone tools within `basic_fem`, public dispatch, metadata, and owned-artifact containment.
-- `development_kit/tests/test_tool_catalog.py` — This module tests deterministic tool catalog metadata and discovery.
-- `development_kit/tests/test_tool_profiles.py` — This module tests static profile selection, membership, and registration.
-- `development_kit/tests/test_validation_collectors.py` — This module tests adapters from validation points to evidence collectors.
-- `development_kit/tests/test_validation_matrix.py` — This module tests bounded validation-matrix specification normalization.
-- `development_kit/tests/test_validation_rows.py` — This module tests append-only validation row identity and durability.
-- `development_kit/tests/test_adjoint_rows.py` — This module tests crash-tail recovery, identity binding, and hash chaining for adjoint rows.
-- `development_kit/tests/test_adjoint_optimization.py` — This module tests bounded manifest expansion, source identity, and explicit resource submission for adjoint jobs.
-- `development_kit/tests/test_robust_shape_optimization.py` — This module tests hash-pinned robust shape manifests, cross-contract identities, and caller-owned admission limits.
-- `development_kit/tests/test_robust_shape_adapter.py` — This module tests exact source, tree, topology, policy, and x/y variable binding before robust ClientAPI work.
-- `development_kit/tests/test_robust_adapter_configuration.py` — This module tests tagged MIM/Lin2025 robust adapter binding and cross-contract drift rejection.
-- `development_kit/tests/test_robust_shape_adapter_licensed_gate.py` — This module tests the S3 licensed gate's caller-owned limits, solver-free dry run, redaction, and cleanup boundaries.
-- `development_kit/tests/test_robust_smoothing_selection.py` — This module tests evidence-only soft-min objective/weight/gradient comparison and forbids automatic winner selection.
-- `development_kit/tests/test_robust_gradient_runtime.py` — This module tests durable ordered native condition-gradient receipts, exact replay, tamper rejection, and robust aggregation without COMSOL.
-- `development_kit/tests/test_robust_shape_rows.py` — This module tests robust condition, gradient, iteration, trial, checkpoint, and cleanup row chaining and crash-tail recovery.
-- `development_kit/tests/test_robust_shape_worker.py` — This module tests JobManager dispatch, synthetic 24-condition completion, exact replay, status summaries, duplicate suppression, and durable licensed-condition receipt recovery.
-- `development_kit/tests/test_robust_finalist_runtime.py` — This module tests solver-free finalist remesh, convergence, off-design, external-fidelity persistence, and observation-order failure boundaries.
-- `development_kit/tests/test_robust_shape_tools.py` — This module verifies experimental-only robust preview, durable submission routing, bounded evidence inspection, verification, redaction, and public dispatch.
-- `development_kit/tests/test_robust_wall_watchdog.py` — This module deterministically verifies deadline cancellation, exact-attempt refusal, terminal exit, launch-failure evidence, and synthetic-job exclusion.
-- `development_kit/tests/test_lin2025_pedot_cylinder.py` — This module tests the Lin2025 PEDOT-cylinder fixture, topology, state, and explicit deformation-selection contracts.
-- `development_kit/tests/test_lin2025_pedot_backend.py` — This module tests failure-atomic Lin2025 ClientAPI control preparation and source-identity rejection.
-- `development_kit/tests/test_lin2025_pedot_shape_licensed_gate.py` — This module tests the Lin2025 licensed gate's hash-bound solver-free dry-run boundary.
-- `development_kit/tests/test_lin2025_robust_manifest.py` — This module tests strict licensed Lin2025 robust manifest assembly, self-validation, and failure-atomic output cleanup.
-- `development_kit/tests/test_robust_startup_admission.py` — This module tests caller-owned absolute RAM/disk thresholds with startup-only evaluation semantics.
-- `development_kit/tests/test_validation_runner.py` — This module tests the solver-independent validation point loop.
-- `development_kit/tests/test_validation_worker.py` — This module tests detached validation worker boundaries and cleanup.
-- `development_kit/tests/test_visual_review_contracts.py` — This module tests host-confirmed visual-review requests and receipts.
-- `development_kit/tests/test_wave_optics_audit.py` — This module tests policy-separated one-point Wave Optics evidence.
-- `development_kit/tests/test_wave_optics_preflight.py` — This module tests threshold-free read-only Wave Optics preflight evidence.
-- `development_kit/tests/test_workflow.py` — This module tests durable staged workflow execution without COMSOL.
+- `development_kit/tests/test_surrogate_dnn_adapter.py` — The tests cover surrogate DNN configuration sealing, typed write-plan derivation, deferred argument binding, and failure-atomic rollback without COMSOL. They check the boundary between solver-free and licensed modules. A structural check requires the licensed bridge to access Java only through the adapter.
+- `development_kit/tests/test_surrogate_export.py` — The tests cover solver-free surrogate export-artifact content hashing, sealed export manifests, prediction-consistency tolerances, and out-of-domain registry integration.
+- `development_kit/tests/test_surrogate_fields_and_splits.py` — The tests cover solver-free surrogate field-schema, transform round-trip, deterministic split, and adversarial leakage contracts.
+- `development_kit/tests/test_surrogate_manifests.py` — The tests cover solver-free surrogate dataset, schema, split, and transform manifest contracts.
+- `development_kit/tests/test_surrogate_onnx_runtime.py` — The tests cover solver-free ONNX protobuf decoding, operator coverage, transB weight layout, input binding, refusal paths, and regression against a real COMSOL export.
+- `development_kit/tests/test_surrogate_registry.py` — The tests cover solver-free surrogate model-card sealing, lifecycle transitions, drift detection, out-of-domain policy, and prediction-evidence separation.
+- `development_kit/tests/test_surrogate_rows.py` — The tests cover solver-free surrogate row-provenance binding, ineligible-row retention, ledger summarization, and deterministic Latin-hypercube design reproducibility.
+- `development_kit/tests/test_surrogate_training_metrics.py` — The tests cover solver-free surrogate physical-unit metrics, deterministic non-DNN baselines, baseline comparison, continuation identity rules, and multi-seed stability reporting.
+- `development_kit/tests/test_acdc_differential_coils_recipe.py` — The tests cover static portability and input contracts for the differential-coil recipe.
+- `development_kit/tests/test_attached_job_backend.py` — The tests cover immutable attached-job targets, handoff, worker execution, resume, cancellation, and preservation.
+- `development_kit/tests/test_async_solver.py` — The tests cover asynchronous solver thread state with fake studies.
+- `development_kit/tests/test_basic.py` — The tests cover basic server helpers and registration assumptions.
+- `development_kit/tests/test_bounded_steps.py` — The module solver-free tests bounded-step receipts, checkpoint usability, crash/cancel/replay decisions, and job-status surfacing.
+- `development_kit/tests/test_branch_continuation.py` — The tests cover ordered solver-free branch-continuation state binding and planning.
+- `development_kit/tests/test_branch_continuation_acceptance_runner.py` — The tests cover the explicit licensed continuation runner without starting COMSOL.
+- `development_kit/tests/test_branch_continuation_campaign_job.py` — The tests cover immutable bounded durable branch-continuation campaign specifications.
+- `development_kit/tests/test_branch_continuation_campaign_rows.py` — The tests cover hash-chained continuation state evidence and artifact replay.
+- `development_kit/tests/test_branch_continuation_campaign_runner.py` — The tests cover continuation composition, stopping, ambiguity, and exact resume.
+- `development_kit/tests/test_branch_continuation_campaign_worker.py` — The tests cover continuation worker ownership, later-state recovery, and cleanup failure.
+- `development_kit/tests/test_cancel_state_machine.py` — The tests cover deterministic cancellation state transitions without wall-clock sleeps.
+- `development_kit/tests/test_clientapi_properties.py` — The tests cover constrained clientapi property access with mocks.
+- `development_kit/tests/test_control_plane_metrics.py` — The tests cover bounded control-plane latency, overload, and fairness evidence.
+- `development_kit/tests/test_control_plane_startup.py` — The tests cover solver-free cold discovery and startup budgets.
+- `development_kit/tests/conftest.py` — The module prepares the shared ASCII runtime parent for dependency-only tests.
+- `development_kit/tests/mcp_test_support.py` — The module decodes public in-process MCP tool results consistently across the legacy SDK 1.x and conservative SDK 2.0 base.
+- `development_kit/tests/semantic_test_support.py` — The module provides sanitized subprocess environments for semantic isolation tests.
+- `development_kit/tests/test_convergence_campaign_job.py` — The tests cover immutable bounded durable convergence campaign specifications.
+- `development_kit/tests/test_convergence_campaign_rows.py` — The tests cover hash-chained durable convergence level evidence and artifact replay.
+- `development_kit/tests/test_convergence_campaign_runner.py` — The tests cover composed spectral-level execution, convergence stopping, and exact resume.
+- `development_kit/tests/test_convergence_campaign_worker.py` — The tests cover convergence worker ownership, later-level recovery, and cleanup failure.
+- `development_kit/tests/test_convergence_acceptance_runner.py` — The tests cover the licensed convergence runner contract without starting COMSOL.
+- `development_kit/tests/test_convergence_evaluation.py` — The tests cover ordered solver-free convergence evidence and policy evaluation.
+- `development_kit/tests/test_compatibility_registry.py` — The module solver-free tests the compatibility/skill registry matrix, hashes, and cold discovery.
+- `development_kit/tests/test_deployment_identity.py` — The tests cover package version, build identity, and fresh-process deployment consistency.
+- `development_kit/tests/test_derived_geometry.py` — The tests cover typed derived-geometry edits without COMSOL.
+- `development_kit/tests/test_durable_job_control_plane.py` — The tests cover durable submission, reconciliation, status, cancellation, and resume behavior.
+- `development_kit/tests/test_durable_primitives.py` — The tests cover versioned canonical bytes, bounded hashing, atomic writes, and row recovery.
+- `development_kit/tests/test_dependency_license_gate.py` — The tests cover deterministic dependency-license receipts and fail-closed review behavior.
+- `development_kit/tests/test_dependency_drift_report.py` — The tests cover dependency scopes, PEP 503 names, project-range exclusions, exact dependency pairs, bootstrap tools, and complete lock drift.
+- `development_kit/tests/test_environment_identity.py` — The tests cover redacted solver-free environment identity.
+- `development_kit/tests/test_evidence_contracts.py` — The tests cover physical evidence, policies, and immutable migration contracts.
+- `development_kit/tests/test_evidence_integrity_controls.py` — The tests cover default-on settings, explicit per-check opt-out, and fail-closed disclosure.
+- `development_kit/tests/test_evidence_integrity_stdio.py` — The module discovers and invokes both evidence guard tools over real solver-free MCP stdio.
+- `development_kit/tests/test_evidence_integrity_verifier.py` — The tests cover settings-aware formal evidence verification and resume identity checks.
+- `development_kit/tests/test_user_guides.py` — The module checks documented settings, tool names, warnings, and bilingual guide contracts.
+- `development_kit/tests/test_field_artifacts.py` — The tests cover bounded durable scalar field serialization.
+- `development_kit/tests/test_field_bundle.py` — The tests cover field-evidence request normalization and identity.
+- `development_kit/tests/test_field_dataset.py` — The tests cover read-only dataset adaptation to field evidence.
+- `development_kit/tests/test_field_discovery.py` — The tests cover locale-safe field dataset discovery.
+- `development_kit/tests/test_field_interpolation.py` — The tests cover bounded field interpolation onto declared grids.
+- `development_kit/tests/test_field_manifest.py` — The tests cover versioned field-evidence manifests and hashes.
+- `development_kit/tests/test_field_matrix.py` — The tests cover validation-matrix binding to field requests.
+- `development_kit/tests/test_field_pipeline.py` — The tests cover the raw-sample to durable field-evidence pipeline.
+- `development_kit/tests/test_field_render.py` — The tests cover isolated bounded field PNG rendering.
+- `development_kit/tests/test_field_review.py` — The tests cover paired field-review bundle assembly.
+- `development_kit/tests/test_field_sampling.py` — The tests cover bounded slice selection from raw field samples.
+- `development_kit/tests/test_field_tools.py` — The tests cover public field discovery and extraction adapters.
+- `development_kit/tests/test_geometry.py` — The tests cover geometry helpers without a COMSOL client.
+- `development_kit/tests/test_geometry_selections.py` — The tests cover bounded named Box and rectangular-side selection transactions without COMSOL.
+- `development_kit/tests/test_geometry_tools.py` — The tests cover structured input contracts for the difference/union geometry tools.
+- `development_kit/tests/test_incidence_config.py` — The tests cover typed periodic incidence preview and mutation gates.
+- `development_kit/tests/test_integration_boundaries.py` — The tests cover isolation and safety boundaries for integration probes.
+- `development_kit/tests/test_installed_stdio_probe.py` — The tests cover installed stdio probe result decoding.
+- `development_kit/tests/test_research_adapter_template_probe.py` — The module solver-free tests candidate-probe isolation, path bounds, settings, redaction, and atomic receipt behavior.
+- `development_kit/tests/test_research_adapter_licensed_gate.py` — The module solver-free tests the S4 licensed gate's dry-run binding and isolated strict settings.
+- `development_kit/tests/test_job_state_stress.py` — The module stress-tests durable state readers and writers without COMSOL.
+- `development_kit/tests/test_launcher_distribution.py` — The tests cover launcher portability and runs its PowerShell 5.1 and pwsh acceptance suite on Windows.
+- `development_kit/tests/test_lexical_manual.py` — The tests cover bounded SQLite lexical manual search and page reading.
+- `development_kit/tests/test_material_expressions.py` — The tests cover solver-free dispersive material-expression previews.
+- `development_kit/tests/test_mcp_sdk2_compatibility.py` — The module locks the reviewed MCP SDK 2.2.x lane, unchanged wire schemas, absent modern-protocol opt-in, and legacy stdio revisions.
+- `development_kit/tests/test_protocol_identity.py` — The module locks the separated SDK, protocol-revision, and Tasks wire-generation identities and the public SDK extension hooks.
+- `development_kit/tests/test_tasks_extension.py` — The tests cover the Tasks mapping contract against a fake durable engine, including opt-in gating, idempotency, TTL, and cancellation limits.
+- `development_kit/tests/test_tasks_server_registration.py` — The tests cover real-server Tasks advertisement, additive registration, and removed-method absence.
+- `development_kit/tests/test_dbmodel_operations.py` — The tests cover the `dbmodel://` operation contract, including the default-off write gate, refused overwrite, and revision collisions.
+- `development_kit/tests/test_solver_owners.py` — The tests cover the two-owner one-core ceiling, verified-absence release, and cross-owner isolation.
+- `development_kit/tests/test_operation_ledger.py` — The tests cover append-only operation journaling, replay recovery, artifact immutability, and preserved cleanup uncertainty.
+- `development_kit/tests/test_model_manager_gate.py` — The module binds the default-off Model Manager write gate to operation admission and checks the advertised capability metadata.
+- `development_kit/tests/test_model_manager_runtime.py` — The tests cover the default-off Model Manager feature gate, upload setting, collision refusals, and durable journalling without a solver.
+- `development_kit/tests/test_mesh.py` — The tests cover mesh helpers without a COMSOL client.
+- `development_kit/tests/test_mim_patch.py` — The tests cover patch-metasurface helper behavior without a COMSOL client.
+- `development_kit/tests/test_mim_recipe_contracts.py` — The tests cover solver-free safety contracts shared by the standalone MIM recipes.
+- `development_kit/tests/test_mph_inspection.py` — The module solver-free tests bounded offline `.mph` archive inspection, summaries, and refusals.
+- `development_kit/tests/test_model_identity.py` — The module solver-free tests the offline model-identity contract, checkpoint readiness, and passive session lanes.
+- `development_kit/tests/test_model.py` — The tests cover model management helpers without a COMSOL client.
+- `development_kit/tests/test_outcome_contract.py` — The tests cover orthogonal execution, evidence, and scientific outcome contracts.
+- `development_kit/tests/test_offline_export.py` — The module solver-free tests offline export-manifest construction, tamper rejection, and dispatch.
+- `development_kit/tests/test_observation.py` — The module solver-free tests observation outcomes, PID reuse detection, and exact-owner cleanup decisions.
+- `development_kit/tests/test_operation_arbiter.py` — The tests cover durable serialization and responsive control-plane operation classes.
+- `development_kit/tests/test_native_cancel_probe.py` — The tests cover native cancellation discovery and allowlisting without COMSOL.
+- `development_kit/tests/test_namespace_compatibility.py` — The tests cover canonical package identity and the bounded legacy import interval.
+- `development_kit/tests/test_native_runtime.py` — The tests cover the native-runtime manifest, main-thread preload, and representative lazy native calls.
+- `development_kit/tests/test_ownership.py` — The tests cover solver ownership, leases, and collision detection.
+- `development_kit/tests/test_parameters.py` — The tests cover parameter tools without a COMSOL client.
+- `development_kit/tests/test_path_policy.py` — The tests cover configured model-read and owned-artifact path containment.
+- `development_kit/tests/test_surrogate_public_tools.py` — The tests cover the five bounded public surrogate tools without COMSOL. They check typed contracts, the frozen `dbmodel://` source kind, document verification, dataset shape, and evidence separation. They also check real dispatch, cold discovery, and path containment.
+- `development_kit/tests/test_parallel_plate_capacitor_recipe.py` — The tests cover the standalone capacitor recipe without starting COMSOL.
+- `development_kit/tests/test_periodic_mesh_audit.py` — The tests cover periodic mesh evidence and clone-only smoke logic.
+- `development_kit/tests/test_physics.py` — The tests cover physics helpers without a COMSOL client.
+- `development_kit/tests/test_portfolio_verifier.py` — The tests cover policy-free summary citations against exact hashed evidence chains.
+- `development_kit/tests/test_power_audit.py` — The tests cover solver-free declared physical-power evidence.
+- `development_kit/tests/test_process_control.py` — The tests cover exact-identity process inspection and termination policy.
+- `development_kit/tests/test_process_inventory_stress.py` — The module stress-tests host inventory under PID churn without COMSOL.
+- `development_kit/tests/test_python_compatibility_gate.py` — The tests cover the compatibility gate's raced-worker identity tolerance.
+- `development_kit/tests/test_public_error_redaction.py` — The tests cover stable path-free public failures across tools, resources, and integrity receipts.
+- `development_kit/tests/test_property_transport.py` — The tests cover bounded JSON transport for clientapi properties.
+- `development_kit/tests/test_public_input_contracts.py` — The tests cover bounded discovery schemas and matching pre-side-effect runtime limits.
+- `development_kit/tests/test_quality_properties.py` — The module provides seeded property tests and exhaustive safety-decision branch cases for foundation contracts.
+- `development_kit/tests/test_quality_gate.py` — The tests cover exact coverage floors and fail-closed quality-policy evaluation.
+- `development_kit/tests/test_real_fixture_contract.py` — The tests cover portable contracts for controlled licensed fixtures.
+- `development_kit/tests/test_recipe_paths.py` — The tests cover standalone recipe output path policy.
+- `development_kit/tests/test_reference_power_acceptance.py` — The tests cover reference-power acceptance contracts and preflight.
+- `development_kit/tests/test_reference_power_gate.py` — The tests cover pure reference-power receipt evaluation.
+- `development_kit/tests/test_reference_power_release_orchestrator.py` — The tests cover mandatory serial release orchestration with fake processes.
+- `development_kit/tests/test_reference_power_runner.py` — The tests cover reference-power coordinator and worker process boundaries.
+- `development_kit/tests/test_release_engineering.py` — The tests cover repository, dependency, fixture, archive, and release policies.
+- `development_kit/tests/test_engineering_fixture_builder.py` — The tests cover the engineering fixture builder without COMSOL. They check single-core enforcement, absolute ASCII output isolation, staging, publication, and refusal to overwrite a model. They also check save-failure propagation without residue and release-failure accounting. Scope checks prevent claims of physical validity.
+- `development_kit/tests/test_release_facts.py` — The tests cover the generated release-facts view against live implementation data.
+- `development_kit/tests/test_release_receipts.py` — The tests cover deterministic SBOM and release inventory receipts.
+- `development_kit/tests/test_research_contracts.py` — The tests cover closed goal and design-space normalization, identities, and the first MIM campaign bounds.
+- `development_kit/tests/test_research_benchmarks.py` — The module proves the frozen feasible, impossible, multi-objective, material, and crash-resume benchmark fixtures.
+- `development_kit/tests/test_research_workflow.py` — The tests cover passive workflow claims, ambiguity review, canonical identity, and baseline readiness.
+- `development_kit/tests/test_research_materials.py` — The tests cover provenance, validity, approval, strict verification, and campaign material binding.
+- `development_kit/tests/test_research_candidates.py` — The tests cover pre-side-effect candidate normalization, bounds, lifecycle, and deduplication.
+- `development_kit/tests/test_research_decisions.py` — The tests cover hash-chained adaptive decisions, exact references, and derived budget exhaustion.
+- `development_kit/tests/test_research_state.py` — The tests cover backend-neutral checkpoints and bounded evidence-separated candidate portfolios.
+- `development_kit/tests/test_research_journal.py` — The tests cover fsync'd appends, stale-tail rejection, partial-tail truncation, and exact hash-chain recovery.
+- `development_kit/tests/test_research_evaluations.py` — The tests cover durable started and terminal evaluation authority and journal replay.
+- `development_kit/tests/test_research_coordinator.py` — The tests cover solver-free budget admission, duplicate suppression, cancellation, and exact crash replay.
+- `development_kit/tests/test_research_campaign_loop.py` — The tests cover optimizer-to-coordinator execution, per-point checkpoints, measured success, and honest budget exhaustion.
+- `development_kit/tests/test_research_objectives.py` — The tests cover exact evidence pointers, deterministic losses, and threshold disposition separation.
+- `development_kit/tests/test_research_robustness.py` — The tests cover bounded axis perturbations, exact evidence coverage, and optional robustness thresholds.
+- `development_kit/tests/test_research_tools.py` — The tests cover real dispatch for experimental solver-free campaign compilation and robustness planning.
+- `development_kit/tests/test_research_adapters.py` — The tests cover exact trusted-template manifests, closed x/y mutation scope, and live-tree drift rejection.
+- `development_kit/tests/test_adjoint_adapter.py` — The tests cover native adapter readback, unit canonicalization, and rollback on mutation failure.
+- `development_kit/tests/test_adapter_protocol.py` — The tests cover the project-owned COMSOL adapter protocol without COMSOL. They check explicit conversion, failure-atomic rollback, error translation, and step-6 typed Java access and feature lifecycle. They also check MPh 1.3.1/1.4 behavior parity.
+- `development_kit/tests/test_adapter_migration_inventory.py` — The tests enforce the S4A direct-call inventory. Every measured module needs a declared disposition. A migrated module must have no direct call site. Synthetic trees exercise each ledger rule so an inactive rule cannot pass unnoticed.
+- `development_kit/tests/test_derivative_support.py` — The tests cover strict derivative-support identities, variable mappings, objective contracts, and immutable normalization.
+- `development_kit/tests/test_gradient_contracts.py` — The tests cover caller-budgeted native optimizer and exact gradient-row contracts.
+- `development_kit/tests/test_gradient_validation.py` — The tests cover independent finite-difference, sign, cosine, directional, and step-sensitivity gradient checks.
+- `development_kit/tests/test_external_validation.py` — The tests cover independent COMSOL-first validation and explicitly authorized RCWA fallback receipts.
+- `development_kit/tests/test_robust_conditions.py` — The tests cover complete or explicitly sparse configurable multi-condition and material-state tables.
+- `development_kit/tests/test_robust_gradient_acceptance.py` — The tests cover joint component, cosine, sign, three-step, and directional gradient acceptance.
+- `development_kit/tests/test_robust_material_mapping.py` — The tests cover diagonal optical tensor axes, source columns, time convention, and no-extrapolation identity.
+- `development_kit/tests/test_robust_pedot_fixture.py` — The tests cover private-data-redacted OX/MR CSV auditing and complete 24-condition fixture compilation.
+- `development_kit/tests/test_pedot_material_ownership_probe.py` — The tests cover source-bound dry run, bounded material selection/property inspection, redaction, and cleanup for the read-only licensed probe.
+- `development_kit/tests/test_robust_finalist_validation.py` — The tests cover caller-owned finalist validation policy and no-fallback/no-host-default boundaries.
+- `development_kit/tests/test_robust_finalist_evidence.py` — The tests cover independent finalist manufacturability, remesh, convergence, branch, off-design, and external-fidelity promotion evidence.
+- `development_kit/tests/test_robust_gradient_ladder_licensed_gate.py` — The tests cover required caller budgets, startup-only admission, shared-lease sequencing, exact gradient thresholds, and explicit non-fallback MMA disposition.
+- `development_kit/tests/test_robust_objectives.py` — The tests cover smooth absolute two-state contrast and weighted smooth worst-case scalarization.
+- `development_kit/tests/test_robust_optimizer_policy.py` — The tests cover method-bound manual GCMMA/MMA selection and rejects automatic fallback.
+- `development_kit/tests/test_robust_outer_gcmma.py` — The tests cover fingerprinted external GCMMA state, normalized move limits, and actual condition-solve budgets. They check conservative acceptance and visible inner revisions without importing the optional backend.
+- `development_kit/tests/test_shape_support.py` — The tests cover geometry-derived minimum gap, per-model mesh admission, invariant guards, and model retention.
+- `development_kit/tests/test_research_adaptive_acquisition.py` — The tests cover bounded deterministic GP/EI selection, invalid evidence rejection, and heavy-import isolation.
+- `development_kit/tests/test_research_optimizers.py` — The tests cover deterministic ask/tell/checkpoint replay, mixed domains, and dependency isolation.
+- `development_kit/tests/test_native_gradient_support_matrix.py` — The module validates the redacted alpha7.1 native-gradient capability matrix and receipt boundary.
+- `development_kit/tests/test_resource_admission.py` — The tests cover resource policy normalization, telemetry, and admission decisions.
+- `development_kit/tests/test_results.py` — The tests cover result normalization without a COMSOL client.
+- `development_kit/tests/test_runtime_paths.py` — The tests cover shared ASCII-safe runtime and lease paths.
+- `development_kit/tests/test_schema_registry.py` — The tests cover named schema coverage and version support resolution.
+- `development_kit/tests/test_security_gate.py` — The tests cover vulnerability report parsing and expiring allowlist policy.
+- `development_kit/tests/test_progressive_discovery.py` — The tests cover the cold-start byte budget, catalog, and cursor paging boundaries.
+- `development_kit/tests/test_semantic_contracts.py` — The tests cover semantic benchmark contracts, limits, and import safety.
+- `development_kit/tests/test_semantic_index.py` — The tests cover immutable semantic index construction and publication.
+- `development_kit/tests/test_semantic_retrieval.py` — The tests cover deterministic vector retrieval, filtering, fusion, and cache identity.
+- `development_kit/tests/test_semantic_tools.py` — The tests cover semantic feature schemas, configuration, and degradation behavior.
+- `development_kit/tests/test_semantic_worker_protocol.py` — The tests cover isolated semantic worker protocol and containment.
+- `development_kit/tests/test_server.py` — The tests cover server construction and capabilities without starting a transport.
+- `development_kit/tests/test_settings.py` — The tests cover grouped settings defaults, validation, and fallback errors.
+- `development_kit/tests/test_alpha6_settings_gui_contract.py` — The module locks the alpha6 settings schema, location, launcher, and packaging contracts.
+- `development_kit/tests/test_settings_gui_launcher.py` — The tests cover detached Settings GUI launch, handshake, profile discovery, and Tk import isolation.
+- `development_kit/tests/test_settings_gui_direct_entry.py` — The tests cover the installed Settings GUI exact-path, validate-only, and explicit shortcut command contract.
+- `development_kit/tests/test_settings_gui_package.py` — The tests cover Settings GUI distribution membership receipts.
+- `development_kit/tests/test_settings_gui_root_launcher.py` — The tests cover the repository-root manual Settings GUI launcher under both supported PowerShell hosts.
+- `development_kit/tests/test_shared_attach_request.py` — The tests cover the complete pre-lease shared-server attach gate.
+- `development_kit/tests/test_shared_cleanup_contracts.py` — The tests cover non-owning detach and owned-cleanup outcome semantics.
+- `development_kit/tests/test_shared_interactive_licensed_gate.py` — The tests cover the licensed shared interactive gate's solver-free specification path.
+- `development_kit/tests/test_shared_model_locking.py` — The tests cover bounded shared-model revisions and exact enforcement locks.
+- `development_kit/tests/test_shared_operation_dependencies.py` — The tests cover shared operations against the reused arbiter and path-containment dependencies.
+- `development_kit/tests/test_shared_process_probe.py` — The tests cover redacted Windows process, listener, window, and version inventory.
+- `development_kit/tests/test_shared_session_contracts.py` — The tests cover default-off feature and loopback endpoint contracts.
+- `development_kit/tests/test_shared_session_identity.py` — The tests cover attached-server and exact model-selector identities.
+- `development_kit/tests/test_shared_session_lifecycle.py` — The tests cover fake-client attach, failure cleanup, and external-resource-preserving detach.
+- `development_kit/tests/test_shared_session_preflight.py` — The tests cover shared-preflight version gates and process identity hashing.
+- `development_kit/tests/test_shared_session_registration.py` — The tests cover registration-time tolerance of the shared-session feature gate.
+- `development_kit/tests/test_shared_session_tools.py` — The tests cover the public default-off shared lifecycle tools and capability surface.
+- `development_kit/tests/test_shared_server_preflight.py` — The tests cover two-probe Desktop, listener, collision, and COMSOL release-line classification.
+- `development_kit/tests/test_spectral_characterization.py` — The tests cover provenance-bound offline spectral validation and measurements.
+- `development_kit/tests/test_spectral_model_comparison.py` — The tests cover identical-support line-shape comparison, coordinate transforms, information criteria, and public dispatch.
+- `development_kit/tests/test_simulation_configuration.py` — The tests cover typed configuration normalization, classified diffs, and solver-free durable-job previews.
+- `development_kit/tests/test_thermal_radiation.py` — The tests cover Kirchhoff applicability, Planck/Jacobian integration, angular and polarization handling, detector kernels, and public dispatch.
+- `development_kit/tests/test_thermal_material.py` — The tests cover typed material states, analytic/table models, phase boundaries, extrapolation, conversion previews, and public dispatch.
+- `development_kit/tests/test_surrogate_training_job.py` — The tests cover durable surrogate-training spec binding, epoch journaling, resume without duplicates, deduplication, and solver-free preflight.
+- `development_kit/tests/test_thermo_optomechanical_replay.py` — The tests cover the closed thermo-optomechanical specification, durable stage replay, result binding, save semantics, evidence validation, and cleanup.
+- `development_kit/tests/test_spectral_audit.py` — The tests cover strict projection of point-audit artifacts into durable spectral rows.
+- `development_kit/tests/test_spectral_acceptance_runner.py` — The tests cover the licensed spectral runner contract without starting COMSOL.
+- `development_kit/tests/test_spectral_characterization_job.py` — The tests cover immutable bounded durable spectral job specifications.
+- `development_kit/tests/test_spectral_progress.py` — The tests cover adaptive spectral transitions and policy-separated scientific outcomes.
+- `development_kit/tests/test_spectral_rows.py` — The tests cover hash-chained durable spectral rows and exact artifact-bound resume.
+- `development_kit/tests/spectral_job_fixtures.py` — The module creates sanitized fake point-audit artifacts for durable spectral tests.
+- `development_kit/tests/test_spectral_runner.py` — The tests cover the adaptive spectral point loop, summaries, and fault recovery.
+- `development_kit/tests/test_spectral_level_execution.py` — The tests cover loaded-model spectral execution with shared resource and collector machinery.
+- `development_kit/tests/test_spectral_stages.py` — The tests cover immutable spectral stage planning, freezing, and replay.
+- `development_kit/tests/test_spectral_worker.py` — The tests cover injected spectral worker ownership, resources, state, and cleanup.
+- `development_kit/tests/test_study.py` — The tests cover study helpers without a COMSOL client.
+- `development_kit/tests/test_standalone_executable.py` — The tests cover the reviewed Python-free Windows launcher build, deployment identity, durable inspection, and fixed launch contract.
+- `development_kit/tests/test_standalone_acceptance_runner.py` — The tests cover the explicit licensed standalone acceptance orchestration without starting COMSOL.
+- `development_kit/tests/test_standalone_tools.py` — The tests cover the standalone tools within `basic_fem`, public dispatch, metadata, and owned-artifact containment.
+- `development_kit/tests/test_tool_catalog.py` — The tests cover deterministic tool catalog metadata and discovery.
+- `development_kit/tests/test_tool_profiles.py` — The tests cover static profile selection, membership, and registration.
+- `development_kit/tests/test_validation_collectors.py` — The tests cover adapters from validation points to evidence collectors.
+- `development_kit/tests/test_validation_matrix.py` — The tests cover bounded validation-matrix specification normalization.
+- `development_kit/tests/test_validation_rows.py` — The tests cover append-only validation row identity and durability.
+- `development_kit/tests/test_adjoint_rows.py` — The tests cover crash-tail recovery, identity binding, and hash chaining for adjoint rows.
+- `development_kit/tests/test_adjoint_optimization.py` — The tests cover bounded manifest expansion, source identity, and explicit resource submission for adjoint jobs.
+- `development_kit/tests/test_robust_shape_optimization.py` — The tests cover hash-pinned robust shape manifests, cross-contract identities, and caller-owned admission limits.
+- `development_kit/tests/test_robust_shape_adapter.py` — The tests cover exact source, tree, topology, policy, and x/y variable binding before robust ClientAPI work.
+- `development_kit/tests/test_robust_adapter_configuration.py` — The tests cover tagged MIM/Lin2025 robust adapter binding and cross-contract drift rejection.
+- `development_kit/tests/test_robust_shape_adapter_licensed_gate.py` — The tests cover the S3 licensed gate's caller-owned limits, solver-free dry run, redaction, and cleanup boundaries.
+- `development_kit/tests/test_robust_smoothing_selection.py` — The tests cover evidence-only soft-min objective/weight/gradient comparison and forbids automatic winner selection.
+- `development_kit/tests/test_robust_gradient_runtime.py` — The tests cover durable ordered native condition-gradient receipts, exact replay, tamper rejection, and robust aggregation without COMSOL.
+- `development_kit/tests/test_robust_shape_rows.py` — The tests cover robust condition, gradient, iteration, trial, checkpoint, and cleanup row chaining and crash-tail recovery.
+- `development_kit/tests/test_robust_shape_worker.py` — The tests cover JobManager dispatch, synthetic 24-condition completion, exact replay, status summaries, duplicate suppression, and durable licensed-condition receipt recovery.
+- `development_kit/tests/test_robust_finalist_runtime.py` — The tests cover solver-free finalist remesh, convergence, off-design, external-fidelity persistence, and observation-order failure boundaries.
+- `development_kit/tests/test_robust_shape_tools.py` — The module verifies experimental-only robust preview, durable submission routing, bounded evidence inspection, verification, redaction, and public dispatch.
+- `development_kit/tests/test_robust_wall_watchdog.py` — The module deterministically verifies deadline cancellation, exact-attempt refusal, terminal exit, launch-failure evidence, and synthetic-job exclusion.
+- `development_kit/tests/test_lin2025_pedot_cylinder.py` — The tests cover the Lin2025 PEDOT-cylinder fixture, topology, state, and explicit deformation-selection contracts.
+- `development_kit/tests/test_lin2025_pedot_backend.py` — The tests cover failure-atomic Lin2025 ClientAPI control preparation and source-identity rejection.
+- `development_kit/tests/test_lin2025_pedot_shape_licensed_gate.py` — The tests cover the Lin2025 licensed gate's hash-bound solver-free dry-run boundary.
+- `development_kit/tests/test_lin2025_robust_manifest.py` — The tests cover strict licensed Lin2025 robust manifest assembly, self-validation, and failure-atomic output cleanup.
+- `development_kit/tests/test_robust_startup_admission.py` — The tests cover caller-owned absolute RAM/disk thresholds with startup-only evaluation semantics.
+- `development_kit/tests/test_validation_runner.py` — The tests cover the solver-independent validation point loop.
+- `development_kit/tests/test_validation_worker.py` — The tests cover detached validation worker boundaries and cleanup.
+- `development_kit/tests/test_visual_review_contracts.py` — The tests cover host-confirmed visual-review requests and receipts.
+- `development_kit/tests/test_wave_optics_audit.py` — The tests cover policy-separated one-point Wave Optics evidence.
+- `development_kit/tests/test_wave_optics_preflight.py` — The tests cover threshold-free read-only Wave Optics preflight evidence.
+- `development_kit/tests/test_workflow.py` — The tests cover durable staged workflow execution without COMSOL.
 
 ## Packaged runtime root
 
-- `comsol_mcp/research/__init__.py` — This file exports solver-free bounded research contracts.
-- `comsol_mcp/research/contracts.py` — This module normalizes versioned research goals and design spaces with deterministic fingerprints.
-- `comsol_mcp/research/compiler.py` — This module compiles approved goals and design spaces into frozen campaign manifests without a solver.
-- `comsol_mcp/research/derivative_support.py` — This module defines solver-free native-derivative support, variable, objective, and constraint identities.
-- `comsol_mcp/research/gradient_contracts.py` — This module defines immutable gradient rows and caller-budgeted native optimizer identities.
-- `comsol_mcp/research/gradient_validation.py` — This module compares native gradients with caller-supplied central or one-sided finite-difference evidence.
-- `comsol_mcp/research/external_validation.py` — This module normalizes backend-neutral independent validation receipts and forbids silent RCWA fallback.
-- `comsol_mcp/research/robust_conditions.py` — This module normalizes immutable configurable optimization condition tables and provenance-bound material states.
-- `comsol_mcp/research/robust_condition_controls.py` — This module normalizes explicit COMSOL tags, expressions, angle, and polarization mappings for robust condition execution.
-- `comsol_mcp/research/robust_gradient_acceptance.py` — This module combines independent component and directional gradient receipts under caller-frozen thresholds.
-- `comsol_mcp/research/robust_material_mapping.py` — This module freezes source columns, diagonal tensor axes, time-harmonic convention, interpolation, and no-extrapolation policy for immutable material states.
-- `comsol_mcp/research/robust_material_tensor_rows.py` — This module validates caller-supplied OX/MR tensor samples and cross-binds them to condition wavelengths and source identities.
-- `comsol_mcp/research/robust_finalist_validation.py` — This module freezes caller-owned fresh-remesh, convergence, branch, off-design, and external-fidelity finalist validation policy.
-- `comsol_mcp/research/robust_finalist_evidence.py` — This module independently assesses complete finalist promotion evidence and emits a tamper-evident receipt.
-- `comsol_mcp/research/robust_objectives.py` — This module evaluates differentiable absolute state contrast, caller-configurable smooth worst-case aggregation, and the exact condition-to-aggregate gradient chain rule.
-- `comsol_mcp/research/robust_optimizer_policy.py` — This module binds manual GCMMA/MMA selection to method-specific execution evidence without automatic fallback.
-- `comsol_mcp/research/robust_outer_gcmma.py` — This module persists the bounded outer-loop GCMMA state and lazily hash-verifies a caller-supplied `mmapy` wheel while COMSOL remains the native condition/adjoint solver.
-- `comsol_mcp/research/robust_shape_adapter.py` — This module binds the trusted periodic-MIM structure, tree audit, derivative support, shape policy, and x/y variables, then verifies failure-atomic Deformed Geometry control preparation.
-- `comsol_mcp/research/robust_adapter_configuration.py` — This module normalizes the tagged periodic-MIM or Lin2025 adapter configuration and binds it to derivative and shape policies.
-- `comsol_mcp/research/robust_smoothing_selection.py` — This module compares caller-supplied smooth-worst-case temperatures while preserving objective, weight, and gradient effects for manual review.
-- `comsol_mcp/research/shape_support.py` — This module normalizes geometry-scale minimum-gap, mesh admission, invariant geometry, and retention policy.
-- `comsol_mcp/research/robust_startup_admission.py` — This module evaluates caller-owned absolute RAM/disk thresholds exactly once before robust work starts.
-- `comsol_mcp/research/workflow.py` — This module normalizes passive cited workflow capsules, explicit assumptions, review, and baseline readiness.
-- `comsol_mcp/research/materials.py` — This module normalizes provenance-bound material catalogs and derives approval and strict-verification sets.
-- `comsol_mcp/research/records.py` — This module normalizes canonical candidate records and point identities before side effects.
-- `comsol_mcp/research/decisions.py` — This module normalizes hash-chained adaptive decisions and bounded budget snapshots.
-- `comsol_mcp/research/state.py` — This module normalizes backend-neutral optimizer checkpoints and candidate portfolios.
-- `comsol_mcp/research/journal.py` — This module implements the append-only hash-chained authority for durable research artifacts.
-- `comsol_mcp/research/evaluations.py` — This module normalizes started and terminal candidate evaluation records without interpreting results.
-- `comsol_mcp/research/coordinator.py` — This module serializes injected evaluators behind durable admission, cancellation, and replay contracts.
-- `comsol_mcp/research/campaign_loop.py` — This module connects optimizer proposals to durable evaluation, scoring, checkpoints, and honest bounded stop outcomes.
-- `comsol_mcp/research/objectives.py` — This module computes deterministic objective receipts from exact immutable evidence fields.
-- `comsol_mcp/research/robustness.py` — This module creates bounded finalist perturbation matrices and threshold-separated robustness summaries.
-- `comsol_mcp/research/adapters.py` — This module freezes trusted structure-family manifests and exact live-tree audit receipts.
-- `comsol_mcp/research/adjoint_adapter.py` — This module configures the fixed periodic-MIM native Sensitivity/Optimization feature pair with failure-atomic rollback.
-- `comsol_mcp/research/lin2025_pedot_cylinder.py` — This module freezes the Lin2025 PEDOT-cylinder source, OX/MR state, topology, and explicit shape-support selections.
-- `comsol_mcp/research/lin2025_pedot_backend.py` — This module prepares failure-atomic ClientAPI Deformed Geometry controls for the derived Lin2025 PEDOT cylinder.
-- `comsol_mcp/jobs/native_adjoint_runtime.py` — This module executes the licensed fixed-topology GCMMA lane with caller budgets, explicit datasets, remesh, fresh-forward, and physical evidence.
-- `comsol_mcp/jobs/robust_condition_runtime.py` — This module persists and exactly replays full per-condition licensed receipts before hash-chained robust rows.
-- `comsol_mcp/jobs/robust_shape_native_runtime.py` — This module applies explicit Lin2025 ClientAPI condition controls on a derived model and delegates durable rows.
-- `comsol_mcp/jobs/robust_shape_optimization.py` — This module expands a bounded external robust-shape manifest and validates every contract before worker startup.
-- `comsol_mcp/jobs/robust_gradient_runtime.py` — This module persists exact native condition-gradient receipts and compiles their complete ordered robust aggregate.
-- `comsol_mcp/jobs/robust_shape_rows.py` — This module persists hash-chained fsync'd robust condition, gradient, iteration, trial, checkpoint, and cleanup rows.
-- `comsol_mcp/jobs/robust_shape_worker.py` — This module runs solver-free robust lifecycle fixtures and the licensed durable COMSOL-condition plus explicit outer-GCMMA candidate loop.
-- `comsol_mcp/jobs/robust_finalist_runtime.py` — This module runs fresh licensed finalist baseline/finer meshes, validation-only off-design conditions, and durable independent-fidelity assessment.
+- `comsol_mcp/research/__init__.py` — The file exports solver-free bounded research contracts.
+- `comsol_mcp/research/contracts.py` — The module normalizes versioned research goals and design spaces with deterministic fingerprints.
+- `comsol_mcp/research/compiler.py` — The module compiles approved goals and design spaces into frozen campaign manifests without a solver.
+- `comsol_mcp/research/derivative_support.py` — The module defines solver-free native-derivative support, variable, objective, and constraint identities.
+- `comsol_mcp/research/gradient_contracts.py` — The module defines immutable gradient rows and caller-budgeted native optimizer identities.
+- `comsol_mcp/research/gradient_validation.py` — The module compares native gradients with caller-supplied central or one-sided finite-difference evidence.
+- `comsol_mcp/research/external_validation.py` — The module normalizes backend-neutral independent validation receipts and forbids silent RCWA fallback.
+- `comsol_mcp/research/robust_conditions.py` — The module normalizes immutable configurable optimization condition tables and provenance-bound material states.
+- `comsol_mcp/research/robust_condition_controls.py` — The module normalizes explicit COMSOL tags, expressions, angle, and polarization mappings for robust condition execution.
+- `comsol_mcp/research/robust_gradient_acceptance.py` — The module combines independent component and directional gradient receipts under caller-frozen thresholds.
+- `comsol_mcp/research/robust_material_mapping.py` — The module freezes source columns, diagonal tensor axes, time-harmonic convention, interpolation, and no-extrapolation policy for immutable material states.
+- `comsol_mcp/research/robust_material_tensor_rows.py` — The module validates caller-supplied OX/MR tensor samples and cross-binds them to condition wavelengths and source identities.
+- `comsol_mcp/research/robust_finalist_validation.py` — The module freezes caller-owned fresh-remesh, convergence, branch, off-design, and external-fidelity finalist validation policy.
+- `comsol_mcp/research/robust_finalist_evidence.py` — The module independently assesses complete finalist promotion evidence and emits a tamper-evident receipt.
+- `comsol_mcp/research/robust_objectives.py` — The module evaluates differentiable absolute state contrast, caller-configurable smooth worst-case aggregation, and the exact condition-to-aggregate gradient chain rule.
+- `comsol_mcp/research/robust_optimizer_policy.py` — The module binds manual GCMMA/MMA selection to method-specific execution evidence without automatic fallback.
+- `comsol_mcp/research/robust_outer_gcmma.py` — The module persists the bounded outer-loop GCMMA state and lazily hash-verifies a caller-supplied `mmapy` wheel while COMSOL remains the native condition/adjoint solver.
+- `comsol_mcp/research/robust_shape_adapter.py` — The module binds the trusted periodic-MIM structure, tree audit, derivative support, shape policy, and x/y variables, then verifies failure-atomic Deformed Geometry control preparation.
+- `comsol_mcp/research/robust_adapter_configuration.py` — The module normalizes the tagged periodic-MIM or Lin2025 adapter configuration and binds it to derivative and shape policies.
+- `comsol_mcp/research/robust_smoothing_selection.py` — The module compares caller-supplied smooth-worst-case temperatures while preserving objective, weight, and gradient effects for manual review.
+- `comsol_mcp/research/shape_support.py` — The module normalizes geometry-scale minimum-gap, mesh admission, invariant geometry, and retention policy.
+- `comsol_mcp/research/robust_startup_admission.py` — The module evaluates caller-owned absolute RAM/disk thresholds exactly once before robust work starts.
+- `comsol_mcp/research/workflow.py` — The module normalizes passive cited workflow capsules, explicit assumptions, review, and baseline readiness.
+- `comsol_mcp/research/materials.py` — The module normalizes provenance-bound material catalogs and derives approval and strict-verification sets.
+- `comsol_mcp/research/records.py` — The module normalizes canonical candidate records and point identities before side effects.
+- `comsol_mcp/research/decisions.py` — The module normalizes hash-chained adaptive decisions and bounded budget snapshots.
+- `comsol_mcp/research/state.py` — The module normalizes backend-neutral optimizer checkpoints and candidate portfolios.
+- `comsol_mcp/research/journal.py` — The module implements the append-only hash-chained authority for durable research artifacts.
+- `comsol_mcp/research/evaluations.py` — The module normalizes started and terminal candidate evaluation records without interpreting results.
+- `comsol_mcp/research/coordinator.py` — The module serializes injected evaluators behind durable admission, cancellation, and replay contracts.
+- `comsol_mcp/research/campaign_loop.py` — The module connects optimizer proposals to durable evaluation, scoring, checkpoints, and honest bounded stop outcomes.
+- `comsol_mcp/research/objectives.py` — The module computes deterministic objective receipts from exact immutable evidence fields.
+- `comsol_mcp/research/robustness.py` — The module creates bounded finalist perturbation matrices and threshold-separated robustness summaries.
+- `comsol_mcp/research/adapters.py` — The module freezes trusted structure-family manifests and exact live-tree audit receipts.
+- `comsol_mcp/research/adjoint_adapter.py` — The module configures the fixed periodic-MIM native Sensitivity/Optimization feature pair with failure-atomic rollback.
+- `comsol_mcp/research/lin2025_pedot_cylinder.py` — The module freezes the Lin2025 PEDOT-cylinder source, OX/MR state, topology, and explicit shape-support selections.
+- `comsol_mcp/research/lin2025_pedot_backend.py` — The module prepares failure-atomic ClientAPI Deformed Geometry controls for the derived Lin2025 PEDOT cylinder.
+- `comsol_mcp/jobs/native_adjoint_runtime.py` — The module executes the licensed fixed-topology GCMMA lane with caller budgets, explicit datasets, remesh, fresh-forward, and physical evidence.
+- `comsol_mcp/jobs/robust_condition_runtime.py` — The module persists and exactly replays full per-condition licensed receipts before hash-chained robust rows.
+- `comsol_mcp/jobs/robust_shape_native_runtime.py` — The module applies explicit Lin2025 ClientAPI condition controls on a derived model and delegates durable rows.
+- `comsol_mcp/jobs/robust_shape_optimization.py` — The module expands a bounded external robust-shape manifest and validates every contract before worker startup.
+- `comsol_mcp/jobs/robust_gradient_runtime.py` — The module persists exact native condition-gradient receipts and compiles their complete ordered robust aggregate.
+- `comsol_mcp/jobs/robust_shape_rows.py` — The module persists hash-chained fsync'd robust condition, gradient, iteration, trial, checkpoint, and cleanup rows.
+- `comsol_mcp/jobs/robust_shape_worker.py` — The module runs solver-free robust lifecycle fixtures and the licensed durable COMSOL-condition plus explicit outer-GCMMA candidate loop.
+- `comsol_mcp/jobs/robust_finalist_runtime.py` — The module runs fresh licensed finalist baseline/finer meshes, validation-only off-design conditions, and durable independent-fidelity assessment.
 - `comsol_mcp/jobs/robust_wall_watchdog.py` — This detached process enforces the caller-owned licensed robust wall budget through exact-attempt durable cancellation without calling COMSOL.
-- `comsol_mcp/jobs/adjoint_optimization_worker.py` — This module dispatches synthetic lifecycle fixtures or the licensed durable native-adjoint runtime and persists validated hash-chained terminal rows.
+- `comsol_mcp/jobs/adjoint_optimization_worker.py` — The module dispatches synthetic lifecycle fixtures or the licensed durable native-adjoint runtime and persists validated hash-chained terminal rows.
 - `comsol_mcp/research/adaptive_acquisition.py` — This explicitly loaded module performs bounded Gaussian-process posterior and expected-improvement selection without affecting ordinary discovery imports.
-- `comsol_mcp/research/optimizers.py` — This module provides the backend-neutral optimizer protocol and deterministic grid, random, and Latin-hypercube baselines.
+- `comsol_mcp/research/optimizers.py` — The module provides the backend-neutral optimizer protocol and deterministic grid, random, and Latin-hypercube baselines.
 
 - `src/__init__.py` — This compatibility package aliases legacy imports to the canonical implementation modules.
-- `comsol_mcp/__init__.py` — This module defines the single authored package version.
-- `comsol_mcp/artifact_chain.py` — This module verifies bounded JSON artifact dependency chains without a solver.
-- `comsol_mcp/adapter/__init__.py` — This module exposes the project-owned COMSOL adapter seam and resolves a backend lazily so importing it never imports MPh.
-- `comsol_mcp/adapter/conversion.py` — This module performs explicit, version-neutral scalar and matrix conversion so no backend can silently coerce a value.
-- `comsol_mcp/adapter/fake_backend.py` — This module is a deterministic scripted backend that lets adapter contract and parity tests run with no COMSOL, JVM, or lease; it implements the whole protocol, including the step-6 typed Java access and container/node lifecycle operations.
-- `comsol_mcp/adapter/migration_inventory.py` — This module holds the executable S4A direct-call inventory: the AST-grounded measures of a direct MPh/ClientAPI site, the declared per-module disposition ledger, and the checker that fails when the declaration and a fresh scan of the tree disagree.
-- `comsol_mcp/adapter/mph14_backend.py` — This module is the isolated MPh 1.4.0 lane, recording that lane's general matrix read and `dbmodel://` load capability without enabling a live operation.
-- `comsol_mcp/adapter/mph_backend.py` — This module is the MPh 1.3.1 reference backend and the only place that constructs an MPh client for operational work; it also owns the closed Java write-kind vocabulary, the typed accessor probe, and the enumerable-container and node-lifecycle operations the DNN bridge depends on.
-- `comsol_mcp/adapter/protocol.py` — This module defines the typed adapter protocol, request/result objects, stable error codes, the closed `JAVA_WRITE_KINDS` and `DNN_FEATURE_METHODS` vocabularies, the already-resolved node handle, and the operation list the six S4A steps map onto.
-- `comsol_mcp/build_identity.py` — This module derives package build identity from shipped paths and bytes.
-- `comsol_mcp/compatibility.py` — This module loads and validates the packaged runtime compatibility declaration.
-- `comsol_mcp/contracts/__init__.py` — This module exports lightweight public input contracts without solver imports.
-- `comsol_mcp/contracts/job_submission.py` — This module defines bounded discriminated durable-job submission inputs.
-- `comsol_mcp/contracts/mph_inspection.py` — This module defines bounded offline `.mph` inspection input contracts.
-- `comsol_mcp/contracts/model_identity.py` — This module defines the bounded read-only model-identity request contract.
-- `comsol_mcp/contracts/simulation_configuration.py` — This module defines closed typed simulation-configuration and diff-policy inputs.
-- `comsol_mcp/contracts/thermal_radiation.py` — This module defines closed Kirchhoff-assessment and thermal-radiation request inputs.
-- `comsol_mcp/contracts/thermal_material.py` — This module defines closed temperature/state material ledger and evaluation inputs.
-- `comsol_mcp/contracts/thermo_optomechanical.py` — This module defines the closed durable thermal-to-optical replay input contract.
-- `comsol_mcp/contracts/offline_export.py` — This module defines bounded offline export-validation input contracts.
-- `comsol_mcp/contracts/structural.py` — This module applies shared public schema and runtime structural limits.
-- `comsol_mcp/contracts/surrogate.py` — This module defines closed solver-free input contracts for the five bounded public surrogate tools, including the frozen `dbmodel://` URI source kind.
-- `comsol_mcp/durable/__init__.py` — This module exports versioned canonicalization and durable filesystem primitives.
-- `comsol_mcp/durable/canonical.py` — This module preserves legacy canonical bytes and adds domain-separated identities for new schemas.
-- `comsol_mcp/durable/io.py` — This module implements bounded hashing, atomic replacement, and complete-row persistence.
-- `comsol_mcp/surrogate/__init__.py` — This module exports solver-free surrogate dataset, split, schema, transform, and row contracts.
-- `comsol_mcp/surrogate/campaign.py` — This module plans and adjudicates a bounded screening campaign in which a surrogate ranks candidates while only a fresh verified FEM run may promote a candidate to evidence.
-- `comsol_mcp/surrogate/dnn_adapter.py` — This module validates one bounded fully connected DNN configuration, derives an exact typed property-write plan, and applies it failure-atomically with full COMSOL-owned default readback.
-- `comsol_mcp/surrogate/dnn_clientapi_backend.py` — This licensed module is the ClientAPI bridge for the typed surrogate DNN adapter; since the S4A step-6 migration it owns no Java typing rule of its own and routes node resolution, typed reads and writes, the feature lifecycle, and export through the project adapter, presenting a caller-resolved Java feature as an already-resolved node.
-- `comsol_mcp/surrogate/export.py` — This module hashes exported surrogate artifacts by content, binds them into a sealed export manifest, checks re-imported prediction consistency within a declared tolerance, and routes the result through the out-of-domain and registry decisions.
-- `comsol_mcp/surrogate/fields.py` — This module freezes ordered feature and target field declarations with units and bounds, and fits training-only transforms with proven round-trip inversion.
-- `comsol_mcp/surrogate/manifests.py` — This module validates closed versioned surrogate dataset, schema, leakage-group, split, and training-transform manifests with deterministic hashes.
-- `comsol_mcp/surrogate/onnx_runtime.py` — This module decodes the ONNX protobuf COMSOL's DNN export produces and runs a bounded forward pass with only the standard library, so an exported surrogate can be evaluated without an ONNX dependency.
-- `comsol_mcp/surrogate/registry.py` — This module seals immutable surrogate model cards and registry entries, enforces forward-only lifecycle transitions, detects contract drift, and evaluates out-of-domain policy without clipping.
-- `comsol_mcp/surrogate/rows.py` — This module binds each label row to its exact producing candidate, model, solver, study, solution, dataset, fidelity, and evidence identities, and builds deterministic bounded Latin-hypercube designs.
-- `comsol_mcp/surrogate/training.py` — This module computes held-out physical-unit metrics, fits deterministic non-DNN baselines, and decides continuation eligibility from exact contract identities.
-- `comsol_mcp/surrogate/splits.py` — This module assigns whole leakage groups to disjoint train, validation, test, and scientific-holdout splits deterministically and detects declared leakage classes.
-- `comsol_mcp/compatibility_manifest.json` — This file declares exact licensed, dependency-only, and unknown runtime compatibility.
-- `comsol_mcp/deployment_manifest.json` — This file binds deployment identity to frozen tool and profile snapshots.
-- `comsol_mcp/environment_identity.py` — This module reports redacted Python, platform, dependency, and optional-feature identity.
-- `comsol_mcp/operation_arbiter.py` — This module serializes COMSOL-bound calls with a durable exact-process lock.
-- `comsol_mcp/path_policy.py` — This module enforces configured model-read and owned ASCII artifact roots.
-- `comsol_mcp/schema_registry.py` — This module registers named artifact schema producers and readable and writable versions.
-- `comsol_mcp/native_runtime.py` — This module classifies native-backed imports and preloads every main-process runtime before event-loop dispatch.
-- `comsol_mcp/server.py` — This module creates the profiled MCP server and console entry point.
-- `comsol_mcp/settings.py` — This module loads grouped project settings and reports bounded fallback errors.
-- `comsol_mcp/settings_gui_handshake.py` — This module implements the bounded path-free Settings GUI startup handshake.
-- `comsol_mcp/settings_gui_launcher.py` — This module launches and tracks one detached Windows Settings GUI without importing Tk.
-- `comsol_mcp/standalone/__init__.py` — This module exports the standalone launcher build and solver-free inspection surface.
-- `comsol_mcp/standalone/builder.py` — This module builds one reviewed native Windows x64 launcher from packaged C# and Java sources.
-- `comsol_mcp/standalone/control.py` — This module detaches, controls, and inspects manifest-verified standalone COMSOL 6.4 campaigns.
-- `comsol_mcp/standalone/inspection.py` — This module validates bounded standalone build, status, result, log, and terminal artifacts without COMSOL.
-- `comsol_mcp/standalone/assets/__init__.py` — This file marks embedded standalone launcher sources as packaged resources.
+- `comsol_mcp/__init__.py` — The module defines the single authored package version.
+- `comsol_mcp/artifact_chain.py` — The module verifies bounded JSON artifact dependency chains without a solver.
+- `comsol_mcp/adapter/__init__.py` — The module exposes the project-owned COMSOL adapter seam and resolves a backend lazily so importing it never imports MPh.
+- `comsol_mcp/adapter/conversion.py` — The module performs explicit, version-neutral scalar and matrix conversion so no backend can silently coerce a value.
+- `comsol_mcp/adapter/fake_backend.py` — The deterministic scripted backend runs adapter contract and parity tests without COMSOL, a JVM, or a lease. It implements the complete protocol, including step-6 typed Java access and container/node lifecycle operations.
+- `comsol_mcp/adapter/migration_inventory.py` — The module defines the executable S4A direct-call inventory. AST measures identify direct MPh/ClientAPI sites. A ledger declares each module disposition. The checker fails if a fresh source scan differs from the declaration.
+- `comsol_mcp/adapter/mph14_backend.py` — The module is the isolated MPh 1.4.0 lane, recording that lane's general matrix read and `dbmodel://` load capability without enabling a live operation.
+- `comsol_mcp/adapter/mph_backend.py` — The module implements the MPh 1.3.1 reference backend. Only this backend constructs an MPh client for operational work. It defines the closed Java write-kind vocabulary and typed accessor probe. It also provides the enumerable-container and node-lifecycle operations required by the DNN bridge.
+- `comsol_mcp/adapter/protocol.py` — The module defines the typed adapter protocol, request/result objects, and stable error codes. It defines the closed `JAVA_WRITE_KINDS` and `DNN_FEATURE_METHODS` vocabularies and the already-resolved node handle. Its operation list maps the six S4A steps.
+- `comsol_mcp/build_identity.py` — The module derives package build identity from shipped paths and bytes.
+- `comsol_mcp/compatibility.py` — The module loads and validates the packaged runtime compatibility declaration.
+- `comsol_mcp/contracts/__init__.py` — The module exports lightweight public input contracts without solver imports.
+- `comsol_mcp/contracts/job_submission.py` — The module defines bounded discriminated durable-job submission inputs.
+- `comsol_mcp/contracts/mph_inspection.py` — The module defines bounded offline `.mph` inspection input contracts.
+- `comsol_mcp/contracts/model_identity.py` — The module defines the bounded read-only model-identity request contract.
+- `comsol_mcp/contracts/simulation_configuration.py` — The module defines closed typed simulation-configuration and diff-policy inputs.
+- `comsol_mcp/contracts/thermal_radiation.py` — The module defines closed Kirchhoff-assessment and thermal-radiation request inputs.
+- `comsol_mcp/contracts/thermal_material.py` — The module defines closed temperature/state material ledger and evaluation inputs.
+- `comsol_mcp/contracts/thermo_optomechanical.py` — The module defines the closed durable thermal-to-optical replay input contract.
+- `comsol_mcp/contracts/offline_export.py` — The module defines bounded offline export-validation input contracts.
+- `comsol_mcp/contracts/structural.py` — The module applies shared public schema and runtime structural limits.
+- `comsol_mcp/contracts/surrogate.py` — The module defines closed solver-free input contracts for the five bounded public surrogate tools, including the frozen `dbmodel://` URI source kind.
+- `comsol_mcp/durable/__init__.py` — The module exports versioned canonicalization and durable filesystem primitives.
+- `comsol_mcp/durable/canonical.py` — The module preserves legacy canonical bytes and adds domain-separated identities for new schemas.
+- `comsol_mcp/durable/io.py` — The module implements bounded hashing, atomic replacement, and complete-row persistence.
+- `comsol_mcp/surrogate/__init__.py` — The module exports solver-free surrogate dataset, split, schema, transform, and row contracts.
+- `comsol_mcp/surrogate/campaign.py` — The module plans and evaluates a bounded screening campaign. A surrogate ranks candidates. Only a fresh verified FEM run may promote a candidate to evidence.
+- `comsol_mcp/surrogate/dnn_adapter.py` — The module validates one bounded fully connected DNN configuration and derives the exact typed property-write plan. It applies the plan failure-atomically and reads all COMSOL-owned defaults.
+- `comsol_mcp/surrogate/dnn_clientapi_backend.py` — This licensed module connects the typed surrogate DNN adapter to ClientAPI. Since the S4A step-6 migration, it defines no separate Java typing rules. It uses the project adapter for node resolution, typed reads and writes, feature lifecycle, and export. It presents a caller-resolved Java feature as an already-resolved node.
+- `comsol_mcp/surrogate/export.py` — The module hashes exported surrogate artifacts by content and binds them into a sealed export manifest. It checks re-imported predictions for consistency within the declared tolerance. It then applies the out-of-domain and registry decisions.
+- `comsol_mcp/surrogate/fields.py` — The module freezes ordered feature and target field declarations with units and bounds, and fits training-only transforms with proven round-trip inversion.
+- `comsol_mcp/surrogate/manifests.py` — The module validates closed versioned surrogate dataset, schema, leakage-group, split, and training-transform manifests with deterministic hashes.
+- `comsol_mcp/surrogate/onnx_runtime.py` — The module decodes the ONNX protobuf from COMSOL DNN export. It evaluates a bounded forward pass with the standard library only. Evaluation needs no ONNX dependency.
+- `comsol_mcp/surrogate/registry.py` — The module seals immutable surrogate model cards and registry entries, enforces forward-only lifecycle transitions, detects contract drift, and evaluates out-of-domain policy without clipping.
+- `comsol_mcp/surrogate/rows.py` — The module binds each label row to its producing candidate, model, solver, study, solution, dataset, fidelity, and evidence identities. It builds deterministic bounded Latin-hypercube designs.
+- `comsol_mcp/surrogate/training.py` — The module computes held-out physical-unit metrics, fits deterministic non-DNN baselines, and decides continuation eligibility from exact contract identities.
+- `comsol_mcp/surrogate/splits.py` — The module assigns whole leakage groups to disjoint train, validation, test, and scientific-holdout splits deterministically and detects declared leakage classes.
+- `comsol_mcp/compatibility_manifest.json` — The file declares exact licensed, dependency-only, and unknown runtime compatibility.
+- `comsol_mcp/deployment_manifest.json` — The file binds deployment identity to frozen tool and profile snapshots.
+- `comsol_mcp/environment_identity.py` — The module reports redacted Python, platform, dependency, and optional-feature identity.
+- `comsol_mcp/operation_arbiter.py` — The module serializes COMSOL-bound calls with a durable exact-process lock.
+- `comsol_mcp/path_policy.py` — The module enforces configured model-read and owned ASCII artifact roots.
+- `comsol_mcp/protocol_identity.py` — The module reports the separated MCP SDK version, protocol revision, and extension wire-generation identities without starting a transport.
+- `comsol_mcp/jobs/tasks_bridge.py` — The module maps durable jobs onto the stable MCP Tasks wire contract without owning a second scheduler.
+- `comsol_mcp/jobs/tasks_extension.py` — The module registers the stable Tasks extension over the public SDK extension hooks.
+- `comsol_mcp/shared_session/dbmodel_operations.py` — The module admits and receipt-binds the four `dbmodel://` Model Manager operations with a separate default-off write gate.
+- `comsol_mcp/shared_session/model_manager.py` — The module runs the default-off Model Manager feature over an injected transport, journalling every attempt including refusals.
+- `comsol_mcp/shared_session/solver_owners.py` — The module enforces at most two independent one-core solver owners with verified-absence release and no cross-owner access.
+- `comsol_mcp/durable/operation_ledger.py` — The module journals Model Manager, owner, and local-session operations for append-only replay, duplicate suppression, and recovery.
+- `comsol_mcp/schema_registry.py` — The module registers named artifact schema producers and readable and writable versions.
+- `comsol_mcp/native_runtime.py` — The module classifies native-backed imports and preloads every main-process runtime before event-loop dispatch.
+- `comsol_mcp/server.py` — The module creates the profiled MCP server and console entry point.
+- `comsol_mcp/settings.py` — The module loads grouped project settings and reports bounded fallback errors.
+- `comsol_mcp/settings_gui_handshake.py` — The module implements the bounded path-free Settings GUI startup handshake.
+- `comsol_mcp/settings_gui_launcher.py` — The module launches and tracks one detached Windows Settings GUI without importing Tk.
+- `comsol_mcp/standalone/__init__.py` — The module exports the standalone launcher build and solver-free inspection surface.
+- `comsol_mcp/standalone/builder.py` — The module builds one reviewed native Windows x64 launcher from packaged C# and Java sources.
+- `comsol_mcp/standalone/control.py` — The module detaches, controls, and inspects manifest-verified standalone COMSOL 6.4 campaigns.
+- `comsol_mcp/standalone/inspection.py` — The module validates bounded standalone build, status, result, log, and terminal artifacts without COMSOL.
+- `comsol_mcp/standalone/assets/__init__.py` — The file marks embedded standalone launcher sources as packaged resources.
 - `comsol_mcp/standalone/assets/Launcher.cs` — This source builds the native Windows 10/11 x64 campaign launcher and durable control plane.
 - `comsol_mcp/standalone/assets/CapacitorPointTemplate.java` — This embedded COMSOL Java driver generates and validates one analytical capacitor point.
 
 ## Asynchronous compatibility layer
 
-- `comsol_mcp/async_handler/__init__.py` — This file exports asynchronous compatibility handlers.
-- `comsol_mcp/async_handler/solver.py` — This module implements the experimental in-process asynchronous solver wrapper.
+- `comsol_mcp/async_handler/__init__.py` — The file exports asynchronous compatibility handlers.
+- `comsol_mcp/async_handler/solver.py` — The module implements the experimental in-process asynchronous solver wrapper.
 
 ## Evidence modules
 
-- `comsol_mcp/evidence/__init__.py` — This file exports versioned solver-free evidence contracts.
-- `comsol_mcp/evidence/contracts.py` — This module implements strict physical evidence, policy, and migration contracts.
-- `comsol_mcp/evidence/branch_continuation.py` — This module validates and plans ordered branch-continuation states without a solver.
-- `comsol_mcp/evidence/compatibility_registry.py` — This module builds the versioned compatibility and skill-layer registry without a solver.
-- `comsol_mcp/evidence/convergence_evaluation.py` — This module validates ordered spectral convergence ladders and caller policies.
+- `comsol_mcp/evidence/__init__.py` — The file exports versioned solver-free evidence contracts.
+- `comsol_mcp/evidence/contracts.py` — The module implements strict physical evidence, policy, and migration contracts.
+- `comsol_mcp/evidence/branch_continuation.py` — The module validates and plans ordered branch-continuation states without a solver.
+- `comsol_mcp/evidence/compatibility_registry.py` — The module builds the versioned compatibility and skill-layer registry without a solver.
+- `comsol_mcp/evidence/convergence_evaluation.py` — The module validates ordered spectral convergence ladders and caller policies.
 - `comsol_mcp/evidence/inspection/__init__.py` — This package exports solver-free offline `.mph` archive inspection contracts.
-- `comsol_mcp/evidence/inspection/archive.py` — This module implements the bounded stdlib-only safety reader for offline `.mph` ZIP archives.
-- `comsol_mcp/evidence/inspection/diff.py` — This module builds versioned offline two-archive `.mph` diffs with input-immutability proof.
-- `comsol_mcp/evidence/inspection/probe.py` — This module provides warning-only post-run `.mph` artifact probes for job pipelines.
-- `comsol_mcp/evidence/inspection/summary.py` — This module builds versioned offline inspection summaries from declared archive markers.
-- `comsol_mcp/evidence/integrity_controls.py` — This module loads default-on evidence-integrity settings and defines warning propagation.
-- `comsol_mcp/evidence/model_identity.py` — This module builds the versioned offline model-identity and checkpoint-readiness contract without a solver.
-- `comsol_mcp/evidence/integrity_verifier.py` — This module composes settings-aware outcome, artifact, summary, and resume verification.
-- `comsol_mcp/evidence/field_artifacts.py` — This module serializes bounded gridded scalar field artifacts.
-- `comsol_mcp/evidence/field_bundle.py` — This module normalizes bounded field-evidence extraction requests.
-- `comsol_mcp/evidence/field_dataset.py` — This module adapts existing MPh datasets to field-evidence samples.
-- `comsol_mcp/evidence/field_discovery.py` — This module discovers exact dataset, solution, and component identities.
-- `comsol_mcp/evidence/field_interpolation.py` — This module interpolates selected field samples onto declared grids.
-- `comsol_mcp/evidence/field_manifest.py` — This module builds and validates field-evidence manifests.
-- `comsol_mcp/evidence/field_matrix.py` — This module binds validation-matrix points to field requests.
-- `comsol_mcp/evidence/field_pipeline.py` — This module coordinates raw field samples into durable artifacts.
-- `comsol_mcp/evidence/field_plot_worker.py` — This module renders bounded scalar field PNGs in an isolated worker.
-- `comsol_mcp/evidence/field_render.py` — This module coordinates isolated field PNG rendering.
-- `comsol_mcp/evidence/field_sampling.py` — This module selects bounded raw samples for one declared slice.
-- `comsol_mcp/evidence/material_expressions.py` — This module constructs and previews dispersive material expressions.
-- `comsol_mcp/evidence/offline_export.py` — This module builds and validates the offline export manifest with tamper detection, without a solver.
-- `comsol_mcp/evidence/outcome_contract.py` — This module validates solver-free execution, evidence-completeness, and scientific-disposition outcomes.
-- `comsol_mcp/evidence/portfolio_verifier.py` — This module verifies summary claims against exact values in hash-bound evidence chains.
-- `comsol_mcp/evidence/power_audit.py` — This module normalizes declared reference-power evidence.
-- `comsol_mcp/evidence/real_fixture.py` — This module validates portable controlled licensed-fixture contracts.
-- `comsol_mcp/evidence/reference_power_acceptance.py` — This module validates reference-power acceptance and execution inputs.
-- `comsol_mcp/evidence/reference_power_gate.py` — This module evaluates reference-power receipts and artifact accounting.
-- `comsol_mcp/evidence/spectral_characterization.py` — This module validates and characterizes provenance-bound spectra without a solver.
-- `comsol_mcp/evidence/spectral_model_comparison.py` — This module compares bounded scalar line-shape fits on identical spectral evidence without assigning a physical mechanism.
-- `comsol_mcp/evidence/surrogate_evidence.py` — This module validates surrogate datasets, documents, and predictions by re-deriving their canonical hashes without a solver or any FEM-evidence upgrade.
-- `comsol_mcp/evidence/simulation_configuration.py` — This module normalizes declared simulation units and classifies provenance-bound configuration differences.
-- `comsol_mcp/evidence/thermal_radiation.py` — This module evaluates exact-channel Kirchhoff applicability and bounded channel-resolved thermal radiation.
-- `comsol_mcp/evidence/thermal_material.py` — This module validates and evaluates provenance-bound temperature/state material ledgers.
-- `comsol_mcp/evidence/visual_review.py` — This module defines visual-review capability, request, receipt, and dual-review contracts.
+- `comsol_mcp/evidence/inspection/archive.py` — The module implements the bounded stdlib-only safety reader for offline `.mph` ZIP archives.
+- `comsol_mcp/evidence/inspection/diff.py` — The module builds versioned offline two-archive `.mph` diffs with input-immutability proof.
+- `comsol_mcp/evidence/inspection/probe.py` — The module provides warning-only post-run `.mph` artifact probes for job pipelines.
+- `comsol_mcp/evidence/inspection/summary.py` — The module builds versioned offline inspection summaries from declared archive markers.
+- `comsol_mcp/evidence/integrity_controls.py` — The module loads default-on evidence-integrity settings and defines warning propagation.
+- `comsol_mcp/evidence/model_identity.py` — The module builds the versioned offline model-identity and checkpoint-readiness contract without a solver.
+- `comsol_mcp/evidence/integrity_verifier.py` — The module composes settings-aware outcome, artifact, summary, and resume verification.
+- `comsol_mcp/evidence/field_artifacts.py` — The module serializes bounded gridded scalar field artifacts.
+- `comsol_mcp/evidence/field_bundle.py` — The module normalizes bounded field-evidence extraction requests.
+- `comsol_mcp/evidence/field_dataset.py` — The module adapts existing MPh datasets to field-evidence samples.
+- `comsol_mcp/evidence/field_discovery.py` — The module discovers exact dataset, solution, and component identities.
+- `comsol_mcp/evidence/field_interpolation.py` — The module interpolates selected field samples onto declared grids.
+- `comsol_mcp/evidence/field_manifest.py` — The module builds and validates field-evidence manifests.
+- `comsol_mcp/evidence/field_matrix.py` — The module binds validation-matrix points to field requests.
+- `comsol_mcp/evidence/field_pipeline.py` — The module coordinates raw field samples into durable artifacts.
+- `comsol_mcp/evidence/field_plot_worker.py` — The module renders bounded scalar field PNGs in an isolated worker.
+- `comsol_mcp/evidence/field_render.py` — The module coordinates isolated field PNG rendering.
+- `comsol_mcp/evidence/field_sampling.py` — The module selects bounded raw samples for one declared slice.
+- `comsol_mcp/evidence/material_expressions.py` — The module constructs and previews dispersive material expressions.
+- `comsol_mcp/evidence/offline_export.py` — The module builds and validates the offline export manifest with tamper detection, without a solver.
+- `comsol_mcp/evidence/outcome_contract.py` — The module validates solver-free execution, evidence-completeness, and scientific-disposition outcomes.
+- `comsol_mcp/evidence/portfolio_verifier.py` — The module verifies summary claims against exact values in hash-bound evidence chains.
+- `comsol_mcp/evidence/power_audit.py` — The module normalizes declared reference-power evidence.
+- `comsol_mcp/evidence/real_fixture.py` — The module validates portable controlled licensed-fixture contracts.
+- `comsol_mcp/evidence/reference_power_acceptance.py` — The module validates reference-power acceptance and execution inputs.
+- `comsol_mcp/evidence/reference_power_gate.py` — The module evaluates reference-power receipts and artifact accounting.
+- `comsol_mcp/evidence/spectral_characterization.py` — The module validates and characterizes provenance-bound spectra without a solver.
+- `comsol_mcp/evidence/spectral_model_comparison.py` — The module compares bounded scalar line-shape fits on identical spectral evidence without assigning a physical mechanism.
+- `comsol_mcp/evidence/surrogate_evidence.py` — The module validates surrogate datasets, documents, and predictions by re-deriving their canonical hashes without a solver or any FEM-evidence upgrade.
+- `comsol_mcp/evidence/simulation_configuration.py` — The module normalizes declared simulation units and classifies provenance-bound configuration differences.
+- `comsol_mcp/evidence/thermal_radiation.py` — The module evaluates exact-channel Kirchhoff applicability and bounded channel-resolved thermal radiation.
+- `comsol_mcp/evidence/thermal_material.py` — The module validates and evaluates provenance-bound temperature/state material ledgers.
+- `comsol_mcp/evidence/visual_review.py` — The module defines visual-review capability, request, receipt, and dual-review contracts.
 
 ## Durable job modules
 
-- `comsol_mcp/jobs/__init__.py` — This file exports durable background-job primitives.
-- `comsol_mcp/jobs/attached_backend.py` — This module normalizes immutable automation-exclusive attached-server execution specifications.
-- `comsol_mcp/jobs/attached_runtime.py` — This module verifies attached server, model, revision, and preservation identities for durable workers.
-- `comsol_mcp/jobs/bounded_steps.py` — This module persists hash-chained bounded-step review receipts with checkpoint usability and resume decisions.
-- `comsol_mcp/jobs/cancel_worker.py` — This module coordinates detached durable cancellation and cleanup.
-- `comsol_mcp/jobs/convergence_campaign.py` — This module normalizes immutable bounded durable convergence campaign specifications.
-- `comsol_mcp/jobs/branch_continuation_campaign.py` — This module normalizes immutable bounded durable branch-continuation campaign specifications.
-- `comsol_mcp/jobs/branch_continuation_campaign_rows.py` — This module persists hash-chained continuation state evidence bound to completed spectral artifacts.
-- `comsol_mcp/jobs/branch_continuation_campaign_runner.py` — This module composes completed spectral states with offline continuation planning and durable summaries.
-- `comsol_mcp/jobs/branch_continuation_campaign_worker.py` — This worker runs exact-model continuation states under one owned COMSOL attempt.
-- `comsol_mcp/jobs/convergence_campaign_rows.py` — This module persists hash-chained convergence level evidence bound to completed spectral artifacts.
-- `comsol_mcp/jobs/convergence_campaign_runner.py` — This module composes completed spectral levels with offline convergence evaluation and durable summaries.
-- `comsol_mcp/jobs/convergence_campaign_worker.py` — This worker runs exact-model convergence ladders under one owned COMSOL attempt.
-- `comsol_mcp/jobs/field_review.py` — This module assembles paired validation-matrix field-review artifacts.
-- `comsol_mcp/jobs/journal.py` — This module provides shared process-safe locking and crash-tail recovery for bounded JSONL journals.
-- `comsol_mcp/jobs/manager.py` — This module handles durable job submission, status, cancellation, resume, and reconciliation.
-- `comsol_mcp/jobs/native_cancel_probe.py` — This module inspects allowlisted native cancellation support.
-- `comsol_mcp/jobs/native_cancel_profiles.json` — This file stores exact native cancellation compatibility profiles.
-- `comsol_mcp/jobs/observation.py` — This module records exact long-task observation receipts with ownership verification and resume dispositions.
-- `comsol_mcp/jobs/process_control.py` — This module performs exact-identity process inspection and containment.
-- `comsol_mcp/jobs/resource_admission.py` — This module validates resource policy, telemetry, journals, and admission.
-- `comsol_mcp/jobs/sequence_worker.py` — This module provides an injected process-only durability worker.
-- `comsol_mcp/jobs/spectral_audit.py` — This module verifies point-audit artifacts before durable spectral row persistence.
-- `comsol_mcp/jobs/spectral_characterization.py` — This module normalizes immutable bounded durable spectral job specifications.
-- `comsol_mcp/jobs/spectral_progress.py` — This module derives bounded adaptive spectral transitions from frozen stages and durable rows.
-- `comsol_mcp/jobs/spectral_runner.py` — This module runs the solver-independent adaptive spectral point loop and summary writes.
-- `comsol_mcp/jobs/spectral_level_execution.py` — This module runs the accepted spectral pipeline against an already loaded owned model.
-- `comsol_mcp/jobs/spectral_rows.py` — This module persists hash-chained raw spectral points with artifact verification.
-- `comsol_mcp/jobs/spectral_stages.py` — This module builds and atomically freezes hash-chained adaptive spectral stage plans.
-- `comsol_mcp/jobs/spectral_worker.py` — This module runs detached adaptive spectral jobs through the shared solver runtime.
-- `comsol_mcp/jobs/store.py` — This module persists crash-durable job state and process-safe locks.
-- `comsol_mcp/jobs/thermo_optomechanical_replay.py` — This module normalizes immutable bounded thermal-to-optical replay specifications.
-- `comsol_mcp/jobs/thermo_optomechanical_replay_execution.py` — This module executes fixed COMSOL thermal, structural, moving-mesh, and optical stages against explicit result datasets.
-- `comsol_mcp/jobs/thermo_optomechanical_replay_rows.py` — This module validates and persists hash-chained thermo-optomechanical stage evidence.
-- `comsol_mcp/jobs/thermo_optomechanical_replay_runner.py` — This module runs resumable thermo-optomechanical stages and derives the policy-separated summary.
-- `comsol_mcp/jobs/surrogate_training.py` — This module normalizes and binds one bounded durable surrogate-training submission to exact dataset, split, schema, transform, and architecture identities.
-- `comsol_mcp/jobs/surrogate_training_worker.py` — This module is the injected solver-free surrogate-training worker that proves durable epoch journaling, resume without duplicate work, cancellation, and terminal receipts.
-- `comsol_mcp/jobs/thermo_optomechanical_replay_worker.py` — This worker owns one licensed COMSOL client and publishes terminal state only after cleanup.
-- `comsol_mcp/jobs/validation_collectors.py` — This module adapts validation points to physical evidence collectors.
-- `comsol_mcp/jobs/validation_matrix.py` — This module normalizes bounded durable validation-matrix specifications.
-- `comsol_mcp/jobs/validation_rows.py` — This module writes and validates append-only durable validation rows.
-- `comsol_mcp/jobs/adjoint_rows.py` — This module writes and validates hash-chained iteration, gradient, and trial rows for adjoint optimization.
-- `comsol_mcp/jobs/adjoint_optimization.py` — This module validates and expands hash-bound adjoint optimization submission manifests.
-- `comsol_mcp/jobs/validation_runner.py` — This module runs the solver-independent validation point loop.
-- `comsol_mcp/jobs/validation_worker.py` — This module runs one detached physical-validation matrix worker.
-- `comsol_mcp/jobs/worker.py` — This module runs one detached staged COMSOL sweep worker.
+- `comsol_mcp/jobs/__init__.py` — The file exports durable background-job primitives.
+- `comsol_mcp/jobs/attached_backend.py` — The module normalizes immutable automation-exclusive attached-server execution specifications.
+- `comsol_mcp/jobs/attached_runtime.py` — The module verifies attached server, model, revision, and preservation identities for durable workers.
+- `comsol_mcp/jobs/bounded_steps.py` — The module persists hash-chained bounded-step review receipts with checkpoint usability and resume decisions.
+- `comsol_mcp/jobs/cancel_worker.py` — The module coordinates detached durable cancellation and cleanup.
+- `comsol_mcp/jobs/convergence_campaign.py` — The module normalizes immutable bounded durable convergence campaign specifications.
+- `comsol_mcp/jobs/branch_continuation_campaign.py` — The module normalizes immutable bounded durable branch-continuation campaign specifications.
+- `comsol_mcp/jobs/branch_continuation_campaign_rows.py` — The module persists hash-chained continuation state evidence bound to completed spectral artifacts.
+- `comsol_mcp/jobs/branch_continuation_campaign_runner.py` — The module composes completed spectral states with offline continuation planning and durable summaries.
+- `comsol_mcp/jobs/branch_continuation_campaign_worker.py` — The worker runs exact-model continuation states under one owned COMSOL attempt.
+- `comsol_mcp/jobs/convergence_campaign_rows.py` — The module persists hash-chained convergence level evidence bound to completed spectral artifacts.
+- `comsol_mcp/jobs/convergence_campaign_runner.py` — The module composes completed spectral levels with offline convergence evaluation and durable summaries.
+- `comsol_mcp/jobs/convergence_campaign_worker.py` — The worker runs exact-model convergence ladders under one owned COMSOL attempt.
+- `comsol_mcp/jobs/field_review.py` — The module assembles paired validation-matrix field-review artifacts.
+- `comsol_mcp/jobs/journal.py` — The module provides shared process-safe locking and crash-tail recovery for bounded JSONL journals.
+- `comsol_mcp/jobs/manager.py` — The module handles durable job submission, status, cancellation, resume, and reconciliation.
+- `comsol_mcp/jobs/native_cancel_probe.py` — The module inspects allowlisted native cancellation support.
+- `comsol_mcp/jobs/native_cancel_profiles.json` — The file stores exact native cancellation compatibility profiles.
+- `comsol_mcp/jobs/observation.py` — The module records exact long-task observation receipts with ownership verification and resume dispositions.
+- `comsol_mcp/jobs/process_control.py` — The module performs exact-identity process inspection and containment.
+- `comsol_mcp/jobs/resource_admission.py` — The module validates resource policy, telemetry, journals, and admission.
+- `comsol_mcp/jobs/sequence_worker.py` — The module provides an injected process-only durability worker.
+- `comsol_mcp/jobs/spectral_audit.py` — The module verifies point-audit artifacts before durable spectral row persistence.
+- `comsol_mcp/jobs/spectral_characterization.py` — The module normalizes immutable bounded durable spectral job specifications.
+- `comsol_mcp/jobs/spectral_progress.py` — The module derives bounded adaptive spectral transitions from frozen stages and durable rows.
+- `comsol_mcp/jobs/spectral_runner.py` — The module runs the solver-independent adaptive spectral point loop and summary writes.
+- `comsol_mcp/jobs/spectral_level_execution.py` — The module runs the accepted spectral pipeline against an already loaded owned model.
+- `comsol_mcp/jobs/spectral_rows.py` — The module persists hash-chained raw spectral points with artifact verification.
+- `comsol_mcp/jobs/spectral_stages.py` — The module builds and atomically freezes hash-chained adaptive spectral stage plans.
+- `comsol_mcp/jobs/spectral_worker.py` — The module runs detached adaptive spectral jobs through the shared solver runtime.
+- `comsol_mcp/jobs/store.py` — The module persists crash-durable job state and process-safe locks.
+- `comsol_mcp/jobs/thermo_optomechanical_replay.py` — The module normalizes immutable bounded thermal-to-optical replay specifications.
+- `comsol_mcp/jobs/thermo_optomechanical_replay_execution.py` — The module executes fixed COMSOL thermal, structural, moving-mesh, and optical stages against explicit result datasets.
+- `comsol_mcp/jobs/thermo_optomechanical_replay_rows.py` — The module validates and persists hash-chained thermo-optomechanical stage evidence.
+- `comsol_mcp/jobs/thermo_optomechanical_replay_runner.py` — The module runs resumable thermo-optomechanical stages and derives the policy-separated summary.
+- `comsol_mcp/jobs/surrogate_training.py` — The module normalizes and binds one bounded durable surrogate-training submission to exact dataset, split, schema, transform, and architecture identities.
+- `comsol_mcp/jobs/surrogate_training_worker.py` — The module is the injected solver-free surrogate-training worker that proves durable epoch journaling, resume without duplicate work, cancellation, and terminal receipts.
+- `comsol_mcp/jobs/thermo_optomechanical_replay_worker.py` — The worker owns one licensed COMSOL client and publishes terminal state only after cleanup.
+- `comsol_mcp/jobs/validation_collectors.py` — The module adapts validation points to physical evidence collectors.
+- `comsol_mcp/jobs/validation_matrix.py` — The module normalizes bounded durable validation-matrix specifications.
+- `comsol_mcp/jobs/validation_rows.py` — The module writes and validates append-only durable validation rows.
+- `comsol_mcp/jobs/adjoint_rows.py` — The module writes and validates hash-chained iteration, gradient, and trial rows for adjoint optimization.
+- `comsol_mcp/jobs/adjoint_optimization.py` — The module validates and expands hash-bound adjoint optimization submission manifests.
+- `comsol_mcp/jobs/validation_runner.py` — The module runs the solver-independent validation point loop.
+- `comsol_mcp/jobs/validation_worker.py` — The module runs one detached physical-validation matrix worker.
+- `comsol_mcp/jobs/worker.py` — The module runs one detached staged COMSOL sweep worker.
 
 ## Knowledge modules and prompts
 
-- `comsol_mcp/knowledge/__init__.py` — This file exports knowledge and documentation services.
-- `comsol_mcp/knowledge/embedded.py` — This module registers embedded documentation tools.
-- `comsol_mcp/knowledge/lexical_manual.py` — This module implements bounded SQLite full-text manual search.
-- `comsol_mcp/knowledge/lexical_build_worker.py` — This module builds and atomically validates bounded SQLite manual indexes in an isolated process.
-- `comsol_mcp/knowledge/lexical_worker.py` — This module isolates lexical manual operations behind JSON transport.
-- `comsol_mcp/knowledge/semantic_contracts.py` — This module defines dependency-free semantic service contracts.
-- `comsol_mcp/knowledge/semantic_index.py` — This module builds and validates immutable semantic indexes.
-- `comsol_mcp/knowledge/semantic_process.py` — This module manages the exact semantic worker child process.
-- `comsol_mcp/knowledge/semantic_retrieval.py` — This module performs vector retrieval and deterministic BM25 fusion.
-- `comsol_mcp/knowledge/semantic_runtime.py` — This module reports opt-in semantic runtime configuration.
-- `comsol_mcp/knowledge/semantic_worker.py` — This module implements the isolated semantic worker protocol.
-- `comsol_mcp/knowledge/prompts/mph_api.md` — This prompt summarizes calibrated MPh and clientapi usage.
-- `comsol_mcp/knowledge/prompts/physics_guide.md` — This prompt summarizes physics construction and verification guidance.
-- `comsol_mcp/knowledge/prompts/workflow.md` — This prompt summarizes safe model workflow sequencing.
+- `comsol_mcp/knowledge/__init__.py` — The file exports knowledge and documentation services.
+- `comsol_mcp/knowledge/embedded.py` — The module registers embedded documentation tools.
+- `comsol_mcp/knowledge/lexical_manual.py` — The module implements bounded SQLite full-text manual search.
+- `comsol_mcp/knowledge/lexical_build_worker.py` — The module builds and atomically validates bounded SQLite manual indexes in an isolated process.
+- `comsol_mcp/knowledge/lexical_worker.py` — The module isolates lexical manual operations behind JSON transport.
+- `comsol_mcp/knowledge/semantic_contracts.py` — The module defines dependency-free semantic service contracts.
+- `comsol_mcp/knowledge/semantic_index.py` — The module builds and validates immutable semantic indexes.
+- `comsol_mcp/knowledge/semantic_process.py` — The module manages the exact semantic worker child process.
+- `comsol_mcp/knowledge/semantic_retrieval.py` — The module performs vector retrieval and deterministic BM25 fusion.
+- `comsol_mcp/knowledge/semantic_runtime.py` — The module reports opt-in semantic runtime configuration.
+- `comsol_mcp/knowledge/semantic_worker.py` — The module implements the isolated semantic worker protocol.
+- `comsol_mcp/knowledge/prompts/mph_api.md` — The prompt summarizes calibrated MPh and clientapi usage.
+- `comsol_mcp/knowledge/prompts/physics_guide.md` — The prompt summarizes physics construction and verification guidance.
+- `comsol_mcp/knowledge/prompts/workflow.md` — The prompt summarizes safe model workflow sequencing.
 
 ## MCP resources
 
-- `comsol_mcp/resources/__init__.py` — This file exports MCP model resources.
-- `comsol_mcp/resources/model_resources.py` — This module exposes bounded model status and information resources.
+- `comsol_mcp/resources/__init__.py` — The file exports MCP model resources.
+- `comsol_mcp/resources/model_resources.py` — The module exposes bounded model status and information resources.
 
 ## Shared Desktop and attached-server contracts
 
-- `comsol_mcp/shared_session/__init__.py` — This file exports the default-off shared-session contracts.
-- `comsol_mcp/shared_session/attach_request.py` — This module normalizes all static and per-call gates before attached lease acquisition.
-- `comsol_mcp/shared_session/cleanup.py` — This module distinguishes external-resource-preserving detach from owned cleanup.
-- `comsol_mcp/shared_session/contracts.py` — This module normalizes the shared feature gate and local loopback endpoint.
-- `comsol_mcp/shared_session/identity.py` — This module defines exact non-owned server and model-selector identities.
-- `comsol_mcp/shared_session/locking.py` — This module defines bounded model revisions and shared-model enforcement locks.
-- `comsol_mcp/shared_session/lifecycle.py` — This module attaches and disconnects one non-owned server client without start or clear behavior.
-- `comsol_mcp/shared_session/preflight.py` — This module classifies stable local Desktop and Server readiness without importing MPh.
-- `comsol_mcp/shared_session/process_probe.py` — This module collects bounded Windows process, listener, window, and executable-version evidence.
+- `comsol_mcp/shared_session/__init__.py` — The file exports the default-off shared-session contracts.
+- `comsol_mcp/shared_session/attach_request.py` — The module normalizes all static and per-call gates before attached lease acquisition.
+- `comsol_mcp/shared_session/cleanup.py` — The module distinguishes external-resource-preserving detach from owned cleanup.
+- `comsol_mcp/shared_session/contracts.py` — The module normalizes the shared feature gate and local loopback endpoint.
+- `comsol_mcp/shared_session/identity.py` — The module defines exact non-owned server and model-selector identities.
+- `comsol_mcp/shared_session/locking.py` — The module defines bounded model revisions and shared-model enforcement locks.
+- `comsol_mcp/shared_session/lifecycle.py` — The module attaches and disconnects one non-owned server client without start or clear behavior.
+- `comsol_mcp/shared_session/preflight.py` — The module classifies stable local Desktop and Server readiness without importing MPh.
+- `comsol_mcp/shared_session/process_probe.py` — The module collects bounded Windows process, listener, window, and executable-version evidence.
 
 ## MCP tool adapters
 
-- `comsol_mcp/tools/__init__.py` — This file exports and registers MCP tool modules.
-- `comsol_mcp/tools/capabilities.py` — This module reports profiles, compatibility, identities, schemas, and feature maturity.
-- `comsol_mcp/tools/branch_continuation.py` — This module exposes bounded solver-free branch-continuation planning.
-- `comsol_mcp/tools/convergence_evaluation.py` — This module exposes bounded solver-free convergence evaluation.
-- `comsol_mcp/tools/catalog.py` — This module classifies tools and snapshots deterministic public schemas.
-- `comsol_mcp/tools/derived_geometry.py` — This module applies typed edits only to provenance-tracked derived models.
-- `comsol_mcp/tools/evidence_integrity.py` — This module exposes solver-free evidence-integrity status and formal verification tools.
-- `comsol_mcp/tools/field_evidence.py` — This module exposes read-only field discovery and extraction tools.
-- `comsol_mcp/tools/geometry.py` — This module exposes COMSOL geometry tools.
-- `comsol_mcp/tools/geometry_selections.py` — This module exposes bounded named Box and rectangular-side selections.
-- `comsol_mcp/tools/incidence_config.py` — This module exposes typed periodic incidence preview and mutation gates.
-- `comsol_mcp/tools/jobs.py` — This module exposes durable job submission and control tools.
-- `comsol_mcp/tools/material_expressions.py` — This module exposes solver-free material-expression preview tools.
-- `comsol_mcp/tools/mesh.py` — This module exposes COMSOL mesh tools.
-- `comsol_mcp/tools/mim_patch.py` — This module exposes patch-metasurface construction helpers.
-- `comsol_mcp/tools/model.py` — This module exposes model creation, loading, cloning, saving, and listing tools.
-- `comsol_mcp/tools/model_identity.py` — This module exposes the read-only offline model-identity tool.
-- `comsol_mcp/tools/mph_inspection.py` — This module exposes the bounded offline `.mph` archive inspection tool.
-- `comsol_mcp/tools/offline_export.py` — This module exposes the read-only offline export validation tool.
-- `comsol_mcp/tools/ownership.py` — This module enforces cross-process solver ownership and collision preflight.
-- `comsol_mcp/tools/parameters.py` — This module exposes COMSOL parameter tools.
-- `comsol_mcp/tools/periodic_mesh_audit.py` — This module exposes periodic geometry and mesh evidence tools.
-- `comsol_mcp/tools/physics.py` — This module exposes COMSOL physics and multiphysics tools.
-- `comsol_mcp/tools/electro_chemistry.py` — This module exposes the isolated Electrochemistry Module catalog, interface creation, electrode reaction, electrolyte, and inspect tools.
-- `comsol_mcp/tools/acoustics_pde.py` — This module exposes constrained Pressure Acoustics and mathematical PDE tools.
-- `comsol_mcp/tools/surrogate.py` — This module exposes the five bounded solver-free surrogate tools that validate datasets, preview configurations, inspect and verify documents, and validate predictions without promoting them to FEM evidence.
-- `comsol_mcp/tools/profiles.py` — This module resolves static profiles and filters tool registration.
-- `comsol_mcp/tools/session_status.py` — This module stores last-known session booleans without importing COMSOL or MPh.
-- `comsol_mcp/tools/properties.py` — This module exposes constrained clientapi property access.
-- `comsol_mcp/tools/research.py` — This module exposes experimental solver-free campaign compilation and robustness planning.
-- `comsol_mcp/tools/robust_shape.py` — This module exposes the experimental bounded robust-shape preview, durable submission, evidence inspection, and verification surface.
-- `comsol_mcp/tools/property_transport.py` — This module normalizes bounded property values for JSON transport.
-- `comsol_mcp/tools/results.py` — This module exposes result evaluation and export tools.
-- `comsol_mcp/tools/semantic_docs.py` — This module exposes bounded opt-in semantic documentation tools.
-- `comsol_mcp/tools/spectral_characterization.py` — This module exposes bounded solver-free spectral characterization.
-- `comsol_mcp/tools/configuration.py` — This module exposes solver-free simulation configuration validation and comparison.
-- `comsol_mcp/tools/compatibility_registry.py` — This module exposes the read-only runtime compatibility status tool.
-- `comsol_mcp/tools/thermal_radiation.py` — This module exposes solver-free Kirchhoff and thermal-radiation evidence tools.
-- `comsol_mcp/tools/thermal_material.py` — This module exposes solver-free thermal material ledger validation and evaluation.
-- `comsol_mcp/tools/session.py` — This module manages COMSOL client startup, status, models, and shutdown.
-- `comsol_mcp/tools/settings_gui.py` — This module exposes the profile-independent solver-free Settings GUI launcher.
-- `comsol_mcp/tools/shared_session.py` — This module exposes default-off local attached-server lifecycle tools.
-- `comsol_mcp/tools/study.py` — This module exposes COMSOL study and solving tools.
-- `comsol_mcp/tools/standalone.py` — This module exposes typed standalone build, lifecycle, log, and result tools.
-- `comsol_mcp/tools/visual_review.py` — This module exposes solver-free visual-review contract adapters.
-- `comsol_mcp/tools/wave_optics_audit.py` — This module exposes one-point policy-separated Wave Optics evidence audits.
-- `comsol_mcp/tools/wave_optics_preflight.py` — This module exposes threshold-free read-only Wave Optics preflight.
-- `comsol_mcp/tools/workflow.py` — This module exposes reusable staged study workflows.
+- `comsol_mcp/tools/__init__.py` — The file exports and registers MCP tool modules.
+- `comsol_mcp/tools/capabilities.py` — The module reports profiles, compatibility, identities, schemas, and feature maturity.
+- `comsol_mcp/tools/branch_continuation.py` — The module exposes bounded solver-free branch-continuation planning.
+- `comsol_mcp/tools/convergence_evaluation.py` — The module exposes bounded solver-free convergence evaluation.
+- `comsol_mcp/tools/catalog.py` — The module classifies tools and snapshots deterministic public schemas.
+- `comsol_mcp/tools/discovery.py` — The module builds the compact domain catalog and bounded on-demand schema fetches.
+- `comsol_mcp/tools/discovery_tools.py` — The module registers the read-only progressive-discovery catalog tool.
+- `comsol_mcp/tools/tools_list_pagination.py` — The module implements the default-off experimental tools/list cursor adapter.
+- `comsol_mcp/tools/derived_geometry.py` — The module applies typed edits only to provenance-tracked derived models.
+- `comsol_mcp/tools/evidence_integrity.py` — The module exposes solver-free evidence-integrity status and formal verification tools.
+- `comsol_mcp/tools/field_evidence.py` — The module exposes read-only field discovery and extraction tools.
+- `comsol_mcp/tools/geometry.py` — The module exposes COMSOL geometry tools.
+- `comsol_mcp/tools/geometry_selections.py` — The module exposes bounded named Box and rectangular-side selections.
+- `comsol_mcp/tools/incidence_config.py` — The module exposes typed periodic incidence preview and mutation gates.
+- `comsol_mcp/tools/jobs.py` — The module exposes durable job submission and control tools.
+- `comsol_mcp/tools/material_expressions.py` — The module exposes solver-free material-expression preview tools.
+- `comsol_mcp/tools/mesh.py` — The module exposes COMSOL mesh tools.
+- `comsol_mcp/tools/mim_patch.py` — The module exposes patch-metasurface construction helpers.
+- `comsol_mcp/tools/model.py` — The module exposes model creation, loading, cloning, saving, and listing tools.
+- `comsol_mcp/tools/model_identity.py` — The module exposes the read-only offline model-identity tool.
+- `comsol_mcp/tools/mph_inspection.py` — The module exposes the bounded offline `.mph` archive inspection tool.
+- `comsol_mcp/tools/offline_export.py` — The module exposes the read-only offline export validation tool.
+- `comsol_mcp/tools/ownership.py` — The module enforces cross-process solver ownership and collision preflight.
+- `comsol_mcp/tools/parameters.py` — The module exposes COMSOL parameter tools.
+- `comsol_mcp/tools/periodic_mesh_audit.py` — The module exposes periodic geometry and mesh evidence tools.
+- `comsol_mcp/tools/physics.py` — The module exposes COMSOL physics and multiphysics tools.
+- `comsol_mcp/tools/electro_chemistry.py` — The module exposes the isolated Electrochemistry Module catalog, interface creation, electrode reaction, electrolyte, and inspect tools.
+- `comsol_mcp/tools/acoustics_pde.py` — The module exposes constrained Pressure Acoustics and mathematical PDE tools.
+- `comsol_mcp/tools/surrogate.py` — The module provides five bounded solver-free surrogate tools. They validate datasets, preview configurations, inspect and verify documents, and validate predictions. Predictions do not become FEM evidence.
+- `comsol_mcp/tools/profiles.py` — The module resolves static profiles and filters tool registration.
+- `comsol_mcp/tools/session_status.py` — The module stores last-known session booleans without importing COMSOL or MPh.
+- `comsol_mcp/tools/properties.py` — The module exposes constrained clientapi property access.
+- `comsol_mcp/tools/research.py` — The module exposes experimental solver-free campaign compilation and robustness planning.
+- `comsol_mcp/tools/robust_shape.py` — The module exposes the experimental bounded robust-shape preview, durable submission, evidence inspection, and verification surface.
+- `comsol_mcp/tools/property_transport.py` — The module normalizes bounded property values for JSON transport.
+- `comsol_mcp/tools/results.py` — The module exposes result evaluation and export tools.
+- `comsol_mcp/tools/semantic_docs.py` — The module exposes bounded opt-in semantic documentation tools.
+- `comsol_mcp/tools/spectral_characterization.py` — The module exposes bounded solver-free spectral characterization.
+- `comsol_mcp/tools/configuration.py` — The module exposes solver-free simulation configuration validation and comparison.
+- `comsol_mcp/tools/compatibility_registry.py` — The module exposes the read-only runtime compatibility status tool.
+- `comsol_mcp/tools/thermal_radiation.py` — The module exposes solver-free Kirchhoff and thermal-radiation evidence tools.
+- `comsol_mcp/tools/thermal_material.py` — The module exposes solver-free thermal material ledger validation and evaluation.
+- `comsol_mcp/tools/model_manager.py` — The module exposes the default-off COMSOL Model Manager tools, which stay hidden until the feature is enabled.
+- `comsol_mcp/tools/session.py` — The module manages COMSOL client startup, status, models, and shutdown.
+- `comsol_mcp/tools/settings_gui.py` — The module exposes the profile-independent solver-free Settings GUI launcher.
+- `comsol_mcp/tools/shared_session.py` — The module exposes default-off local attached-server lifecycle tools.
+- `comsol_mcp/tools/study.py` — The module exposes COMSOL study and solving tools.
+- `comsol_mcp/tools/standalone.py` — The module exposes typed standalone build, lifecycle, log, and result tools.
+- `comsol_mcp/tools/visual_review.py` — The module exposes solver-free visual-review contract adapters.
+- `comsol_mcp/tools/wave_optics_audit.py` — The module exposes one-point policy-separated Wave Optics evidence audits.
+- `comsol_mcp/tools/wave_optics_preflight.py` — The module exposes threshold-free read-only Wave Optics preflight.
+- `comsol_mcp/tools/workflow.py` — The module exposes reusable staged study workflows.
 
 ## Settings GUI
 
-- `settings_gui/__init__.py` — This module exports the alpha6 Settings GUI release identity.
-- `settings_gui/__main__.py` — This module provides the installed Settings GUI console entry point and startup failure handshake.
-- `settings_gui/app.py` — This module constructs the localized single-window Tk and ttk settings editor.
-- `settings_gui/assets/__init__.py` — This file marks the packaged Settings GUI visual assets.
-- `settings_gui/assets/comsol_mcp.ico` — This file provides the compressed transparent multi-size Windows application icon.
-- `settings_gui/comsol_discovery.py` — This module discovers validated COMSOL 6.4 and Java installations without launching a process.
-- `settings_gui/constants.py` — This module defines bounded Settings GUI runtime constants.
-- `settings_gui/controller.py` — This module coordinates validation, dialogs, discovery, persistence, and close behavior.
-- `settings_gui/desktop_shortcut.py` — This module implements the explicit owned per-user Windows Desktop shortcut lifecycle with exact settings binding.
-- `settings_gui/dialogs.py` — This module adapts native file, folder, confirmation, information, and error dialogs.
-- `settings_gui/fonts.py` — This module selects deterministic Windows CJK system-font fallbacks.
-- `settings_gui/i18n.py` — This module loads complete runtime gettext catalogs and supports language switching.
-- `settings_gui/manual_index.py` — This module manages one cancellable JSON-lines manual-index worker task for the GUI.
-- `settings_gui/model.py` — This module defines every settings field binding and the validated dirty form model.
-- `settings_gui/storage.py` — This module implements strict loading, recovery copies, and exact atomic settings writes.
-- `settings_gui/windows_lock.py` — This module enforces Windows mutex, sidecar, target-handle, and file-identity ownership.
-- `settings_gui/locales/settings_gui.pot` — This file is the deterministic Settings GUI gettext template.
-- `settings_gui/locales/en/LC_MESSAGES/settings_gui.po` — This file contains the complete English Settings GUI translation source.
-- `settings_gui/locales/en/LC_MESSAGES/settings_gui.mo` — This file contains the compiled English Settings GUI runtime catalog.
-- `settings_gui/locales/zh_CN/LC_MESSAGES/settings_gui.po` — This file contains the complete Simplified Chinese Settings GUI translation source.
-- `settings_gui/locales/zh_CN/LC_MESSAGES/settings_gui.mo` — This file contains the compiled Simplified Chinese Settings GUI runtime catalog.
-- `settings_gui/locales/zh_TW/LC_MESSAGES/settings_gui.po` — This file contains the complete Traditional Chinese Settings GUI translation source.
-- `settings_gui/locales/zh_TW/LC_MESSAGES/settings_gui.mo` — This file contains the compiled Traditional Chinese Settings GUI runtime catalog.
-- `settings_gui/tests/__init__.py` — This file marks the independent repository-only Settings GUI test package.
-- `settings_gui/tests/conftest.py` — This file isolates GUI tests under a temporary ASCII ProgramData root.
-- `settings_gui/tests/test_app.py` — This module performs bounded real-Tk construction, invalid-style, language, and startup-version tests.
-- `settings_gui/tests/test_discovery.py` — This module tests COMSOL registry, marker, Java ordering, and ambiguity behavior.
-- `settings_gui/tests/test_desktop_shortcut.py` — This module tests exact shortcut creation, inspection, idempotency, collision protection, removal, and real Shell Link round trips.
-- `settings_gui/tests/test_fonts.py` — This module tests deterministic English and CJK font selection.
-- `settings_gui/tests/test_i18n.py` — This module tests gettext completeness, placeholders, and reproducible PO and MO outputs.
-- `settings_gui/tests/test_icon.py` — This module verifies the packaged ICO dimensions, encoding, transparency-capable depth, and size bound.
-- `settings_gui/tests/test_model_controller.py` — This module tests complete field bindings and controller state transitions.
-- `settings_gui/tests/test_manual_index.py` — This module tests isolated manual-index task progress, cancellation, and cleanup.
-- `settings_gui/tests/test_storage.py` — This module tests Windows mutex, sharing, conflict, recovery, and atomic-write behavior.
+- `settings_gui/__init__.py` — The module exports the Settings GUI release identity.
+- `settings_gui/__main__.py` — The module provides the installed Settings GUI console entry point and startup failure handshake.
+- `settings_gui/app.py` — The module constructs the localized single-window Tk and ttk settings editor.
+- `settings_gui/assets/__init__.py` — The file marks the packaged Settings GUI visual assets.
+- `settings_gui/assets/comsol_mcp.ico` — The file provides the compressed transparent multi-size Windows application icon.
+- `settings_gui/comsol_discovery.py` — The module discovers validated COMSOL 6.4 and Java installations without launching a process.
+- `settings_gui/constants.py` — The module defines bounded Settings GUI runtime constants.
+- `settings_gui/controller.py` — The module coordinates validation, dialogs, discovery, persistence, and close behavior.
+- `settings_gui/desktop_shortcut.py` — The module implements the explicit owned per-user Windows Desktop shortcut lifecycle with exact settings binding.
+- `settings_gui/dialogs.py` — The module adapts native file, folder, confirmation, information, and error dialogs.
+- `settings_gui/fonts.py` — The module selects deterministic Windows CJK system-font fallbacks.
+- `settings_gui/i18n.py` — The module loads complete runtime gettext catalogs and supports language switching.
+- `settings_gui/manual_index.py` — The module manages one cancellable JSON-lines manual-index worker task for the GUI.
+- `settings_gui/model.py` — The module defines every settings field binding and the validated dirty form model.
+- `settings_gui/storage.py` — The module implements strict loading, recovery copies, and exact atomic settings writes.
+- `settings_gui/windows_lock.py` — The module enforces Windows mutex, sidecar, target-handle, and file-identity ownership.
+- `settings_gui/locales/settings_gui.pot` — The file is the deterministic Settings GUI gettext template.
+- `settings_gui/locales/en/LC_MESSAGES/settings_gui.po` — The file contains the complete English Settings GUI translation source.
+- `settings_gui/locales/en/LC_MESSAGES/settings_gui.mo` — The file contains the compiled English Settings GUI runtime catalog.
+- `settings_gui/locales/zh_CN/LC_MESSAGES/settings_gui.po` — The file contains the complete Simplified Chinese Settings GUI translation source.
+- `settings_gui/locales/zh_CN/LC_MESSAGES/settings_gui.mo` — The file contains the compiled Simplified Chinese Settings GUI runtime catalog.
+- `settings_gui/locales/zh_TW/LC_MESSAGES/settings_gui.po` — The file contains the complete Traditional Chinese Settings GUI translation source.
+- `settings_gui/locales/zh_TW/LC_MESSAGES/settings_gui.mo` — The file contains the compiled Traditional Chinese Settings GUI runtime catalog.
+- `settings_gui/tests/__init__.py` — The file marks the independent repository-only Settings GUI test package.
+- `settings_gui/tests/conftest.py` — The file isolates GUI tests under a temporary ASCII ProgramData root.
+- `settings_gui/tests/test_app.py` — The module performs bounded real-Tk construction, invalid-style, language, and startup-version tests.
+- `settings_gui/tests/test_discovery.py` — The tests cover COMSOL registry, marker, Java ordering, and ambiguity behavior.
+- `settings_gui/tests/test_desktop_shortcut.py` — The tests cover exact shortcut creation, inspection, idempotency, collision protection, removal, and real Shell Link round trips.
+- `settings_gui/tests/test_fonts.py` — The tests cover deterministic English and CJK font selection.
+- `settings_gui/tests/test_i18n.py` — The tests cover gettext completeness, placeholders, and reproducible PO and MO outputs.
+- `settings_gui/tests/test_icon.py` — The module verifies the packaged ICO dimensions, encoding, transparency-capable depth, and size bound.
+- `settings_gui/tests/test_model_controller.py` — The tests cover complete field bindings and controller state transitions.
+- `settings_gui/tests/test_manual_index.py` — The tests cover isolated manual-index task progress, cancellation, and cleanup.
+- `settings_gui/tests/test_storage.py` — The tests cover Windows mutex, sharing, conflict, recovery, and atomic-write behavior.
 
 ## Shared utilities
 
-- `comsol_mcp/utils/__init__.py` — This file exports shared utility functions.
-- `comsol_mcp/utils/control_plane.py` — This module attaches bounded latency and outcome evidence to control calls.
-- `comsol_mcp/utils/immutability.py` — This module creates recursively immutable JSON-compatible snapshots and mutable exports.
-- `comsol_mcp/utils/public_errors.py` — This module builds stable path-free public failure payloads.
-- `comsol_mcp/utils/runtime_paths.py` — This module defines shared ASCII-safe runtime artifact locations.
-- `comsol_mcp/utils/validation.py` — This module provides strict dependency-free JSON scalar validation.
-- `comsol_mcp/utils/versioning.py` — This module creates and parses versioned model filenames.
+- `comsol_mcp/utils/__init__.py` — The file exports shared utility functions.
+- `comsol_mcp/utils/control_plane.py` — The module attaches bounded latency and outcome evidence to control calls.
+- `comsol_mcp/utils/immutability.py` — The module creates recursively immutable JSON-compatible snapshots and mutable exports.
+- `comsol_mcp/utils/public_errors.py` — The module builds stable path-free public failure payloads.
+- `comsol_mcp/utils/runtime_paths.py` — The module defines shared ASCII-safe runtime artifact locations.
+- `comsol_mcp/utils/validation.py` — The module provides strict dependency-free JSON scalar validation.
+- `comsol_mcp/utils/versioning.py` — The module creates and parses versioned model filenames.
