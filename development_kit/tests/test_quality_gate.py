@@ -308,3 +308,32 @@ def test_quality_runs_allocate_independent_evidence_directories(
 
     assert first["run_id"] != second["run_id"]
     assert len(list(ascii_tmp_path.glob("run-*/quality-receipt.json"))) == 2
+
+
+def test_hosted_shard_failure_retains_full_log_and_bounds_console(tmp_path, monkeypatch, capsys):
+    from development_kit.scripts import serial_test_shards as runner
+
+    payload = b"private-prefix-marker\n" + b"x" * 70000 + b"\nFAILED explicit-assertion\n"
+
+    class FailedProcess:
+        def __init__(self, _command, **kwargs):
+            kwargs["stdout"].write(payload)
+
+        def wait(self):
+            return 1
+
+        def poll(self):
+            return 1
+
+    monkeypatch.setattr(runner, "test_files", lambda **_kwargs: ["test_case.py"])
+    monkeypatch.setattr(runner.subprocess, "Popen", FailedProcess)
+    coverage_root = tmp_path / "coverage"
+    with pytest.raises(SystemExit, match="pytest shard failures: 0=1"):
+        runner.run_shards(
+            basetemp_root=tmp_path / "tests", shard_count=1, coverage_root=coverage_root
+        )
+    assert (coverage_root / "shard0.log").read_bytes() == payload
+    output = capsys.readouterr().out
+    assert "FAILED explicit-assertion" in output
+    assert "private-prefix-marker" not in output
+    assert len(output) < 65700
