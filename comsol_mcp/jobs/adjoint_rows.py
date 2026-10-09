@@ -192,6 +192,8 @@ def _read_adjoint_rows_unlocked(journal: Path, job: str) -> list[dict[str, Any]]
     outcome = read_complete_jsonl(journal, max_bytes=MAX_ADJOINT_ROWS * MAX_ADJOINT_ROW_BYTES)
     if outcome["state"] in {"corrupt", "oversized"}:
         raise ValueError(f"adjoint journal is {outcome['state']}")
+    if len(outcome["records"]) > MAX_ADJOINT_ROWS:
+        raise ValueError("adjoint journal exceeds its entry limit")
     rows: list[dict[str, Any]] = []
     previous = None
     for sequence, value in enumerate(outcome["records"]):
