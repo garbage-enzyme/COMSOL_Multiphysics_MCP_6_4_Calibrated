@@ -320,6 +320,7 @@ class ThermoOptomechanicalComsolExecutor:
             "reference_temperature_parameter", expansion["reference_temperature_K"], "K"
         )
         self._parameter("deformation_scale_parameter", transfer["deformation_scale"])
+        self._apply_thermal_load_features()
 
     @staticmethod
     def _feature_by_type(physics: Any, feature_type: str) -> Any:
@@ -338,17 +339,18 @@ class ThermoOptomechanicalComsolExecutor:
     @staticmethod
     def _set_feature_value(feature: Any, key: str, expression: str) -> None:
         feature.set(key, expression)
-        try:
-            observed = str(feature.getString(key))
-        except (AttributeError, TypeError):
-            try:
-                observed = str(feature.get(key))
-            except (AttributeError, TypeError) as exc:
-                raise RuntimeError(f"feature parameter {key} has no readback API") from exc
+        observed = str(feature.getString(key))
         if observed != expression:
-            raise RuntimeError(
-                f"feature parameter {key} did not read back exactly: {observed!r}"
-            )
+            raise RuntimeError(f"feature parameter {key} did not read back exactly: {observed!r}")
+
+    @staticmethod
+    def _bind_feature_selection(feature: Any, component: Any, tag: str) -> None:
+        expected = {int(item) for item in component.selection(tag).entities()}
+        if not expected:
+            raise RuntimeError(f"thermal load selection {tag} is empty")
+        feature.selection().named(tag)
+        if {int(item) for item in feature.selection().entities()} != expected:
+            raise RuntimeError(f"thermal load selection {tag} did not read back exactly")
 
     def _apply_thermal_load_features(self) -> None:
         contract = self.spec["model_contract"]
@@ -356,18 +358,14 @@ class ThermoOptomechanicalComsolExecutor:
         component = self.model.java.component(contract["component_tag"])
         heat = component.physics(contract["heat_transfer_tag"])
         source = self._feature_by_type(heat, "HeatSource")
-        source.selection().set(
-            list(component.selection(contract["heated_domain_selection"]).entities())
-        )
+        self._bind_feature_selection(source, component, contract["heated_domain_selection"])
         self._set_feature_value(
             source,
             "Q0",
             f"{load['volumetric_heat_source_W_per_m3']:.17g}[{load['heat_source_unit']}]",
         )
         convection = self._feature_by_type(heat, "ConvectiveHeatFlux")
-        convection.selection().set(
-            list(component.selection(contract["thermal_boundary_selection"]).entities())
-        )
+        self._bind_feature_selection(convection, component, contract["thermal_boundary_selection"])
         self._set_feature_value(
             convection,
             "h",
@@ -387,7 +385,6 @@ class ThermoOptomechanicalComsolExecutor:
             self._save(self.derived_path)
         self._load_derived()
         self._apply_positive_parameters()
-        self._apply_thermal_load_features()
         self._set_moving_mesh_active(False)
         self._study("thermal_structure_study_tag")
         temperature_min = self._evaluate("temperature_min")

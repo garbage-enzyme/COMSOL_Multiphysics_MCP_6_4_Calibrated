@@ -9,6 +9,7 @@ import os
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import src.jobs.thermo_optomechanical_replay as replay_module
@@ -925,7 +926,9 @@ def test_worker_publishes_completion_only_after_client_and_lease_cleanup(ascii_t
 
 
 def test_worker_refuses_thermo_stage_when_resource_budget_is_exceeded(ascii_tmp_path):
-    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "resource-refusal"))
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "resource-refusal")
+    )
     store = JobStore(ascii_tmp_path / "resource-refusal-runtime" / "jobs")
     job_id = store.create(
         spec,
@@ -956,14 +959,198 @@ def test_worker_refuses_thermo_stage_when_resource_budget_is_exceeded(ascii_tmp_
         telemetry_provider=over_budget,
     )
     state = store.read_state(job_id)
-    assert code == 1
-    assert state["status"] == "failed"
-    assert "Resource admission refused" in state["last_error"]["message"]
+    assert code == 0
+    assert state["status"] == "interrupted"
+    assert "before_stage_stop" in state["last_error"]["message"]
     entries = store.read_resource_journal(job_id)
     assert entries
     assert entries[-1]["entry_type"] == "admission"
     assert entries[-1]["decision"] == "refuse"
     assert entries[-1]["start_authorized"] is False
+    assert state["resource_gate"]["latest_entry_sha256"] == entries[-1]["entry_sha256"]
+    assert not (store.job_dir(job_id) / "thermo_optomechanical_stages.jsonl").exists()
+
+
+@pytest.mark.parametrize("refusal_stage", ["pre_mesh", "post_solve", "pre_solve"])
+def test_resource_refusal_resume_preserves_completed_stages(ascii_tmp_path, refusal_stage):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "resume-budget"))
+    store = JobStore(ascii_tmp_path / "resume-budget-runtime" / "jobs")
+    job_id = store.create(
+        spec,
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "worker_pid": None,
+            "worker_process_create_time": None,
+            "worker_command_signature": None,
+            "progress": {"completed": 0, "total": 5},
+            "last_error": None,
+        },
+    )
+    first_calls = []
+
+    def factory(_client, current_spec, _root):
+        def execute(stage, _directory, _spec):
+            first_calls.append(stage)
+            return _payload(stage, current_spec)
+
+        return execute
+
+    def telemetry(stage, _point_id, _client, _directory, _elapsed):
+        return {"stage": stage, "elapsed_wall_seconds": 301.0 if stage == refusal_stage else 0.0}
+
+    owner = _Ownership()
+    client = _Client()
+    assert (
+        run_worker(
+            str(store.root),
+            job_id,
+            ownership_factory=lambda *_args: owner,
+            client_factory=lambda _spec: client,
+            stage_executor_factory=factory,
+            telemetry_provider=telemetry,
+            native_cancel_enabled=False,
+        )
+        == 0
+    )
+    assert store.read_state(job_id)["status"] == "interrupted"
+    expected_count = 0 if refusal_stage == "pre_mesh" else 1
+    assert len(first_calls) == expected_count
+    assert owner.released is True
+    assert client.clear_count == 1
+    journal = store.job_dir(job_id) / "thermo_optomechanical_stages.jsonl"
+    original_rows = journal.read_bytes() if journal.exists() else b""
+    assert not (store.job_dir(job_id) / "analysis" / "summary.json").exists()
+    store.update_state(job_id, "starting", patch={"attempt": 2})
+    second_calls = []
+
+    def second_factory(_client, current_spec, _root):
+        def execute(stage, _directory, _spec):
+            second_calls.append(stage)
+            return _payload(stage, current_spec)
+
+        return execute
+
+    fresh_owner, fresh_client = _Ownership(), _Client()
+    assert (
+        run_worker(
+            str(store.root),
+            job_id,
+            ownership_factory=lambda *_args: fresh_owner,
+            client_factory=lambda _spec: fresh_client,
+            stage_executor_factory=second_factory,
+            telemetry_provider=lambda stage, *_args: {"stage": stage, "elapsed_wall_seconds": 0.0},
+            native_cancel_enabled=False,
+        )
+        == 0
+    )
+    assert store.read_state(job_id)["status"] == "completed"
+    assert first_calls + second_calls == list(THERMO_OPTOMECHANICAL_STAGES)
+    assert journal.read_bytes().startswith(original_rows)
+    rows = read_thermo_optomechanical_stage_rows(journal, spec, artifact_root=store.job_dir(job_id))
+    assert [row["attempt"] for row in rows] == [1] * expected_count + [2] * (5 - expected_count)
+    assert {entry["attempt"] for entry in store.read_resource_journal(job_id)} == {1, 2}
+
+
+class _ThermalFeature:
+    def __init__(self, feature_type, selections):
+        self.feature_type = feature_type
+        self.values = {}
+        self.selections = selections
+        self.selection_tag = None
+        self.ignore_set = False
+        self.ignore_selection = False
+
+    def getType(self):
+        return self.feature_type
+
+    def set(self, key, value):
+        if not self.ignore_set:
+            self.values[key] = value
+
+    def getString(self, key):
+        return self.values.get(key, "stale")
+
+    def selection(self):
+        return self
+
+    def named(self, tag):
+        if not self.ignore_selection:
+            self.selection_tag = tag
+
+    def entities(self):
+        return self.selections.get(self.selection_tag, [99])
+
+
+def _thermal_executor_fixture(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "load-readback"))
+    selections = {"sel_heat": [3, 7], "sel_temp": [2, 4, 6]}
+    source = _ThermalFeature("HeatSource", selections)
+    convection = _ThermalFeature("ConvectiveHeatFlux", selections)
+    features = {"custom_source": source, "custom_flux": convection}
+    physics = SimpleNamespace(
+        feature=lambda tag=None: (
+            features[tag] if tag else SimpleNamespace(tags=lambda: list(features))
+        )
+    )
+    component = SimpleNamespace(
+        physics=lambda tag: physics,
+        selection=lambda tag: SimpleNamespace(entities=lambda: selections[tag]),
+    )
+    executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
+    executor.model = SimpleNamespace(java=SimpleNamespace(component=lambda tag: component))
+    return executor, source, convection, selections, features
+
+
+def test_thermal_load_applies_values_units_and_named_selections(ascii_tmp_path):
+    executor, source, convection, _selections, _features = _thermal_executor_fixture(ascii_tmp_path)
+    executor.spec["thermal_load"]["volumetric_heat_source_W_per_m3"] = 25.0
+    executor.spec["thermal_load"]["convection_coefficient_W_per_m2_K"] = 12.5
+    executor._apply_thermal_load_features()
+    assert source.values == {"Q0": "25[W/m^3]"}
+    assert convection.values == {"h": "12.5[W/(m^2*K)]", "Text": "300[K]"}
+    assert source.selection_tag == "sel_heat"
+    assert convection.selection_tag == "sel_temp"
+    assert source.entities() == [3, 7]
+    assert convection.entities() == [2, 4, 6]
+
+
+@pytest.mark.parametrize("feature", ["source", "convection"])
+def test_thermal_load_rejects_silent_parameter_set(ascii_tmp_path, feature):
+    executor, source, convection, _selections, _features = _thermal_executor_fixture(ascii_tmp_path)
+    (source if feature == "source" else convection).ignore_set = True
+    with pytest.raises(RuntimeError, match="did not read back exactly"):
+        executor._apply_thermal_load_features()
+
+
+@pytest.mark.parametrize("feature", ["source", "convection"])
+def test_thermal_load_rejects_silent_selection_bind(ascii_tmp_path, feature):
+    executor, source, convection, _selections, _features = _thermal_executor_fixture(ascii_tmp_path)
+    (source if feature == "source" else convection).ignore_selection = True
+    with pytest.raises(RuntimeError, match="selection .* did not read back exactly"):
+        executor._apply_thermal_load_features()
+
+
+@pytest.mark.parametrize("tag", ["sel_heat", "sel_temp"])
+def test_thermal_load_rejects_empty_selection(ascii_tmp_path, tag):
+    executor, _source, _convection, selections, _features = _thermal_executor_fixture(
+        ascii_tmp_path
+    )
+    selections[tag] = []
+    with pytest.raises(RuntimeError, match="selection .* is empty"):
+        executor._apply_thermal_load_features()
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate"])
+def test_thermal_load_rejects_ambiguous_convection_feature(ascii_tmp_path, mutation):
+    executor, _source, convection, _selections, features = _thermal_executor_fixture(ascii_tmp_path)
+    if mutation == "missing":
+        del features["custom_flux"]
+    else:
+        features["other_flux"] = convection
+    with pytest.raises(RuntimeError, match="exactly one ConvectiveHeatFlux"):
+        executor._apply_thermal_load_features()
 
 
 def test_native_cancel_monitor_failure_becomes_durable_worker_error(ascii_tmp_path, monkeypatch):

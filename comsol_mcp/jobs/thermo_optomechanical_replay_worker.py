@@ -60,6 +60,7 @@ def _run(
     telemetry_provider: Callable[[str, str, Any, Path, float], dict[str, Any]] | None = None,
 ) -> int:
     """Run one exact attempt and publish terminal state only after cleanup."""
+    worker_started = time.monotonic()
     store = JobStore(Path(root))
     directory = store.job_dir(job_id)
     spec: dict[str, Any] = {}
@@ -151,8 +152,7 @@ def _run(
         from .thermo_optomechanical_replay_rows import read_thermo_optomechanical_stage_rows
         from .worker import _record_native_cancel
 
-        worker_started = time.monotonic()
-        resource_journal = directory / "resource.jsonl"
+        stage_journal = directory / "thermo_optomechanical_stages.jsonl"
 
         def completed_stage_ids() -> set[str]:
             journal = directory / "thermo_optomechanical_stages.jsonl"
@@ -170,13 +170,25 @@ def _run(
                 return telemetry_provider(
                     stage, point_id, client, directory, time.monotonic() - worker_started
                 )
+            mesh_elements = None
+            model = getattr(stage_executor, "model", None)
+            if model is not None:
+                from comsol_mcp.tools.mesh import get_mesh_info
+
+                try:
+                    mesh = get_mesh_info(model)
+                    if mesh.get("success"):
+                        mesh_elements = mesh.get("mesh", {}).get("num_elements")
+                except Exception:  # noqa: S110 - missing telemetry remains unavailable
+                    pass
             return collect_resource_telemetry(
                 stage=stage,
                 runtime_path=store.root,
                 process_id=os.getpid(),
+                mesh_elements=mesh_elements,
                 elapsed_wall_seconds=time.monotonic() - worker_started,
                 durable_result_epoch=(
-                    resource_journal.stat().st_mtime if resource_journal.is_file() else None
+                    stage_journal.stat().st_mtime if stage_journal.is_file() else None
                 ),
             )
 
@@ -193,6 +205,7 @@ def _run(
             ThermoOptomechanicalComsolExecutor,
         )
         from .thermo_optomechanical_replay_runner import run_thermo_optomechanical_replay
+
         executor_factory = stage_executor_factory or ThermoOptomechanicalComsolExecutor
         stage_executor = executor_factory(client, spec, directory)
 
@@ -218,7 +231,6 @@ def _run(
             cancel_thread.start()
 
         def stage_persisted(row: Mapping[str, Any]) -> None:
-            resource.evaluate(stage="post_solve", point_id=str(row["stage_id"]))
             current = store.read_state(job_id)["status"]
             if current == "smoke_running":
                 store.update_state(
@@ -244,6 +256,22 @@ def _run(
         if should_stop():
             raise _CooperativeCancellation("Stopped before thermo-optomechanical stages")
         store.update_state(job_id, "smoke_running", event="thermo_optomechanical_worker_started")
+        resource_gate: dict[str, Any] | None = None
+
+        def admission(context: Mapping[str, Any], resource_stage: str) -> Mapping[str, Any]:
+            nonlocal resource_gate
+            decision = resource.evaluate(stage=resource_stage, point_id=str(context["stage_id"]))
+            if decision["action"] in {"await_confirmation", "checkpoint_no_start"}:
+                entries = store.read_resource_journal(job_id)
+                latest = entries[-1]
+                resource_gate = {
+                    "point_id": latest["point_id"],
+                    "stage": latest["stage"],
+                    "decision": latest["decision"],
+                    "latest_entry_sha256": latest["entry_sha256"],
+                }
+                return {"action": "stop"}
+            return {"action": "continue"}
 
         def resource_control(context: Mapping[str, Any]) -> Mapping[str, Any]:
             action = "continue" if not should_stop() else "cancel"
@@ -251,13 +279,7 @@ def _run(
                 return {"action": action}
             stage_id = str(context["stage_id"])
             resource_stage = "pre_mesh" if stage_id == "preflight" else "pre_solve"
-            decision = resource.evaluate(stage=resource_stage, point_id=stage_id)
-            if not decision["start_authorized"]:
-                raise RuntimeError(
-                    f"Resource admission refused thermo-optomechanical stage {stage_id}: "
-                    f"{decision['action']}"
-                )
-            return {"action": "continue"}
+            return admission(context, resource_stage)
 
         result = run_thermo_optomechanical_replay(
             spec,
@@ -266,6 +288,7 @@ def _run(
             stage_executor=stage_executor,
             control_hook=resource_control,
             on_durable_stage=stage_persisted,
+            after_durable_stage_hook=lambda context: admission(context, "post_solve"),
             fault_hook=fault_hook,
         )
         if result.get("completed"):
@@ -298,9 +321,14 @@ def _run(
                 "event": "thermo_optomechanical_stage_interrupted",
                 "patch": {
                     "last_error": {
-                        "type": "ThermoOptomechanicalStageStop",
+                        "type": (
+                            "ResourceAdmissionStop"
+                            if resource_gate
+                            else "ThermoOptomechanicalStageStop"
+                        ),
                         "message": str(result.get("stop_reason")),
-                    }
+                    },
+                    **({"resource_gate": resource_gate} if resource_gate else {}),
                 },
             }
     except _CooperativeCancellation as exc:
