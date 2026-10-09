@@ -260,7 +260,7 @@ def _submit_job(
                 "success": False,
                 "state": "attached_handoff_recovery_failed",
                 "error_type": type(recovery_exc).__name__,
-                "error": str(recovery_exc),
+                "error": "Attached-job recovery failed safely.",
             }
         return (
             dict(observed_recovery)
@@ -289,7 +289,7 @@ def _submit_job(
             "success": False,
             "state": "job_submit_failed_after_attached_handoff",
             "error_type": type(exc).__name__,
-            "error": str(exc),
+            "error": "Job submission failed safely.",
             "attached_handoff": _attached_handoff_summary(handoff),
             "handoff_recovery": recovery,
         }
@@ -317,7 +317,7 @@ def _job_call(operation: str, callback, **error_fields: Any) -> dict[str, Any]:
                 "success": False,
                 **error_fields,
                 "error_type": type(exc).__name__,
-                "error": str(exc),
+                "error": "Job operation failed safely.",
             }
 
     return measured_call(operation, run)
