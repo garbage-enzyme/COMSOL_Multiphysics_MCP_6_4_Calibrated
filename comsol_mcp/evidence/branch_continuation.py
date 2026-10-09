@@ -905,8 +905,13 @@ def _one_transition(
     policy: Mapping[str, Any],
     total_expansions: int,
     planned_points: int,
+    previous_effective_peak: float | None = None,
 ) -> tuple[dict[str, Any], int, int]:
-    previous_peak = previous["candidate"]["peak_wavelength_m"]
+    previous_peak = (
+        previous_effective_peak
+        if previous_effective_peak is not None
+        else previous["candidate"]["peak_wavelength_m"]
+    )
     current_candidate = current["candidate"]
     current_peak = current_candidate["peak_wavelength_m"]
     classification = current_candidate["classification"]
@@ -1064,6 +1069,7 @@ def plan_branch_continuation(
     transitions = []
     total_expansions = 0
     planned_points = 0
+    effective_peak = None
     stopped_after_state_index = None
     for index in range(1, len(all_states)):
         transition, total_expansions, planned_points = _one_transition(
@@ -1072,8 +1078,15 @@ def plan_branch_continuation(
             policy,
             total_expansions,
             planned_points,
+            effective_peak,
         )
         transitions.append(transition)
+        if transition["branch_followed"]:
+            effective_peak = (
+                transition["selected_candidate_wavelength_m"]
+                or transition["current_peak_wavelength_m"]
+                or effective_peak
+            )
         if (
             policy["stop_policy"] == "stop_at_first_unresolved"
             and not transition["branch_followed"]
