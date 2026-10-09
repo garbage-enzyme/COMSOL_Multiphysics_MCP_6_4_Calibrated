@@ -118,6 +118,14 @@ def test_only_verified_rows_may_be_eligible() -> None:
         validate_row_provenance(resealed)
 
 
+def test_eligible_must_be_a_boolean() -> None:
+    row = _row()
+    body = {k: v for k, v in row.items() if k != "row_sha256"}
+    body["eligible"] = 1
+    with pytest.raises(ValueError, match="eligible must be a boolean"):
+        validate_row_provenance({**body, "row_sha256": canonical_sha256_v1(body)})
+
+
 def test_ledger_retains_failed_rows_with_reasons() -> None:
     rows = [
         _row(row_id="row-1"),

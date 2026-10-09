@@ -450,7 +450,19 @@ def summarize_campaign(
         raise ValueError("wall_time_seconds must be non-negative")
 
     states: dict[str, int] = {}
+    screened_ids = {record["candidate_id"] for record in records}
+    fem_candidate_ids: set[str] = set()
     for result in fem_results:
+        if not isinstance(result, Mapping):
+            raise ValueError("each FEM result must be a mapping")
+        candidate_id = result.get("candidate_id")
+        if not isinstance(candidate_id, str) or not candidate_id:
+            raise ValueError("each FEM result must declare a non-empty candidate_id")
+        if candidate_id not in screened_ids:
+            raise ValueError(f"FEM result for unscreened candidate: {candidate_id!r}")
+        if candidate_id in fem_candidate_ids:
+            raise ValueError(f"duplicate FEM result for candidate: {candidate_id!r}")
+        fem_candidate_ids.add(candidate_id)
         state = result.get("state")
         if state not in CANDIDATE_STATES:
             raise ValueError(f"unknown candidate state: {state!r}")

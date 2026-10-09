@@ -264,6 +264,10 @@ def validate_fitted_transforms(value: Any) -> dict[str, Any]:
         raise ValueError("transforms may fit only on train")
     if not isinstance(manifest["fit_row_count"], int) or manifest["fit_row_count"] < 1:
         raise ValueError("fit_row_count must be a positive integer")
+    if not isinstance(manifest["transforms"], Sequence) or isinstance(
+        manifest["transforms"], (str, bytes)
+    ) or not manifest["transforms"]:
+        raise ValueError("transforms must be a non-empty sequence")
     seen: set[str] = set()
     for item in manifest["transforms"]:
         if not isinstance(item, Mapping):
@@ -335,9 +339,18 @@ def verify_transform_roundtrip(
     """Prove forward/inverse round-trip fidelity on the supplied rows."""
     if relative_tolerance <= 0 or absolute_tolerance <= 0:
         raise ValueError("round-trip tolerances must be positive")
+    validated = validate_fitted_transforms(transforms)
+    if not isinstance(rows, Sequence):
+        raise ValueError("rows must be a sequence")
+    field_ids = {item["field_id"] for item in validated["transforms"]}
     worst = 0.0
     worst_field: str | None = None
     for index, row in enumerate(rows):
+        if not isinstance(row, Mapping):
+            raise ValueError(f"rows[{index}] must be a mapping")
+        for field_id, original in row.items():
+            if field_id in field_ids:
+                _require_finite(f"rows[{index}].{field_id}", original)
         restored = invert_transforms(transforms, apply_transforms(transforms, row))
         for field_id, original in row.items():
             if field_id not in restored:

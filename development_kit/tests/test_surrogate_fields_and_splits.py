@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from comsol_mcp.durable.canonical import canonical_sha256_v1
+
 from comsol_mcp.surrogate.fields import (
     apply_transforms,
     build_field_schema,
@@ -179,6 +181,20 @@ def test_transforms_ignore_non_train_values_by_construction() -> None:
         validate_fitted_transforms({**body, "manifest_sha256": canonical_sha256_v1(body)})
 
 
+def test_transforms_reject_empty_manifest_and_nonfinite_roundtrip_rows() -> None:
+    schema = _schema()
+    transforms = fit_transforms(
+        transform_id="t", schema=schema, train_rows=[{"w": 1.0, "h": 2.0, "R": 0.1}]
+    )
+    body = {k: v for k, v in transforms.items() if k != "manifest_sha256"}
+    body["transforms"] = []
+    resealed = {**body, "manifest_sha256": canonical_sha256_v1(body)}
+    with pytest.raises(ValueError, match="non-empty sequence"):
+        validate_fitted_transforms(resealed)
+    with pytest.raises(ValueError, match="finite"):
+        verify_transform_roundtrip(transforms, [{"w": float("nan"), "h": 2.0, "R": 0.1}])
+
+
 def test_standardize_with_zero_scale_is_refused() -> None:
     schema = _schema()
     with pytest.raises(ValueError, match="zero scale"):
@@ -253,6 +269,10 @@ def test_split_plan_rejects_tampering_and_bad_inputs() -> None:
     tampered["seed"] = 18
     with pytest.raises(ValueError):
         validate_split_plan(tampered)
+    tampered_counts = dict(plan)
+    tampered_counts["group_counts"] = {**plan["group_counts"], "train": 0}
+    with pytest.raises(ValueError, match="manifest_sha256"):
+        validate_split_plan(tampered_counts)
     with pytest.raises(ValueError, match="sum to 100"):
         assign_group_disjoint_split(
             group_ids=groups, seed=17, proportions={"train": 70, "validation": 15, "test": 10}

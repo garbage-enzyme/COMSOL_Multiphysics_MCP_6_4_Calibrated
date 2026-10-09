@@ -365,6 +365,24 @@ def test_summary_reports_no_metrics_without_verified_fem() -> None:
     assert summary["error_metrics_source"] == "no_verified_fem_results"
 
 
+def test_summary_rejects_duplicate_or_unscreened_fem_results() -> None:
+    result = record_fem_result(
+        candidate_id="c1", predicted_objective=1.0, measured_objective=None,
+        fem_evidence_state="failed", fem_artifact_sha256=None, absolute_tolerance=1e-6,
+    )
+    with pytest.raises(ValueError, match="duplicate FEM result"):
+        summarize_campaign(
+            spec=_spec(), screening_records=[_record("c1", 1.0)],
+            fem_results=[result, result], fem_escalations_used=2, wall_time_seconds=1.0,
+        )
+    unknown = {**result, "candidate_id": "missing"}
+    with pytest.raises(ValueError, match="unscreened candidate"):
+        summarize_campaign(
+            spec=_spec(), screening_records=[_record("c1", 1.0)],
+            fem_results=[unknown], fem_escalations_used=1, wall_time_seconds=1.0,
+        )
+
+
 def test_summary_enforces_the_escalation_and_time_budgets() -> None:
     with pytest.raises(ValueError, match="exceeds the declared budget"):
         summarize_campaign(
