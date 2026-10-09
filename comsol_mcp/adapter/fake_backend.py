@@ -398,7 +398,7 @@ class FakeComsolBackend:
         self._record("node_lookup", phase="remove", kind=kind, tag=tag)
         self._maybe_fail("node_lookup")
         self._require_model("node_lookup")
-        if kind not in {"study", "function"}:
+        if kind not in {"study", "function", "study_step"}:
             raise AdapterError(
                 "node_not_found",
                 f"the fake does not remove {kind!r} nodes",
@@ -406,6 +406,11 @@ class FakeComsolBackend:
             )
         # COMSOL's ``remove`` is tolerant of an absent tag; the fake matches that
         # so a rollback of an already-removed node is not reported as a failure.
+        if kind == "study_step":
+            parent, separator, child = tag.partition("/")
+            if separator and parent in self._containers.get("study", []):
+                self._properties.pop(child, None)
+            return
         if tag in self._containers.get(kind, []):
             self._containers[kind].remove(tag)
         self._properties.pop(tag, None)

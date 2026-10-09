@@ -144,6 +144,9 @@ class ClientapiSurrogateDnnBackend:
     def remove_study(self, tag: str) -> None:
         self.adapter.remove_node("study", tag)
 
+    def remove_study_step(self, study_tag: str, step_tag: str) -> None:
+        self.adapter.remove_node("study_step", f"{study_tag}/{step_tag}")
+
     def remove_function(self, tag: str) -> None:
         self.adapter.remove_node("function", tag)
 

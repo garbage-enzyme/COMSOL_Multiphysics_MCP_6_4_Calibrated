@@ -83,12 +83,14 @@ def _value_info(name: str) -> bytes:
     return _ld(1, name.encode())
 
 
-def _onnx(nodes: list[bytes], initializers: list[bytes], inputs: list[str]) -> bytes:
+def _onnx(
+    nodes: list[bytes], initializers: list[bytes], inputs: list[str], output: str = "output"
+) -> bytes:
     graph = b"".join(_ld(1, node) for node in nodes)
     graph += _ld(2, b"graph")
     graph += b"".join(_ld(5, tensor) for tensor in initializers)
     graph += b"".join(_ld(11, _value_info(name)) for name in inputs)
-    graph += _ld(12, _value_info("output"))
+    graph += _ld(12, _value_info(output))
     return _ld(2, b"COMSOL") + _ld(7, graph)
 
 
@@ -181,7 +183,7 @@ def test_supported_operator_set_is_declared() -> None:
 
 def test_identity_gemm_reproduces_its_input() -> None:
     path = _write(
-        tmp_path := __import__("pathlib").Path(__import__("tempfile").mkdtemp()),
+        __import__("pathlib").Path(__import__("tempfile").mkdtemp()),
         "identity.onnx",
         _mlp_onnx(
             weight=[1.0, 0.0, 0.0, 1.0],
@@ -296,10 +298,57 @@ def test_multiple_points_are_evaluated_independently(tmp_path) -> None:
         _mlp_onnx(weight=[2.0], bias=[1.0], weight_dims=[1, 1], activation="Identity"),
     )
     model = load_onnx_model(path)
-    result = evaluate_onnx_model(
-        model, input_names=["x"], points=[[1.0], [2.0], [3.0]]
-    )
+    result = evaluate_onnx_model(model, input_names=["x"], points=[[1.0], [2.0], [3.0]])
     assert [row[0] for row in result] == pytest.approx([3.0, 5.0, 7.0])
+
+
+def test_gemm_alpha_and_beta_scale_weight_and_bias(tmp_path) -> None:
+    path = _write(
+        tmp_path,
+        "gemm-scale.onnx",
+        _onnx(
+            [_node("Gemm", ["input", "W", "B"], ["output"], {"alpha": 2, "beta": 3})],
+            [_tensor("W", [1, 1], [4.0]), _tensor("B", [1], [5.0])],
+            ["input"],
+        ),
+    )
+    model = load_onnx_model(path)
+    assert evaluate_onnx_model(model, input_names=["x"], points=[[2.0]])[0][0] == pytest.approx(
+        31.0
+    )
+
+
+def test_declared_graph_output_is_used_instead_of_last_node(tmp_path) -> None:
+    payload = _onnx(
+        [_node("Identity", ["input"], ["declared"]), _node("Identity", ["input"], ["other"])],
+        [],
+        ["input"],
+        output="declared",
+    )
+    model = load_onnx_model(_write(tmp_path, "declared-output.onnx", payload))
+    assert evaluate_onnx_model(model, input_names=["x"], points=[[7.0]]) == [[7.0]]
+
+
+def test_sigmoid_handles_large_negative_values(tmp_path) -> None:
+    payload = _onnx([_node("Sigmoid", ["input"], ["output"])], [], ["input"])
+    model = load_onnx_model(_write(tmp_path, "stable-sigmoid.onnx", payload))
+    result = evaluate_onnx_model(model, input_names=["x"], points=[[-1000.0]])
+    assert result[0][0] == pytest.approx(0.0)
+
+
+def test_graph_limits_are_checked_before_decoding_all_entries(tmp_path) -> None:
+    too_many_nodes = [_node("Identity", ["input"], [f"node-{i}"]) for i in range(513)]
+    with pytest.raises(OnnxDecodeError, match="node limit"):
+        load_onnx_model(
+            _write(tmp_path, "too-many-nodes.onnx", _onnx(too_many_nodes, [], ["input"]))
+        )
+    too_many_initializers = [_tensor(f"w-{i}", [1], [1.0]) for i in range(513)]
+    with pytest.raises(OnnxDecodeError, match="initializer limit"):
+        load_onnx_model(
+            _write(
+                tmp_path, "too-many-initializers.onnx", _onnx([], too_many_initializers, ["input"])
+            )
+        )
 
 
 # --------------------------------------------------------------------------
@@ -422,9 +471,7 @@ REAL_COMSOL_ONNX_SHA256 = "a417ee487ad5d8c8fc25919aa47f2782b5c9b7f0a979ee255da8a
 def _real_comsol_onnx_path():
     from pathlib import Path
 
-    candidate = Path(
-        r"D:\mcp_tests\a75s7g02\workspace\surrogate_export_a.onnx"
-    )
+    candidate = Path(r"D:\mcp_tests\a75s7g02\workspace\surrogate_export_a.onnx")
     return candidate if candidate.is_file() else None
 
 

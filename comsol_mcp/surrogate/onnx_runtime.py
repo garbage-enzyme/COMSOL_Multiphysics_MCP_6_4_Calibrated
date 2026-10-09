@@ -210,9 +210,15 @@ def _decode_value_info(payload: bytes) -> dict[str, Any]:
 
 def _decode_graph(payload: bytes) -> dict[str, Any]:
     fields = _read_fields(payload)
-    nodes = [_decode_node(node) for node in _field_messages(fields, 1)]
+    raw_nodes = _field_messages(fields, 1)
+    if len(raw_nodes) > MAX_NODES:
+        raise OnnxDecodeError("graph exceeds the node limit")
+    nodes = [_decode_node(node) for node in raw_nodes]
     names = _field_strings(fields, 2)
-    initializers = [_decode_tensor(item) for item in _field_messages(fields, 5)]
+    raw_initializers = _field_messages(fields, 5)
+    if len(raw_initializers) > MAX_INITIALIZERS:
+        raise OnnxDecodeError("graph exceeds the initializer limit")
+    initializers = [_decode_tensor(item) for item in raw_initializers]
     graph_inputs = [_decode_value_info(item) for item in _field_messages(fields, 11)]
     graph_outputs = [_decode_value_info(item) for item in _field_messages(fields, 12)]
     return {
@@ -291,6 +297,8 @@ def _dense(
     weight_dims: Sequence[int],
     *,
     trans_b: bool,
+    alpha: float = 1.0,
+    beta: float = 1.0,
 ) -> list[float]:
     """Apply one Gemm: ``output = input @ W`` with an optional broadcast bias.
 
@@ -314,13 +322,13 @@ def _dense(
             continue
         for column in range(columns):
             weight = weights[column * rows + row] if trans_b else weights[row * columns + column]
-            output[column] += value * weight
+            output[column] += alpha * value * weight
     if bias:
         if len(bias) == 1:
-            offset = bias[0]
+            offset = beta * bias[0]
             output = [item + offset for item in output]
         else:
-            output = [item + bias[index] for index, item in enumerate(output)]
+            output = [item + beta * bias[index] for index, item in enumerate(output)]
     return output
 
 
@@ -419,6 +427,8 @@ def evaluate_onnx_model(
                     bias,
                     weight_dims,
                     trans_b=bool(int(node.get("attributes", {}).get("transB") or 0)),
+                    alpha=float(node.get("attributes", {}).get("alpha", 1.0)),
+                    beta=float(node.get("attributes", {}).get("beta", 1.0)),
                 )
             elif op == "Mul":
                 if len(resolved) != 2:
@@ -447,7 +457,14 @@ def evaluate_onnx_model(
             elif op == "Tanh":
                 values[target] = [math.tanh(item) for item in resolved[0]]
             elif op == "Sigmoid":
-                values[target] = [1.0 / (1.0 + math.exp(-item)) for item in resolved[0]]
+                values[target] = [
+                    (
+                        1.0 / (1.0 + math.exp(-item))
+                        if item >= 0
+                        else math.exp(item) / (1.0 + math.exp(item))
+                    )
+                    for item in resolved[0]
+                ]
             elif op == "Relu":
                 values[target] = [max(0.0, item) for item in resolved[0]]
             elif op == "Identity":
@@ -457,7 +474,11 @@ def evaluate_onnx_model(
 
         # The guard inside the loop already refuses a node without an output, but
         # narrowing does not survive the loop, so the lookup is guarded again here.
-        final = values.get(target) if target is not None else None
+        graph_outputs = [str(name) for name in (model.get("graph_outputs") or [])]
+        if len(graph_outputs) > 1:
+            raise OnnxDecodeError("multiple graph outputs are not supported")
+        output_name = graph_outputs[0] if graph_outputs else target
+        final = values.get(output_name) if output_name is not None else None
         if final is None:
             raise OnnxDecodeError("graph produced no output")
         if any(not math.isfinite(item) for item in final):

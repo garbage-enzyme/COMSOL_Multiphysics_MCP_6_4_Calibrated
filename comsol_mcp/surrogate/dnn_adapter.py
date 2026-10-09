@@ -475,6 +475,8 @@ class SurrogateDnnBackend(Protocol):
 
     def remove_study(self, tag: str) -> None: ...
 
+    def remove_study_step(self, study_tag: str, step_tag: str) -> None: ...
+
     def remove_function(self, tag: str) -> None: ...
 
     def write_scalar(self, feature: Any, name: str, value: Any, kind: str) -> None: ...
@@ -521,6 +523,7 @@ def apply_surrogate_configuration(
     """
     plan = build_write_plan(configuration, data_source_bound=data_source_bound)
     created: list[tuple[str, str]] = []
+    rollback_created: list[tuple[str, str, str | None]] = []
     readback: dict[str, Any] = {}
     try:
         existing_studies = set(backend.study_tags())
@@ -533,13 +536,16 @@ def apply_surrogate_configuration(
 
             backend.create_study(plan["study_tag"])
             created.append(("study", plan["study_tag"]))
+            rollback_created.append(("study", plan["study_tag"], None))
             if create_study_step:
                 backend.create_study_step(
                     plan["study_tag"], plan["study_step_tag"], SURROGATE_STUDY_STEP_TYPE
                 )
                 created.append(("study_step", plan["study_step_tag"]))
+                rollback_created.append(("study_step", plan["study_tag"], plan["study_step_tag"]))
             backend.create_dnn_function(plan["dnn_function_tag"])
             created.append(("function", plan["dnn_function_tag"]))
+            rollback_created.append(("function", plan["dnn_function_tag"], None))
         else:
             if plan["dnn_function_tag"] not in existing_functions:
                 raise ValueError(
@@ -616,14 +622,21 @@ def apply_surrogate_configuration(
             allowed[name] = backend.read_allowed_values(dnn, name)
     except Exception as exc:
         rollback_errors: list[str] = []
-        for kind, tag in reversed(created):
+        for item in reversed(rollback_created):
             try:
+                kind = item[0]
                 if kind == "function":
+                    tag = item[1]
                     backend.remove_function(tag)
+                elif kind == "study_step":
+                    backend.remove_study_step(item[1], item[2])
                 else:
-                    backend.remove_study(tag)
+                    backend.remove_study(item[1])
             except Exception as rollback_exc:  # pragma: no cover - defensive
-                rollback_errors.append(f"{kind}:{tag}:{type(rollback_exc).__name__}")
+                rollback_errors.append(
+                    f"{kind}:{'/'.join(str(value) for value in item[1:])}:"
+                    f"{type(rollback_exc).__name__}"
+                )
         return {
             "success": False,
             "error": f"{type(exc).__name__}: {exc}",

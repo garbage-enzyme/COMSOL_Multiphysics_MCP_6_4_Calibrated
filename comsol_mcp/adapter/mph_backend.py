@@ -997,6 +997,14 @@ class MphBackendBase:
             if kind == "function":
                 java.func().remove(tag)
                 return
+            if kind == "study_step":
+                parent, separator, child = tag.partition("/")
+                if not separator or not parent or not child:
+                    raise AdapterError(
+                        "node_not_found", "study step identity is invalid", operation="node_lookup"
+                    )
+                java.study(parent).feature().remove(child)
+                return
         except Exception as exc:
             raise self._translate(exc, "node_lookup") from exc
         raise AdapterError(

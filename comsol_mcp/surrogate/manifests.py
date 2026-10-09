@@ -7,6 +7,7 @@ by the current surrogate lifecycle.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, TypedDict
 
@@ -72,7 +73,7 @@ class SurrogateTrainingTransforms(TypedDict):
 
 
 def _require_hex64(name: str, value: str) -> str:
-    if not isinstance(value, str) or len(value) != 64:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
         raise ValueError(f"{name} must be a 64-character hex digest")
     try:
         int(value, 16)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -65,7 +66,7 @@ def _require_str(name: str, value: Any, *, max_len: int = 256) -> str:
 
 
 def _require_hex64(name: str, value: Any) -> str:
-    if not isinstance(value, str) or len(value) != 64:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
         raise ValueError(f"{name} must be a 64-character hex digest")
     try:
         int(value, 16)

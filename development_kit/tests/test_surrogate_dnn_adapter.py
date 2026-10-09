@@ -318,6 +318,10 @@ class FakeBackend:
         self.calls.append(f"remove_study:{tag}")
         self.studies.pop(tag, None)
 
+    def remove_study_step(self, study_tag: str, step_tag: str) -> None:
+        self.calls.append(f"remove_study_step:{study_tag}:{step_tag}")
+        self.studies[study_tag]["features"].pop(step_tag, None)
+
     def remove_function(self, tag: str) -> None:
         self.calls.append(f"remove_function:{tag}")
         self.functions.pop(tag, None)
@@ -422,6 +426,15 @@ def test_apply_rolls_back_every_created_node_on_failure() -> None:
 
 def test_apply_rolls_back_when_study_step_creation_fails() -> None:
     backend = FakeBackend(fail_on="create_study_step")
+    result = apply_surrogate_configuration(backend, _configuration())
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert backend.studies == {}
+    assert backend.functions == {}
+
+
+def test_apply_rolls_back_only_created_study_step() -> None:
+    backend = FakeBackend(fail_on="write_string_map:globaldnnfunction")
     result = apply_surrogate_configuration(backend, _configuration())
     assert result["success"] is False
     assert result["rolled_back"] is True

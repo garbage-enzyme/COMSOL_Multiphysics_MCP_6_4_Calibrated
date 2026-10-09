@@ -69,9 +69,7 @@ def test_perfect_prediction_scores_zero_and_r2_one() -> None:
 
 
 def test_r2_is_undefined_for_zero_variance_targets() -> None:
-    metrics = compute_metrics(
-        predicted=[[1.1], [2.1]], actual=[[1.0], [1.0]]
-    )
+    metrics = compute_metrics(predicted=[[1.1], [2.1]], actual=[[1.0], [1.0]])
     assert metrics["r2"] is None
     assert metrics["r2_limitation"] == "target_variance_is_zero_r2_undefined"
     assert metrics["normalized_rmse"] is None
@@ -97,6 +95,16 @@ def test_worst_group_mae_exposes_a_failed_regime() -> None:
     assert metrics["worst_group_mae"] == pytest.approx(4.0)
 
 
+def test_worst_group_mae_excludes_failed_predictions() -> None:
+    metrics = compute_metrics(
+        predicted=[[float("nan")], [2.0]],
+        actual=[[100.0], [3.0]],
+        group_ids=["failed", "valid"],
+    )
+    assert metrics["failed_prediction_count"] == 1
+    assert metrics["worst_group_mae"] == pytest.approx(1.0)
+
+
 def test_metrics_reject_misaligned_and_bad_inputs() -> None:
     with pytest.raises(ValueError, match="same row count"):
         compute_metrics(predicted=[[1.0]], actual=[[1.0], [2.0]])
@@ -114,9 +122,7 @@ def test_metrics_reject_misaligned_and_bad_inputs() -> None:
 def test_surrogate_must_beat_the_baseline_materially() -> None:
     surrogate = {"rmse": 0.5}
     baseline = {"rmse": 1.0}
-    report = compare_against_baseline(
-        surrogate_metrics=surrogate, baseline_metrics=baseline
-    )
+    report = compare_against_baseline(surrogate_metrics=surrogate, baseline_metrics=baseline)
     assert report["beats_baseline"] is True
     assert report["improvement_fraction"] == pytest.approx(0.5)
     assert report["accepted_on_training_loss"] is False
@@ -292,9 +298,7 @@ def test_every_contract_identity_blocks_continuation_independently() -> None:
 
     for field in CONTINUATION_IDENTITY_FIELDS:
         replacement = "9" * 64 if field.endswith("_sha256") else "changed"
-        report = evaluate_continuation(
-            prior=_identity(), current=_identity(**{field: replacement})
-        )
+        report = evaluate_continuation(prior=_identity(), current=_identity(**{field: replacement}))
         assert report["continuation_allowed"] is False, field
         assert field in report["mismatched_fields"], field
 
@@ -310,6 +314,14 @@ def test_continuation_identity_rejects_bad_digests() -> None:
         _identity(dataset_manifest_sha256="nope")
     with pytest.raises(ValueError, match="comsol_build"):
         _identity(comsol_build="")
+
+
+def test_continuation_identity_missing_field_never_matches() -> None:
+    current = _identity()
+    current.pop("objective")
+    report = evaluate_continuation(prior=_identity(), current=current)
+    assert report["continuation_allowed"] is False
+    assert report["mismatched_fields"] == ["objective"]
 
 
 # --------------------------------------------------------------------------
@@ -331,12 +343,27 @@ def test_seed_stability_reports_every_seed() -> None:
 
 
 def test_unstable_seeds_are_reported_as_unstable() -> None:
-    report = evaluate_seed_stability(
-        [{"rmse": 0.10}, {"rmse": 0.90}], maximum_spread_fraction=0.2
-    )
+    report = evaluate_seed_stability([{"rmse": 0.10}, {"rmse": 0.90}], maximum_spread_fraction=0.2)
     assert report["stable"] is False
     assert report["spread_fraction"] is not None
     assert report["spread_fraction"] > 0.2
+
+
+def test_even_seed_count_uses_standard_median() -> None:
+    report = evaluate_seed_stability(
+        [{"rmse": 1.0}, {"rmse": 2.0}, {"rmse": 3.0}, {"rmse": 100.0}],
+        maximum_spread_fraction=100.0,
+    )
+    assert report["median"] == pytest.approx(2.5)
+    assert report["spread_fraction"] == pytest.approx(99.0 / 2.5)
+
+
+@pytest.mark.parametrize(
+    "value", ["+" + "a" * 63, "a" * 32 + "_" + "a" * 31, " " + "a" * 64, "a" * 64 + " "]
+)
+def test_sha256_rejects_non_hex_formatting(value: str) -> None:
+    with pytest.raises(ValueError, match="hex digest"):
+        _identity(dataset_manifest_sha256=value)
 
 
 def test_seed_stability_rejects_empty_and_missing_metric() -> None:
