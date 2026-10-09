@@ -32,13 +32,16 @@ def _prepare(
     status: str = "running",
     budget: int = 5,
     deadline: float = 105.0,
+    job_type: str = "robust_shape_optimization",
 ):
     store = JobStore(root)
     worker = process_identity(os.getpid())
     spec = {
-        "job_type": "robust_shape_optimization",
+        "job_type": job_type,
         "synthetic_mode": False,
-        "native_optimizer": {"budget": {"max_wall_time_seconds": budget}},
+        "native_optimizer" if job_type == "robust_shape_optimization" else "optimizer": {
+            "budget": {"max_wall_time_seconds": budget}
+        },
     }
     state = {
         "schema_version": "2",
@@ -64,9 +67,10 @@ def _prepare(
     return store, job_id
 
 
-def test_terminal_before_deadline_exits_without_cancellation(ascii_tmp_path):
+@pytest.mark.parametrize("job_type", ["robust_shape_optimization", "adjoint_optimization"])
+def test_terminal_before_deadline_exits_without_cancellation(ascii_tmp_path, job_type):
     clock = _Clock()
-    store, job_id = _prepare(ascii_tmp_path / "jobs", status="completed")
+    store, job_id = _prepare(ascii_tmp_path / "jobs", status="completed", job_type=job_type)
 
     assert (
         run(
@@ -85,9 +89,10 @@ def test_terminal_before_deadline_exits_without_cancellation(ascii_tmp_path):
     assert receipt["terminal_job_status"] == "completed"
 
 
-def test_stale_attempt_is_refused_without_touching_new_attempt(ascii_tmp_path):
+@pytest.mark.parametrize("job_type", ["robust_shape_optimization", "adjoint_optimization"])
+def test_stale_attempt_is_refused_without_touching_new_attempt(ascii_tmp_path, job_type):
     clock = _Clock()
-    store, job_id = _prepare(ascii_tmp_path / "jobs", state_attempt=2)
+    store, job_id = _prepare(ascii_tmp_path / "jobs", state_attempt=2, job_type=job_type)
 
     assert (
         run(
@@ -107,9 +112,10 @@ def test_stale_attempt_is_refused_without_touching_new_attempt(ascii_tmp_path):
     assert store.read_state(job_id)["status"] == "running"
 
 
-def test_deadline_requests_cancellation_for_exact_attempt(ascii_tmp_path):
+@pytest.mark.parametrize("job_type", ["robust_shape_optimization", "adjoint_optimization"])
+def test_deadline_requests_cancellation_for_exact_attempt(ascii_tmp_path, job_type):
     clock = _Clock()
-    store, job_id = _prepare(ascii_tmp_path / "jobs")
+    store, job_id = _prepare(ascii_tmp_path / "jobs", job_type=job_type)
     observed = []
 
     class _Manager:
