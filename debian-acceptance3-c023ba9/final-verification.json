@@ -1,0 +1,32 @@
+{
+  "target": "c023ba9a470f0c1cd60b6692713d26c27e2f4a6a",
+  "overall_accepted": false,
+  "historical_acc_fixed_in_scope": [
+    "ACC-001",
+    "ACC-002",
+    "ACC-003",
+    "ACC-004",
+    "ACC-005",
+    "ACC-006",
+    "ACC-007",
+    "ACC-008",
+    "ACC-009"
+  ],
+  "remaining": [
+    "ACC-010 / BUG-052"
+  ],
+  "changed_files_reviewed": 37,
+  "independent_io_passed": 24,
+  "ci_totals": {
+    "passed": 5047,
+    "failed": 0,
+    "skipped": 57,
+    "deselected": 14
+  },
+  "quality_status": "failed",
+  "quality_returncode": 1,
+  "remote_jobs_succeeded": 10,
+  "solver_started": false,
+  "target_clean": true,
+  "remote_raw_logs_available": false
+}
