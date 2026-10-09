@@ -155,7 +155,8 @@ def register_field_evidence_tools(mcp: MCPServer) -> None:
             relative_root = Path("field_evidence") / normalized["request_fingerprint"]
             artifact_root = ownership_manager.runtime_dir / relative_root
             artifact_root.parent.mkdir(parents=True, exist_ok=True)
-            if artifact_root.exists():
+            view_root = artifact_root / view["view_fingerprint"]
+            if view_root.is_dir():
                 return {
                     "success": True,
                     "model_name": model_name,
@@ -163,6 +164,8 @@ def register_field_evidence_tools(mcp: MCPServer) -> None:
                     "source_model_sha256": source_before,
                     "source_unchanged": True,
                     "already_present": True,
+                    "view_id": view_id,
+                    "view_fingerprint": view["view_fingerprint"],
                     "ownership_checked": True,
                     "solver_started_by_tool": False,
                     "evaluation_skipped": True,
@@ -184,7 +187,8 @@ def register_field_evidence_tools(mcp: MCPServer) -> None:
                 source_after = _sha256_file(source_path)
                 if source_after != source_before:
                     raise RuntimeError("loaded source changed during read-only field extraction")
-                os.rename(staging_root, artifact_root)
+                artifact_root.mkdir(parents=True, exist_ok=True)
+                os.rename(staging_root, artifact_root / view["view_fingerprint"])
             finally:
                 source_hash_error = None
                 if source_after is None:
