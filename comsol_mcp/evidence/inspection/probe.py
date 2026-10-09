@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp.durable.io import read_file_bytes_bounded
 from comsol_mcp.evidence.inspection.archive import MphInspectionError
 from comsol_mcp.evidence.inspection.summary import build_mph_inspection_summary
 
@@ -110,8 +111,8 @@ def probe_mph_artifacts(directory: str | Path, *, refresh: bool = False) -> dict
     if not refresh:
         cache: Mapping[str, Any] | None = None
         try:
-            raw = cache_path.read_bytes()
-            if 0 < len(raw) <= _MPH_PROBE_CACHE_BYTES:
+            raw = read_file_bytes_bounded(cache_path, max_bytes=_MPH_PROBE_CACHE_BYTES)
+            if 0 < len(raw):
                 cache = json.loads(raw.decode("utf-8"))
         except OSError, UnicodeDecodeError, json.JSONDecodeError:
             cache = None

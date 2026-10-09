@@ -135,7 +135,7 @@ def _normalize_artifact(raw: Any, index: int) -> dict[str, Any]:
     if ordering is None or ordering != _ordering_fingerprint(columns):
         raise OfflineExportError(f"{label} ordering fingerprint does not match its columns")
 
-    parameters_raw = raw["parameter_values"] or {}
+    parameters_raw = raw["parameter_values"]
     if not isinstance(parameters_raw, Mapping):
         raise OfflineExportError(f"{label}.parameter_values must be an object or null")
     parameter_values = {
@@ -204,6 +204,8 @@ def _normalize_structure(payload: Any) -> dict[str, Any]:
         "source_identity",
         "artifacts",
     }
+    if set(payload) - top_required - {"manifest_sha256"}:
+        raise OfflineExportError("manifest contains unknown fields")
     if not set(top_required) <= set(payload):
         missing = sorted(top_required - set(payload))
         raise OfflineExportError(f"manifest is missing fields: {missing}")
@@ -548,7 +550,9 @@ def validate_offline_export_manifest(
 
     # B12: hash the exact bytes that were normalized.
     if isinstance(manifest_source, (str, Path, bytes, bytearray)):
-        manifest_bytes = raw if raw is not None else json.dumps(payload, sort_keys=True).encode("utf-8")
+        manifest_bytes = (
+            raw if raw is not None else json.dumps(payload, sort_keys=True).encode("utf-8")
+        )
         manifest_digest = hashlib.sha256(manifest_bytes).hexdigest()
     else:
         manifest_digest = canonical_sha256_v1(manifest)
@@ -563,7 +567,9 @@ def validate_offline_export_manifest(
         max_time_values=max_time_values,
     )
     for message in count_errors:
-        failures.append({"artifact_id": None, "reason_codes": ["limit_exceeded"], "detail": message[:160]})
+        failures.append(
+            {"artifact_id": None, "reason_codes": ["limit_exceeded"], "detail": message[:160]}
+        )
     if failures:
         return _finish(
             False,

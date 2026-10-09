@@ -131,11 +131,15 @@ def _bounded_file_sha256(
     try:
         with path.open("rb") as handle:
             while True:
-                block = handle.read(_HASH_CHUNK_BYTES)
+                block = handle.read(min(_HASH_CHUNK_BYTES, max_bytes - digest_bytes + 1))
                 if not block:
                     break
                 digest.update(block)
                 digest_bytes += len(block)
+                if digest_bytes > max_bytes:
+                    raise ModelIdentityError(
+                        over_limit_code, f"{path.name} grew beyond the declared byte limit"
+                    )
     except OSError as exc:
         raise ModelIdentityError(missing_code, f"{path.name} could not be read") from exc
     return digest.hexdigest(), digest_bytes

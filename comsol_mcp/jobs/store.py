@@ -281,6 +281,8 @@ class JobLock:
                     continue
                 except FileExistsError:
                     try:
+                        if not self.path.is_file() or self.path.is_symlink():
+                            raise TimeoutError("durable job lock path is not a regular file")
                         observed = self.path.read_bytes()
                         existing = json.loads(observed.decode("utf-8"))
                         state, _ = process_identity_state(existing)
@@ -872,12 +874,13 @@ class JobStore:
     def tail(self, job_id: str, n: int = 20) -> dict[str, Any]:
         count = max(1, min(int(n), 200))
         directory = self.job_dir(job_id)
+        max_line_chars = 65_536
         events: deque[str] = deque(maxlen=count)
         with (directory / "events.jsonl").open("r", encoding="utf-8", errors="replace") as handle:
             for line in handle:
-                events.append(line.rstrip("\r\n"))
+                events.append(line.rstrip("\r\n")[:max_line_chars])
         logs: deque[str] = deque(maxlen=count)
         with (directory / "worker.log").open("r", encoding="utf-8", errors="replace") as handle:
             for line in handle:
-                logs.append(line.rstrip("\r\n"))
+                logs.append(line.rstrip("\r\n")[:max_line_chars])
         return {"job_id": job_id, "limit": count, "events": list(events), "worker_log": list(logs)}
