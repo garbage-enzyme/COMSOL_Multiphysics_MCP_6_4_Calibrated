@@ -408,6 +408,55 @@ def test_validation_transition_error_remains_bound_to_concurrent_cancel(
     assert "Invalid job state transition" in state["cancel"]["worker_error"]["message"]
 
 
+def test_blocked_native_cancel_preserves_validation_client_and_lease(
+    tmp_path, ascii_root, monkeypatch
+):
+    from src.jobs import native_cancel_probe
+
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    spec = normalize_validation_matrix_spec(_raw_spec(source, points=1))
+    store, job_id = _create_job(ascii_root / "jobs", spec)
+    entered = threading.Event()
+    release = threading.Event()
+    ownership = FakeOwnership()
+    client = FakeClient()
+
+    def blocked_probe():
+        entered.set()
+        assert release.wait(timeout=10)
+        return {"requested": False}
+
+    def cancel_collector(point, collector, artifact_dir):
+        store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+        assert entered.wait(timeout=2)
+        return _collector(point, collector, artifact_dir)
+
+    monkeypatch.setattr(native_cancel_probe, "request_native_cancel_once", blocked_probe)
+    try:
+        code = _run(
+            str(store.root),
+            job_id,
+            ownership_factory=lambda *_args: ownership,
+            client_factory=lambda _spec: client,
+            collector_executor=cancel_collector,
+            telemetry_provider=_telemetry(),
+            native_cancel_enabled=True,
+        )
+        assert code == 0
+        assert store.read_state(job_id)["status"] in {"cancel_requested", "cancelling"}
+        assert ownership.acquired and not ownership.released
+        assert not client.cleared
+    finally:
+        monitors = [
+            thread for thread in threading.enumerate() if thread.name == "comsol-native-cancel"
+        ]
+        release.set()
+        for monitor in monitors:
+            monitor.join(timeout=2)
+            assert not monitor.is_alive()
+
+
 def test_native_cancel_monitor_failure_is_recorded_durably(tmp_path, ascii_root, monkeypatch):
     from src.jobs import native_cancel_probe
 
