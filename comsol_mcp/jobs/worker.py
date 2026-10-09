@@ -85,7 +85,7 @@ def _runner_kwargs(spec: dict[str, Any], directory: Path) -> dict[str, Any]:
         "csv_path": str(directory / "results.csv"),
         "resume_csv": True,
         "max_retries": int(spec.get("max_retries", 0)),
-        "continue_on_error": bool(spec.get("continue_on_error", False)),
+        "continue_on_error": spec.get("continue_on_error", False),
         "checkpoint_model_path": str(directory / "checkpoint.mph"),
         "checkpoint_every": int(spec.get("checkpoint_every", 1)),
         "save_model_copy": spec.get("execution_backend") is not None,

@@ -205,6 +205,8 @@ def validate_staged_sweep_spec(raw: dict[str, Any]) -> dict[str, Any]:
             or not math.isfinite(float(value))
         ):
             raise ValueError("parameter_values must contain only finite numbers")
+    if len({str(value) for value in values}) != len(values):
+        raise ValueError("parameter_values must not contain duplicates")
     expressions = spec.get("expressions")
     if (
         not isinstance(expressions, list)
@@ -215,8 +217,13 @@ def validate_staged_sweep_spec(raw: dict[str, Any]) -> dict[str, Any]:
     if len(set(expressions)) != len(expressions):
         raise ValueError("expressions must not contain duplicates")
     smoke_points = spec.get("smoke_points", 1)
+    if isinstance(smoke_points, bool) or not isinstance(smoke_points, int):
+        raise ValueError("smoke_points must be an integer")
     if smoke_points not in (1, 2) or smoke_points > len(values):
         raise ValueError("smoke_points must be 1 or 2 and no larger than the sweep")
+    for key in ("continue_on_error", "record_wavelength_controls"):
+        if key in spec and not isinstance(spec[key], bool):
+            raise ValueError(f"{key} must be a boolean")
     for key in ("max_retries",):
         value = spec.get(key, 0)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:

@@ -53,6 +53,30 @@ def jobs_root(ascii_tmp_path):
     return root
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("continue_on_error", "false"),
+        ("record_wavelength_controls", "false"),
+        ("smoke_points", True),
+        ("parameter_values", [1.0, 1.0]),
+    ],
+)
+def test_staged_spec_rejects_ambiguous_types_and_duplicate_points(tmp_path, field, value):
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"immutable source")
+    raw = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "p",
+        "parameter_values": [1.0, 2.0],
+        "expressions": ["p"],
+    }
+    raw[field] = value
+    with pytest.raises(ValueError, match=field):
+        validate_staged_sweep_spec(raw)
+
+
 def wait_for(manager: JobManager, job_id: str, statuses: set[str], timeout: float = 5.0):
     deadline = monoclock() + timeout
     while monoclock() < deadline:

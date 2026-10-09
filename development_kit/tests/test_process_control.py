@@ -76,6 +76,31 @@ def test_detached_reaper_isolates_poll_exceptions(monkeypatch):
     assert manager_module._DETACHED_PROCESSES == set()
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("process_create_time", float("nan")),
+        ("process_create_time", float("inf")),
+        ("process_create_time", True),
+        ("process_create_time", "123"),
+        ("pid", True),
+        ("pid", "123"),
+        ("command_signature", "z" * 64),
+    ],
+)
+def test_exact_termination_rejects_invalid_identity_before_opening_process(
+    monkeypatch, field, value
+):
+    identity = {"pid": 123, "process_create_time": 123.0, "command_signature": "a" * 64}
+    identity[field] = value
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("invalid identity must not open a process")
+
+    monkeypatch.setattr(process_control_module.psutil, "Process", forbidden)
+    assert terminate_exact(identity)["acted"] is False
+
+
 def test_exact_termination_refuses_a_reused_identity():
     child = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(30)"],

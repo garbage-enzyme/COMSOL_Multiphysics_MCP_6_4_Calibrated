@@ -6,8 +6,8 @@ import ctypes
 import hashlib
 import math
 import os
-from pathlib import Path
 from ctypes import wintypes
+from pathlib import Path
 from typing import Any
 
 import psutil
@@ -286,15 +286,49 @@ def capture_owned_descendants(worker_identity: dict[str, Any]) -> dict[str, Any]
     return {"worker": verdict, "descendants": descendants, "capture_complete": True}
 
 
+def _valid_exact_identity(identity: Any) -> bool:
+    if not isinstance(identity, dict):
+        return False
+    pid = identity.get("pid")
+    created = identity.get("process_create_time")
+    signature = identity.get("command_signature")
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return False
+    if isinstance(created, bool) or not isinstance(created, (int, float)):
+        return False
+    try:
+        if not math.isfinite(float(created)) or created <= 0:
+            return False
+    except OverflowError:
+        return False
+    return (
+        isinstance(signature, str)
+        and len(signature) == 64
+        and all(char in "0123456789abcdef" for char in signature)
+    )
+
+
 def _inspect_open_process(
     process: psutil.Process,
     identity: dict[str, Any],
 ) -> dict[str, Any]:
     """Validate exact identity through the same process object used to act."""
+    if not _valid_exact_identity(identity):
+        return {
+            "identity": identity,
+            "state": "uncertain",
+            "reason": "process identity fields are missing or invalid",
+        }
     try:
         expected_pid = int(identity["pid"])
         expected_created = float(identity["process_create_time"])
     except KeyError, TypeError, ValueError, OverflowError:
+        return {
+            "identity": identity,
+            "state": "uncertain",
+            "reason": "process identity fields are missing or invalid",
+        }
+    if expected_pid <= 0 or not math.isfinite(expected_created):
         return {
             "identity": identity,
             "state": "uncertain",
@@ -312,6 +346,12 @@ def _inspect_open_process(
             "identity": identity,
             "state": "uncertain",
             "reason": f"worker identity cannot be inspected: {exc}",
+        }
+    if not math.isfinite(actual_created):
+        return {
+            "identity": identity,
+            "state": "uncertain",
+            "reason": "process creation time is invalid",
         }
     if actual_pid != expected_pid:
         return {"identity": identity, "state": "stale", "reason": "worker PID was reused"}
@@ -344,6 +384,16 @@ def _inspect_open_process(
 
 def terminate_exact(identity: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
     """Validate and terminate through one process object with reuse protection."""
+    if not _valid_exact_identity(identity):
+        return {
+            "acted": False,
+            "before": {
+                "identity": identity,
+                "state": "uncertain",
+                "reason": "process identity fields are missing or invalid",
+            },
+            "reason": "identity_not_active",
+        }
     try:
         process = psutil.Process(int(identity["pid"]))
     except KeyError, TypeError, ValueError, OverflowError:
