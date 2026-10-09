@@ -805,13 +805,7 @@ def _run_licensed(root: str, job_id: str) -> int:
     previous_temporary_directory = os.environ.get("COMSOL_TMPDIR")
     source = Path(spec["source_model_path"])
     source_pins = ExitStack()
-    source_pins.enter_context(pin_validated_reads((validated_read_pin(source, source.parent),)))
-    expected_source_sha = spec.get("source_model_sha256")
-    if not isinstance(expected_source_sha, str) or len(expected_source_sha) != 64:
-        raise ValueError("robust shape source_model_sha256 is missing or invalid")
-    if hashlib.sha256(source.read_bytes()).hexdigest() != expected_source_sha:
-        raise RuntimeError("Immutable source SHA-256 changed before robust worker startup")
-    source_before = source.read_bytes()
+    source_before = None
     try:
         store.bind_worker_identity(job_id, process_identity(os.getpid()))
         store.update_state(
@@ -829,6 +823,10 @@ def _run_licensed(root: str, job_id: str) -> int:
             store.update_state(job_id, "starting", event="worker_started")
         elif state["status"] != "starting":
             raise ValueError(f"licensed robust shape worker cannot start from {state['status']}")
+        source_pins.enter_context(pin_validated_reads((validated_read_pin(source, source.parent),)))
+        source_before = source.read_bytes()
+        if hashlib.sha256(source_before).hexdigest() != spec.get("source_model_sha256"):
+            raise RuntimeError("Immutable source SHA-256 changed before robust worker startup")
         _await_licensed_wall_watchdog(store, job_id, spec, attempt)
         telemetry = collect_resource_telemetry(stage="pre_mesh", runtime_path=directory)
         admission = evaluate_robust_startup_admission(spec["startup_admission"], telemetry)
@@ -1236,8 +1234,14 @@ def _run_licensed(root: str, job_id: str) -> int:
             os.environ.pop("COMSOL_TMPDIR", None)
         else:
             os.environ["COMSOL_TMPDIR"] = previous_temporary_directory
-        source_pins.close()
-        source_unchanged = source.exists() and source.read_bytes() == source_before
+        source_unchanged = bool(
+            source_before is not None and source.exists() and source.read_bytes() == source_before
+        )
+        try:
+            source_pins.close()
+        except Exception as exc:
+            source_unchanged = False
+            print(f"source_pin_cleanup:{type(exc).__name__}", file=sys.stderr, flush=True)
         cleanup_payload = _finalize_licensed_cleanup(
             directory,
             ownership=ownership,

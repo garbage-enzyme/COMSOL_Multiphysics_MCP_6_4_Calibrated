@@ -53,6 +53,7 @@ _SAMPLE_FIELDS = frozenset(
     }
 )
 _STAGES = frozenset({"pre_mesh", "post_mesh", "pre_solve", "post_solve", "recovery"})
+_RESOURCE_JOURNAL_NAME = re.compile(r"resource(?:-level-\d+|-state-\d+)?\.jsonl\Z")
 _COLLECTOR_FIELDS = frozenset(
     {
         "process_id",
@@ -1180,6 +1181,7 @@ class ResourceStageAdapter:
         policy: object | None,
         telemetry_provider: Callable[[str, str], object],
         completed_point_ids_provider: Callable[[], object],
+        journal_name: str = "resource.jsonl",
     ) -> None:
         if not callable(telemetry_provider):
             raise ValueError("telemetry_provider must be callable")
@@ -1191,6 +1193,9 @@ class ResourceStageAdapter:
         self.policy = normalize_resource_policy(policy)
         self.telemetry_provider = telemetry_provider
         self.completed_point_ids_provider = completed_point_ids_provider
+        if not isinstance(journal_name, str) or not _RESOURCE_JOURNAL_NAME.fullmatch(journal_name):
+            raise ValueError("journal_name must be a supported JSONL filename")
+        self.journal_name = journal_name
 
     def _completed(self) -> tuple[str, ...]:
         values = self.completed_point_ids_provider()
@@ -1216,7 +1221,11 @@ class ResourceStageAdapter:
         """Persist one stage sample/decision and return a bounded worker action."""
         stage = _stage(stage)
         point_id = _identifier(point_id, "point_id")
-        current = self.store.read_resource_journal(self.job_id)
+        current = (
+            self.store.read_resource_journal(self.job_id)
+            if self.journal_name == "resource.jsonl"
+            else self.store.read_resource_journal(self.job_id, journal_name=self.journal_name)
+        )
         completed = self._completed()
         if stage == "pre_solve" and point_id in completed:
             replay = replay_resource_journal(
@@ -1249,6 +1258,7 @@ class ResourceStageAdapter:
             self.job_id,
             new_entries,
             expected_policy=self.policy,
+            journal_name=self.journal_name,
         )
         combined = current + new_entries
         replay = replay_resource_journal(
@@ -1271,7 +1281,11 @@ class ResourceStageAdapter:
     def confirm_warning(self, *, point_id: str, confirmation_id: str) -> dict[str, Any]:
         """Persist a caller confirmation only for the exact latest warning decision."""
         point_id = _identifier(point_id, "point_id")
-        current = self.store.read_resource_journal(self.job_id)
+        current = (
+            self.store.read_resource_journal(self.job_id)
+            if self.journal_name == "resource.jsonl"
+            else self.store.read_resource_journal(self.job_id, journal_name=self.journal_name)
+        )
         completed = self._completed()
         replay = replay_resource_journal(
             current,
@@ -1296,6 +1310,7 @@ class ResourceStageAdapter:
             self.job_id,
             [continuation],
             expected_policy=self.policy,
+            journal_name=self.journal_name,
         )
         final = replay_resource_journal(
             current + [continuation],

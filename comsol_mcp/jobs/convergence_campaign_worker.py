@@ -215,6 +215,7 @@ def _run(
                 collector_executor=collector_executor,
                 telemetry_provider=telemetry_provider,
                 fault_hook=fault_hook,
+                resource_journal_name=f"resource-level-{level['ordinal']}.jsonl",
             )
             latest_resource_decision = execution["latest_resource_decision"]
             if _sha256_file(source) != child["source_model_sha256"]:

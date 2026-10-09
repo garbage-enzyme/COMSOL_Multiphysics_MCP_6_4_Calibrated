@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import threading
 import time
@@ -61,6 +62,13 @@ TRANSITIONS = {
 
 _PROCESS_GUARD_REGISTRY_LOCK = threading.Lock()
 _PROCESS_GUARDS: WeakValueDictionary[str, Any] = WeakValueDictionary()
+_RESOURCE_JOURNAL_NAME = re.compile(r"resource(?:-level-\d+|-state-\d+)?\.jsonl\Z")
+
+
+def _validate_resource_journal_name(name: str) -> str:
+    if not isinstance(name, str) or not _RESOURCE_JOURNAL_NAME.fullmatch(name):
+        raise ValueError("resource journal name must be a supported JSONL filename")
+    return name
 
 
 def _process_guard(path: Path) -> Any:
@@ -787,10 +795,9 @@ class JobStore:
             state = self.read_state(job_id)
             self._append_event_unlocked(job_id, event, data or {}, str(state["status"]))
 
-    def _read_resource_journal_unlocked(self, job_id: str) -> list[dict[str, Any]]:
+    def _read_resource_journal_unlocked_path(self, path: Path) -> list[dict[str, Any]]:
         from .resource_admission import RESOURCE_JOURNAL_MAX_ENTRIES
 
-        path = self.job_dir(job_id) / "resource.jsonl"
         entries: list[dict[str, Any]] = []
         if not path.exists():
             return entries
@@ -803,12 +810,18 @@ class JobStore:
                     raise ValueError("resource journal exceeds the entry limit")
         return entries
 
-    def read_resource_journal(self, job_id: str) -> list[dict[str, Any]]:
+    def read_resource_journal(
+        self, job_id: str, *, journal_name: str = "resource.jsonl"
+    ) -> list[dict[str, Any]]:
         """Read and validate the bounded append-only resource journal."""
         from .resource_admission import replay_resource_journal
 
         with self.lock(job_id):
-            entries = self._read_resource_journal_unlocked(job_id)
+            journal_name = _validate_resource_journal_name(journal_name)
+            path = (self.job_dir(job_id) / journal_name).resolve(strict=False)
+            if path.parent != self.job_dir(job_id).resolve(strict=False):
+                raise ValueError("resource journal path escapes job directory")
+            entries = self._read_resource_journal_unlocked_path(path)
             if entries:
                 admission = next(
                     (item for item in entries if item.get("entry_type") == "admission"),
@@ -828,6 +841,7 @@ class JobStore:
         entries: list[dict[str, Any]],
         *,
         expected_policy: object,
+        journal_name: str = "resource.jsonl",
     ) -> dict[str, Any]:
         """Durably append validated resource transitions for the active attempt."""
         from .resource_admission import replay_resource_journal
@@ -835,7 +849,11 @@ class JobStore:
         if not isinstance(entries, list) or not entries:
             raise ValueError("resource journal append requires a non-empty entry list")
         with self.lock(job_id):
-            current = self._read_resource_journal_unlocked(job_id)
+            journal_name = _validate_resource_journal_name(journal_name)
+            path = (self.job_dir(job_id) / journal_name).resolve(strict=False)
+            if path.parent != self.job_dir(job_id).resolve(strict=False):
+                raise ValueError("resource journal path escapes job directory")
+            current = self._read_resource_journal_unlocked_path(path)
             state = self.read_state(job_id)
             attempt = int(state.get("attempt", 1))
             replay = replay_resource_journal(
@@ -843,7 +861,6 @@ class JobStore:
                 attempt=attempt,
                 expected_policy=expected_policy,
             )
-            path = self.job_dir(job_id) / "resource.jsonl"
             payload = b"".join(
                 json.dumps(
                     entry,
