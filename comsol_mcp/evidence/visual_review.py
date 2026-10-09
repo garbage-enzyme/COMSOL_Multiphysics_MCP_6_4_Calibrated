@@ -365,7 +365,8 @@ def normalize_opencode_capability(
     canonical_json_bytes(metadata)
     capabilities = metadata.get("capabilities", {})
     inputs = capabilities.get("input", {}) if isinstance(capabilities, dict) else {}
-    metadata_image_input = bool(inputs.get("image")) if isinstance(inputs, dict) else False
+    metadata_image_value = inputs.get("image") if isinstance(inputs, dict) else None
+    metadata_image_input = metadata_image_value if type(metadata_image_value) is bool else False
     metadata_identity = metadata.get("id") or metadata.get("model") or metadata.get("name")
     model_identity_confirmed = bool(
         isinstance(metadata_identity, str)

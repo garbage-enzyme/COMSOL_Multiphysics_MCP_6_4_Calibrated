@@ -788,7 +788,7 @@ def _fit_candidate(
                 continue
             coordinate = float(np.real(root))
             if (
-                -1.0 < coordinate < 1.0
+                z[0] < coordinate < z[-1]
                 and float(np.polyval(np.polyder(polynomial, 2), coordinate)) < 0.0
             ):
                 candidates.append(coordinate)
@@ -869,7 +869,7 @@ def _fit_candidate(
             except RuntimeError, ValueError:
                 continue
             candidate_peak = float(parameters[2] + parameters[3] / parameters[4])
-            if not -1.0 < candidate_peak < 1.0:
+            if not z[0] < candidate_peak < z[-1]:
                 continue
             candidate_peak_response = float(fano(candidate_peak, *parameters))
             if not math.isfinite(candidate_peak_response) or candidate_peak_response <= baseline:
@@ -910,7 +910,9 @@ def _fit_candidate(
     else:
         raise ValueError("unsupported fit method")
 
-    if not -1.0 < peak_z < 1.0:
+    support_lower = float(z[0])
+    support_upper = float(z[-1])
+    if not support_lower < peak_z < support_upper:
         raise ValueError("fitted peak is outside its declared support window")
     peak_oriented = float(model(peak_z))
     measured_fit = np.asarray([model(value) for value in z])
@@ -950,9 +952,9 @@ def _fit_candidate(
     half_prominence = baseline + (peak_oriented - baseline) / 2.0
     left_z, right_z = _model_crossings(
         model,
-        left_bound=-1.0,
+        left_bound=support_lower,
         peak=peak_z,
-        right_bound=1.0,
+        right_bound=support_upper,
         level=half_prominence,
     )
     peak_wavelength = origin + peak_z * scale

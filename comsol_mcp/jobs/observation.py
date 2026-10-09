@@ -146,6 +146,12 @@ def verify_exact_ownership(
         reasons.append("executable_unreadable")
     elif observed_executable != expected_normalized["executable"]:
         reasons.append("executable_mismatch")
+    observed_targets = observed.get("target_files")
+    if (
+        not isinstance(observed_targets, list)
+        or observed_targets != expected_normalized["target_files"]
+    ):
+        reasons.append("target_files_absent_or_changed")
     return {
         "owned": not reasons,
         "reason_codes": reasons,
@@ -314,16 +320,45 @@ def summarize_observation(
     except UnicodeDecodeError, json.JSONDecodeError:
         return {"available": False, "reason_code": "observation_receipt_unreadable"}
     required = {
+        "schema_name",
+        "schema_version",
         "job_id",
         "attempt",
+        "process_identity",
+        "observer_started_epoch",
+        "deadline_epoch",
+        "log_tail",
+        "log_truncated",
+        "last_output_epoch",
         "observer_outcome",
         "reason_codes",
         "terminal_state",
+        "terminal_identity_verified",
+        "transport_alive",
+        "worker_exit_observed",
         "cleanup_outcome",
         "resume_disposition",
         "receipt_sha256",
     }
     if not isinstance(payload, Mapping) or not required <= set(payload):
+        return {"available": False, "reason_code": "observation_receipt_shape_invalid"}
+    if (
+        payload.get("schema_name") != OBSERVATION_RECEIPT_SCHEMA_NAME
+        or payload.get("schema_version") != OBSERVATION_SCHEMA_VERSION
+        or not isinstance(payload.get("attempt"), int)
+        or isinstance(payload.get("attempt"), bool)
+        or payload["attempt"] <= 0
+        or not isinstance(payload.get("terminal_identity_verified"), bool)
+        or payload.get("cleanup_outcome") not in _CLEANUP_OUTCOMES
+        or payload.get("resume_disposition")
+        not in {"none_needed", "resume_from_checkpoint", "restart"}
+        or not isinstance(payload.get("reason_codes"), list)
+        or not all(isinstance(item, str) and item for item in payload["reason_codes"])
+    ):
+        return {"available": False, "reason_code": "observation_receipt_shape_invalid"}
+    try:
+        normalize_process_identity(payload["process_identity"])
+    except ObservationError:
         return {"available": False, "reason_code": "observation_receipt_shape_invalid"}
     stored_hash = payload.get("receipt_sha256")
     body = {key: value for key, value in payload.items() if key != "receipt_sha256"}

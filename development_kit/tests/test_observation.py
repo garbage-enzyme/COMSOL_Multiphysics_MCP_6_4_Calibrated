@@ -13,6 +13,8 @@ from typing import Any
 
 import pytest
 
+from comsol_mcp.durable import canonical_sha256_v1
+
 from comsol_mcp.jobs.manager import JobManager
 from comsol_mcp.jobs.observation import (
     OBSERVATION_RECEIPT_FILENAME,
@@ -220,6 +222,11 @@ def test_b07_ownership_requires_readable_signature_and_executable():
     with pytest.raises(ObservationError):
         verify_exact_ownership(identity, identity, create_time_tolerance_seconds=-1.0)
 
+    missing_targets = {key: value for key, value in identity.items() if key != "target_files"}
+    ownership = verify_exact_ownership(identity, missing_targets)
+    assert ownership["owned"] is False
+    assert "target_files_absent_or_changed" in ownership["reason_codes"]
+
 
 # ---------------------------------------------------------------------------
 # Receipt assembly, log bounds, resume disposition
@@ -355,6 +362,18 @@ def test_summarize_rejects_shapes_missing_required_fields(tmp_path):
     summary = summarize_observation(path)
     assert summary["available"] is False
     assert summary["reason_code"] == "observation_receipt_shape_invalid"
+
+
+def test_summarize_rejects_resealed_fake_status_fields(tmp_path):
+    receipt = build_observation_receipt(**_receipt())
+    receipt["observer_outcome"] = "solver_terminal"
+    receipt["terminal_identity_verified"] = "yes"
+    body = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
+    body["receipt_sha256"] = canonical_sha256_v1(body)
+    path = tmp_path / "observation-dir"
+    path.mkdir()
+    (path / OBSERVATION_RECEIPT_FILENAME).write_text(json.dumps(body), encoding="utf-8")
+    assert summarize_observation(path)["reason_code"] == "observation_receipt_shape_invalid"
 
 
 # ---------------------------------------------------------------------------

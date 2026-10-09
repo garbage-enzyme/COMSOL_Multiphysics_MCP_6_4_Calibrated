@@ -542,6 +542,44 @@ def test_legacy_declared_flux_state_cannot_substitute_for_nested_measurements():
         assert migrated["evidence"][f"flux.{name}"]["state"] == "unknown"
 
 
+def test_legacy_flux_without_plane_direction_or_medium_is_not_complete():
+    legacy = {
+        "schema_version": "1", "config_id": "legacy-config", "config_sha256": CONFIG_HASH,
+        "source_sha256": SOURCE_HASH,
+        "measurement": {
+            "schema_version": "1", "config_id": "legacy-config",
+            "provenance": {"config_sha256": CONFIG_HASH, "source_sha256_before": SOURCE_HASH},
+            "wavelength": {}, "power": {}, "polarization": {}, "mesh": {},
+            "declared_plane_flux": {
+                "state": "derived_from_declared_convention",
+                "planes": {
+                    name: {
+                        "raw_power_w": 1.0, "directed_power_w": 1.0,
+                        "positive_power_sign": 1, "expression": name,
+                        "selection_ids": [1],
+                    }
+                    for name in ("incident", "reflected", "transmitted")
+                },
+                "R": 0.0, "T": 0.0, "A": 1.0, "closure_abs": 0.0,
+            },
+        },
+    }
+    migrated = migrate_legacy_point_audit(legacy)
+    assert migrated["evidence"]["flux.convention_complete"]["state"] == "unknown"
+
+
+def test_wavelength_synchronization_rejects_negative_values():
+    envelope = _envelope()
+    envelope["evidence"]["wavelength.evaluated_parameter_m"]["value"] = -1.0
+    envelope["evidence"]["wavelength.solved_frequency_m"]["value"] = -1.0
+    envelope.pop("contract_sha256")
+    envelope = build_physical_evidence(envelope)
+    policy = example_validation_policies()["wavelength_synchronization"]
+    result = evaluate_physical_evidence_policy(envelope, policy)
+    assert result["overall"] == "missing"
+    assert "positive" in result["rules"][0]["reason"]
+
+
 @pytest.mark.parametrize("section", [None, 1, []])
 def test_legacy_measured_internal_absorption_requires_object_sections(section):
     legacy = {

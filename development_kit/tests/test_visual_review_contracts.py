@@ -254,6 +254,20 @@ def test_opencode_image_metadata_requires_a_confirmed_attachment_part():
     assert mismatched["host_evidence"]["model_identity_confirmed"] is False
 
 
+def test_opencode_string_false_does_not_enable_image_input():
+    capability = normalize_opencode_capability(
+        provider="opencode-go", model="text-model",
+        provider_metadata={
+            "id": "opencode-go/text-model",
+            "capabilities": {"input": {"image": "false"}},
+        },
+        cli_attachment_supported=True, attachment_part_confirmed=True,
+        delivered_artifacts=_refs(), calibration=_calibration(),
+    )
+    assert capability["image_input"] is False
+    assert capability["host_capability_confirmed"] is False
+
+
 def test_codex_requires_actual_image_content_results_not_self_identification():
     missing = normalize_codex_capability(
         view_image_available=False,

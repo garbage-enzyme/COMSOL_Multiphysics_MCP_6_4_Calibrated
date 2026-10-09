@@ -468,6 +468,23 @@ def _legacy_declared_flux_is_complete(value: Mapping[str, Any]) -> bool:
             return False
         expression = plane.get("expression")
         selection_ids = plane.get("selection_ids")
+        coordinate = plane.get("plane_coordinate_m")
+        normal = plane.get("normal")
+        medium_id = plane.get("medium_id")
+        if (
+            isinstance(coordinate, bool)
+            or not isinstance(coordinate, (int, float))
+            or _finite_float(coordinate) is None
+            or not isinstance(normal, list)
+            or len(normal) != 3
+            or any(_finite_float(item) is None for item in normal)
+            or not isinstance(medium_id, str)
+            or not medium_id.strip()
+        ):
+            return False
+        norm = math.sqrt(sum(float(item) ** 2 for item in normal))
+        if not math.isclose(norm, 1.0, rel_tol=1e-9, abs_tol=1e-9):
+            return False
         if not isinstance(expression, str) or not expression.strip() or len(expression) > MAX_TEXT:
             return False
         if (
@@ -1081,6 +1098,8 @@ def _rule_outcome(rule: Mapping[str, Any], evidence: Mapping[str, Any]) -> dict[
         elif rule_type == "wavelength_synchronization":
             left = measured_number("wavelength.evaluated_parameter_m")
             right = measured_number("wavelength.solved_frequency_m")
+            if left <= 0.0 or right <= 0.0:
+                raise ValueError("wavelength synchronization values must be positive")
             absolute = abs(left - right)
             relative = None if right == 0 else absolute / abs(right)
             checks = []
