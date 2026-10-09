@@ -14,7 +14,6 @@ from typing import Any
 import pytest
 
 from comsol_mcp.durable import canonical_sha256_v1
-
 from comsol_mcp.jobs.manager import JobManager
 from comsol_mcp.jobs.observation import (
     OBSERVATION_RECEIPT_FILENAME,

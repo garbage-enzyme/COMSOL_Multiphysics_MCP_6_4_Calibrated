@@ -264,9 +264,11 @@ def validate_fitted_transforms(value: Any) -> dict[str, Any]:
         raise ValueError("transforms may fit only on train")
     if not isinstance(manifest["fit_row_count"], int) or manifest["fit_row_count"] < 1:
         raise ValueError("fit_row_count must be a positive integer")
-    if not isinstance(manifest["transforms"], Sequence) or isinstance(
-        manifest["transforms"], (str, bytes)
-    ) or not manifest["transforms"]:
+    if (
+        not isinstance(manifest["transforms"], Sequence)
+        or isinstance(manifest["transforms"], (str, bytes))
+        or not manifest["transforms"]
+    ):
         raise ValueError("transforms must be a non-empty sequence")
     seen: set[str] = set()
     for item in manifest["transforms"]:

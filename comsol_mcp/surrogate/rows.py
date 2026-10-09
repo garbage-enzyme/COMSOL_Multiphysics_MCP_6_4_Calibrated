@@ -209,13 +209,18 @@ def validate_row_provenance(value: Any) -> dict[str, Any]:
         if value["ineligible_reason"] not in INELIGIBLE_REASON_CODES:
             raise ValueError("unknown ineligible_reason")
     rebuilt = build_row_provenance(
-        row_id=value["row_id"], candidate_id=value["candidate_id"],
+        row_id=value["row_id"],
+        candidate_id=value["candidate_id"],
         source_model_sha256=value["source_model_sha256"],
         solver_identity_sha256=value["solver_identity_sha256"],
-        study_identity=value["study_identity"], solution_identity=value["solution_identity"],
-        dataset_identity=value["dataset_identity"], fidelity=value["fidelity"],
-        evidence_state=value["evidence_state"], features=value["features"],
-        targets=value["targets"], leakage_group_id=value["leakage_group_id"],
+        study_identity=value["study_identity"],
+        solution_identity=value["solution_identity"],
+        dataset_identity=value["dataset_identity"],
+        fidelity=value["fidelity"],
+        evidence_state=value["evidence_state"],
+        features=value["features"],
+        targets=value["targets"],
+        leakage_group_id=value["leakage_group_id"],
         ineligible_reason=value["ineligible_reason"],
     )
     if rebuilt != dict(value):

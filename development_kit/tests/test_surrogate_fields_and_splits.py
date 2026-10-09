@@ -344,6 +344,7 @@ def test_surrogate_modules_are_solver_free() -> None:
     import comsol_mcp.surrogate.splits as splits_mod
 
     for module in (fields_mod, manifests_mod, splits_mod):
-        source = open(module.__file__, encoding="utf-8").read().lower()
+        with open(module.__file__, encoding="utf-8") as handle:
+            source = handle.read().lower()
         for banned in SOLVER_FREE_BANNED:
             assert banned not in source, f"{module.__name__} references {banned}"

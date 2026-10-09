@@ -241,6 +241,7 @@ def test_design_points_are_unique() -> None:
 def test_rows_module_is_solver_free() -> None:
     import comsol_mcp.surrogate.rows as module
 
-    source = open(module.__file__, encoding="utf-8").read().lower()
+    with open(module.__file__, encoding="utf-8") as handle:
+        source = handle.read().lower()
     for banned in SOLVER_FREE_BANNED:
         assert banned not in source, f"rows references {banned}"
