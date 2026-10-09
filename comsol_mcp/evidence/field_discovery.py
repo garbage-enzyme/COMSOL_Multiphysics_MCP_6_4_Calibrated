@@ -230,7 +230,9 @@ def discover_field_datasets(
             "solution_name": solution["solution_name"] if solution else None,
             "computed_state": solution["computed_state"] if solution else "not_solution",
             "field_evaluation_eligible": bool(
-                solution and solution["computed_state"] == "verified_computed"
+                solution
+                and solution["computed_state"] == "verified_computed"
+                and dataset["dataset_type"] == "Solution"
             ),
         }
         row["dataset_identity_sha256"] = _canonical_hash(row)

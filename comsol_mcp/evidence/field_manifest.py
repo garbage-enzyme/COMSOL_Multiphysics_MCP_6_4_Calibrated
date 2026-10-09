@@ -133,6 +133,10 @@ def _coordinate_ranges(value: object, request: Mapping[str, Any]) -> dict[str, A
         requested = request["coordinate_bounds"][axis]
         if normalized[0] < requested[0] or normalized[1] > requested[1]:
             raise ValueError(f"coordinate_ranges.{axis} escapes the requested bounds")
+        if axis == request["slice"]["axis"]:
+            slice_value = request["slice"]["value"]
+            if normalized != [slice_value, slice_value]:
+                raise ValueError("slice coordinate range must equal the requested slice value")
         result[axis] = normalized
     return result
 

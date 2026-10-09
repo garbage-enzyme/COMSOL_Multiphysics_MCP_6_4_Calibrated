@@ -158,6 +158,21 @@ def test_cross_section_volume_agreement_remains_internal_consistency_only():
     assert result["physical_flux_closure_eligible"] is False
 
 
+def test_zero_internal_absorption_is_a_valid_measurement():
+    cross = _cross_section()
+    cross["value_m2"] = 0.0
+    volume = _volume_loss()
+    volume["value_w"] = 0.0
+
+    result = normalize_internal_absorption_consistency(cross, volume)
+
+    assert result["state"] == "measured"
+    assert result["cross_section"]["normalized_absorption"] == 0.0
+    assert result["volume_loss"]["normalized_absorption"] == 0.0
+    assert result["relative_residual"] == 0.0
+    assert result["physical_flux_closure_eligible"] is False
+
+
 def test_missing_cross_section_is_not_requested_and_missing_volume_is_unknown():
     assert normalize_internal_absorption_consistency(None, _volume_loss()) == {
         "schema_version": "1.0.0",
@@ -239,5 +254,5 @@ def test_internal_consistency_rejects_nonfinite_derived_residuals():
     volume["value_w"] = -1.0e308
     volume["incident_power_w"] = 1.0
 
-    with pytest.raises(ValueError, match="strictly positive"):
+    with pytest.raises(ValueError, match="nonnegative"):
         normalize_internal_absorption_consistency(cross, volume)

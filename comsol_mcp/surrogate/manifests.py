@@ -174,6 +174,13 @@ def validate_schema_manifest(value: Any) -> SurrogateSchemaManifest:
         raise ValueError("input_dim outside 2-12")
     if not 1 <= manifest["target_dim"] <= 8:
         raise ValueError("target_dim outside 1-8")
+    rebuilt = build_schema_manifest(
+        schema_id=manifest["schema_id"],
+        feature_names=manifest["feature_names"],
+        target_names=manifest["target_names"],
+    )
+    if rebuilt != manifest:
+        raise ValueError("schema manifest content is not canonical")
     return manifest  # type: ignore[return-value]
 
 
@@ -233,6 +240,11 @@ def validate_training_transforms(value: Any) -> SurrogateTrainingTransforms:
     for item in manifest["transforms"]:
         if item.get("kind") not in {"standardize", "minmax", "identity"}:
             raise ValueError("unsupported transform kind")
+    rebuilt = build_training_transforms(
+        transform_id=manifest["transform_id"], transforms=manifest["transforms"]
+    )
+    if rebuilt != manifest:
+        raise ValueError("training transforms content is not canonical")
     return manifest  # type: ignore[return-value]
 
 

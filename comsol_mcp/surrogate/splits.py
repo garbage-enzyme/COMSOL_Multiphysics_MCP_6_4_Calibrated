@@ -235,7 +235,11 @@ def detect_leakage(
         "leakage_detected": bool(findings),
         "findings": findings,
         "finding_count": len(findings),
-        "classes_checked": list(LEAKAGE_CLASSES),
+        "classes_checked": ["cross_split_group", "holdout_in_fit"]
+        + (["duplicate_candidate"] if candidate_ids is not None else []),
+        "classes_not_checked": [
+            "normalization_from_non_train", "test_access_before_freeze"
+        ] + (["duplicate_candidate"] if candidate_ids is None else []),
         "group_count": len(assignments),
         "row_count": len(row_split),
     }

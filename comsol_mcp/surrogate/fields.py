@@ -337,6 +337,8 @@ def verify_transform_roundtrip(
     absolute_tolerance: float = 1e-12,
 ) -> dict[str, Any]:
     """Prove forward/inverse round-trip fidelity on the supplied rows."""
+    relative_tolerance = _require_finite("relative_tolerance", relative_tolerance)
+    absolute_tolerance = _require_finite("absolute_tolerance", absolute_tolerance)
     if relative_tolerance <= 0 or absolute_tolerance <= 0:
         raise ValueError("round-trip tolerances must be positive")
     validated = validate_fitted_transforms(transforms)
@@ -355,6 +357,7 @@ def verify_transform_roundtrip(
         for field_id, original in row.items():
             if field_id not in restored:
                 continue
+            _require_finite(f"restored.{field_id}", restored[field_id])
             delta = abs(restored[field_id] - float(original))
             allowed = absolute_tolerance + relative_tolerance * abs(float(original))
             if delta > allowed:

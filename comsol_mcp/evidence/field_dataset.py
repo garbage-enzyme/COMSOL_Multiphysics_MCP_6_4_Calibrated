@@ -129,10 +129,16 @@ def _collect_dataset_field_evidence(
         *local_coordinates,
         *component_coordinates,
     ]
+    coordinate_unit = request_value["coordinate_bounds"]["unit"]
+    evaluation_units = [
+        *(expression["unit"] for expression in request_value["expressions"]),
+        *(coordinate_unit for _ in range(6)),
+    ]
     try:
         evaluated = model.evaluate(
             evaluation_expressions,
             dataset=source["dataset_name"],
+            unit=evaluation_units,
             inner=(
                 [source["solution_number"]] if source.get("solution_number") is not None else None
             ),
