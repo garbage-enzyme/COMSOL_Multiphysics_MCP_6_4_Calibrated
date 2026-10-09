@@ -20,15 +20,21 @@ def _vector(value: object, name: str, count: int) -> list[float]:
     return [_finite(item, f"{name}[{i}]") for i, item in enumerate(value)]
 
 
-def _norm(values: list[float]) -> float:
-    return math.sqrt(sum(item * item for item in values))
+def _unit_vector(values: list[float]) -> list[float] | None:
+    scale = max(abs(item) for item in values)
+    if scale == 0.0:
+        return None
+    scaled = [item / scale for item in values]
+    norm = math.hypot(*scaled)
+    return [item / norm for item in scaled]
 
 
 def _cosine(left: list[float], right: list[float]) -> float | None:
-    denominator = _norm(left) * _norm(right)
-    if denominator == 0.0:
+    left_unit, right_unit = _unit_vector(left), _unit_vector(right)
+    if left_unit is None or right_unit is None:
         return None
-    return sum(a * b for a, b in zip(left, right, strict=True)) / denominator
+    cosine = math.fsum(a * b for a, b in zip(left_unit, right_unit, strict=True))
+    return max(-1.0, min(1.0, cosine))
 
 
 def _relative_error(native: float, finite_difference: float, floor: float) -> float:
@@ -205,10 +211,10 @@ def compare_directional_gradient(
     """Compare one caller-supplied directional derivative with native output."""
     gradient = normalize_gradient_record(native_record, support)
     vector = _vector(direction, "direction", len(gradient["variable_order"]))
-    direction_norm = _norm(vector)
-    if direction_norm == 0.0:
+    unit_vector = _unit_vector(vector)
+    if unit_vector is None:
         raise ValueError("direction must be nonzero")
-    vector = [item / direction_norm for item in vector]
+    vector = unit_vector
     step_value = _finite(step, "step", positive=True)
     if plus_objective is not None and minus_objective is not None and base_objective is not None:
         raise ValueError("central directional evidence must not include a base objective")
@@ -229,7 +235,7 @@ def compare_directional_gradient(
         mode = "backward"
     else:
         raise ValueError("central or one-sided directional objective values are required")
-    predicted = sum(a * b for a, b in zip(gradient["native_gradient"], vector, strict=True))
+    predicted = math.fsum(a * b for a, b in zip(gradient["native_gradient"], vector, strict=True))
     raw_policy = _object(
         policy,
         {"relative_error_limit", "absolute_error_floor", "cosine_floor", "require_sign"},
