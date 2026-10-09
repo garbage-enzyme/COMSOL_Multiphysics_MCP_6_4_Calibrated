@@ -57,19 +57,20 @@ def recover_jsonl_tail(path: str | Path, *, max_row_bytes: int) -> None:
                 boundary = window_start + found
             scan_end = window_start
         record_start = boundary + 1
+        if end - record_start > max_row_bytes:
+            handle.truncate(record_start)
+            handle.flush()
+            os.fsync(handle.fileno())
+            return
         handle.seek(record_start)
         tail = handle.read(end - record_start)
-
-        if len(tail) > max_row_bytes:
+        try:
+            json.loads(tail.decode("utf-8"))
+        except UnicodeDecodeError, json.JSONDecodeError:
             handle.truncate(record_start)
         else:
-            try:
-                json.loads(tail.decode("utf-8"))
-            except UnicodeDecodeError, json.JSONDecodeError:
-                handle.truncate(record_start)
-            else:
-                handle.seek(0, os.SEEK_END)
-                handle.write(b"\n")
+            handle.seek(0, os.SEEK_END)
+            handle.write(b"\n")
         handle.flush()
         os.fsync(handle.fileno())
 

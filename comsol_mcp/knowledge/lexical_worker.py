@@ -23,7 +23,7 @@ def main() -> None:
         result = {
             "success": False,
             "error_type": type(exc).__name__,
-            "error": str(exc),
+            "error": "manual operation failed",
         }
     try:
         encoded = json.dumps(result, ensure_ascii=False).encode("utf-8")

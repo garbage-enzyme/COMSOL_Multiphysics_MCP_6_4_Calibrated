@@ -14,6 +14,7 @@ changes the job terminal state.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -75,7 +76,7 @@ def _cache_is_current(cache: Mapping[str, Any] | None, candidates: list[Path]) -
             or recorded.get("mtime_ns") != live["mtime_ns"]
         ):
             return False
-    return cache.get("probe") is not None
+    return isinstance(cache.get("probe"), Mapping)
 
 
 def _list_candidates(root: Path) -> list[Path]:
@@ -95,6 +96,7 @@ def probe_mph_artifacts(directory: str | Path, *, refresh: bool = False) -> dict
     root = Path(directory)
     cache_path = root / MPH_ARTIFACT_PROBE_CACHE_FILENAME
     candidates = _list_candidates(root)
+    selected = candidates[:MPH_ARTIFACT_PROBE_MAX_FILES]
     if not root.is_dir():
         return {
             "schema_name": MPH_ARTIFACT_PROBE_SCHEMA_NAME,
@@ -113,7 +115,7 @@ def probe_mph_artifacts(directory: str | Path, *, refresh: bool = False) -> dict
                 cache = json.loads(raw.decode("utf-8"))
         except OSError, UnicodeDecodeError, json.JSONDecodeError:
             cache = None
-        if cache is not None and _cache_is_current(cache, candidates):
+        if cache is not None and _cache_is_current(cache, selected):
             cached_probe = cache["probe"]
             return {
                 **cached_probe,
@@ -125,7 +127,7 @@ def probe_mph_artifacts(directory: str | Path, *, refresh: bool = False) -> dict
 
     truncated = len(candidates) > MPH_ARTIFACT_PROBE_MAX_FILES
     probes: list[dict[str, Any]] = []
-    for path in candidates[:MPH_ARTIFACT_PROBE_MAX_FILES]:
+    for path in selected:
         try:
             summary = build_mph_inspection_summary(path)
         except MphInspectionError as exc:
@@ -166,7 +168,7 @@ def probe_mph_artifacts(directory: str | Path, *, refresh: bool = False) -> dict
     }
     try:
         fingerprints = []
-        for path in candidates[:MPH_ARTIFACT_PROBE_MAX_FILES]:
+        for path in selected:
             try:
                 fingerprints.append(_file_fingerprint(path))
             except OSError:
@@ -177,10 +179,13 @@ def probe_mph_artifacts(directory: str | Path, *, refresh: bool = False) -> dict
             "file_fingerprints": fingerprints,
             "probe": {key: value for key, value in probe.items() if key != "cache"},
         }
-        cache_path.write_text(
-            json.dumps(cache_payload, ensure_ascii=False, sort_keys=True),
-            encoding="utf-8",
+        if cache_path.is_symlink() or (cache_path.exists() and not cache_path.is_file()):
+            raise OSError("probe cache path is not a regular file")
+        temporary = cache_path.with_name(f".{cache_path.name}.tmp-{os.getpid()}")
+        temporary.write_text(
+            json.dumps(cache_payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
         )
+        os.replace(temporary, cache_path)
     except OSError:
         # Cache write failure must not affect the probe result.
         probe["cache"] = {"status": "unavailable", "refreshed": bool(refresh)}

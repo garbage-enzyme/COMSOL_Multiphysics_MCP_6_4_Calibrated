@@ -80,7 +80,17 @@ def _parse_xml(payload: bytes, member: str) -> ElementTree.Element:
     # expansion is refused below before parsing: bounded marker bytes cannot
     # grow into unbounded memory through a DTD.
     folded = payload.lower()
-    if b"<!doctype" in folded or b"<!entity" in folded:
+    try:
+        decoded = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        decoded = payload.decode("utf-16", errors="ignore")
+    decoded_lower = decoded.lower()
+    if (
+        b"<!doctype" in folded
+        or b"<!entity" in folded
+        or "<!doctype" in decoded_lower
+        or "<!entity" in decoded_lower
+    ):
         raise MphInspectionError(
             "mph_marker_dtd_rejected",
             f"archive marker {member} declares a DTD or entity; markers are data-only",
