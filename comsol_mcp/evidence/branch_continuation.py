@@ -489,6 +489,18 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
         raise ValueError(
             f"{label}.search_window_m must exactly match the tested requested-wavelength domain"
         )
+    if (
+        complete
+        and normalized_candidate["fwhm_m"] is not None
+        and normalized_candidate["fwhm_m"] <= 0
+    ):
+        raise ValueError(f"{label}.candidate.fwhm_m must be positive")
+    if (
+        complete
+        and normalized_candidate["quality_factor"] is not None
+        and normalized_candidate["quality_factor"] <= 0
+    ):
+        raise ValueError(f"{label}.candidate.quality_factor must be positive")
     candidate_peak = normalized_candidate["peak_wavelength_m"]
     if candidate_peak is not None and not (
         search_window["lower_m"] <= candidate_peak <= search_window["upper_m"]

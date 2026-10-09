@@ -278,6 +278,33 @@ class TestContinuationStateBinding:
         validated = validate_continuation_states(built)
         assert validated == built
 
+    @pytest.mark.parametrize(
+        "field,value",
+        [("fwhm_m", -1.0), ("fwhm_m", 0.0), ("quality_factor", -2.0), ("quality_factor", 0.0)],
+    )
+    def test_hash_consistent_states_reject_nonpositive_width_and_quality(self, field, value):
+        import hashlib
+        import json
+
+        built = build_continuation_states(
+            states_id="angle-sweep", states=_build_dispersive_states(3)
+        )
+        state = built["states"][0]
+        state["candidate"][field] = value
+
+        def rehash(item, field):
+            body = {key: val for key, val in item.items() if key != field}
+            item[field] = hashlib.sha256(
+                json.dumps(
+                    body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+                ).encode()
+            ).hexdigest()
+
+        rehash(state, "state_sha256")
+        rehash(built, "states_sha256")
+        with pytest.raises(ValueError, match="must be positive"):
+            validate_continuation_states(built)
+
     def test_states_sha256_is_deterministic(self):
         states = _build_dispersive_states(3)
         first = build_continuation_states(states_id="angle-sweep", states=states)

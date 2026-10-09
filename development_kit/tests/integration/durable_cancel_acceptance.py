@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.evidence.outcome_contract import execution_from_terminal_job_state
 from src.jobs.manager import JobManager
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 
 _TERMINAL_STATES = frozenset({"cancelled", "failed", "interrupted", "completed"})
 
@@ -90,7 +91,7 @@ def main() -> int:
             ],
             "study_name": "std1",
             "version": "6.4",
-            "cores": 14,
+            "cores": required_acceptance_cores(),
             "smoke_points": 1,
             "record_wavelength_controls": True,
             "physical_bounds": {

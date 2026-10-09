@@ -38,6 +38,35 @@ def test_acceptance_cores_fail_closed_without_live_capacity(monkeypatch):
         )
 
 
+def test_durable_cancel_entrypoint_uses_caller_cores_before_submit(monkeypatch, tmp_path):
+    from development_kit.tests.integration import durable_cancel_acceptance as gate
+    from src.evidence import real_fixture
+
+    monkeypatch.setenv("COMSOL_MCP_ACCEPTANCE_CORES", "1")
+    monkeypatch.setenv("COMSOL_MCP_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr(acceptance_resources.os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(
+        real_fixture,
+        "controlled_fixture_from_environment",
+        lambda: {"source": tmp_path / "source.mph", "wavelength_um": 5.0},
+    )
+
+    class SubmitBoundary(Exception):
+        pass
+
+    class Manager:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def submit(self, spec):
+            assert spec["cores"] == 1
+            raise SubmitBoundary
+
+    monkeypatch.setattr(gate, "JobManager", Manager)
+    with pytest.raises(SubmitBoundary):
+        gate.main()
+
+
 def test_caller_acceptance_values_do_not_enter_tracked_product_text():
     root = Path(__file__).resolve().parents[2]
     text_suffixes = {
