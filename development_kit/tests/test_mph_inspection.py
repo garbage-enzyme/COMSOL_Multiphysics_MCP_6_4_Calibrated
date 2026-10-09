@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import struct
 import zipfile
 from pathlib import Path
 
@@ -267,6 +268,57 @@ def test_underreported_entry_count_is_rejected_by_bounded_directory_scan(tmp_pat
     assert eocd >= 0
     raw[eocd + 10 : eocd + 12] = (1).to_bytes(2, "little")
     fixture.write_bytes(raw)
+    _refuse(fixture, "mph_too_many_entries", MphInspectionLimits(max_entries=1))
+
+
+@pytest.mark.parametrize("legacy_location", [False, True])
+def test_zip64_inventory_accepts_exact_entry_limit_without_source_mutation(
+    tmp_path, monkeypatch, legacy_location
+):
+    monkeypatch.setattr(zipfile, "ZIP_FILECOUNT_LIMIT", 1)
+    fixture = _write_valid_mph(tmp_path / "valid-zip64.mph")
+    original = fixture.read_bytes()
+    assert b"PK\x06\x06" in original
+    assert b"PK\x06\x07" in original
+    with zipfile.ZipFile(fixture) as archive:
+        count = len(archive.infolist())
+        assert archive.testzip() is None
+    if legacy_location:
+        reader = zipfile._EndRecData
+
+        def legacy_end_record(stream):
+            end = reader(stream)
+            end[zipfile._ECD_LOCATION] = original.rfind(b"PK\x05\x06")
+            return end
+
+        monkeypatch.setattr(zipfile, "_EndRecData", legacy_end_record)
+        from comsol_mcp.evidence.inspection.archive import _preflight_entry_count
+
+        # Only preflight receives the emulated legacy location. The current
+        # ZipFile implementation requires its own reader's location semantics.
+        _preflight_entry_count(fixture, count)
+        monkeypatch.setattr(zipfile, "_EndRecData", reader)
+    inventory = inspect_archive_inventory(fixture, MphInspectionLimits(max_entries=count))
+    assert len(inventory.entries) == count
+    assert fixture.read_bytes() == original
+
+
+@pytest.mark.parametrize("declared_count", [None, 1, 100_000])
+def test_zip64_count_refusal_precedes_zipfile_construction(tmp_path, monkeypatch, declared_count):
+    monkeypatch.setattr(zipfile, "ZIP_FILECOUNT_LIMIT", 1)
+    fixture = _write_valid_mph(tmp_path / "bounded-zip64.mph")
+    raw = bytearray(fixture.read_bytes())
+    record_offset = raw.rfind(b"PK\x06\x06")
+    assert record_offset >= 0
+    if declared_count is not None:
+        struct.pack_into("<Q", raw, record_offset + 24, declared_count)
+        struct.pack_into("<Q", raw, record_offset + 32, declared_count)
+    fixture.write_bytes(raw)
+
+    def must_not_construct(*_args, **_kwargs):
+        pytest.fail("ZIP64 metadata allocation must not precede entry-count admission")
+
+    monkeypatch.setattr(zipfile.ZipFile, "__init__", must_not_construct)
     _refuse(fixture, "mph_too_many_entries", MphInspectionLimits(max_entries=1))
 
 

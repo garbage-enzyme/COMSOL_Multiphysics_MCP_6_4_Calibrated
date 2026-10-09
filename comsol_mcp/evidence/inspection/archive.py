@@ -52,7 +52,11 @@ def _preflight_entry_count(path: Path, max_entries: int) -> None:
             directory_bytes = end[zipfile._ECD_SIZE]
             directory_start = end[zipfile._ECD_LOCATION] - directory_bytes
             if end[zipfile._ECD_SIGNATURE] == zipfile.stringEndArchive64:
-                directory_start -= zipfile.sizeEndCentDir64 + zipfile.sizeEndCentDir64Locator
+                # New stdlib readers point at the ZIP64 end record. Older
+                # readers retain the ordinary end-record location.
+                stream.seek(end[zipfile._ECD_LOCATION])
+                if stream.read(4) != zipfile.stringEndArchive64:
+                    directory_start -= zipfile.sizeEndCentDir64 + zipfile.sizeEndCentDir64Locator
             if directory_start < 0:
                 raise zipfile.BadZipFile("invalid directory offset")
             stream.seek(directory_start)
