@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import sys
 
 import pytest
 from src.tools.property_transport import (
@@ -126,6 +127,18 @@ def test_property_integer_limit_uses_exact_decimal_size():
         normalize_property_value(10**4299)
     with pytest.raises(ValueError, match="integers may contain at most"):
         normalize_property_value(10**MAX_SCALAR_BYTES)
+
+
+def test_disabled_python_integer_limit_preserves_transport_byte_bound():
+    previous = sys.get_int_max_str_digits()
+    try:
+        sys.set_int_max_str_digits(0)
+        for value in (0, 123456789, -123456789, 10**5000):
+            assert normalize_property_value(value) == value
+        with pytest.raises(ValueError, match="integers may contain at most"):
+            normalize_property_value(10**MAX_SCALAR_BYTES)
+    finally:
+        sys.set_int_max_str_digits(previous)
 
 
 def test_direct_property_normalization_enforces_escaped_aggregate_size():

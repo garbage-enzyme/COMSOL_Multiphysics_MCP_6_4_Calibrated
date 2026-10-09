@@ -65,7 +65,9 @@ def _normalize_scalar(value: object) -> JSONScalar:
         if _integer_serialized_bytes(value) > MAX_SCALAR_BYTES:
             raise ValueError(f"property integers may contain at most {MAX_SCALAR_BYTES} bytes")
         digit_limit = sys.get_int_max_str_digits()
-        if _integer_decimal_digits(value) >= digit_limit:
+        # Python returns zero when its interpreter-level conversion limit is
+        # disabled.  The transport still applies its own byte bound above.
+        if digit_limit and _integer_decimal_digits(value) >= digit_limit:
             raise ValueError(
                 f"property integers may contain at most {digit_limit - 1} decimal digits "
                 "so the payload stays JSON-serializable"
