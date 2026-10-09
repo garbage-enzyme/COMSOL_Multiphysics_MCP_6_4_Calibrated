@@ -1,0 +1,15 @@
+{
+  "archive": "/workspace/COMSOL_MCP_Debian_reacceptance_42f9e95.zip",
+  "bytes": 3726645,
+  "sha256": "8fef8979ee68720af8dbed3afb76e3e686a76c6a98f4aac6bc28316ec3c1cde5",
+  "source_files": 780,
+  "all_source_matches_git": true,
+  "zip_crc_and_bytes_verified": true,
+  "provenance_verified": true,
+  "ci_totals": {
+    "passed": 4984,
+    "failed": 4,
+    "skipped": 57,
+    "deselected": 14
+  }
+}

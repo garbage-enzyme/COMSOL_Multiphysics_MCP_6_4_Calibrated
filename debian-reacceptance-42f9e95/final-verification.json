@@ -1,0 +1,28 @@
+{
+  "target": "42f9e95a2f2f33e76a06261b5eaf4801987d70e0",
+  "overall_accepted": false,
+  "fixed_records": [
+    "ACC-005",
+    "ACC-008"
+  ],
+  "remaining_records": [
+    "ACC-001",
+    "ACC-002",
+    "ACC-003",
+    "ACC-004",
+    "ACC-006",
+    "ACC-007",
+    "ACC-009"
+  ],
+  "behavior_passed": 20,
+  "behavior_failed": 4,
+  "ci_totals": {
+    "passed": 4984,
+    "failed": 4,
+    "skipped": 57,
+    "deselected": 14
+  },
+  "solver_started": false,
+  "target_clean": true,
+  "remote_raw_logs_available": false
+}
