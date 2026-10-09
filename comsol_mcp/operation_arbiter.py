@@ -310,7 +310,8 @@ _ARBITERS_LOCK = threading.Lock()
 
 def get_operation_arbiter() -> OperationArbiter:
     """Return one process-local facade for the configured durable lock root."""
-    root = str(default_runtime_dir().resolve()).casefold()
+    root_path = default_runtime_dir().resolve()
+    root = os.path.normcase(str(root_path)) if os.name == "nt" else str(root_path)
     pid = os.getpid()
     process_create_time = _process_create_time(pid)
     key = (root, pid, process_create_time)

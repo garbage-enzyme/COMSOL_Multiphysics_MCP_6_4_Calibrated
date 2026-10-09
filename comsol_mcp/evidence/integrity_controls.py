@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.durable import read_file_bytes_bounded
-from comsol_mcp.settings import load_settings, settings_fingerprint, settings_status
+from comsol_mcp.settings import (
+    load_settings,
+    load_settings_report,
+    settings_fingerprint,
+    settings_status,
+)
 
 EVIDENCE_SETTINGS_ENV = "COMSOL_MCP_EVIDENCE_SETTINGS_PATH"
 EVIDENCE_SETTINGS_SCHEMA = "comsol_mcp.evidence_integrity_settings"
@@ -207,8 +212,14 @@ def load_evidence_integrity_status(
     if environ is None and EVIDENCE_SETTINGS_ENV in os.environ:
         environ = os.environ
     if environ is None:
-        project_status = settings_status()
-        project = load_settings()
+        report = load_settings_report()
+        project = report["settings"]
+        project_status = {
+            "settings_errors": report.get("errors", []),
+            "reason_code": "settings_invalid" if report.get("errors") else None,
+        }
+        if not report.get("errors"):
+            project_status = settings_status()
         effective = {
             "schema_name": EVIDENCE_SETTINGS_SCHEMA,
             "schema_version": EVIDENCE_INTEGRITY_VERSION,

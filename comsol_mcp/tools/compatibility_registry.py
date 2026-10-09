@@ -60,9 +60,11 @@ def register_compatibility_registry_tools(mcp: MCPServer) -> None:
         selection = getattr(mcp, "profile_selection", None)
         profile_name = getattr(selection, "name", None)
         feature_enabled = getattr(selection, "feature_enabled", None)
+        from comsol_mcp.tools.catalog import FEATURE_NAMES
+
         enabled_features = tuple(
             feature
-            for feature in ("lexical_docs", "semantic_docs", "shared_server")
+            for feature in FEATURE_NAMES
             if callable(feature_enabled) and feature_enabled(feature)
         )
         if not isinstance(profile_name, str) or not profile_name:
