@@ -10,7 +10,7 @@ from typing import Any, Mapping
 
 from comsol_mcp.durable.io import fsync_directory
 
-from .journal import locked_journal
+from .journal import locked_journal, recover_jsonl_tail
 from .spectral_runner import validate_spectral_completion
 
 CONVERGENCE_CAMPAIGN_LEVEL_SCHEMA_NAME = "comsol_mcp.convergence_campaign_level"
@@ -232,6 +232,7 @@ def _read_convergence_campaign_levels_unlocked(
     journal = Path(path)
     if not journal.exists():
         return []
+    recover_jsonl_tail(journal, max_row_bytes=MAX_CONVERGENCE_CAMPAIGN_ROW_BYTES)
     if journal.stat().st_size > len(spec["levels"]) * MAX_CONVERGENCE_CAMPAIGN_ROW_BYTES:
         raise ValueError("convergence campaign level journal exceeds its bound")
     values = []
