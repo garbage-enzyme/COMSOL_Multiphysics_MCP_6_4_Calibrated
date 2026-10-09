@@ -264,8 +264,12 @@ class ModelManagerRuntime:
         # Order is deliberate: feature gate, then session, then request validity,
         # then the upload setting, then pre-dispatch policy, then journal, then
         # dispatch. A refusal at an earlier step cannot reach a later one.
-        _require_gate(self._feature_enabled)
-        _require_session(self._context)
+        try:
+            _require_gate(self._feature_enabled)
+            _require_session(self._context)
+        except ModelManagerError as exc:
+            self._journal_raw(operation=operation, subject=uri, reason=exc.reason_code)
+            raise
 
         try:
             request = build_request(
