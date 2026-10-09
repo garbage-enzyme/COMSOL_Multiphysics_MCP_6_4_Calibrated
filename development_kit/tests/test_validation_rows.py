@@ -204,7 +204,9 @@ def test_completed_rows_require_existing_nested_collector_manifest(tmp_path):
     wrapper.write_text(json.dumps(wrapper_payload), encoding="utf-8")
     summary = _summary("off", digest=hashlib.sha256(wrapper.read_bytes()).hexdigest())
     summary["manifest_size_bytes"] = wrapper.stat().st_size
-    append_validation_row(path, spec, attempt=1, point_id="off", status="ok", collector_summaries=[summary])
+    append_validation_row(
+        path, spec, attempt=1, point_id="off", status="ok", collector_summaries=[summary]
+    )
     assert completed_point_fingerprints(path, spec, artifact_root=tmp_path)
     inner.unlink()
     with pytest.raises(ValueError, match="inner manifest"):
@@ -230,7 +232,9 @@ def test_completed_rows_reject_changed_nested_collector_manifest(tmp_path):
     wrapper.write_text(json.dumps(wrapper_payload), encoding="utf-8")
     summary = _summary("off", digest=hashlib.sha256(wrapper.read_bytes()).hexdigest())
     summary["manifest_size_bytes"] = wrapper.stat().st_size
-    append_validation_row(path, spec, attempt=1, point_id="off", status="ok", collector_summaries=[summary])
+    append_validation_row(
+        path, spec, attempt=1, point_id="off", status="ok", collector_summaries=[summary]
+    )
     inner.write_text('{"measurement":"tampered"}', encoding="utf-8")
     with pytest.raises(ValueError, match="inner manifest hash"):
         completed_point_fingerprints(path, spec, artifact_root=tmp_path)

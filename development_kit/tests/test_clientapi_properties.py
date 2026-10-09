@@ -259,6 +259,22 @@ def test_property_set_coercion_is_not_reported_as_success_and_rolls_back():
     assert target.values["label"] == "old"
 
 
+def test_property_set_rejects_large_integer_rounding_in_readback():
+    class RoundingFeature(FakeFeature):
+        def set(self, name, value):
+            self.set_calls.append((name, value))
+            self.values[name] = float(value)
+
+    target = RoundingFeature({"count": 0.0}, {"count": "Double"})
+    requested = 9_007_199_254_740_993
+    result = set_existing_property(
+        FakeModel(target), "comp1", "geometry_feature", "parent1/child1", "count", requested
+    )
+    assert result["success"] is False
+    assert "did not match" in result["error"]
+    assert result["rolled_back"] is True
+
+
 def test_property_access_rejects_unknown_targets_and_properties(feature):
     model = FakeModel(feature)
 

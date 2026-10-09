@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Literal, Optional
 
@@ -154,10 +155,14 @@ def _read_property(target, property_name: str) -> tuple[JSONValue, str]:
 def _exact_json_value_equal(left: JSONValue, right: JSONValue) -> bool:
     if isinstance(left, bool) or isinstance(right, bool):
         return type(left) is type(right) and left == right
+    if isinstance(left, int) and isinstance(right, float):
+        # COMSOL returns doubles for Double properties.  Accept 5 -> 5.0,
+        # but do not let float rounding make a large integer look unchanged.
+        return math.isfinite(right) and right.is_integer() and int(right) == left
+    if isinstance(left, float) and isinstance(right, int):
+        return math.isfinite(left) and left.is_integer() and int(left) == right
     if isinstance(left, (int, float)) and isinstance(right, (int, float)):
-        # COMSOL returns doubles for Double properties, so a JSON integer
-        # request reads back as 5.0; compare numerically instead of by type.
-        return float(left) == float(right)
+        return left == right
     if type(left) is not type(right):
         return False
     if isinstance(left, list):
