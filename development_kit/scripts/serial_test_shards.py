@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -83,7 +84,16 @@ def run_shards(
         failures: list[tuple[int, int]] = []
         for index, process, _log_handle in processes:
             returncode = process.wait()
+            _log_handle.flush()
+            log_path = basetemp_root / f"shard{index}.log"
+            if coverage_root is not None:
+                shutil.copyfile(log_path, coverage_root / log_path.name)
             if returncode:
+                # Preserve full logs in artifacts and expose a bounded failure tail in CI.
+                with log_path.open("rb") as failure_log:
+                    failure_log.seek(max(0, log_path.stat().st_size - 65536))
+                    tail = failure_log.read().decode("utf-8", errors="replace")
+                print(f"pytest shard {index} failed (exit {returncode}):\n{tail}", flush=True)
                 failures.append((index, returncode))
         if failures:
             raise SystemExit("pytest shard failures: " + ", ".join(f"{i}={c}" for i, c in failures))

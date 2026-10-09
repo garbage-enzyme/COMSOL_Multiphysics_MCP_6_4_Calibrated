@@ -26,10 +26,12 @@ from comsol_mcp.shared_session.model_manager import (
     ModelManagerRuntime,
     evaluate_gate,
 )
+from development_kit.tests.platform_fixtures import platform_test_root
 
 VALID_URI = "dbmodel://library/models/cell"
 DIGEST_A = "a" * 64
 DIGEST_B = "b" * 64
+DOWNLOAD_PATH = str(platform_test_root("downloads") / "cell.mph")
 
 
 class Dispatch:
@@ -107,7 +109,7 @@ def test_the_gate_reports_the_enabled_combination() -> None:
     [
         lambda r: r.open(uri=VALID_URI),
         lambda r: r.run(uri=VALID_URI),
-        lambda r: r.download(uri=VALID_URI, destination="D:/downloads/cell.mph"),
+        lambda r: r.download(uri=VALID_URI, destination=DOWNLOAD_PATH),
         lambda r: r.upload(
             uri=VALID_URI, derived_source_identity={"revision": "r1", "sha256": DIGEST_A}
         ),
@@ -139,7 +141,7 @@ def test_a_disabled_feature_refuses_before_any_transport(tmp_path: Path) -> None
     [
         lambda r: r.open(uri=VALID_URI),
         lambda r: r.run(uri=VALID_URI, resource_policy={"cores": 1}),
-        lambda r: r.download(uri=VALID_URI, destination="D:/downloads/cell.mph"),
+        lambda r: r.download(uri=VALID_URI, destination=DOWNLOAD_PATH),
     ],
 )
 def test_reads_work_with_the_upload_setting_off(tmp_path: Path, call: Any) -> None:
@@ -226,7 +228,7 @@ def test_an_upload_without_a_derived_identity_is_refused(tmp_path: Path) -> None
 
 def test_a_download_to_an_absent_destination_is_dispatched(tmp_path: Path) -> None:
     runtime, transport = _runtime(tmp_path)
-    runtime.download(uri=VALID_URI, destination="D:/downloads/cell.mph", destination_exists=False)
+    runtime.download(uri=VALID_URI, destination=DOWNLOAD_PATH, destination_exists=False)
     assert [name for name, _ in transport.calls] == ["download"]
 
 
@@ -234,7 +236,7 @@ def test_an_existing_destination_refuses_before_dispatch(tmp_path: Path) -> None
     runtime, transport = _runtime(tmp_path)
     result = runtime.download(
         uri=VALID_URI,
-        destination="D:/downloads/cell.mph",
+        destination=DOWNLOAD_PATH,
         destination_exists=True,
         existing_sha256=DIGEST_B,
         incoming_sha256=DIGEST_A,
@@ -248,7 +250,7 @@ def test_identical_content_is_refused_rather_than_replaced(tmp_path: Path) -> No
     runtime, transport = _runtime(tmp_path)
     result = runtime.download(
         uri=VALID_URI,
-        destination="D:/downloads/cell.mph",
+        destination=DOWNLOAD_PATH,
         destination_exists=True,
         existing_sha256=DIGEST_A,
         incoming_sha256=DIGEST_A,
@@ -278,7 +280,7 @@ def test_an_invalid_download_destination_is_refused(tmp_path: Path, destination:
     [
         lambda r: r.open(uri=VALID_URI),
         lambda r: r.run(uri=VALID_URI),
-        lambda r: r.download(uri=VALID_URI, destination="D:/downloads/cell.mph"),
+        lambda r: r.download(uri=VALID_URI, destination=DOWNLOAD_PATH),
     ],
 )
 def test_an_unattached_session_refuses_every_operation(tmp_path: Path, call: Any) -> None:

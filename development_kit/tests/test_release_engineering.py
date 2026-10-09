@@ -971,7 +971,45 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         for step in job["steps"]
         if "uses" in step
     ]
-    assert len(action_references) == 19
+    assert len(action_references) == 30
+    paired_job = jobs["paired-platform-coverage"]
+    assert paired_job["needs"] == ["unit-and-package-py314", "experimental-ubuntu-backend"]
+    paired_commands = "\n".join(str(step.get("run", "")) for step in paired_job["steps"])
+    assert "release_locked_ubuntu_py314.txt" in paired_commands
+    assert "^packaging==" in paired_commands
+    assert "--require-hashes --only-binary=:all:" in paired_commands
+    assert "development_kit.scripts.paired_coverage" in paired_commands
+    for name in ("experimental-ubuntu-backend", "experimental-ubuntu-settings-gui"):
+        ubuntu = jobs[name]
+        assert ubuntu["runs-on"] == "ubuntu-26.04"
+        commands = "\n".join(str(step.get("run", "")) for step in ubuntu["steps"])
+        assert "--require-hashes --only-binary=:all:" in commands
+        assert "constraints/release_locked_ubuntu_py314.txt" in commands
+        assert "-c $versionConstraints" in commands
+        assert "Set-Content -Encoding utf8NoBOM $versionConstraints" in commands
+        assert '".[dev,manuals]" -c constraints/release_locked_ubuntu_py314.txt' not in commands
+        assert "pip check" in commands
+        assert "run_real_release_gate" not in commands
+    ubuntu_backend = "\n".join(
+        str(step.get("run", "")) for step in jobs["experimental-ubuntu-backend"]["steps"]
+    )
+    assert "quality_gate.py" in ubuntu_backend
+    assert "installed_package_probe.py" in ubuntu_backend
+    assert "installed_stdio_probe.py" in ubuntu_backend
+    ubuntu_gui = "\n".join(
+        str(step.get("run", "")) for step in jobs["experimental-ubuntu-settings-gui"]["steps"]
+    )
+    assert "xvfb-run -a python -m pytest -q -W error settings_gui/tests" in ubuntu_gui
+    assert "desktop-file-utils" in ubuntu_gui
+    gui_upload = next(
+        step
+        for step in jobs["experimental-ubuntu-settings-gui"]["steps"]
+        if step.get("name") == "Upload Ubuntu GUI evidence"
+    )
+    assert gui_upload["with"]["path"].splitlines() == [
+        "/tmp/a77gui/tests.xml",
+        "/tmp/a77gui/visual",
+    ]
     assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for _action, revision in action_references)
     assert "# actions/checkout v7.0.0" in workflow
     assert "# actions/setup-python v6.2.0" in workflow

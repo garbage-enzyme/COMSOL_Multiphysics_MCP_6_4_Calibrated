@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from development_kit.tests.platform_fixtures import platform_test_root
+
 from comsol_mcp.settings import (
     MODEL_MANAGER_ENABLED_ENV,
     SHARED_SERVER_ENV,
@@ -173,7 +175,7 @@ def test_read_operations_work_with_the_gate_off(operation: str) -> None:
     gate = load_settings({})["model_manager"]["enabled"]
     kwargs: dict[str, object] = {"write_enabled": gate}
     if operation == "download":
-        kwargs["destination"] = "D:/downloads/cell.mph"
+        kwargs["destination"] = str(platform_test_root("downloads/cell.mph"))
     request = build_request(operation=operation, uri=VALID_URI, **kwargs)  # type: ignore[arg-type]
     assert request.write_enabled is False
 

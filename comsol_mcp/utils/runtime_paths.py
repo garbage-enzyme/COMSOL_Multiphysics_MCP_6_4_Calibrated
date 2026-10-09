@@ -41,6 +41,13 @@ def default_runtime_dir(environ: dict[str, str] | None = None) -> Path:
         program_data = environment.get("PROGRAMDATA")
         if program_data:
             return Path(program_data) / "comsol_mcp_runtime"
+    else:
+        from comsol_mcp.xdg_paths import project_path
+
+        root = project_path("state", source) / "runtime"
+        if not str(root).isascii():
+            raise RuntimeError("set COMSOL_MCP_RUNTIME_DIR to an absolute ASCII root")
+        return root
     temporary = Path(tempfile.gettempdir())
     if not str(temporary).isascii():
         raise RuntimeError(

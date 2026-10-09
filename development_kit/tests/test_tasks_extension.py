@@ -560,6 +560,7 @@ def test_the_interceptor_passes_through_without_opt_in(tmp_path: Path, tool_name
             self.arguments: dict[str, Any] = {"job_type": "staged_sweep"}
 
     class Context:
+        protocol_version = TASKS_WIRE_GENERATION
         meta = None
 
     ordinary = {"content": [{"type": "text", "text": "ordinary"}], "resultType": "complete"}
@@ -589,6 +590,7 @@ def test_the_interceptor_returns_a_task_only_for_an_opted_in_capable_call(
         arguments = {"job_type": "staged_sweep", "parameter_values": [1.0]}
 
     class Context:
+        protocol_version = TASKS_WIRE_GENERATION
         meta = {
             "io.modelcontextprotocol/clientCapabilities": {"extensions": OPT_IN},
             "io.modelcontextprotocol/clientInfo": {"name": "tasks-client", "version": "9.9"},
@@ -618,6 +620,7 @@ def test_an_opted_in_call_to_another_tool_is_not_task_shaped(tmp_path: Path) -> 
         arguments = {"job_id": "job-0001"}
 
     class Context:
+        protocol_version = TASKS_WIRE_GENERATION
         meta = {"io.modelcontextprotocol/clientCapabilities": {"extensions": OPT_IN}}
 
     ordinary = {"resultType": "complete", "content": []}
@@ -668,3 +671,26 @@ def test_a_terminal_task_keeps_its_durable_row(bridge: TasksBridge) -> None:
     _engine(bridge).set_state(row.job_id, "completed")
     assert bridge.get_task(handle["taskId"])["status"] in TERMINAL_TASK_STATUSES
     assert bridge._store.latest_for_task(handle["taskId"]) is not None
+
+
+@pytest.mark.parametrize("revision", [None, "2025-11-25", "2025-03-26"])
+def test_legacy_revision_cannot_receive_a_stable_task_envelope(tmp_path, revision):
+    from types import SimpleNamespace
+
+    engine = FakeEngine()
+    bridge = TasksBridge(engine=engine, store=TasksMappingStore(tmp_path / "tasks"), owner="local")
+    extension = build_tasks_extension(bridge)
+    ordinary = {"resultType": "complete", "content": []}
+
+    async def call_next(ctx):
+        return ordinary
+
+    context = SimpleNamespace(
+        protocol_version=revision,
+        meta={"io.modelcontextprotocol/clientCapabilities": {"extensions": OPT_IN}},
+    )
+    params = SimpleNamespace(name="job_submit", arguments={"spec": {"job_type": "staged_sweep"}})
+    result = asyncio.run(extension.intercept_tool_call(params, context, call_next))
+    assert result == ordinary
+    assert not engine.submit_calls
+    assert not (tmp_path / "tasks").exists()

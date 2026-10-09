@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import _winapi
 import hashlib
 import inspect
 import json
@@ -19,6 +18,7 @@ from src.jobs.validation_collectors import execute_field_evidence_collector
 from src.jobs.validation_matrix import normalize_validation_matrix_spec
 from src.jobs.validation_rows import append_validation_row, read_validation_rows
 
+from development_kit.tests.platform_fixtures import create_directory_link, remove_directory_link
 from development_kit.tests.test_field_matrix import _field_inputs
 
 
@@ -291,7 +291,7 @@ def test_pair_assembler_rejects_junctioned_publication_parent(tmp_path):
     outside = tmp_path / "outside-review"
     outside.mkdir()
     visual_root = directory / "artifacts" / "visual-review"
-    _winapi.CreateJunction(str(outside), str(visual_root))
+    create_directory_link(str(outside), str(visual_root))
     try:
         with pytest.raises(ValueError, match="link or junction"):
             assemble_validation_matrix_field_review(
@@ -305,7 +305,7 @@ def test_pair_assembler_rejects_junctioned_publication_parent(tmp_path):
         assert list(outside.iterdir()) == []
     finally:
         try:
-            visual_root.rmdir()
+            remove_directory_link(visual_root)
         except OSError:
             pass
         shutil.rmtree(outside, ignore_errors=True)

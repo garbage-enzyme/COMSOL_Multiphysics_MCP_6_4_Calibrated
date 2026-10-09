@@ -1,11 +1,13 @@
 # COMSOL MCP Server for COMSOL 6.4
 
+Version 0.7.7 adds [experimental solver-free Ubuntu support](docs/experimental_linux/README.md) and [explicit strict wavelength validation](docs/strict_wavelength/README.md). Windows remains the native solver platform. Read the platform limits before invoking a tool.
+
 English | [中文](README_CN.md)
 
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.6](https://img.shields.io/badge/release-0.7.6-blue)
+![Release: 0.7.7](https://img.shields.io/badge/release-0.7.7-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -87,15 +89,20 @@ job engine, so a client that opts in can start a long simulation and poll it
 through `tasks/get` instead of blocking. The adapter adds no second scheduler:
 `job_submit` is the only task-capable tool, a task handle is emitted only when
 *that* request declares the extension, and an identical retry returns the
-existing durable job rather than launching another one. Task TTL limits
-addressability only — it never abandons a running solve and never erases a
-scientific receipt — and a cancellation acknowledgement is reported separately
-from verified cleanup. Clients that do not opt in keep using the ordinary
+existing durable job rather than launching another one.
+Task TTL permits later expiry. The current implementation retains mappings after TTL, including completed tasks.
+It never abandons a running solve or erases scientific evidence.
+Cancellation acknowledgement remains separate from verified cleanup. Clients that do not opt in keep using the ordinary
 `job_submit`/`job_status`/`job_tail`/`job_cancel`/`job_resume` tools unchanged,
 and the experimental `2025-11-25` Tasks dialect is refused rather than
 reinterpreted.
 
-The initialize response also carries a short safety instruction through the
+The 2026-07-28 core revision uses per-request metadata instead of an initialize handshake.
+The client must declare the protocol revision and client capabilities on each request.
+Older revisions retain initialize negotiation and ordinary tool results.
+The Tasks path uses the same registered submission guards as ordinary `job_submit`.
+
+The legacy initialize response also carries a short safety instruction through the
 legacy MCP initialize schema: discover capabilities and preflight first, require
 an explicit user request before start/solve/mutation, keep source models
 read-only, and separate execution success from evidence integrity and scientific

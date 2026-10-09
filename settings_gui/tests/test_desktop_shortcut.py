@@ -32,6 +32,7 @@ def test_shell_icon_location_spacing_is_canonicalized() -> None:
     )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows PE GUI subsystem entry")
 def test_installed_shortcut_entry_prefers_the_gui_subsystem_launcher(
     tmp_path: Path,
     monkeypatch,
@@ -120,6 +121,7 @@ def test_shell_mismatch_diagnostics_include_only_field_names(tmp_path: Path) -> 
     )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows CommandLineToArgvW diagnostic")
 def test_settings_token_mismatch_has_specific_diagnostic(tmp_path: Path) -> None:
     expected = ShortcutSpec(
         target=tmp_path / "python.exe",
@@ -386,6 +388,7 @@ def test_initial_create_refuses_a_shortcut_that_appears_at_publish(
 
 
 def test_powershell_timeout_is_normalized(monkeypatch) -> None:
+    monkeypatch.setattr(shortcut_module, "_powershell_executable", lambda: Path("pwsh"))
     monkeypatch.setattr(
         shortcut_module.subprocess,
         "run",

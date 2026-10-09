@@ -6,6 +6,7 @@ import ctypes
 import hashlib
 import math
 import os
+from pathlib import Path
 from ctypes import wintypes
 from typing import Any
 
@@ -197,6 +198,23 @@ def inspect_identity(identity: dict[str, Any]) -> dict[str, Any]:
     """Return an exact identity verdict without acting on a process."""
     state, reason = process_identity_state(identity)
     return {"identity": identity, "state": state, "reason": reason}
+
+
+def controlled_leaf_worker_proved(spec: dict, state: dict, worker: dict) -> bool:
+    """Recognize only the fixed internal sequence worker, which never spawns children.
+
+    This is a test-driver contract, not native process-tree containment.
+    Public production submission never accepts this job type.
+    """
+    contract = state.get("controlled_leaf_worker")
+    return bool(
+        spec.get("job_type") == "test_sequence"
+        and isinstance(contract, dict)
+        and contract.get("kind") == "sequence_leaf_v1"
+        and contract.get("worker") == worker
+        and contract.get("driver_sha256")
+        == hashlib.sha256(Path(__file__).with_name("sequence_worker.py").read_bytes()).hexdigest()
+    )
 
 
 def capture_owned_descendants(worker_identity: dict[str, Any]) -> dict[str, Any]:

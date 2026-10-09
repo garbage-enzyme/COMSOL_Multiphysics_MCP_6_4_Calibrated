@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import ctypes
+import errno
 import hashlib
 import io
 import json
@@ -267,7 +268,7 @@ def _windows_unlink_opened_file_if(
         raise OSError("opened-identity deletion requires Windows")
     import msvcrt
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     create_file = kernel32.CreateFileW
     create_file.argtypes = (
         ctypes.c_wchar_p,
@@ -293,7 +294,9 @@ def _windows_unlink_opened_file_if(
         return False
     descriptor: int | None = None
     try:
-        descriptor = msvcrt.open_osfhandle(int(handle), os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        descriptor = int(
+            getattr(msvcrt, "open_osfhandle")(int(handle), os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        )
         handle = None
         opened = os.fstat(descriptor)
         if not stat.S_ISREG(opened.st_mode) or not predicate(descriptor, opened):
@@ -311,7 +314,7 @@ def _windows_unlink_opened_file_if(
         )
         set_information.restype = ctypes.c_int
         disposition = FileDispositionInfo(1)
-        os_handle = msvcrt.get_osfhandle(descriptor)
+        os_handle = getattr(msvcrt, "get_osfhandle")(descriptor)
         return bool(
             set_information(
                 ctypes.c_void_p(os_handle),
@@ -341,6 +344,87 @@ def _read_descriptor_bounded(descriptor: int, maximum: int) -> bytes:
     return bytes(chunks)
 
 
+def _posix_unlink_opened_file_if(
+    path: Path,
+    predicate: Callable[[int, os.stat_result], bool],
+) -> bool:
+    """Quarantine and verify the moved inode before deleting it on POSIX.
+
+    A raced replacement is restored without overwriting a newer destination.
+    If restoration conflicts, retain the quarantined file and report uncertainty.
+    """
+    descriptor: int | None = None
+    directory: int | None = None
+    quarantine: str | None = None
+    quarantine_fd: int | None = None
+    moved = False
+    restoration_attempted = False
+    directory_flags = os.O_RDONLY | int(getattr(os, "O_DIRECTORY")) | int(getattr(os, "O_NOFOLLOW"))
+    read_flags = os.O_RDONLY | int(getattr(os, "O_NOFOLLOW"))
+
+    def restore() -> None:
+        nonlocal moved, restoration_attempted
+        restoration_attempted = True
+        try:
+            os.link(
+                "owned",
+                path.name,
+                src_dir_fd=quarantine_fd,
+                dst_dir_fd=directory,
+                follow_symlinks=False,
+            )
+        except OSError as exc:
+            raise RuntimeError(
+                "identity cleanup conflict: a quarantined replacement was retained"
+            ) from exc
+        os.unlink("owned", dir_fd=quarantine_fd)
+        moved = False
+
+    try:
+        directory = os.open(path.parent, directory_flags)
+        descriptor = os.open(path.name, read_flags, dir_fd=directory)
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or not predicate(descriptor, opened):
+            return False
+        quarantine = f".unlink-{uuid.uuid4().hex}"
+        os.mkdir(quarantine, mode=0o700, dir_fd=directory)
+        quarantine_fd = os.open(quarantine, directory_flags, dir_fd=directory)
+        os.rename(path.name, "owned", src_dir_fd=directory, dst_dir_fd=quarantine_fd)
+        moved = True
+        observed = os.stat("owned", dir_fd=quarantine_fd, follow_symlinks=False)
+        same = (observed.st_dev, observed.st_ino) == (opened.st_dev, opened.st_ino)
+        if same and predicate(descriptor, os.fstat(descriptor)):
+            os.unlink("owned", dir_fd=quarantine_fd)
+            moved = False
+            os.fsync(directory)
+            return True
+        restore()
+        return False
+    except FileNotFoundError:
+        if moved and not restoration_attempted:
+            restore()
+        return False
+    except BaseException:
+        if moved and not restoration_attempted:
+            restore()
+        raise
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if quarantine_fd is not None:
+            os.close(quarantine_fd)
+        if quarantine is not None and not moved and directory is not None:
+            os.rmdir(quarantine, dir_fd=directory)
+        if directory is not None:
+            os.close(directory)
+
+
+def _unlink_opened_file_if(path: Path, predicate: Callable[[int, os.stat_result], bool]) -> bool:
+    if os.name == "nt":
+        return _windows_unlink_opened_file_if(path, predicate)
+    return _posix_unlink_opened_file_if(path, predicate)
+
+
 def unlink_if_content(path: str | Path, expected: bytes, *, allow_prefix: bool = False) -> bool:
     """Remove only an opened regular file whose bytes match the expected publication."""
     if not isinstance(expected, bytes):
@@ -351,13 +435,13 @@ def unlink_if_content(path: str | Path, expected: bytes, *, allow_prefix: bool =
         observed = _read_descriptor_bounded(descriptor, len(expected))
         return expected.startswith(observed) if allow_prefix else observed == expected
 
-    return _windows_unlink_opened_file_if(target, matches)
+    return _unlink_opened_file_if(target, matches)
 
 
 def unlink_if_identity(path: str | Path, identity: tuple[int, int]) -> bool:
     """Remove only the exact file identity published by the current operation."""
     target = Path(path)
-    return _windows_unlink_opened_file_if(
+    return _unlink_opened_file_if(
         target,
         lambda _descriptor, opened: (opened.st_dev, opened.st_ino) == identity,
     )
@@ -563,3 +647,22 @@ __all__ = [
     "unlink_if_content",
     "unlink_if_identity",
 ]
+
+
+def publish_directory_exclusive(source: Path, destination: Path) -> None:
+    """Publish a directory atomically without replacing a competing directory."""
+    if os.name == "nt":
+        os.rename(source, destination)
+        return
+    libc = ctypes.CDLL(None, use_errno=True)
+    rename = getattr(libc, "renameat2", None)
+    if rename is None:
+        raise RuntimeError("exclusive directory publication is unavailable")
+    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    rename.restype = ctypes.c_int
+    # AT_FDCWD and RENAME_NOREPLACE. Linux refuses even an empty destination.
+    if rename(-100, os.fsencode(source), -100, os.fsencode(destination), 1):
+        code = ctypes.get_errno()
+        if code in {errno.EEXIST, errno.ENOTEMPTY}:
+            raise FileExistsError(code, os.strerror(code), str(destination))
+        raise OSError(code, os.strerror(code), str(destination))

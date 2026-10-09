@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 import sys
 import uuid
@@ -12,13 +11,12 @@ import pytest
 
 from development_kit.scripts import robust_gradient_ladder_licensed_gate as gate
 from development_kit.scripts import verify_robust_gradient_ladder_receipt as verifier
+from development_kit.tests.platform_fixtures import platform_test_root
 
 
 @pytest.fixture
 def gate_root(tmp_path: Path):
-    root = (
-        Path("D:/mcp_tests") / f"l{uuid.uuid4().hex[:8]}" if os.name == "nt" else tmp_path / "a72s4"
-    )
+    root = platform_test_root() / f"l{uuid.uuid4().hex[:8]}"
     root.mkdir(parents=True, exist_ok=False)
     try:
         yield root

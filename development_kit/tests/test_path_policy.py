@@ -335,6 +335,7 @@ def test_wave_optics_read_arguments_are_enforced_by_recommended_profiles(
     assert rejected["path_policy"]["accepted"] is False
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows delete-denying read handles")
 def test_guarded_model_read_pins_file_and_ancestors_until_consumer_returns(
     tmp_path, ascii_root, monkeypatch
 ):
@@ -422,6 +423,7 @@ def test_read_pin_rejects_replacement_between_validation_and_acquisition(tmp_pat
             pytest.fail("replacement identity must not reach the consumer")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows delete-denying ancestor handles")
 def test_guarded_write_pins_ancestors_but_allows_file_creation(tmp_path, ascii_root, monkeypatch):
     _policy_value, read_root, write_root = _policy(tmp_path, ascii_root)
     target = write_root / "saved.mph"

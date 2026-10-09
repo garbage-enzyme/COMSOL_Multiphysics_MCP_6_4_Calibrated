@@ -65,7 +65,7 @@ _DEFAULT_USER_DIR = "comsol_mcp"
 _DEFAULT_LOCAL_ROOT = f"{_LOCALAPPDATA_REFERENCE}/{_DEFAULT_USER_DIR}"
 _DEFAULT_PROGRAM_ROOT = f"{_PROGRAMDATA_REFERENCE}/{_DEFAULT_USER_DIR}"
 
-_DEFAULT_SETTINGS = {
+_DEFAULT_SETTINGS: dict[str, Any] = {
     "schema_name": SETTINGS_SCHEMA,
     "schema_version": SETTINGS_VERSION,
     "profile": {"name": "core"},
@@ -405,6 +405,26 @@ def _normalize(
     errors: list[dict[str, str]],
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    defaults = _DEFAULT_SETTINGS
+    if os.name != "nt":
+        try:
+            defaults = default_settings_document(environ=environment)
+        except (OSError, RuntimeError, SettingsError) as exc:
+            _record_error(errors, "settings.environment", exc)
+            defaults = deepcopy(_DEFAULT_SETTINGS)
+        if isinstance(document, dict):
+            document = deepcopy(document)
+            for group, field in (
+                ("runtime", "directory"),
+                ("paths", "model_read_roots"),
+                ("paths", "artifact_write_root"),
+            ):
+                supplied = document.get(group)
+                if (
+                    isinstance(supplied, dict)
+                    and supplied.get(field) == _DEFAULT_SETTINGS[group][field]
+                ):
+                    supplied[field] = deepcopy(defaults[group][field])
     document = _migrate_legacy_document(document)
     if not isinstance(document, dict):
         _record_error(
@@ -418,7 +438,7 @@ def _normalize(
     except SettingsError as exc:
         _record_error(errors, "settings.comments", exc)
 
-    top = _object(document, location="settings", defaults=_DEFAULT_SETTINGS, errors=errors)
+    top = _object(document, location="settings", defaults=defaults, errors=errors)
     schema_name = _read_value(
         top["schema_name"],
         location="settings.schema_name",
@@ -445,13 +465,13 @@ def _normalize(
     profile = _object(
         top["profile"],
         location="settings.profile",
-        defaults=_DEFAULT_SETTINGS["profile"],
+        defaults=defaults["profile"],
         errors=errors,
     )
     name = _read_value(
         profile["name"],
         location="settings.profile.name",
-        default=_DEFAULT_SETTINGS["profile"]["name"],
+        default=defaults["profile"]["name"],
         parser=_parse_profile,
         errors=errors,
     )
@@ -459,13 +479,13 @@ def _normalize(
     runtime = _object(
         top["runtime"],
         location="settings.runtime",
-        defaults=_DEFAULT_SETTINGS["runtime"],
+        defaults=defaults["runtime"],
         errors=errors,
     )
     runtime_dir = _read_value(
         runtime["directory"],
         location="settings.runtime.directory",
-        default=_DEFAULT_SETTINGS["runtime"]["directory"],
+        default=defaults["runtime"]["directory"],
         parser=lambda value: _absolute_string(
             value,
             location="settings.runtime.directory",
@@ -478,7 +498,7 @@ def _normalize(
     jobs_dir = _read_value(
         runtime["jobs_directory"],
         location="settings.runtime.jobs_directory",
-        default=_DEFAULT_SETTINGS["runtime"]["jobs_directory"],
+        default=defaults["runtime"]["jobs_directory"],
         parser=lambda value: _absolute_string(
             value,
             location="settings.runtime.jobs_directory",
@@ -492,20 +512,20 @@ def _normalize(
     paths = _object(
         top["paths"],
         location="settings.paths",
-        defaults=_DEFAULT_SETTINGS["paths"],
+        defaults=defaults["paths"],
         errors=errors,
     )
     normalized_roots = _read_value(
         paths["model_read_roots"],
         location="settings.paths.model_read_roots",
-        default=_DEFAULT_SETTINGS["paths"]["model_read_roots"],
+        default=defaults["paths"]["model_read_roots"],
         parser=lambda value: _parse_roots(value, environment=environment),
         errors=errors,
     )
     artifact_root = _read_value(
         paths["artifact_write_root"],
         location="settings.paths.artifact_write_root",
-        default=_DEFAULT_SETTINGS["paths"]["artifact_write_root"],
+        default=defaults["paths"]["artifact_write_root"],
         parser=lambda value: _absolute_string(
             value,
             location="settings.paths.artifact_write_root",
@@ -519,26 +539,26 @@ def _normalize(
     shared = _object(
         top["shared_server"],
         location="settings.shared_server",
-        defaults=_DEFAULT_SETTINGS["shared_server"],
+        defaults=defaults["shared_server"],
         errors=errors,
     )
     discovery = _object(
         top["discovery"],
         location="settings.discovery",
-        defaults=_DEFAULT_SETTINGS["discovery"],
+        defaults=defaults["discovery"],
         errors=errors,
     )
     discovery_pagination_enabled = _read_value(
         discovery["pagination_enabled"],
         location="settings.discovery.pagination_enabled",
-        default=_DEFAULT_SETTINGS["discovery"]["pagination_enabled"],
+        default=defaults["discovery"]["pagination_enabled"],
         parser=lambda value: _parse_bool(value, location="settings.discovery.pagination_enabled"),
         errors=errors,
     )
     shared_enabled = _read_value(
         shared["enabled"],
         location="settings.shared_server.enabled",
-        default=_DEFAULT_SETTINGS["shared_server"]["enabled"],
+        default=defaults["shared_server"]["enabled"],
         parser=lambda value: _parse_bool(value, location="settings.shared_server.enabled"),
         errors=errors,
     )
@@ -550,20 +570,20 @@ def _normalize(
     model_manager = _object(
         top["model_manager"],
         location="settings.model_manager",
-        defaults=_DEFAULT_SETTINGS["model_manager"],
+        defaults=defaults["model_manager"],
         errors=errors,
     )
     model_manager_enabled = _read_value(
         model_manager["enabled"],
         location="settings.model_manager.enabled",
-        default=_DEFAULT_SETTINGS["model_manager"]["enabled"],
+        default=defaults["model_manager"]["enabled"],
         parser=lambda value: _parse_bool(value, location="settings.model_manager.enabled"),
         errors=errors,
     )
     model_manager_upload_enabled = _read_value(
         model_manager["upload_enabled"],
         location="settings.model_manager.upload_enabled",
-        default=_DEFAULT_SETTINGS["model_manager"]["upload_enabled"],
+        default=defaults["model_manager"]["upload_enabled"],
         parser=lambda value: _parse_bool(value, location="settings.model_manager.upload_enabled"),
         errors=errors,
     )
@@ -571,13 +591,13 @@ def _normalize(
     evidence = _object(
         top["evidence_integrity"],
         location="settings.evidence_integrity",
-        defaults=_DEFAULT_SETTINGS["evidence_integrity"],
+        defaults=defaults["evidence_integrity"],
         errors=errors,
     )
     checks = _object(
         evidence["checks"],
         location="settings.evidence_integrity.checks",
-        defaults=_DEFAULT_SETTINGS["evidence_integrity"]["checks"],
+        defaults=defaults["evidence_integrity"]["checks"],
         errors=errors,
     )
     normalized_checks = {
@@ -597,13 +617,13 @@ def _normalize(
     manuals = _object(
         top["manuals"],
         location="settings.manuals",
-        defaults=_DEFAULT_SETTINGS["manuals"],
+        defaults=defaults["manuals"],
         errors=errors,
     )
     manuals_root = _read_value(
         manuals["root"],
         location="settings.manuals.root",
-        default=_DEFAULT_SETTINGS["manuals"]["root"],
+        default=defaults["manuals"]["root"],
         parser=lambda value: _absolute_string(
             value,
             location="settings.manuals.root",
@@ -616,20 +636,20 @@ def _normalize(
     lexical_docs = _object(
         top["lexical_docs"],
         location="settings.lexical_docs",
-        defaults=_DEFAULT_SETTINGS["lexical_docs"],
+        defaults=defaults["lexical_docs"],
         errors=errors,
     )
     lexical_docs_enabled = _read_value(
         lexical_docs["enabled"],
         location="settings.lexical_docs.enabled",
-        default=_DEFAULT_SETTINGS["lexical_docs"]["enabled"],
+        default=defaults["lexical_docs"]["enabled"],
         parser=lambda value: _parse_bool(value, location="settings.lexical_docs.enabled"),
         errors=errors,
     )
     lexical_index = _read_value(
         lexical_docs["index_path"],
         location="settings.lexical_docs.index_path",
-        default=_DEFAULT_SETTINGS["lexical_docs"]["index_path"],
+        default=defaults["lexical_docs"]["index_path"],
         parser=lambda value: _absolute_string(
             value,
             location="settings.lexical_docs.index_path",
@@ -643,13 +663,13 @@ def _normalize(
     semantic = _object(
         top["semantic_docs"],
         location="settings.semantic_docs",
-        defaults=_DEFAULT_SETTINGS["semantic_docs"],
+        defaults=defaults["semantic_docs"],
         errors=errors,
     )
     semantic_root = _read_value(
         semantic["root"],
         location="settings.semantic_docs.root",
-        default=_DEFAULT_SETTINGS["semantic_docs"]["root"],
+        default=defaults["semantic_docs"]["root"],
         parser=lambda value: _absolute_string(
             value,
             location="settings.semantic_docs.root",
@@ -661,7 +681,7 @@ def _normalize(
     model_path = _read_value(
         semantic["model_path"],
         location="settings.semantic_docs.model_path",
-        default=_DEFAULT_SETTINGS["semantic_docs"]["model_path"],
+        default=defaults["semantic_docs"]["model_path"],
         parser=lambda value: _absolute_string(
             value,
             location="settings.semantic_docs.model_path",
@@ -674,13 +694,13 @@ def _normalize(
     ownership = _object(
         top["ownership"],
         location="settings.ownership",
-        defaults=_DEFAULT_SETTINGS["ownership"],
+        defaults=defaults["ownership"],
         errors=errors,
     )
     owner = _read_value(
         ownership["owner"],
         location="settings.ownership.owner",
-        default=_DEFAULT_SETTINGS["ownership"]["owner"],
+        default=defaults["ownership"]["owner"],
         parser=_parse_owner,
         errors=errors,
     )
@@ -688,13 +708,13 @@ def _normalize(
     java = _object(
         top["java"],
         location="settings.java",
-        defaults=_DEFAULT_SETTINGS["java"],
+        defaults=defaults["java"],
         errors=errors,
     )
     java_home = _read_value(
         java["java_home"],
         location="settings.java.java_home",
-        default=_DEFAULT_SETTINGS["java"]["java_home"],
+        default=defaults["java"]["java_home"],
         parser=lambda value: _absolute_string(
             value,
             location="settings.java.java_home",
@@ -706,7 +726,7 @@ def _normalize(
     jdk_home = _read_value(
         java["jdk_home"],
         location="settings.java.jdk_home",
-        default=_DEFAULT_SETTINGS["java"]["jdk_home"],
+        default=defaults["java"]["jdk_home"],
         parser=lambda value: _absolute_string(
             value,
             location="settings.java.jdk_home",
@@ -719,13 +739,13 @@ def _normalize(
     comsol = _object(
         top["comsol"],
         location="settings.comsol",
-        defaults=_DEFAULT_SETTINGS["comsol"],
+        defaults=defaults["comsol"],
         errors=errors,
     )
     installation_root = _read_value(
         comsol["installation_root"],
         location="settings.comsol.installation_root",
-        default=_DEFAULT_SETTINGS["comsol"]["installation_root"],
+        default=defaults["comsol"]["installation_root"],
         parser=lambda value: _absolute_string(
             value,
             location="settings.comsol.installation_root",
@@ -738,27 +758,27 @@ def _normalize(
     gui = _object(
         top["gui"],
         location="settings.gui",
-        defaults=_DEFAULT_SETTINGS["gui"],
+        defaults=defaults["gui"],
         errors=errors,
     )
     language = _read_value(
         gui["language"],
         location="settings.gui.language",
-        default=_DEFAULT_SETTINGS["gui"]["language"],
+        default=defaults["gui"]["language"],
         parser=_parse_gui_language,
         errors=errors,
     )
     semantic_enabled = _read_value(
         semantic["enabled"],
         location="settings.semantic_docs.enabled",
-        default=_DEFAULT_SETTINGS["semantic_docs"]["enabled"],
+        default=defaults["semantic_docs"]["enabled"],
         parser=lambda value: _parse_bool(value, location="settings.semantic_docs.enabled"),
         errors=errors,
     )
     scale = _read_value(
         gui["scale"],
         location="settings.gui.scale",
-        default=_DEFAULT_SETTINGS["gui"]["scale"],
+        default=defaults["gui"]["scale"],
         parser=_parse_gui_scale,
         errors=errors,
     )
@@ -851,6 +871,29 @@ def default_settings_document(
 ) -> dict[str, Any]:
     """Return canonical Unicode-safe user and ASCII-safe machine defaults."""
     environment = os.environ if environ is None else environ
+    if os.name != "nt":
+        from comsol_mcp.xdg_paths import project_path
+
+        try:
+            data_root = project_path("data", environment)
+            state_root = project_path("state", environment)
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+        local_root = data_root if user_root is None else Path(user_root).expanduser()
+        machine_root = state_root if program_root is None else Path(program_root).expanduser()
+        if not local_root.is_absolute() or not machine_root.is_absolute():
+            raise SettingsError("default settings roots must be absolute paths")
+        if not str(machine_root).isascii() or not str(data_root / "artifacts").isascii():
+            raise SettingsError(
+                "default runtime and artifact roots must contain ASCII characters only"
+            )
+        document = deepcopy(_DEFAULT_SETTINGS)
+        document["runtime"]["directory"] = str(machine_root / "runtime")
+        document["paths"]["model_read_roots"] = [str(local_root / "models")]
+        document["paths"]["artifact_write_root"] = str(
+            data_root / "artifacts" if program_root is None else machine_root / "artifacts"
+        )
+        return document
     local_root = (
         _local_appdata_root(environment, None) / _DEFAULT_USER_DIR
         if user_root is None
@@ -906,9 +949,17 @@ def resolve_settings_location(
             setup_required=False,
         )
 
-    user_target = (
-        _local_appdata_root(environment, local_appdata) / _DEFAULT_USER_DIR / "settings.json"
-    )
+    if os.name == "nt" or local_appdata is not None:
+        user_target = (
+            _local_appdata_root(environment, local_appdata) / _DEFAULT_USER_DIR / "settings.json"
+        )
+    else:
+        from comsol_mcp.xdg_paths import project_path
+
+        try:
+            user_target = project_path("config", environment) / "settings.json"
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
     if user_target.is_file():
         normalized = _validate_file(user_target)
         return SettingsLocation(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -28,8 +29,23 @@ class _LazyJobManager:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._get(), name)
 
+    def submit(self, spec: dict[str, Any]) -> Any:
+        from comsol_mcp.platform_support import require_native_solver
+
+        require_native_solver()
+        return self._get().submit(spec)
+
+    def resume(self, job_id: str) -> Any:
+        from comsol_mcp.platform_support import require_native_solver
+
+        require_native_solver()
+        return self._get().resume(job_id)
+
 
 job_manager: Any = _LazyJobManager()
+_TASK_CANCEL_EXPECTED_ATTEMPT: ContextVar[int | None] = ContextVar(
+    "tasks_cancel_expected_attempt", default=None
+)
 
 
 def _job_point_inventory(spec: dict[str, Any]) -> dict[str, Any]:
@@ -182,9 +198,10 @@ def _submit_job(
     *,
     profile_name: str,
     shared_enabled: bool,
-    manager: Any = job_manager,
+    manager: Any = None,
     session_manager: Any = None,
 ) -> dict[str, Any]:
+    manager = job_manager if manager is None else manager
     spec = validate_job_submission(spec)
     from comsol_mcp.jobs.manager import JobLaunchError
 
@@ -360,7 +377,10 @@ def register_job_tools(mcp: MCPServer) -> None:
         """Cancel one owned job; terminal cancellation requires verified cleanup."""
         return _job_call(
             "job_cancel",
-            lambda: job_manager.cancel(job_id),
+            lambda: job_manager.cancel(
+                job_id, **({"expected_attempt": _TASK_CANCEL_EXPECTED_ATTEMPT.get()}
+                           if _TASK_CANCEL_EXPECTED_ATTEMPT.get() is not None else {})
+            ),
             job_id=job_id,
         )
 

@@ -45,6 +45,7 @@ from comsol_mcp.evidence.surrogate_evidence import (
 from comsol_mcp.surrogate.export import build_export_manifest
 from comsol_mcp.surrogate.registry import build_model_card, build_registry_entry
 from development_kit.tests.mcp_test_support import decode_tool_result
+from development_kit.tests.platform_fixtures import platform_test_root
 
 ROOT = Path(__file__).parents[2]
 
@@ -119,7 +120,7 @@ def _write(path: Path, document: dict) -> Path:
 @pytest.fixture()
 def owned_root(tmp_path_factory, monkeypatch):
     """An ASCII owned artifact root, which the path policy requires."""
-    root = Path("D:/mcp_tests/a75s10t")
+    root = platform_test_root("a75s10t")
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("COMSOL_MCP_ARTIFACT_WRITE_ROOT", str(root))
     monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(root))
@@ -1194,7 +1195,7 @@ def test_dispatch_validates_real_documents(owned_root) -> None:
 
 
 def test_dispatch_refuses_a_path_outside_the_owned_root(owned_root) -> None:
-    outside = Path("D:/mcp_tests/a75s10outside")
+    outside = platform_test_root("a75s10outside")
     outside.mkdir(parents=True, exist_ok=True)
     target = outside / "data.csv"
     target.write_bytes(b"a,b\r\n1,2\r\n")
@@ -1264,6 +1265,7 @@ def test_cold_discovery_loads_no_heavy_optional_module(owned_root) -> None:
     code = """
 import asyncio, json, sys
 from pathlib import Path
+from development_kit.tests.platform_fixtures import platform_test_root
 from src.server import create_server
 server = create_server('surrogate-cold', profile='core')
 names = sorted(t.name for t in asyncio.run(server.list_tools()))

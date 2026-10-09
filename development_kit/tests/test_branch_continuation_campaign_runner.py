@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -255,6 +256,7 @@ def test_transient_append_failure_quarantines_and_notifies_fault_hook(tmp_path, 
     assert calls.count("angle-0") == 2
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows legacy generated-path budget")
 def test_state_directory_stays_inside_the_windows_legacy_path_budget():
     root = Path("D:/comsol_runtime/jobs") / ("job-" + "a" * 32)
     directory = branch_continuation_state_directory(root, 7)

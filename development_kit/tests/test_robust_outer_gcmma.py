@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 
+from development_kit.tests.platform_fixtures import platform_test_root
+
 import numpy as np
 import pytest
 
@@ -21,7 +23,7 @@ def _identity() -> dict:
         "package_version": "0.3.1",
         "distribution_license": "GPL-3.0-or-later",
         "distribution_sha256": "4" * 64,
-        "distribution_path": "D:\\mcp_tests\\mmapy.whl",
+        "distribution_path": str(platform_test_root("mmapy.whl")),
     }
 
 

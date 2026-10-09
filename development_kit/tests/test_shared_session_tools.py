@@ -91,6 +91,10 @@ def test_shared_attach_public_schema_requires_confirmation():
 
 
 def test_shared_preflight_samples_across_a_bounded_settling_interval(monkeypatch):
+    from comsol_mcp import platform_support
+
+    # Exercise delegation through an admitted synthetic native lane.
+    monkeypatch.setattr(platform_support, "native_solver_enabled", lambda: True)
     import src.tools.shared_session as module
 
     events = []
@@ -124,6 +128,10 @@ def test_shared_preflight_samples_across_a_bounded_settling_interval(monkeypatch
 
 
 def test_shared_status_uses_manager_without_constructing_client(monkeypatch):
+    from comsol_mcp import platform_support
+
+    # Exercise delegation through an admitted synthetic native lane.
+    monkeypatch.setattr(platform_support, "native_solver_enabled", lambda: True)
     server = _shared_server("shared-status")
     import src.tools.shared_session as module
 
@@ -148,6 +156,10 @@ def test_shared_status_uses_manager_without_constructing_client(monkeypatch):
 
 
 def test_shared_attach_adapter_propagates_and_enforces_confirmation(monkeypatch):
+    from comsol_mcp import platform_support
+
+    # Exercise delegation through an admitted synthetic native lane.
+    monkeypatch.setattr(platform_support, "native_solver_enabled", lambda: True)
     server = _shared_server("shared-confirmation")
     import src.tools.shared_session as module
 
@@ -197,6 +209,10 @@ def test_shared_attach_adapter_propagates_and_enforces_confirmation(monkeypatch)
 
 
 def test_shared_model_guard_tools_delegate_exact_caller_evidence(monkeypatch):
+    from comsol_mcp import platform_support
+
+    # Exercise delegation through an admitted synthetic native lane.
+    monkeypatch.setattr(platform_support, "native_solver_enabled", lambda: True)
     monkeypatch.setenv(SHARED_SERVER_FEATURE_ENV, "true")
     server = create_server("shared-model-guards", profile="core")
     import src.tools.shared_session as module

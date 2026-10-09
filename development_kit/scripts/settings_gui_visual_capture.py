@@ -6,6 +6,7 @@ import argparse
 import ctypes
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -19,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from PIL import ImageGrab
+from PIL import Image, ImageGrab
 
 from comsol_mcp.settings import default_settings_document
 from settings_gui.app import SettingsApplication
@@ -67,21 +68,112 @@ def _document(language: str, state: str) -> dict:
         document["runtime"]["directory"] = "relative-path"
     elif state == "long_paths":
         suffix = "/".join(["Long COMSOL Installation Folder"] * 7)
-        document["comsol"]["installation_root"] = f"C:/{suffix}"
-        document["java"]["java_home"] = f"C:/{suffix}/java/win64/jre"
-        document["java"]["jdk_home"] = f"C:/{suffix}/java/win64/jre"
+        document["comsol"]["installation_root"] = (
+            f"C:/{suffix}" if os.name == "nt" else f"/opt/{suffix}"
+        )
+        document["java"]["java_home"] = (
+            f"C:/{suffix}/java/win64/jre" if os.name == "nt" else f"/opt/{suffix}/java/linux64/jre"
+        )
+        document["java"]["jdk_home"] = (
+            f"C:/{suffix}/java/win64/jre" if os.name == "nt" else f"/opt/{suffix}/java/linux64/jre"
+        )
     elif state == "docs":
-        document["manuals"]["root"] = "C:/COMSOL64/Multiphysics/doc"
+        document["manuals"]["root"] = (
+            "C:/COMSOL64/Multiphysics/doc" if os.name == "nt" else "/opt/comsol/doc"
+        )
         document["lexical_docs"] = {
             "enabled": True,
-            "index_path": "D:/comsol_docs_fts/manuals.sqlite3",
+            "index_path": "D:/comsol_docs_fts/manuals.sqlite3"
+            if os.name == "nt"
+            else "/tmp/visual-docs/manuals.sqlite3",
         }
         document["semantic_docs"] = {
             "enabled": True,
-            "root": "D:/comsol_docs_semantic",
-            "model_path": "D:/models/semantic-search",
+            "root": "D:/comsol_docs_semantic" if os.name == "nt" else "/tmp/visual-semantic",
+            "model_path": "D:/models/semantic-search"
+            if os.name == "nt"
+            else "/tmp/visual-models/semantic-search",
         }
     return document
+
+
+def _grab_x11_window(root: tk.Tk) -> Image.Image:
+    """Capture this mapped Tk window on a rootless WSLg X server."""
+    from ctypes.util import find_library
+
+    class XImage(ctypes.Structure):
+        _fields_ = [
+            ("width", ctypes.c_int),
+            ("height", ctypes.c_int),
+            ("xoffset", ctypes.c_int),
+            ("format", ctypes.c_int),
+            ("data", ctypes.c_void_p),
+            ("byte_order", ctypes.c_int),
+            ("bitmap_unit", ctypes.c_int),
+            ("bitmap_bit_order", ctypes.c_int),
+            ("bitmap_pad", ctypes.c_int),
+            ("depth", ctypes.c_int),
+            ("bytes_per_line", ctypes.c_int),
+            ("bits_per_pixel", ctypes.c_int),
+            ("red_mask", ctypes.c_ulong),
+            ("green_mask", ctypes.c_ulong),
+            ("blue_mask", ctypes.c_ulong),
+            ("obdata", ctypes.c_void_p),
+            ("functions", ctypes.c_void_p * 6),
+        ]
+
+    library = find_library("X11")
+    if not library:
+        raise RuntimeError("X11 capture library is unavailable")
+    x11 = ctypes.CDLL(library)
+    x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    x11.XOpenDisplay.restype = ctypes.c_void_p
+    x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    x11.XGetImage.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint,
+        ctypes.c_uint,
+        ctypes.c_ulong,
+        ctypes.c_int,
+    ]
+    x11.XGetImage.restype = ctypes.POINTER(XImage)
+    x11.XDestroyImage.argtypes = [ctypes.POINTER(XImage)]
+    display = x11.XOpenDisplay(None)
+    if not display:
+        raise RuntimeError("X11 capture display is unavailable")
+    pointer = None
+    try:
+        pointer = x11.XGetImage(
+            display,
+            root.winfo_id(),
+            0,
+            0,
+            root.winfo_width(),
+            root.winfo_height(),
+            ctypes.c_ulong(-1),
+            2,
+        )
+        if not pointer:
+            raise RuntimeError("Tk window capture failed")
+        value = pointer.contents
+        if (
+            value.bits_per_pixel != 32
+            or value.byte_order != 0
+            or (value.red_mask, value.green_mask, value.blue_mask) != (0xFF0000, 0xFF00, 0xFF)
+            or not 0 < value.bytes_per_line * value.height <= 32 * 1024 * 1024
+        ):
+            raise RuntimeError("X11 capture pixel format or size is unsupported")
+        raw = ctypes.string_at(value.data, value.bytes_per_line * value.height)
+        return Image.frombytes(
+            "RGB", (value.width, value.height), raw, "raw", "BGRX", value.bytes_per_line, 1
+        )
+    finally:
+        if pointer:
+            x11.XDestroyImage(pointer)
+        x11.XCloseDisplay(display)
 
 
 def _capture_one_impl(
@@ -123,7 +215,11 @@ def _capture_one_impl(
     top = root.winfo_rooty()
     right = left + root.winfo_width()
     bottom = top + root.winfo_height()
-    image = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+    image = (
+        _grab_x11_window(root)
+        if sys.platform == "linux"
+        else ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+    )
     image.save(output)
     receipt = {
         "file": output.name,
@@ -135,6 +231,7 @@ def _capture_one_impl(
         "width": image.width,
         "height": image.height,
         "sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
+        "display_backend": "wslg" if os.environ.get("WSL2_GUI_APPS_ENABLED") == "1" else "native",
     }
     application.close()
     return receipt

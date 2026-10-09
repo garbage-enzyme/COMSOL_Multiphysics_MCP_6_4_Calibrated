@@ -30,7 +30,10 @@ from settings_gui.controller import SettingsController
 from settings_gui.model import TAB_IDS, SettingsFormModel, get_value
 from settings_gui.storage import DamagedSettings
 
-pytestmark = pytest.mark.skipif(os.name != "nt", reason="Settings GUI supports Windows only")
+pytestmark = pytest.mark.skipif(
+    os.name != "nt" and not os.environ.get("DISPLAY"),
+    reason="Real Tk tests require an X display on POSIX; run with xvfb-run",
+)
 
 
 class FakeOwnership:
@@ -131,7 +134,7 @@ def _scenario_constructs_every_tab_and_field() -> None:
             for child in row.winfo_children()
             if child.winfo_class() == "TLabel"
         }
-        assert "alpha7.6  |  0.7.6" in header_labels
+        assert "alpha7.7  |  0.7.7" in header_labels
         assert set(app.variables) == {
             "schema_name",
             "schema_version",
@@ -323,7 +326,7 @@ def _scenario_scale_rebuild() -> None:
         assert get_value(controller.model.document, "ownership.owner") == "unsaved owner"
         assert app.notebook.index(app.notebook.select()) == TAB_IDS.index("ownership")
 
-        app.variables["gui.scale"].set("Follow Windows display settings (system)")
+        app.variables["gui.scale"].set("Follow system display settings (system)")
         root.update_idletasks()
         assert get_value(controller.model.document, "gui.scale") == "system"
         assert float(root.tk.call("tk", "scaling")) == pytest.approx(observed_system_scaling)
@@ -632,9 +635,8 @@ def test_first_run_writes_only_after_rebuild_confirmation(tmp_path: Path) -> Non
         ]
         assert store.load() == expected
         assert (target.parent / "models").is_dir()
-        program_root = Path(os.environ["PROGRAMDATA"]) / "comsol_mcp"
-        assert (program_root / "runtime").is_dir()
-        assert (program_root / "artifacts").is_dir()
+        assert Path(expected["runtime"]["directory"]).is_dir()
+        assert Path(expected["paths"]["artifact_write_root"]).is_dir()
     finally:
         store.close()
 

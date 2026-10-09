@@ -88,6 +88,9 @@ def test_preview_rejects_changed_manifest_without_path_disclosure(ascii_tmp_path
 
 
 def test_submit_routes_only_through_durable_manager(ascii_tmp_path, monkeypatch):
+    from comsol_mcp import platform_support
+
+    monkeypatch.setattr(platform_support, "native_solver_enabled", lambda: True)
     envelope, _, _ = _write_manifest(ascii_tmp_path)
     captured = []
 

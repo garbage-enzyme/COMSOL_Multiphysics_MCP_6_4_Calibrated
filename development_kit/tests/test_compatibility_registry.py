@@ -25,7 +25,7 @@ from comsol_mcp.schema_registry import check_schema_support
 
 
 def _skill_file_hash(relative: str) -> str:
-    path = Path(__file__).parents[2] / "comsol_mcp" / relative.replace("/", "\\")
+    path = Path(__file__).parents[2] / "comsol_mcp" / relative
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 

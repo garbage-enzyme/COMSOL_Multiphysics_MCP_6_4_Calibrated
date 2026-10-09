@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import os
 from pathlib import Path
 
 import pytest
@@ -209,6 +210,7 @@ def test_changed_stop_policy_has_a_distinct_campaign_identity(tmp_path):
     assert changed["spec_fingerprint"] != first["spec_fingerprint"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows legacy path budget")
 def test_level_directory_stays_inside_the_windows_legacy_path_budget():
     root = Path("D:/comsol_runtime/jobs") / ("job-" + "a" * 32)
     directory = convergence_level_directory(root, 99)

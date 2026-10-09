@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import re
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Mapping
 
 from comsol_mcp.durable import canonical_json_v1, canonical_sha256_v1
@@ -266,8 +268,17 @@ def _normalize_immutable_source(value: Any) -> dict[str, str] | None:
     if value is None:
         return None
     raw = _exact_mapping(value, _SOURCE_IDENTITY_FIELDS, "immutable source")
+    if os.name == "nt":
+        source_path = _normalize_confirmed_model_path(raw["path"])
+    else:
+        source_path = raw["path"]
+        if not isinstance(source_path, str) or not Path(source_path).is_absolute():
+            raise ValueError("immutable source path must be an absolute local path")
+        if len(source_path) > 4096 or any(ord(c) < 32 for c in source_path):
+            raise ValueError("immutable source path must be bounded and contain no controls")
+        source_path = os.path.normpath(source_path)
     return {
-        "path": _normalize_confirmed_model_path(raw["path"]),
+        "path": source_path,
         "sha256": _hex64(raw["sha256"], "immutable source SHA-256"),
     }
 

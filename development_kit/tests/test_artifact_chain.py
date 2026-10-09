@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import _winapi
 import hashlib
 import json
 from copy import deepcopy
@@ -15,6 +14,8 @@ from src.artifact_chain import (
     validate_artifact_chain_manifest,
     verify_artifact_chain,
 )
+
+from development_kit.tests.platform_fixtures import create_directory_link, remove_directory_link
 
 
 def _write(root: Path, name: str, schema_name: str, schema_version: str) -> dict:
@@ -249,7 +250,7 @@ def test_chain_rejects_absolute_and_junction_escaped_artifact_paths(tmp_path):
     try:
         outside.mkdir()
         escaped = _write(outside, "escaped", "comsol_mcp.environment_identity", "1.0.0")
-        _winapi.CreateJunction(str(outside), str(junction))
+        create_directory_link(str(outside), str(junction))
         escaped["relative_path"] = "linked/escaped.json"
         manifest = build_artifact_chain_manifest(
             chain_id="junction",
@@ -260,7 +261,7 @@ def test_chain_rejects_absolute_and_junction_escaped_artifact_paths(tmp_path):
             verify_artifact_chain(manifest, artifact_root=tmp_path)
     finally:
         if junction.exists():
-            junction.rmdir()
+            remove_directory_link(junction)
         (outside / "escaped.json").unlink(missing_ok=True)
         if outside.exists():
             outside.rmdir()

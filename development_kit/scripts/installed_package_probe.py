@@ -28,6 +28,10 @@ FORBIDDEN_PROCESS_NAMES = frozenset(
         "comsolmphserver.exe",
         "java.exe",
         "javaw.exe",
+        "comsol",
+        "comsolmphserver",
+        "java",
+        "javaw",
     }
 )
 
@@ -159,7 +163,13 @@ def _probe_direct_settings_entry(output_parent: Path) -> dict:
     probe_root.mkdir(parents=True, exist_ok=False)
     try:
         target = probe_root / "settings.json"
-        shortcut = known_desktop_path() / SHORTCUT_NAME
+        if os.name == "nt":
+            shortcut = known_desktop_path() / SHORTCUT_NAME
+        else:
+            from comsol_mcp.xdg_paths import project_path
+            from settings_gui.xdg_shortcut import NAME
+
+            shortcut = project_path("data", os.environ).parent / "applications" / NAME
         shortcut_before = _shortcut_bytes_identity(shortcut)
         processes_before = _forbidden_process_snapshot()
         completed = subprocess.run(  # noqa: S603
@@ -229,6 +239,27 @@ def _probe_owned_shortcut(output_parent: Path) -> dict:
         created = create_desktop_shortcut(settings_path=settings, desktop_path=desktop)
         if created.get("success") is not True or created.get("state") != "created":
             raise AssertionError("installed Settings GUI shortcut creation failed")
+        if os.name != "nt":
+            from settings_gui.xdg_shortcut import NAME, shortcut_status
+
+            status = shortcut_status(settings_path=settings, desktop_path=desktop)
+            if status["state"] != "current":
+                raise AssertionError("installed XDG launcher identity differs")
+            raw = (desktop / NAME).read_bytes()
+            if str(gui_entry).encode() not in raw:
+                raise AssertionError("installed launcher does not target the exact entry")
+            removed = remove_desktop_shortcut(settings_path=settings, desktop_path=desktop)
+            if not removed.get("success") or (desktop / NAME).exists():
+                raise AssertionError("installed XDG launcher cleanup failed")
+            if settings.exists():
+                raise AssertionError("launcher modified settings")
+            return {
+                "created": True,
+                "target_is_gui_entry": True,
+                "removed": True,
+                "contains_local_path": False,
+                "stable_lock_retained": True,
+            }
         observed = inspect_windows_shortcut(desktop / SHORTCUT_NAME)
         if os.path.normcase(os.path.abspath(observed.target)) != os.path.normcase(
             os.path.abspath(gui_entry)
@@ -258,11 +289,21 @@ def main() -> int:
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
-    import mph
+    if os.name == "nt":
+        import mph
 
-    mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(
-        AssertionError("installed-package discovery must not start COMSOL")
-    )
+        mph.Client = lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("installed-package discovery must not start COMSOL")
+        )
+    else:
+        import importlib.abc
+
+        class DenyNative(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname.split(".")[0] in {"mph", "jpype"}:
+                    raise AssertionError("Linux discovery imported a native solver module")
+
+        sys.meta_path.insert(0, DenyNative())
 
     import comsol_mcp
     import settings_gui
@@ -395,7 +436,7 @@ def main() -> int:
     from settings_gui.desktop_shortcut import installed_gui_entry_executable
 
     gui_entry = installed_gui_entry_executable()
-    if _windows_pe_subsystem(gui_entry) != 2:
+    if os.name == "nt" and _windows_pe_subsystem(gui_entry) != 2:
         raise AssertionError("installed Settings GUI entry does not use the Windows GUI subsystem")
     if "tkinter" in sys.modules:
         raise AssertionError("installed solver-free discovery imported tkinter")
@@ -420,7 +461,7 @@ def main() -> int:
             "release": settings_gui.GUI_RELEASE,
             "console_entry": scripts["comsol-mcp-settings"],
             "gui_entry": gui_scripts["comsol-mcp-settings-gui"],
-            "gui_entry_subsystem": "windows_gui",
+            "gui_entry_subsystem": "windows_gui" if os.name == "nt" else "posix_console",
             "locale_bytes": locale_members,
             "icon_bytes": len(icon_raw),
             "icon_sizes": SETTINGS_GUI_ICON_SIZES,

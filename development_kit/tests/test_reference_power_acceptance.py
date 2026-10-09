@@ -156,7 +156,7 @@ def test_bounded_json_reads_limit_plus_one_from_one_descriptor(tmp_path):
             "unit vector",
         ),
         (
-            lambda value: value.update({"artifact_dir": str(Path("C:/Users/nonascii/测试"))}),
+            lambda value: value.update({"artifact_dir": str(Path.home() / "mcp_tests/测试")}),
             "ASCII-only",
         ),
     ],
@@ -220,3 +220,14 @@ def test_preflight_cli_never_truncates_an_existing_receipt(tmp_path):
     assert completed.returncode != 0
     assert output.read_bytes() == original
     assert not list(tmp_path.glob(".*.tmp"))
+
+
+@pytest.mark.parametrize(
+    "value",
+    [r"..\..\runner.py", r"dir\runner.py", "./runner.py", "dir//runner.py", "dir/../runner.py"],
+)
+def test_runner_path_is_canonical_on_every_operating_system(value):
+    from comsol_mcp.evidence.reference_power_acceptance import _relative_repo_path
+
+    with pytest.raises(ValueError, match="sanitized"):
+        _relative_repo_path(value, "runner")

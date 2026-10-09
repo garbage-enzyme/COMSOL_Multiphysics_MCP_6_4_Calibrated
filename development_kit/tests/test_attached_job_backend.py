@@ -8,7 +8,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import types
 from copy import deepcopy
 from dataclasses import replace
@@ -36,11 +35,12 @@ from src.shared_session.locking import (
 )
 from src.tools.jobs import _submit_job
 
+from development_kit.tests.conftest import _create_ascii_temp_dir
+
 
 @pytest.fixture
 def ascii_job_root():
-    base = Path("D:/") if Path("D:/").exists() else Path("C:/Windows/Temp")
-    root = Path(tempfile.mkdtemp(prefix="comsol_attached_worker_", dir=base))
+    root = _create_ascii_temp_dir()
     try:
         yield root
     finally:

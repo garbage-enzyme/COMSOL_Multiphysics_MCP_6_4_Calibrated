@@ -14,6 +14,7 @@ from comsol_mcp.durable.io import (
     atomic_write_json_exclusive,
     fsync_directory,
     publish_file_exclusive,
+    publish_directory_exclusive,
     read_file_bytes_bounded,
     snapshot_file_bounded,
 )
@@ -288,7 +289,7 @@ def write_field_evidence_artifacts(
         if total_bytes > request_value["limits"]["max_artifact_bytes"]:
             raise ValueError("complete field bundle exceeds the caller-declared byte limit")
         try:
-            os.rename(staging_directory, view_directory)
+            publish_directory_exclusive(staging_directory, view_directory)
         except FileExistsError as exc:
             raise FileExistsError("field evidence artifacts already exist for this view") from exc
         fsync_directory(root)

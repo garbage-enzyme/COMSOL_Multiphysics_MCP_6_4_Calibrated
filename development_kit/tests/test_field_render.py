@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -274,6 +275,7 @@ def test_worker_request_transports_unicode_units_as_explicit_utf8_bytes(tmp_path
     assert payload["coordinate_unit"] == "微米"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows delete-denying array read handle")
 def test_array_cannot_change_while_render_worker_consumes_it(tmp_path, monkeypatch):
     array = tmp_path / "pinned.npz"
     digest = _array(array)

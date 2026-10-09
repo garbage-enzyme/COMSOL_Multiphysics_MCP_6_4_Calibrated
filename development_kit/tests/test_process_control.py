@@ -23,11 +23,29 @@ def _wait_absent(identities, timeout=5.0):
     deadline = time.monotonic() + timeout
     verification = verify_absent(identities)
     while not verification["absent"] and time.monotonic() < deadline:
-        if any(item["state"] == "uncertain" for item in verification["verdicts"]):
-            break
         time.sleep(0.025)
         verification = verify_absent(identities)
     return verification
+
+
+@pytest.mark.parametrize("resolve", [False, True])
+def test_absence_poll_uses_existing_budget_without_accepting_uncertainty(monkeypatch, resolve):
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    calls = []
+
+    def inspect(identities):
+        assert identities == ["exact"]
+        absent = bool(resolve and calls)
+        calls.append(absent)
+        return {"absent": absent, "verdicts": [{"state": "stale" if absent else "uncertain"}]}
+
+    monkeypatch.setitem(_wait_absent.__globals__, "verify_absent", inspect)
+    result = _wait_absent(["exact"], timeout=0.05)
+    assert result["absent"] is resolve
+    assert 2 <= len(calls) <= 3
+    assert clock[0] <= 0.05
 
 
 def test_detached_process_tracker_reaps_completed_child_without_wait():
@@ -387,13 +405,15 @@ def test_exact_termination_validates_and_acts_through_one_process_object(monkeyp
         return Process()
 
     monkeypatch.setattr(process_control_module.psutil, "Process", construct)
-    monkeypatch.setattr(process_control_module.ctypes, "WinDLL", lambda *_args, **_kwargs: Kernel32)
+    monkeypatch.setattr(
+        process_control_module.ctypes, "WinDLL", lambda *_args, **_kwargs: Kernel32, raising=False
+    )
 
     result = terminate_exact(identity)
 
     assert result["acted"] is True
     assert constructions == [identity["pid"]]
-    assert actions == ["terminate_handle", "close_handle"]
+    assert actions == (["terminate_handle", "close_handle"] if os.name == "nt" else ["terminate"])
 
 
 @pytest.mark.parametrize("member", [None, "server", 7, []])
@@ -402,3 +422,47 @@ def test_non_mapping_solver_lease_member_is_a_controlled_value_error(member):
         process_control_module.owned_solver_identities_from_lease(
             {"comsol_server_processes": [member]}
         )
+
+
+def test_empty_process_command_line_is_uncertain_not_a_valid_identity(monkeypatch):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    import src.jobs.store as store
+
+    process = SimpleNamespace(
+        pid=123, oneshot=lambda: nullcontext(), cmdline=lambda: [], status=lambda: "running"
+    )
+    monkeypatch.setattr(store.psutil, "Process", lambda _: process)
+    with pytest.raises(OSError, match="temporarily unavailable"):
+        store.process_identity(123)
+    state, reason = store.process_identity_state({"pid": 123})
+    assert state == "uncertain"
+    assert "temporarily unavailable" in reason
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("kind", "native_worker"),
+        ("driver_sha256", "0" * 64),
+        ("worker", {"pid": 999}),
+    ],
+)
+def test_controlled_leaf_contract_rejects_foreign_proof(field, value):
+    from pathlib import Path
+
+    from src.jobs import sequence_worker
+    from src.jobs.process_control import controlled_leaf_worker_proved
+
+    worker = {"pid": 123, "process_create_time": 1.0, "command_signature": "a" * 64}
+    contract = {
+        "kind": "sequence_leaf_v1",
+        "worker": worker,
+        "driver_sha256": hashlib.sha256(Path(sequence_worker.__file__).read_bytes()).hexdigest(),
+    }
+    state = {"controlled_leaf_worker": contract}
+    assert controlled_leaf_worker_proved({"job_type": "test_sequence"}, state, worker)
+    assert not controlled_leaf_worker_proved({"job_type": "staged_sweep"}, state, worker)
+    contract[field] = value
+    assert not controlled_leaf_worker_proved({"job_type": "test_sequence"}, state, worker)

@@ -1,11 +1,13 @@
 # COMSOL 6.4 MCP Server
 
+0.7.7 增加[无求解器 Ubuntu 实验支持](docs/experimental_linux/README_CN.md)和[显式严格波长验证](docs/strict_wavelength/README_CN.md)。Windows 仍是原生求解平台。调用工具前请先阅读平台限制。
+
 [English](README.md) | 中文
 
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.6](https://img.shields.io/badge/release-0.7.6-blue)
+![Release: 0.7.7](https://img.shields.io/badge/release-0.7.7-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -74,12 +76,17 @@ SDK 版本、`2026-07-28` 协议修订版和任何 extension wire generation 是
 适配层：opt in 的 client 可以启动长时间仿真并通过 `tasks/get` 轮询，而不必阻塞
 等待。该适配层不引入第二个调度器：`job_submit` 是唯一 task-capable 工具，只有
 当**该次请求**声明了 extension 时才返回 task handle，重复提交相同规格只会返回
-已有的 durable job。task TTL 只限制可寻址性，绝不放弃正在运行的求解，也绝不
-删除科学 receipt。取消的协议确认与已验证清理分开报告。未 opt in 的 client 继续
+已有的 durable job。task TTL 允许后续到期。当前实现会在 TTL 后保留映射，包括已完成任务。
+它不会放弃运行中的求解，也不会删除科学证据。取消的协议确认与已验证清理分开报告。未 opt in 的 client 继续
 使用原有的 `job_submit`/`job_status`/`job_tail`/`job_cancel`/`job_resume` 工具。
 实验性的 `2025-11-25` Tasks 方言会被拒绝，而不是被重新解释。
 
-initialize 响应也会通过旧 MCP initialize schema 携带一段简短安全说明：先 discovery
+2026-07-28 核心协议使用逐请求元数据，不使用 initialize 握手。
+客户端每次请求都必须声明协议修订版和客户端能力。
+旧协议继续使用 initialize 协商和普通工具结果。
+Tasks 提交复用普通 `job_submit` 已注册的保护流程。
+
+旧协议 initialize 响应会通过旧 MCP initialize schema 携带一段简短安全说明：先 discovery
 和 preflight。只有用户明确要求时才 start、solve 或 mutate。源模型保持只读。执行成功、
 证据完整性和科学验证分开报告。client 可以采用或忽略这段提示。真正的安全边界仍由
 server 内强制执行的 ownership 和 validation 检查提供。

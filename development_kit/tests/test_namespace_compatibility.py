@@ -87,7 +87,7 @@ print(json.dumps({{'same': first is second is canonical, 'before': before, 'afte
     assert result["same"] is True
     assert result["after"] == result["before"]
     assert result["after"]["spec_name"] == "comsol_mcp.tools.session"
-    assert result["after"]["spec_origin"].endswith("comsol_mcp\\tools\\session.py")
+    assert result["after"]["spec_origin"].replace("\\", "/").endswith("comsol_mcp/tools/session.py")
     assert result["after"]["spec_cached"].endswith(f"session.{sys.implementation.cache_tag}.pyc")
 
 

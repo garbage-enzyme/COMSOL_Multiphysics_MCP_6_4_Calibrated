@@ -1,51 +1,51 @@
 {
-  "schema_name": "comsol_mcp.planning_code_allowlist",
-  "schema_version": "1.0.0",
   "entries": [
     {
-      "path": "comsol_mcp/evidence/reference_power_acceptance.py",
       "match_count": 31,
-      "match_sha256": "600a10e91a61906fa634ffd73829ec79c07a382cfdbebfe3a17b37b1cd09e4b0"
+      "match_sha256": "1f5f850bea583ebff7e35c59ae1e3145b7c5cbb17da206963ff557afd0b66f96",
+      "path": "comsol_mcp/evidence/reference_power_acceptance.py"
     },
     {
-      "path": "development_kit/docs/legacy_phase_compatibility.md",
       "match_count": 10,
-      "match_sha256": "369c15ea237cbc3b6a027669513db3549872397e24db60bdb3f51d7bcb5665fc"
+      "match_sha256": "369c15ea237cbc3b6a027669513db3549872397e24db60bdb3f51d7bcb5665fc",
+      "path": "development_kit/docs/legacy_phase_compatibility.md"
     },
     {
-      "path": "development_kit/release/integration_fixtures/reference_power_evidence.json",
       "match_count": 1,
-      "match_sha256": "98d79e3596cf33caf308ffaf007ec8724573495a0fbb32ca6f15798801e60ca6"
+      "match_sha256": "98d79e3596cf33caf308ffaf007ec8724573495a0fbb32ca6f15798801e60ca6",
+      "path": "development_kit/release/integration_fixtures/reference_power_evidence.json"
     },
     {
-      "path": "development_kit/scripts/run_real_release_gate.py",
       "match_count": 16,
-      "match_sha256": "4416d35a89496853509ed1077ed28acfc8aa1d5a0f1fb53aa72abace718318e6"
+      "match_sha256": "4416d35a89496853509ed1077ed28acfc8aa1d5a0f1fb53aa72abace718318e6",
+      "path": "development_kit/scripts/run_real_release_gate.py"
     },
     {
-      "path": "development_kit/tests/test_durable_job_control_plane.py",
       "match_count": 1,
-      "match_sha256": "ff7f57cc61ae4c8900179850222d7d7b1ceb8c20c842ac032e1916cd23eca90c"
+      "match_sha256": "ff7f57cc61ae4c8900179850222d7d7b1ceb8c20c842ac032e1916cd23eca90c",
+      "path": "development_kit/tests/test_durable_job_control_plane.py"
     },
     {
-      "path": "development_kit/tests/test_reference_power_acceptance.py",
       "match_count": 1,
-      "match_sha256": "19b708edc7960d8e539cd8f61b84182f4d69b8a21293fe236ad4de9a82456a05"
+      "match_sha256": "19b708edc7960d8e539cd8f61b84182f4d69b8a21293fe236ad4de9a82456a05",
+      "path": "development_kit/tests/test_reference_power_acceptance.py"
     },
     {
-      "path": "development_kit/tests/test_reference_power_runner.py",
       "match_count": 1,
-      "match_sha256": "48d668521b628b20621d6fcb4ffffc6d53395e5eaf949aaa06f247fd25988a0b"
+      "match_sha256": "48d668521b628b20621d6fcb4ffffc6d53395e5eaf949aaa06f247fd25988a0b",
+      "path": "development_kit/tests/test_reference_power_runner.py"
     },
     {
-      "path": "development_kit/tests/test_schema_registry.py",
       "match_count": 1,
-      "match_sha256": "a79b88fb0ce7b3b414d9ece592974663afb5d7b0ba3c94634407f109617a789d"
+      "match_sha256": "a79b88fb0ce7b3b414d9ece592974663afb5d7b0ba3c94634407f109617a789d",
+      "path": "development_kit/tests/test_schema_registry.py"
     },
     {
-      "path": "pyproject.toml",
       "match_count": 3,
-      "match_sha256": "ad0bbf748aaba70c8342cd40a712af7dce998c36f2f90ee8750c33a1c534e5af"
+      "match_sha256": "ad0bbf748aaba70c8342cd40a712af7dce998c36f2f90ee8750c33a1c534e5af",
+      "path": "pyproject.toml"
     }
-  ]
+  ],
+  "schema_name": "comsol_mcp.planning_code_allowlist",
+  "schema_version": "1.0.0"
 }

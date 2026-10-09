@@ -241,7 +241,13 @@ class ProfiledRegistrar:
                     requires_model_revision=metadata.requires_model_revision,
                     advances_model_revision=metadata.advances_model_revision,
                 )
-                registered = real_decorator(guarded)
+                from comsol_mcp.platform_support import guard_platform_call
+
+                registered = real_decorator(
+                    guard_platform_call(
+                        guarded, tool_name=name, concurrency_class=metadata.concurrency_class
+                    )
+                )
                 tool = self._server._tool_manager._tools[name]
                 tool.parameters = bounded_public_schema(tool.parameters)
                 argument_model = tool.fn_metadata.arg_model

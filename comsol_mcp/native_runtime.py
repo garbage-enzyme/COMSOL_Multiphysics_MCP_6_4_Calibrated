@@ -142,16 +142,20 @@ def preload_mcp_native_runtime() -> dict[str, str]:
     if any(item.scope != "mcp_main_process" for item in preload_items):
         raise RuntimeError("MCP native runtime preload contains a non-main-process scope")
 
-    jpype: Any = import_module("jpype")
-    if jpype.isJVMStarted():
+    from comsol_mcp.platform_support import native_solver_enabled
+
+    jpype: Any = import_module("jpype") if native_solver_enabled() else None
+    if jpype is not None and jpype.isJVMStarted():
         raise RuntimeError("MCP native runtime preload found an already-started JVM")
 
     loaded: dict[str, str] = {}
     for item in preload_items:
+        if not native_solver_enabled() and item.module in {"mph", "jpype"}:
+            continue
         import_module(item.module)
         loaded[item.module] = version(item.distribution)
 
-    if jpype.isJVMStarted():
+    if jpype is not None and jpype.isJVMStarted():
         raise RuntimeError("Import-only MCP native runtime preload unexpectedly started the JVM")
     return loaded
 

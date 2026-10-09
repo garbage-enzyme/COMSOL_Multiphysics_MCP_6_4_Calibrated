@@ -16,6 +16,7 @@ from development_kit.scripts import settings_gui_visual_capture
 from development_kit.scripts.settings_gui_package_probe import (
     ENTRY_POINT_MODULE_MEMBER,
     ICON_MEMBER,
+    PNG_ICON_MEMBER,
     LANGUAGES,
     ROOT_LAUNCHER_MEMBER,
     SHORTCUT_MEMBER,
@@ -30,6 +31,7 @@ def _archives(
     root: Path,
     *,
     include_icon: bool = True,
+    include_portable_icon: bool = True,
     include_launcher: bool = True,
     include_wheel_launcher: bool = False,
     include_test: bool = False,
@@ -58,6 +60,8 @@ def _archives(
         archive.writestr("comsol_mcp-0.6.0.dist-info/entry_points.txt", entry_points)
         if include_icon:
             archive.writestr(ICON_MEMBER, b"ico")
+        if include_portable_icon:
+            archive.writestr(PNG_ICON_MEMBER, b"png")
         if include_shortcut_adapter:
             archive.writestr(SHORTCUT_MEMBER, b"adapter")
         if include_wheel_launcher:
@@ -77,6 +81,8 @@ def _archives(
             members[f"{base}.mo"] = b"mo"
         if include_icon:
             members[ICON_MEMBER] = b"ico"
+        if include_portable_icon:
+            members[PNG_ICON_MEMBER] = b"png"
         if include_launcher:
             members[ROOT_LAUNCHER_MEMBER] = b"launcher"
         for name, raw in members.items():
@@ -129,6 +135,27 @@ def test_distribution_probe_rejects_gui_tests_in_wheel(tmp_path: Path) -> None:
 def test_distribution_probe_rejects_missing_application_icon(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="icon"):
         inspect_settings_gui_distributions(_archives(tmp_path, include_icon=False))
+
+
+def test_distribution_probe_requires_portable_png_and_refuses_private_source_logo(tmp_path):
+    dist = _archives(tmp_path, include_portable_icon=False)
+    with pytest.raises(ValueError, match="portable.*PNG"):
+        inspect_settings_gui_distributions(dist)
+    wheel = next(dist.glob("*.whl"))
+    with zipfile.ZipFile(wheel, "a") as archive:
+        archive.writestr(PNG_ICON_MEMBER, b"png")
+        archive.writestr("settings_gui/assets/private_source.png", b"private")
+    with pytest.raises(ValueError, match="portable.*PNG"):
+        inspect_settings_gui_distributions(dist)  # The sdist still lacks the portable icon.
+
+
+def test_distribution_probe_rejects_additional_private_png(tmp_path):
+    dist = _archives(tmp_path)
+    wheel = next(dist.glob("*.whl"))
+    with zipfile.ZipFile(wheel, "a") as archive:
+        archive.writestr("settings_gui/assets/private_source.png", b"private")
+    with pytest.raises(ValueError, match="private source logo"):
+        inspect_settings_gui_distributions(dist)
 
 
 def test_distribution_probe_rejects_missing_root_launcher(tmp_path: Path) -> None:

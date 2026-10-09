@@ -516,7 +516,7 @@ def test_mismatch_non_ascii_and_pointer_rollback_gates(semantic_index_assets):
 
     with pytest.raises(ValueError, match="ASCII"):
         build_index(
-            deployment_root="C:/Users/陆星/semantic",
+            deployment_root=semantic_index_assets["root"].parent / "陆星" / "semantic",
             lexical_index=semantic_index_assets["lexical"],
             model_path=semantic_index_assets["model"],
             encoder=FakeEncoder(semantic_index_assets["model"]),

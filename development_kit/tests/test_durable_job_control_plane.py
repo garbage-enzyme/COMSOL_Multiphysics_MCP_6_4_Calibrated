@@ -2016,8 +2016,8 @@ def _cleanup_fixture_processes(root: Path) -> dict[str, object]:
     deadline = time.monotonic() + 5.0
     verification = verify_absent(identities)
     while not verification["absent"] and time.monotonic() < deadline:
-        if any(item.get("state") == "uncertain" for item in verification["verdicts"]):
-            break
+        # A killed POSIX child may briefly expose an empty /proc command line.
+        # Retry inspection within the existing deadline. Never treat uncertainty as absence.
         time.sleep(0.025)
         verification = verify_absent(identities)
     return verification

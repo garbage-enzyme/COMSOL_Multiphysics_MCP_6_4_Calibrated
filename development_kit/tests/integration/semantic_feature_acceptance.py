@@ -17,9 +17,11 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from src.jobs.store import JobLock
 
+from development_kit.tests.platform_fixtures import platform_test_root
+
 ROOT = Path(__file__).parents[3]
 PYTHON = Path(sys.executable)
-DEFAULT_OUTPUT_ROOT = Path(os.environ.get("COMSOL_MCP_TEST_ASCII_ROOT", "D:/mcp_tests"))
+DEFAULT_OUTPUT_ROOT = platform_test_root()
 OUTPUT = DEFAULT_OUTPUT_ROOT / "semantic_feature" / "live_feature.json"
 RUN_LOCK = OUTPUT.parent / "acceptance.lock"
 MODEL = Path("D:/comsol_semantic/models/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41")

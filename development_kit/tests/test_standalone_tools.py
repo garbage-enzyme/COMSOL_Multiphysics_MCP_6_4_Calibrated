@@ -152,6 +152,9 @@ def test_public_build_and_status_dispatch_are_solver_free_and_contained(
 def test_public_standalone_paths_cannot_escape_owned_artifacts(
     ascii_tmp_path: Path, monkeypatch
 ) -> None:
+    from comsol_mcp import platform_support
+
+    monkeypatch.setattr(platform_support, "native_solver_enabled", lambda: True)
     owned = ascii_tmp_path / "owned"
     outside = ascii_tmp_path / "outside"
     outside.mkdir()

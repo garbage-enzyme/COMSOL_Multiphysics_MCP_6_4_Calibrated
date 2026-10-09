@@ -579,6 +579,17 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
         },
     }
     result.update(_profile_inventory(active_selection))
+    from comsol_mcp.platform_support import platform_capabilities, tool_available
+
+    result["platform_support"] = platform_capabilities()
+    result["platform_support"]["available_tools"] = sorted(
+        name
+        for name in tool_names_for_selection(active_selection)
+        if tool_available(name, TOOL_METADATA[name].concurrency_class)
+    )
+    result["platform_support"]["verified_claim_scope"] = "windows_reference_lane"
+    if not result["platform_support"]["native_solver_enabled"]:
+        result["targets"]["acceptance"] = "windows_reference_lane_only"
     return attach_control_plane_evidence("capabilities", started, result)
 
 

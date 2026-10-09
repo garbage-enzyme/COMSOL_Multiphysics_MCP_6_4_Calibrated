@@ -72,6 +72,19 @@ def test_pre_h3_compatibility_snapshot_is_preserved():
             allowed_additions.add("expected_model_revision")
         if name == "mesh_convergence_study":
             allowed_additions.update({"config_id", "manifest_path", "source_model_path"})
+        if name == "study_staged_parametric_sweep":
+            strict = observed["properties"]["strict_wavelength_policy"]
+            assert strict["default"] is None
+            definitions = observed.pop("$defs")
+            assert set(definitions) == {"StrictWavelengthPolicy"}
+            policy = definitions["StrictWavelengthPolicy"]
+            assert policy["additionalProperties"] is False
+            assert set(policy["required"]) == {
+                "relative_tolerance",
+                "absolute_tolerance_m",
+                "dataset_tag",
+            }
+            allowed_additions.add("strict_wavelength_policy")
         if name == "geometry_add_feature":
             assert expected["properties"].pop("kwargs")["type"] == "string"
             expected["required"].remove("kwargs")

@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from development_kit.tests.platform_fixtures import platform_test_root
 from mcp.server.mcpserver import MCPServer
 from src.knowledge.semantic_runtime import SemanticService, semantic_configuration
 from src.server import create_server
@@ -89,7 +91,7 @@ def test_configuration_is_ascii_static_and_missing_model_degrades(lightweight_de
     assert missing["configured"] is False
     assert "model_path_configuration" in missing["missing"]
     with pytest.raises(ValueError, match="ASCII"):
-        semantic_configuration({"COMSOL_SEMANTIC_ROOT": "C:/Users/陆星/semantic"})
+        semantic_configuration({"COMSOL_SEMANTIC_ROOT": str(Path.home() / "mcp_tests/陆星/semantic")})
     with pytest.raises(ValueError, match="must be absolute"):
         semantic_configuration({"COMSOL_SEMANTIC_ROOT": "relative/semantic"})
 
@@ -183,8 +185,8 @@ def test_successful_semantic_operations_clear_stale_errors(lightweight_deploymen
 def test_unconfigured_search_returns_explicit_lexical_fallback():
     service = SemanticService(
         {
-            "COMSOL_SEMANTIC_ROOT": "D:/missing-semantic-root",
-            "COMSOL_SEMANTIC_LEXICAL_INDEX": "D:/missing-semantic-lexical.sqlite3",
+            "COMSOL_SEMANTIC_ROOT": str(platform_test_root("missing-semantic-root")),
+            "COMSOL_SEMANTIC_LEXICAL_INDEX": str(platform_test_root("missing-semantic-lexical.sqlite3")),
         }
     )
     result = service.search("CopyFace")

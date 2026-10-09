@@ -10,6 +10,7 @@ import comsol_mcp.settings as settings_module
 from comsol_mcp import __version__
 from comsol_mcp.server import create_server
 from comsol_mcp.tools.catalog import TOOL_SPECS
+from development_kit.tests.platform_fixtures import platform_test_root
 
 RELEASED_SETTINGS_VERSION = "1.3.0"
 RELEASED_SETTINGS_READABLE_VERSIONS = (
@@ -18,7 +19,7 @@ RELEASED_SETTINGS_READABLE_VERSIONS = (
     "1.2.0",
     RELEASED_SETTINGS_VERSION,
 )
-RELEASED_PACKAGE_VERSION = "0.7.6"
+RELEASED_PACKAGE_VERSION = "0.7.7"
 
 
 def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(tmp_path):
@@ -31,7 +32,7 @@ def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(t
     assert defaults["comsol"] == {"installation_root": None}
     assert defaults["gui"] == {"language": "zh-cn", "scale": "system"}
     user_root = tmp_path / "用户配置" / "comsol_mcp"
-    program_root = Path("C:/comsol_pytest/alpha6-program-data/comsol_mcp")
+    program_root = platform_test_root("alpha6-program-data/comsol_mcp")
     user_defaults = settings_module.default_settings_document(
         user_root=user_root,
         program_root=program_root,

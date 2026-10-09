@@ -170,7 +170,7 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q comsol_mcp src development_kit
       - name: Run ratcheted quality, coverage, license, and budget gates
-        run: python development_kit/scripts/quality_gate.py --artifact-root "$env:RUNNER_TEMP\comsol_quality"
+        run: python development_kit/scripts/quality_gate.py --defer-platform-coverage --artifact-root "$env:RUNNER_TEMP\comsol_quality"
       - name: Upload quality gate evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -307,3 +307,159 @@ jobs:
 # version-pinned host.
 # The Settings GUI job is also solver-free and never starts COMSOL, Java, MPh,
 # or JPype.
+
+  experimental-ubuntu-backend:
+    name: Ubuntu 26.04 x64 backend and installed wheel (solver-free)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      PYTHONUNBUFFERED: "1"
+      COMSOL_MCP_TEST_ASCII_ROOT: /tmp/a77t
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14.6"
+      - name: Install retained Ubuntu dependency lane
+        shell: pwsh
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r constraints/release_locked_ubuntu_py314.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          # Hash verification above applies to runtime wheels. Local source cannot use hash mode.
+          $versionConstraints = Join-Path $env:RUNNER_TEMP 'ubuntu-runtime-versions.txt'
+          Get-Content constraints/release_locked_ubuntu_py314.txt | ForEach-Object {
+            if ($_ -match '^[A-Za-z0-9][A-Za-z0-9_.-]*==[^\s]+') { $Matches[0] }
+          } | Set-Content -Encoding utf8NoBOM $versionConstraints
+          python -m pip install ".[dev,manuals]" -c $versionConstraints "pymupdf==1.28.0"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m pip check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Run the declared quality gate without a solver
+        shell: pwsh
+        run: |
+          python development_kit/scripts/quality_gate.py --defer-platform-coverage --artifact-root /tmp/a77q
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify a clean locked installation outside the checkout
+        shell: pwsh
+        run: |
+          python -m build --outdir /tmp/a77dist
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m venv /tmp/a77env
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $candidatePython = '/tmp/a77env/bin/python'
+          & $candidatePython -m pip install --require-hashes --only-binary=:all: -r constraints/release_locked_ubuntu_py314.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $wheel = (Get-Item /tmp/a77dist/*.whl).FullName
+          & $candidatePython -m pip install --no-deps $wheel
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $candidatePython -m pip check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force /tmp/a77installed | Out-Null
+          Get-FileHash $wheel -Algorithm SHA256 | ConvertTo-Json | Set-Content /tmp/a77installed/wheel-hash.json
+          Push-Location /tmp/a77installed
+          try {
+            & $candidatePython "$env:GITHUB_WORKSPACE/development_kit/scripts/installed_package_probe.py" --snapshot-dir "$env:GITHUB_WORKSPACE/development_kit/tests/snapshots" --output /tmp/a77installed/package.json
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            & $candidatePython "$env:GITHUB_WORKSPACE/development_kit/scripts/installed_stdio_probe.py" --command /tmp/a77env/bin/comsol-mcp --workdir /tmp/a77installed/stdio --output /tmp/a77installed/stdio.json
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          } finally { Pop-Location }
+      - name: Upload Ubuntu backend evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ubuntu-backend-evidence
+          path: |
+            /tmp/a77q
+            /tmp/a77installed
+            /tmp/a77dist
+          if-no-files-found: warn
+
+  experimental-ubuntu-settings-gui:
+    name: Ubuntu 26.04 x64 shared Tk GUI and owned launcher (solver-free)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    env:
+      PYTHONUNBUFFERED: "1"
+      COMSOL_MCP_TEST_ASCII_ROOT: /tmp/a77g
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.14.6"
+      - name: Prepare the shared graphical test environment
+        shell: pwsh
+        run: |
+          sudo apt-get update
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          sudo apt-get install -y xvfb xauth python3-tk fonts-noto-cjk desktop-file-utils libglib2.0-bin
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m pip install --require-hashes --only-binary=:all: -r constraints/release_locked_ubuntu_py314.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          # Hash verification above applies to runtime wheels. Local source cannot use hash mode.
+          $versionConstraints = Join-Path $env:RUNNER_TEMP 'ubuntu-runtime-versions.txt'
+          Get-Content constraints/release_locked_ubuntu_py314.txt | ForEach-Object {
+            if ($_ -match '^[A-Za-z0-9][A-Za-z0-9_.-]*==[^\s]+') { $Matches[0] }
+          } | Set-Content -Encoding utf8NoBOM $versionConstraints
+          python -m pip install ".[dev,manuals]" -c $versionConstraints "pymupdf==1.28.0"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m pip check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Test the shared GUI and launcher with Xvfb
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force /tmp/a77gui | Out-Null
+          xvfb-run -a python -m pytest -q -W error settings_gui/tests --basetemp /tmp/a77gui/tests --junitxml /tmp/a77gui/tests.xml
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          xvfb-run -a python development_kit/scripts/settings_gui_visual_capture.py --output-root /tmp/a77gui/visual
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Upload Ubuntu GUI evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ubuntu-settings-gui-evidence
+          path: |
+            /tmp/a77gui/tests.xml
+            /tmp/a77gui/visual
+          if-no-files-found: warn
+
+  paired-platform-coverage:
+    name: Required Windows and Ubuntu branch coverage
+    needs: [unit-and-package-py314, experimental-ubuntu-backend]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: '3.14.6'
+      - name: Install the locked coverage policy parser
+        shell: pwsh
+        run: |
+          $lock = Get-Content constraints/release_locked_ubuntu_py314.txt -Raw
+          $pin = [regex]::Match($lock, '(?m)^packaging==[^\r\n]+\r?\n\s+--hash=sha256:[a-f0-9]+')
+          if (-not $pin.Success) { throw 'The locked packaging dependency is missing' }
+          Set-Content -LiteralPath /tmp/paired-parser.txt -Value $pin.Value -Encoding utf8NoBOM
+          python -m pip install --require-hashes --only-binary=:all: -r /tmp/paired-parser.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: quality-gate-evidence
+          path: /tmp/paired/windows
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: ubuntu-backend-evidence
+          path: /tmp/paired/linux
+      - name: Apply the unchanged coverage policy to identical source evidence
+        shell: pwsh
+        run: |
+          $win = @(Get-ChildItem /tmp/paired/windows -Recurse -Filter quality-receipt.json)
+          $linux = @(Get-ChildItem /tmp/paired/linux -Recurse -Filter quality-receipt.json)
+          if ($win.Count -ne 1 -or $linux.Count -ne 1) { throw 'Exactly one receipt per platform is required' }
+          python -m development_kit.scripts.paired_coverage --windows $win[0].FullName --linux $linux[0].FullName --output /tmp/paired/paired-receipt.json
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: paired-coverage-evidence
+          path: /tmp/paired/paired-receipt.json
+          if-no-files-found: error

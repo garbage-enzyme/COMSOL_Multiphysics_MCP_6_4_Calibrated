@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,9 @@ from src.settings import (
     settings_environment,
     settings_status,
 )
+
+
+from development_kit.tests.platform_fixtures import platform_test_root
 
 
 def _safe_defaults(environ=None) -> dict:
@@ -113,7 +117,7 @@ def test_invalid_value_keeps_only_that_setting_at_default_and_reports_it(tmp_pat
             "profile": {"name": "wave\u0000optics"},
             "runtime": {
                 "directory": "D:/bad\npath",
-                "jobs_directory": "D:/valid/jobs",
+                "jobs_directory": str(platform_test_root("valid/jobs")),
             },
             "shared_server": {"enabled": "true"},
         },
@@ -128,7 +132,7 @@ def test_invalid_value_keeps_only_that_setting_at_default_and_reports_it(tmp_pat
         settings["runtime"]["directory"]
         == default_settings_document(environ=environment)["runtime"]["directory"]
     )
-    assert settings["runtime"]["jobs_directory"] == str(Path("D:/valid/jobs"))
+    assert settings["runtime"]["jobs_directory"] == str(Path(str(platform_test_root("valid/jobs"))))
     assert settings["shared_server"]["enabled"] is False
     assert status["configuration_state"] == "degraded"
     assert status["defaults_used_for_invalid_or_missing_entries"] is True
@@ -154,6 +158,7 @@ def test_malformed_json_falls_back_to_the_complete_safe_defaults(tmp_path):
     assert status["settings_errors"][0]["path"] == "settings"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows environment template contract")
 def test_broken_default_environment_reports_errors_instead_of_raising(tmp_path):
     missing = tmp_path / "missing-settings.json"
     environment = {
@@ -170,6 +175,7 @@ def test_broken_default_environment_reports_errors_instead_of_raising(tmp_path):
     assert any("LOCALAPPDATA" in message and "absolute path" in message for message in messages)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows environment template contract")
 def test_invalid_value_with_broken_default_reparse_is_reported_not_raised(tmp_path):
     path = _settings_path(tmp_path, {"runtime": {"directory": "relative"}})
     environment = {
@@ -250,19 +256,20 @@ def test_project_settings_fill_legacy_runtime_shape_for_existing_callers(tmp_pat
         tmp_path,
         {
             "runtime": {
-                "directory": "D:/comsol_runtime",
-                "jobs_directory": "D:/comsol_runtime/jobs",
+                "directory": str(platform_test_root("settings-runtime")),
+                "jobs_directory": str(platform_test_root("settings-runtime/jobs")),
             },
             "shared_server": {"enabled": True},
         },
     )
     effective = settings_environment({SETTINGS_PATH_ENV: str(path)})
 
-    assert effective["COMSOL_MCP_RUNTIME_DIR"] == str(Path("D:/comsol_runtime"))
-    assert effective["COMSOL_MCP_JOBS_DIR"] == str(Path("D:/comsol_runtime/jobs"))
+    assert effective["COMSOL_MCP_RUNTIME_DIR"] == str(Path(str(platform_test_root("settings-runtime"))))
+    assert effective["COMSOL_MCP_JOBS_DIR"] == str(Path(str(platform_test_root("settings-runtime/jobs"))))
     assert effective["COMSOL_MCP_ENABLE_SHARED_SERVER"] == "true"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows environment template contract")
 def test_split_defaults_preserve_unicode_models_and_ascii_runtime(
     tmp_path, ascii_tmp_path, monkeypatch
 ):
@@ -365,8 +372,8 @@ def test_legacy_override_preserves_itself_without_suppressing_project_defaults(t
         {
             "profile": {"name": "wave_optics"},
             "runtime": {
-                "directory": "D:/project-runtime",
-                "jobs_directory": "D:/project-runtime/jobs",
+                "directory": str(platform_test_root("project-runtime")),
+                "jobs_directory": str(platform_test_root("project-runtime/jobs")),
             },
             "shared_server": {"enabled": True},
         },
@@ -379,7 +386,7 @@ def test_legacy_override_preserves_itself_without_suppressing_project_defaults(t
     )
 
     assert effective["COMSOL_MCP_RUNTIME_DIR"] == "E:/explicit-runtime"
-    assert effective["COMSOL_MCP_JOBS_DIR"] == str(Path("D:/project-runtime/jobs"))
+    assert effective["COMSOL_MCP_JOBS_DIR"] == str(Path(str(platform_test_root("project-runtime/jobs"))))
     assert effective["COMSOL_MCP_PROFILE"] == "wave_optics"
     assert effective["COMSOL_MCP_ENABLE_SHARED_SERVER"] == "true"
 
@@ -436,13 +443,13 @@ def test_settings_1_2_moves_lexical_index_out_of_semantic_group() -> None:
             "profile": {"name": "core"},
             "manuals": {
                 "enabled": True,
-                "pdf_root": "D:/manuals",
-                "lexical_index": "D:/legacy.sqlite3",
+                "pdf_root": str(platform_test_root("manuals")),
+                "lexical_index": str(platform_test_root("legacy.sqlite3")),
             },
             "semantic_docs": {
                 "enabled": False,
-                "root": "D:/semantic",
-                "lexical_index": "D:/manuals.sqlite3",
+                "root": str(platform_test_root("semantic")),
+                "lexical_index": str(platform_test_root("manuals.sqlite3")),
                 "model_path": None,
             },
         }
@@ -450,14 +457,14 @@ def test_settings_1_2_moves_lexical_index_out_of_semantic_group() -> None:
 
     assert report["errors"] == []
     assert report["settings"]["schema_version"] == SETTINGS_VERSION
-    assert report["settings"]["manuals"] == {"root": str(Path("D:/manuals"))}
+    assert report["settings"]["manuals"] == {"root": str(Path(str(platform_test_root("manuals"))))}
     assert report["settings"]["lexical_docs"] == {
         "enabled": True,
-        "index_path": str(Path("D:/manuals.sqlite3")),
+        "index_path": str(Path(str(platform_test_root("manuals.sqlite3")))),
     }
     assert report["settings"]["semantic_docs"] == {
         "enabled": False,
-        "root": str(Path("D:/semantic")),
+        "root": str(Path(str(platform_test_root("semantic")))),
         "model_path": None,
     }
 
@@ -484,8 +491,8 @@ def test_current_feature_gates_are_boolean_composable_and_environment_visible(tm
             "schema_version": SETTINGS_VERSION,
             "profile": {"name": "wave_optics"},
             "shared_server": {"enabled": True},
-            "manuals": {"root": "D:/manuals"},
-            "lexical_docs": {"enabled": True, "index_path": "D:/manuals.sqlite3"},
+            "manuals": {"root": str(platform_test_root("manuals"))},
+            "lexical_docs": {"enabled": True, "index_path": str(platform_test_root("manuals.sqlite3"))},
             "semantic_docs": {
                 "enabled": True,
                 "root": None,
@@ -504,6 +511,6 @@ def test_current_feature_gates_are_boolean_composable_and_environment_visible(tm
     assert effective["COMSOL_MCP_ENABLE_SHARED_SERVER"] == "true"
     assert effective["COMSOL_MCP_ENABLE_LEXICAL_DOCS"] == "true"
     assert effective["COMSOL_MCP_ENABLE_SEMANTIC_DOCS"] == "true"
-    assert effective["COMSOL_MANUALS_ROOT"] == str(Path("D:/manuals"))
-    assert effective["COMSOL_LEXICAL_DOCS_INDEX_PATH"] == str(Path("D:/manuals.sqlite3"))
-    assert effective["COMSOL_SEMANTIC_LEXICAL_INDEX"] == str(Path("D:/manuals.sqlite3"))
+    assert effective["COMSOL_MANUALS_ROOT"] == str(Path(str(platform_test_root("manuals"))))
+    assert effective["COMSOL_LEXICAL_DOCS_INDEX_PATH"] == str(Path(str(platform_test_root("manuals.sqlite3"))))
+    assert effective["COMSOL_SEMANTIC_LEXICAL_INDEX"] == str(Path(str(platform_test_root("manuals.sqlite3"))))

@@ -207,6 +207,8 @@ def build_tasks_extension(bridge: TasksBridge) -> Any:
             client — or an opted-in client calling any other tool — never
             receives a task-shaped result.
             """
+            if getattr(ctx, "protocol_version", None) not in SUPPORTED_PROTOCOL_VERSIONS:
+                return await call_next(ctx)
             if not request_declared_tasks(getattr(ctx, "meta", None)):
                 return await call_next(ctx)
             if getattr(params, "name", None) not in TASK_CAPABLE_TOOLS:

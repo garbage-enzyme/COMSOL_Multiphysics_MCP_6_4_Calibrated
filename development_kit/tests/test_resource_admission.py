@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -463,7 +464,17 @@ def test_host_telemetry_collector_is_bounded_solver_free_and_stage_typed(tmp_pat
     assert result["values"]["dof"] == 456
     assert result["values"]["runtime_free_bytes"] >= 0
     assert result["values"]["worker_working_set_bytes"] > 0
-    assert 0 <= result["values"]["remaining_commit_bytes"] <= result["values"]["commit_limit_bytes"]
+    if os.name == "nt":
+        assert (
+            0
+            <= result["values"]["remaining_commit_bytes"]
+            <= result["values"]["commit_limit_bytes"]
+        )
+    else:
+        assert "remaining_commit_bytes" not in result["values"]
+        assert "commit_limit_bytes" not in result["values"]
+        assert {"remaining_commit_bytes", "commit_limit_bytes"} <= set(result["unavailable"])
+        assert "commit_unavailable" in {item["code"] for item in result["collection_errors"]}
     assert result["solver_started"] is False
     assert result["runtime_volume"]["absolute_path_redacted"] is True
     assert len(result["collection_errors"]) <= 10

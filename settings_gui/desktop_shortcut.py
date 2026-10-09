@@ -176,11 +176,18 @@ def _installed_named_entry(name: str) -> Path:
 
 def installed_entry_executable() -> Path:
     """Find the console entry used for explicit command-line actions."""
+    if os.name != "nt":
+        entry = Path(sys.prefix) / "bin/comsol-mcp-settings"
+        if not entry.is_file() or not os.access(entry, os.X_OK):
+            raise FileNotFoundError("installed GUI console entry is unavailable")
+        return entry
     return _installed_named_entry("comsol-mcp-settings.exe")
 
 
 def installed_gui_entry_executable() -> Path:
     """Find the windowed entry used by owned Desktop shortcuts."""
+    if os.name != "nt":
+        return installed_entry_executable()
     return _installed_named_entry("comsol-mcp-settings-gui.exe")
 
 
@@ -499,6 +506,12 @@ def shortcut_status(
     inspect_shortcut: Callable[[Path], ShortcutSpec] = inspect_windows_shortcut,
     write_shortcut: Callable[[Path, ShortcutSpec], None] = _write_windows_shortcut,
 ) -> dict[str, Any]:
+    if os.name != "nt" and inspect_shortcut is inspect_windows_shortcut:
+        from . import xdg_shortcut
+
+        return xdg_shortcut.shortcut_status(
+            settings_path=settings_path, desktop_path=desktop_path, executable=executable
+        )
     del write_shortcut
     settings, shortcut = _resolved_lifecycle_inputs(settings_path, desktop_path)
     if not shortcut.exists():
@@ -536,6 +549,19 @@ def create_desktop_shortcut(
     inspect_shortcut: Callable[[Path], ShortcutSpec] = inspect_windows_shortcut,
     write_shortcut: Callable[[Path, ShortcutSpec], None] = _write_windows_shortcut,
 ) -> dict[str, Any]:
+    if (
+        os.name != "nt"
+        and inspect_shortcut is inspect_windows_shortcut
+        and write_shortcut is _write_windows_shortcut
+    ):
+        from . import xdg_shortcut
+
+        return xdg_shortcut.create_desktop_shortcut(
+            settings_path=settings_path,
+            replace_existing=replace_existing,
+            desktop_path=desktop_path,
+            executable=executable,
+        )
     settings, shortcut, desired = _resolved_inputs(
         settings_path, desktop_path, executable, icon_path
     )
@@ -608,6 +634,12 @@ def remove_desktop_shortcut(
     inspect_shortcut: Callable[[Path], ShortcutSpec] = inspect_windows_shortcut,
     write_shortcut: Callable[[Path, ShortcutSpec], None] = _write_windows_shortcut,
 ) -> dict[str, Any]:
+    if os.name != "nt" and inspect_shortcut is inspect_windows_shortcut:
+        from . import xdg_shortcut
+
+        return xdg_shortcut.remove_desktop_shortcut(
+            settings_path=settings_path, desktop_path=desktop_path, executable=executable
+        )
     del write_shortcut
     del executable, icon_path
     settings, shortcut = _resolved_lifecycle_inputs(settings_path, desktop_path)
@@ -645,6 +677,10 @@ def shortcut_prerequisites(
     settings_path: Path,
 ) -> dict[str, bool]:
     """Check shortcut prerequisites without constructing Tk or writing anything."""
+    if os.name != "nt":
+        from . import xdg_shortcut
+
+        return xdg_shortcut.shortcut_prerequisites(settings_path=settings_path)
     checks = {
         "desktop_available": False,
         "entry_executable_available": False,

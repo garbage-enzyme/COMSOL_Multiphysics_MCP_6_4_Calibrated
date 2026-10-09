@@ -1,5 +1,7 @@
 # COMSOL MCP deployment guide
 
+This document describes Windows deployment. For experimental solver-free Ubuntu installation, read the [Linux guide](docs/experimental_linux/README.md).
+
 This guide covers a fresh COMSOL MCP installation and client configuration for
 Claude Code, Hermes Agent, Codex CLI, and opencode. Replace every example path
 with the target machine's actual paths.

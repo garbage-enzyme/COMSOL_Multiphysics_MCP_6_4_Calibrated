@@ -21,9 +21,18 @@ import src.tools.ownership as ownership_module
 from src.tools.ownership import SolverOwnership
 
 
+from development_kit.tests.platform_fixtures import fake_lease_artifact_lock, platform_test_root
+
+
+@pytest.fixture(autouse=True)
+def synthetic_lease_lock_on_posix(monkeypatch):
+    if os.name != "nt":
+        monkeypatch.setattr(ownership_module, "_lease_operation_lock", fake_lease_artifact_lock)
+
+
 @pytest.fixture()
 def runtime_dir():
-    path = Path("D:/comsol_runtime_test/p4_inventory") / uuid.uuid4().hex
+    path = platform_test_root("process_inventory") / uuid.uuid4().hex
     path.mkdir(parents=True)
     try:
         yield path
@@ -260,6 +269,7 @@ def test_host_inventory_skips_expensive_metadata_for_unrelated_processes(monkeyp
     }
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows process table probe")
 def test_host_inventory_fails_closed_when_solver_process_is_inaccessible(monkeypatch):
     class InaccessibleProcess:
         pid = 88

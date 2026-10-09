@@ -14,6 +14,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = ROOT / "Open_Settings_GUI.ps1"
+pytestmark = pytest.mark.skipif(
+    os.name != "nt",
+    reason="Windows repository PowerShell launcher; Linux uses the installed Python entry",
+)
 
 
 @pytest.mark.parametrize("shell_name", ["powershell.exe", "pwsh.exe"])

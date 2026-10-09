@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import os
 import sys
@@ -61,7 +62,14 @@ def _run(root: str, job_id: str) -> int:
     store.bind_worker_identity(job_id, identity)
     store.update_state(
         job_id,
-        patch={"process_tree_contained": bool(process_tree_contained)},
+        patch={
+            "process_tree_contained": bool(process_tree_contained),
+            "controlled_leaf_worker": {
+                "kind": "sequence_leaf_v1",
+                "worker": identity,
+                "driver_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            },
+        },
         event="worker_containment_recorded",
         event_data={"process_tree_contained": bool(process_tree_contained)},
     )

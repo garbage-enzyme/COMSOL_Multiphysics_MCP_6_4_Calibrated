@@ -26,6 +26,7 @@ from src.knowledge.semantic_worker import _RequestHandler, _WorkerServer, _Worke
 from src.tools.capabilities import get_capabilities
 from src.tools.ownership import SolverOwnership
 
+from development_kit.tests.platform_fixtures import platform_test_root
 from development_kit.tests.semantic_test_support import isolated_semantic_environment
 
 
@@ -316,7 +317,7 @@ def test_lightweight_identity_hashes_loaded_manifest_and_contains_invalid_utf8(a
     ],
 )
 def test_lightweight_identity_rejects_missing_required_fields(request, document_name, field):
-    root = Path("D:/mcp_tests/a65b15id") / uuid.uuid4().hex
+    root = platform_test_root("a65b15id") / uuid.uuid4().hex
     request.addfinalizer(lambda: shutil.rmtree(root, ignore_errors=True))
     index = root / "indexes" / "corpus" / "model" / "build"
     model_root = root / "model"
