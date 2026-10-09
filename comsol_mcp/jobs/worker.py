@@ -752,7 +752,23 @@ def _run(root: str, job_id: str) -> int:
                     file=sys.stderr,
                     flush=True,
                 )
-        if attached_target is not None:
+        if attached_target is not None and native_monitor_active:
+            # The native cancel call may still be using the attached client.
+            # Preserve the shared client and lease until that thread exits.
+            store.update_state(
+                job_id,
+                patch={
+                    "attached_cleanup": {
+                        "success": False,
+                        "released": False,
+                        "lease_absent": False,
+                        "error": "Native cancel monitor is still active; attached resources preserved.",
+                    }
+                },
+                event="attached_cleanup_deferred",
+                event_data={"success": False, "native_cancel_active": True},
+            )
+        elif attached_target is not None:
             cleanup = _cleanup_attached_execution(
                 client=client,
                 ownership=ownership,
