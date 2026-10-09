@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import shutil
@@ -1388,7 +1389,7 @@ def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(
         "spec_fingerprint": "mock-config",
         "job_type": "staged_sweep",
         "source_model_path": str(jobs_root / "source.mph"),
-        "source_model_sha256": "0" * 64,
+        "source_model_sha256": hashlib.sha256(b"mock").hexdigest(),
         "parameter_name": "wl",
         "parameter_values": [1.0, 2.0],
         "expressions": ["A"],
@@ -1498,7 +1499,7 @@ def test_production_worker_rejects_failed_heartbeat_before_model_load(jobs_root,
             "spec_fingerprint": "heartbeat-config",
             "job_type": "staged_sweep",
             "source_model_path": str(source),
-            "source_model_sha256": "0" * 64,
+            "source_model_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
             "parameter_name": "wl",
             "parameter_values": [1.0],
             "expressions": ["A"],
@@ -1570,7 +1571,7 @@ def test_production_worker_resource_gate_interrupts_before_second_solve(jobs_roo
         "spec_fingerprint": "mock-resource-config",
         "job_type": "staged_sweep",
         "source_model_path": str(jobs_root / "source.mph"),
-        "source_model_sha256": "0" * 64,
+        "source_model_sha256": hashlib.sha256(b"mock").hexdigest(),
         "parameter_name": "wl",
         "parameter_values": [1.0, 2.0],
         "expressions": ["A"],
