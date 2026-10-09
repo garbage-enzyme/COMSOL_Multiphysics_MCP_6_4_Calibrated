@@ -231,6 +231,17 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
         )
         for item in energy.values():
             _finite(item, "energy value")
+        source_w = _finite(energy["source_W"], "energy source")
+        loss_w = _finite(energy["loss_W"], "energy loss")
+        residual_w = _finite(energy["residual_W"], "energy residual")
+        if not math.isclose(residual_w, source_w - loss_w, rel_tol=1.0e-12, abs_tol=1.0e-30):
+            raise ValueError("energy balance residual does not match source minus loss")
+        relative_residual = _finite(energy["relative_residual"], "relative energy residual")
+        calculated_relative = abs(residual_w) / max(abs(source_w), abs(loss_w), 1.0e-30)
+        if relative_residual < 0.0 or not math.isclose(
+            relative_residual, calculated_relative, rel_tol=1.0e-12, abs_tol=1.0e-15
+        ):
+            raise ValueError("relative energy residual does not match the measured balance")
         expansion = _exact(
             payload["expansion"],
             {
@@ -315,7 +326,9 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
         _hex_digest(mesh["identity_sha256"], "mesh identity_sha256")
         _hex_digest(frame["identity_sha256"], "frame identity_sha256")
         _finite(payload["deformation_scale"], "deformation scale")
-        _finite(payload["displacement_to_length"], "displacement ratio")
+        ratio = _finite(payload["displacement_to_length"], "displacement ratio")
+        if ratio < 0.0:
+            raise ValueError("displacement ratio must not be negative")
         return
     if stage_id == "deformation_transfer":
         payload = _exact(

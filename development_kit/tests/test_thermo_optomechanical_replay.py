@@ -754,6 +754,30 @@ def test_wavelength_readback_accepts_last_ulp_but_rejects_material_drift():
     assert not replay_execution_module._wavelength_readback_matches(1.6e-6, requested)
 
 
+def test_thermo_evidence_rejects_inconsistent_energy_and_negative_displacement_ratio(
+    ascii_tmp_path,
+):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path))
+    payload = _payload("thermal_structural_solve", spec)
+    payload["energy_balance"]["residual_W"] = 1.0
+    with pytest.raises(ValueError, match="energy balance residual"):
+        build_stage_evidence(spec, "thermal_structural_solve", payload)
+    payload["energy_balance"] = {
+        "source_W": 10.0,
+        "loss_W": 1.0,
+        "residual_W": 9.0,
+        "relative_residual": 0.0,
+    }
+    with pytest.raises(ValueError, match="relative energy residual"):
+        build_stage_evidence(spec, "thermal_structural_solve", payload)
+    payload["energy_balance"]["relative_residual"] = 0.9
+    assert build_stage_evidence(spec, "thermal_structural_solve", payload)
+    state = _payload("state_evidence", spec)
+    state["displacement_to_length"] = -1.0
+    with pytest.raises(ValueError, match="displacement ratio"):
+        build_stage_evidence(spec, "state_evidence", state)
+
+
 def test_rollback_availability_requires_a_persisted_checkpoint(ascii_tmp_path):
     spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "rollback"))
     executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
