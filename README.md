@@ -472,6 +472,12 @@ hash-bound evidence records coverage, integration policy, extrapolation state,
 uncertainty, source artifacts, and detector/reference/background signals. It
 does not replace COMSOL's Surface-to-Surface Radiation solver.
 
+Absorptivity requests must declare `absorptivity_evidence_sha256` and
+`channel_identity_sha256`. The evidence hash must identify a source artifact.
+The Kirchhoff receipt must match both hashes, propagation direction, polarization
+basis, and source handedness. Stokes Q, U, and V can be negative.
+Their combined magnitude must not exceed I. Scalar and TE/TM values remain in [0, 1].
+
 The solver-free `thermal_material_validate` and `thermal_material_evaluate`
 tools use a versioned ledger instead of embedding a material database. Each
 state binds material/sample identity, phase and fabrication state, source,

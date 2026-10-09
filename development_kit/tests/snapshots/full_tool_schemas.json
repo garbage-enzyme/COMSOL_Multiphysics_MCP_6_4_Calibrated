@@ -4,7 +4,7 @@
     "maxProperties": 256,
     "properties": {
       "continuation_policy": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Continuation Policy",
         "type": "object"
@@ -12,7 +12,7 @@
       "continuation_states": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -26,7 +26,7 @@
       "states_spec": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -401,7 +401,7 @@
       "convergence_ladder": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -413,7 +413,7 @@
         "title": "Convergence Ladder"
       },
       "convergence_policy": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Convergence Policy",
         "type": "object"
@@ -421,7 +421,7 @@
       "ladder_spec": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -538,7 +538,7 @@
         "type": "object"
       },
       "portfolio_request": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Portfolio Request",
         "type": "object"
@@ -546,7 +546,7 @@
       "producer_compatibility": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -1207,7 +1207,7 @@
     "properties": {
       "block_edits": {
         "items": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "maxProperties": 256,
           "type": "object"
         },
@@ -1271,7 +1271,7 @@
     "properties": {
       "block_edits": {
         "items": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "maxProperties": 256,
           "type": "object"
         },
@@ -2266,7 +2266,7 @@
             "type": "string"
           },
           "continuation_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Continuation Policy",
             "type": "object"
@@ -2285,7 +2285,7 @@
           },
           "states": {
             "items": {
-              "additionalProperties": false,
+              "additionalProperties": true,
               "maxProperties": 256,
               "type": "object"
             },
@@ -2323,7 +2323,7 @@
             "type": "string"
           },
           "convergence_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Convergence Policy",
             "type": "object"
@@ -2336,7 +2336,7 @@
           },
           "levels": {
             "items": {
-              "additionalProperties": false,
+              "additionalProperties": true,
               "maxProperties": 256,
               "type": "object"
             },
@@ -2352,7 +2352,7 @@
             "type": "integer"
           },
           "stop_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Stop Policy",
             "type": "object"
@@ -2381,13 +2381,13 @@
         "maxProperties": 256,
         "properties": {
           "analysis_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Analysis Policy",
             "type": "object"
           },
           "collector": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Collector",
             "type": "object"
@@ -2417,13 +2417,13 @@
             "type": "integer"
           },
           "expansion_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Expansion Policy",
             "type": "object"
           },
           "initial_grid": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Initial Grid",
             "type": "object"
@@ -2455,25 +2455,25 @@
             "type": "integer"
           },
           "measurement_configuration": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Measurement Configuration",
             "type": "object"
           },
           "parameter_state": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Parameter State",
             "type": "object"
           },
           "refinement_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Refinement Policy",
             "type": "object"
           },
           "resource_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Resource Policy",
             "type": "object"
@@ -2578,7 +2578,7 @@
           "execution_backend": {
             "anyOf": [
               {
-                "additionalProperties": false,
+                "additionalProperties": true,
                 "maxProperties": 256,
                 "type": "object"
               },
@@ -2665,7 +2665,7 @@
           "physical_bounds": {
             "anyOf": [
               {
-                "additionalProperties": false,
+                "additionalProperties": true,
                 "maxProperties": 256,
                 "type": "object"
               },
@@ -2691,7 +2691,7 @@
           "resource_policy": {
             "anyOf": [
               {
-                "additionalProperties": false,
+                "additionalProperties": true,
                 "maxProperties": 256,
                 "type": "object"
               },
@@ -2944,7 +2944,7 @@
           },
           "points": {
             "items": {
-              "additionalProperties": false,
+              "additionalProperties": true,
               "maxProperties": 256,
               "type": "object"
             },
@@ -2954,7 +2954,7 @@
             "type": "array"
           },
           "resource_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Resource Policy",
             "type": "object"
@@ -3065,7 +3065,7 @@
             "type": "string"
           },
           "continuation_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Continuation Policy",
             "type": "object"
@@ -3084,7 +3084,7 @@
           },
           "states": {
             "items": {
-              "additionalProperties": false,
+              "additionalProperties": true,
               "maxProperties": 256,
               "type": "object"
             },
@@ -3122,7 +3122,7 @@
             "type": "string"
           },
           "convergence_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Convergence Policy",
             "type": "object"
@@ -3135,7 +3135,7 @@
           },
           "levels": {
             "items": {
-              "additionalProperties": false,
+              "additionalProperties": true,
               "maxProperties": 256,
               "type": "object"
             },
@@ -3151,7 +3151,7 @@
             "type": "integer"
           },
           "stop_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Stop Policy",
             "type": "object"
@@ -3180,13 +3180,13 @@
         "maxProperties": 256,
         "properties": {
           "analysis_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Analysis Policy",
             "type": "object"
           },
           "collector": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Collector",
             "type": "object"
@@ -3216,13 +3216,13 @@
             "type": "integer"
           },
           "expansion_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Expansion Policy",
             "type": "object"
           },
           "initial_grid": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Initial Grid",
             "type": "object"
@@ -3254,25 +3254,25 @@
             "type": "integer"
           },
           "measurement_configuration": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Measurement Configuration",
             "type": "object"
           },
           "parameter_state": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Parameter State",
             "type": "object"
           },
           "refinement_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Refinement Policy",
             "type": "object"
           },
           "resource_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Resource Policy",
             "type": "object"
@@ -3377,7 +3377,7 @@
           "execution_backend": {
             "anyOf": [
               {
-                "additionalProperties": false,
+                "additionalProperties": true,
                 "maxProperties": 256,
                 "type": "object"
               },
@@ -3464,7 +3464,7 @@
           "physical_bounds": {
             "anyOf": [
               {
-                "additionalProperties": false,
+                "additionalProperties": true,
                 "maxProperties": 256,
                 "type": "object"
               },
@@ -3490,7 +3490,7 @@
           "resource_policy": {
             "anyOf": [
               {
-                "additionalProperties": false,
+                "additionalProperties": true,
                 "maxProperties": 256,
                 "type": "object"
               },
@@ -3743,7 +3743,7 @@
           },
           "points": {
             "items": {
-              "additionalProperties": false,
+              "additionalProperties": true,
               "maxProperties": 256,
               "type": "object"
             },
@@ -3753,7 +3753,7 @@
             "type": "array"
           },
           "resource_policy": {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "title": "Resource Policy",
             "type": "object"
@@ -4058,7 +4058,7 @@
       },
       "levels": {
         "items": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "maxProperties": 256,
           "type": "object"
         },
@@ -5014,7 +5014,7 @@
       "resource_policy": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -5049,7 +5049,7 @@
     "maxProperties": 256,
     "properties": {
       "derived_source_identity": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Derived Source Identity",
         "type": "object"
@@ -6129,7 +6129,7 @@
       "properties": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -6989,7 +6989,7 @@
       "properties": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -7264,7 +7264,7 @@
       "properties": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -7990,7 +7990,7 @@
       "properties": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -8015,7 +8015,7 @@
     "properties": {
       "boundary_conditions": {
         "items": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "maxProperties": 256,
           "type": "object"
         },
@@ -8264,7 +8264,7 @@
     "properties": {
       "boundary_conditions": {
         "items": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "maxProperties": 256,
           "type": "object"
         },
@@ -8316,19 +8316,19 @@
     "maxProperties": 256,
     "properties": {
       "approval": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Approval",
         "type": "object"
       },
       "design_space": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Design Space",
         "type": "object"
       },
       "goal": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Goal",
         "type": "object"
@@ -8336,7 +8336,7 @@
       "material_catalog": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -8350,7 +8350,7 @@
       "workflow_capsule": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -8389,7 +8389,7 @@
       "checkpoint": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -8411,7 +8411,7 @@
         "type": "string"
       },
       "design_space": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Design Space",
         "type": "object"
@@ -8419,7 +8419,7 @@
       "feedback": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -8459,13 +8459,13 @@
     "maxProperties": 256,
     "properties": {
       "candidate_values": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Candidate Values",
         "type": "object"
       },
       "design_space": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Design Space",
         "type": "object"
@@ -11040,7 +11040,7 @@
     "maxProperties": 256,
     "properties": {
       "analysis_policy": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Analysis Policy",
         "type": "object"
@@ -11048,7 +11048,7 @@
       "bundle_spec": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -11060,7 +11060,7 @@
         "title": "Bundle Spec"
       },
       "measurement_configuration": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Measurement Configuration",
         "type": "object"
@@ -11068,7 +11068,7 @@
       "spectral_bundle": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -11092,7 +11092,7 @@
     "maxProperties": 256,
     "properties": {
       "analysis_policy": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Analysis Policy",
         "type": "object"
@@ -11100,7 +11100,7 @@
       "bundle_spec": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -11112,7 +11112,7 @@
         "title": "Bundle Spec"
       },
       "comparison_configuration": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Comparison Configuration",
         "type": "object"
@@ -11120,7 +11120,7 @@
       "spectral_bundle": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -12329,7 +12329,7 @@
     "maxProperties": 256,
     "properties": {
       "configuration": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "minProperties": 1,
         "title": "Configuration",
@@ -15315,6 +15315,20 @@
         "additionalProperties": false,
         "maxProperties": 256,
         "properties": {
+          "absorptivity_evidence_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Absorptivity Evidence Sha256"
+          },
           "angular_grid": {
             "$ref": "#/$defs/AngularGrid"
           },
@@ -15326,6 +15340,20 @@
           },
           "axis": {
             "$ref": "#/$defs/SpectralAxis"
+          },
+          "channel_identity_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Channel Identity Sha256"
           },
           "configuration_sha256": {
             "maxLength": 16384,
@@ -15424,9 +15452,10 @@
             "type": "array"
           },
           "values_flat": {
+            "description": "Scalar and TE/TM values lie in [0, 1]. Stokes I lies in [0, 1]; Q, U, and V are signed, and their magnitude cannot exceed I.",
             "items": {
-              "maximum": 1.0,
-              "minimum": 0.0,
+              "maximum": 1e+308,
+              "minimum": -1e+308,
               "type": "number"
             },
             "maxItems": 2048,
@@ -15513,7 +15542,7 @@
       "calibration": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -15533,7 +15562,7 @@
         "anyOf": [
           {
             "items": {
-              "additionalProperties": false,
+              "additionalProperties": true,
               "maxProperties": 256,
               "type": "object"
             },
@@ -15595,7 +15624,7 @@
       "provider_metadata": {
         "anyOf": [
           {
-            "additionalProperties": false,
+            "additionalProperties": true,
             "maxProperties": 256,
             "type": "object"
           },
@@ -15627,7 +15656,7 @@
         "anyOf": [
           {
             "items": {
-              "additionalProperties": false,
+              "additionalProperties": true,
               "maxProperties": 256,
               "type": "object"
             },
@@ -15663,19 +15692,19 @@
         "type": "string"
       },
       "first_receipt": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "First Receipt",
         "type": "object"
       },
       "request": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Request",
         "type": "object"
       },
       "second_receipt": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Second Receipt",
         "type": "object"
@@ -15695,14 +15724,14 @@
     "maxProperties": 256,
     "properties": {
       "capability": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Capability",
         "type": "object"
       },
       "findings": {
         "items": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "maxProperties": 256,
           "type": "object"
         },
@@ -15716,7 +15745,7 @@
       },
       "received_artifacts": {
         "items": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "maxProperties": 256,
           "type": "object"
         },
@@ -15734,7 +15763,7 @@
         "type": "array"
       },
       "request": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Request",
         "type": "object"
@@ -15790,7 +15819,7 @@
     "properties": {
       "artifacts": {
         "items": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "maxProperties": 256,
           "type": "object"
         },
@@ -15804,7 +15833,7 @@
         "type": "string"
       },
       "numerical_summary": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Numerical Summary",
         "type": "object"
@@ -15835,7 +15864,7 @@
       },
       "views": {
         "items": {
-          "additionalProperties": false,
+          "additionalProperties": true,
           "maxProperties": 256,
           "type": "object"
         },
@@ -15895,7 +15924,7 @@
         "type": "string"
       },
       "request": {
-        "additionalProperties": false,
+        "additionalProperties": true,
         "maxProperties": 256,
         "title": "Request",
         "type": "object"

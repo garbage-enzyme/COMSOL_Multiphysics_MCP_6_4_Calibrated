@@ -194,6 +194,26 @@ def evaluate_thermal_radiation(
         assessment = _validate_assessment(request.kirchhoff_assessment)
         if assessment["disposition"] != "applicable":
             raise ValueError("absorptivity cannot be used without an applicable assessment")
+        if (
+            assessment["absorptivity_evidence_sha256"] != request.absorptivity_evidence_sha256
+            or request.absorptivity_evidence_sha256 not in request.source_artifact_sha256s
+        ):
+            raise ValueError("Kirchhoff assessment does not match the request absorption evidence")
+        if assessment["channel_identity_sha256"] != request.channel_identity_sha256:
+            raise ValueError("Kirchhoff assessment does not match the request channel identity")
+        if assessment["propagation_direction"] != request.polarization.propagation_direction:
+            raise ValueError(
+                "Kirchhoff assessment does not match the request propagation direction"
+            )
+        basis = {
+            "scalar": "scalar",
+            "te_tm_incoherent": "te_tm",
+            "stokes_mueller": "stokes_mueller",
+        }[request.polarization.mode]
+        if assessment["polarization_basis"] != basis:
+            raise ValueError("Kirchhoff assessment does not match the request polarization basis")
+        if assessment["handedness_convention"] != request.polarization.source_handedness:
+            raise ValueError("Kirchhoff assessment does not match the request handedness")
     else:
         assessment = (
             None

@@ -89,16 +89,21 @@ def _process_records() -> tuple[list[dict[str, Any]], bool]:
 
 def _listener_records() -> tuple[list[dict[str, Any]], bool]:
     listeners: list[dict[str, Any]] = []
+    complete = True
     try:
         connections = psutil.net_connections(kind="tcp")
     except psutil.AccessDenied:
         return [], False
     for connection in connections:
-        if connection.status != psutil.CONN_LISTEN or connection.pid is None:
+        if connection.status != psutil.CONN_LISTEN:
+            continue
+        if connection.pid is None:
+            complete = False
             continue
         host = getattr(connection.laddr, "ip", None)
         port = getattr(connection.laddr, "port", None)
         if host is None or port is None:
+            complete = False
             continue
         try:
             normalized_host, _bind_scope = normalize_shared_listener_bind_host(host)
@@ -113,7 +118,7 @@ def _listener_records() -> tuple[list[dict[str, Any]], bool]:
         )
         if len(listeners) > MAX_LISTENER_RECORDS:
             raise RuntimeError("listener inventory exceeds the bounded maximum")
-    return listeners, True
+    return listeners, complete
 
 
 def _is_primary_desktop_window(*, title: str, class_name: str) -> bool:

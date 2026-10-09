@@ -240,11 +240,12 @@ def test_spec_rejects_duplicate_seeds_and_bad_budgets() -> None:
         )
 
 
-def test_continuation_requires_identical_contract_identities() -> None:
+@pytest.mark.parametrize("checksum", ["f" * 64, "-8938453606443985335"])
+def test_continuation_requires_identical_contract_identities(checksum) -> None:
     spec = normalize_surrogate_training_spec(_spec())
     good = {
         "parent_job_id": "job-parent",
-        "trained_chksum": "f" * 64,
+        "trained_chksum": checksum,
         "dataset_manifest_sha256": spec["dataset_manifest_sha256"],
         "split_manifest_sha256": spec["split_manifest_sha256"],
         "field_schema_sha256": spec["field_schema_sha256"],
@@ -253,6 +254,7 @@ def test_continuation_requires_identical_contract_identities() -> None:
     }
     resumed = normalize_surrogate_training_spec(_spec(continue_from=good))
     assert resumed["continue_from"]["parent_job_id"] == "job-parent"
+    assert resumed["continue_from"]["trained_chksum"] == checksum
 
     mismatched = {**good, "dataset_manifest_sha256": "b" * 64}
     with pytest.raises(ValueError, match="does not match the current contract identity"):

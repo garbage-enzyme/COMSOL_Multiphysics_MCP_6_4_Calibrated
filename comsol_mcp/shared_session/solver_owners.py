@@ -34,6 +34,7 @@ Frozen rules
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -150,9 +151,15 @@ def normalize_owner_identity(
         )
     if isinstance(process_create_time, bool) or not isinstance(process_create_time, (int, float)):
         raise OwnerAdmissionError("invalid_process_identity", "process_create_time must be numeric")
-    if float(process_create_time) <= 0:
+    try:
+        normalized_create_time = float(process_create_time)
+    except OverflowError as exc:
         raise OwnerAdmissionError(
-            "invalid_process_identity", "process_create_time must be positive"
+            "invalid_process_identity", "process_create_time exceeds the finite numeric range"
+        ) from exc
+    if not math.isfinite(normalized_create_time) or normalized_create_time <= 0:
+        raise OwnerAdmissionError(
+            "invalid_process_identity", "process_create_time must be finite and positive"
         )
     normalized_lease = _bounded_identifier(lease_sha256, "lease_sha256")
     if len(normalized_lease) != 64 or any(
@@ -164,7 +171,7 @@ def normalize_owner_identity(
     return {
         "owner": normalized_owner,
         "process_id": process_id,
-        "process_create_time": float(process_create_time),
+        "process_create_time": normalized_create_time,
         "lease_sha256": normalized_lease.lower(),
         "session_id": _bounded_identifier(session_id, "session_id"),
     }

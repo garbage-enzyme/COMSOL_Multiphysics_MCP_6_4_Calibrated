@@ -389,6 +389,11 @@ Stokes/Mueller 偏振，并可应用受限的气体、孔径、光学、analyzer
 以及 detector/reference/background signal。它不替代 COMSOL Surface-to-Surface
 Radiation solver。
 
+使用 absorptivity 时，请求必须提供 `absorptivity_evidence_sha256` 和
+`channel_identity_sha256`。吸收证据哈希必须对应一个 source artifact。
+Kirchhoff 回执必须匹配这两个哈希、传播方向、偏振基和源手性约定。
+Stokes Q、U、V 可以为负值，其合成模长不能超过 I。scalar 与 TE/TM 值仍限制在 [0, 1]。
+
 solver-free 的 `thermal_material_validate` 与 `thermal_material_evaluate` 使用
 versioned ledger，而不是内置第二套材料数据库。每个 state 都绑定 material/sample
 identity、phase/fabrication state、source、光谱与温度有效域、不确定度、测量条件以及

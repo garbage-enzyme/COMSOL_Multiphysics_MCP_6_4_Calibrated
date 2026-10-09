@@ -209,6 +209,9 @@ def _outside_fraction(value: float, minimum: float, maximum: float) -> float:
 def _bracket(values: list[float], target: float) -> tuple[int, int, float]:
     if len(values) == 1:
         return 0, 0, 0.0
+    if target in values:
+        index = values.index(target)
+        return index, index, 0.0
     if target <= values[0]:
         lower, upper = 0, 1
     elif target >= values[-1]:
@@ -239,6 +242,8 @@ def _table_discontinuity_crossed(model: Any, wavelength_m: float, temperature_K:
 
 
 def _interpolate_pair(left: float, right: float, fraction: float, method: str) -> float:
+    if fraction == 0.0:
+        return left
     if method == "nearest":
         return left if fraction < 0.5 else right
     if method == "piecewise_constant":
@@ -499,6 +504,8 @@ def evaluate_thermal_material(
             **body,
             "evaluation_sha256": domain_sha256_v2("thermal_material_evaluation/1.0.0", body),
         }
+    except (OverflowError, ZeroDivisionError) as exc:
+        raise ValueError("material evaluation exceeded the finite numeric range") from exc
     if not math.isfinite(epsilon.real) or not math.isfinite(epsilon.imag):
         raise ValueError("material evaluation produced non-finite permittivity")
     if epsilon.imag < -1.0e-12:

@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from comsol_mcp.durable.canonical import canonical_sha256_v1
+from comsol_mcp.surrogate.export import normalize_trained_checksum
 
 SCHEMA_VERSION = "1.0.0"
 
@@ -83,6 +84,10 @@ DRIFT_IDENTITY_FIELDS = (
     "architecture_sha256",
     "comsol_build",
     "objective",
+    "material_identity_sha256",
+    "mesh_identity_sha256",
+    "physics_identity_sha256",
+    "adapter_identity_sha256",
 )
 
 # Scientific disposition is deliberately separate from execution state.
@@ -165,7 +170,7 @@ def build_model_card(
         "intended_uses": [_require_str("intended_use", item) for item in intended_uses],
         "prohibited_uses": [_require_str("prohibited_use", item) for item in prohibited_uses],
         "trained_chksum": (
-            _require_hex64("trained_chksum", trained_chksum) if trained_chksum else None
+            normalize_trained_checksum(trained_chksum) if trained_chksum is not None else None
         ),
         "scientific_disposition": "predicted",
         "never_upgrades_fem_evidence": True,
@@ -214,6 +219,8 @@ def validate_model_card(value: Any) -> dict[str, Any]:
             _require_hex64(f"identities.{key}", body["identities"][key])
     for key, metric in body["metrics"].items():
         _require_finite(f"metrics.{key}", metric)
+    if body["trained_chksum"] is not None:
+        normalize_trained_checksum(body["trained_chksum"])
     return dict(value)
 
 

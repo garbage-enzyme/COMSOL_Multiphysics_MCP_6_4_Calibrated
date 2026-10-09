@@ -66,6 +66,33 @@ def test_model_card_is_sealed_and_never_upgrades_evidence() -> None:
     validate_model_card(card)
 
 
+def test_model_card_preserves_native_signed_training_checksum():
+    checksum = "-8938453606443985335"
+    card = _card(trained_chksum=checksum)
+    assert validate_model_card(card)["trained_chksum"] == checksum
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "material_identity_sha256",
+        "mesh_identity_sha256",
+        "physics_identity_sha256",
+        "adapter_identity_sha256",
+    ],
+)
+@pytest.mark.parametrize("change", ["replace", "add", "remove"])
+def test_scientific_identity_changes_require_new_lineage(field, change):
+    before = {**IDENTITIES, field: "1" * 64}
+    after = {**before, field: "2" * 64}
+    if change == "add":
+        before.pop(field)
+    elif change == "remove":
+        after.pop(field)
+    with pytest.raises(ValueError, match="drift_requires_new_lineage"):
+        assert_no_contract_drift(_card(identities=before), _card(identities=after))
+
+
 def test_model_card_rejects_tampering_and_nonhex_identities() -> None:
     card = _card()
     tampered = dict(card)
