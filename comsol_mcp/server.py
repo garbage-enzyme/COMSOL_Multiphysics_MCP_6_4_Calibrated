@@ -212,11 +212,9 @@ def main() -> None:
     logger.info("Native runtime: %s", native_runtime)
     logger.info("Capabilities: %s", startup_capability_summary(selection))
 
-    register_all_tools(profile=selection)
-    register_all_resources()
-    _install_discovery_pagination(mcp)
-
-    mcp.run()
+    # Use the same factory as embedded and installed callers.  The legacy
+    # module-global server does not carry the Tasks extension or its engine.
+    create_server(profile=selection).run()
 
 
 def _is_transport_entrypoint() -> bool:

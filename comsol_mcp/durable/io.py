@@ -360,7 +360,13 @@ def _posix_unlink_opened_file_if(
     moved = False
     restoration_attempted = False
     directory_flags = os.O_RDONLY | int(getattr(os, "O_DIRECTORY")) | int(getattr(os, "O_NOFOLLOW"))
-    read_flags = os.O_RDONLY | int(getattr(os, "O_NOFOLLOW"))
+    # O_NONBLOCK is required before fstat().  A FIFO must never make cleanup
+    # wait for a writer.  The regular-file check below rejects the descriptor.
+    read_flags = (
+        os.O_RDONLY
+        | int(getattr(os, "O_NOFOLLOW"))
+        | int(getattr(os, "O_NONBLOCK", 0))
+    )
 
     def restore() -> None:
         nonlocal moved, restoration_attempted

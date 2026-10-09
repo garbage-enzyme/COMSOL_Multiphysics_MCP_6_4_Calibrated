@@ -68,7 +68,9 @@ def test_valid_root_and_relative_jvm_ini_select_bundled_java(tmp_path: Path) -> 
 
 def test_root_validation_rejects_wrong_release_metadata(tmp_path: Path) -> None:
     root, _java_home = _installation(tmp_path / "wrong")
-    (root / "bin" / "win64" / "comsol.ini").write_text("unrelated", encoding="utf-8")
+    (root / "bin" / "win64" / "comsol.ini").write_text(
+        "COMSOL Multiphysics 6.3", encoding="utf-8"
+    )
 
     with pytest.raises(ValueError, match="supported family"):
         validate_comsol_root(root)

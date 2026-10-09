@@ -51,7 +51,7 @@ def validate_comsol_root(value: str | Path) -> Path:
         encoding="utf-8",
         errors="replace",
     )
-    if not re.search(r"(?:COMSOL|Multiphysics|6\.4)", ini, re.IGNORECASE):
+    if not re.search(r"\bCOMSOL\s+Multiphysics\s+6\.4(?:\D|$)", ini, re.IGNORECASE):
         raise ValueError("COMSOL installation metadata does not identify the supported family")
     return resolved
 

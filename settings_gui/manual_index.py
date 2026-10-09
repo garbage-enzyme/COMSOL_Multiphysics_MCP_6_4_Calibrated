@@ -100,6 +100,13 @@ class ManualIndexBuildTask:
             )
             with self._process_lock:
                 self._process = process
+                cancelled_before_registration = self._cancel.is_set()
+                if cancelled_before_registration and process.poll() is None:
+                    process.terminate()
+            if cancelled_before_registration:
+                process.wait(timeout=5)
+                self._publish({"event": "cancelled"})
+                return
             if process.stdin is None or process.stdout is None or process.stderr is None:
                 raise RuntimeError("index worker pipes were not created")
 
@@ -114,6 +121,11 @@ class ManualIndexBuildTask:
 
             stderr_thread = threading.Thread(target=drain_stderr, daemon=True)
             stderr_thread.start()
+            if self._cancel.is_set():
+                process.terminate()
+                process.wait(timeout=5)
+                self._publish({"event": "cancelled"})
+                return
             process.stdin.write(request)
             process.stdin.close()
             for raw_line in process.stdout:

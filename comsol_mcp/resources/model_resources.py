@@ -11,6 +11,28 @@ from ..tools.session import session_manager
 logger = logging.getLogger(__name__)
 
 _BACKTICK_RUN = re.compile(r"`+")
+_MAX_RESOURCE_BYTES = 128 * 1024
+_MAX_RESOURCE_ITEMS = 2048
+_MAX_RESOURCE_VALUE_CHARS = 4096
+
+
+def _bounded_resource(lines: list[str]) -> str:
+    """Return a bounded resource without exposing unbounded model fields."""
+    output: list[str] = []
+    used = 0
+    truncated = False
+    for line in lines[:_MAX_RESOURCE_ITEMS]:
+        if len(line) > _MAX_RESOURCE_VALUE_CHARS:
+            line = line[:_MAX_RESOURCE_VALUE_CHARS] + "… [truncated]"
+        encoded = (line + "\n").encode("utf-8")
+        if used + len(encoded) > _MAX_RESOURCE_BYTES:
+            truncated = True
+            break
+        output.append(line)
+        used += len(encoded)
+    if truncated or len(lines) > _MAX_RESOURCE_ITEMS:
+        output.append("\n[resource output truncated by the response bound]")
+    return "\n".join(output)
 
 
 def _markdown_text(value: object) -> str:
@@ -76,7 +98,7 @@ def register_model_resources(mcp: MCPServer) -> None:
                 if model.get("file"):
                     lines.append(f"  - File: {_markdown_text(model['file'])}")
 
-        return "\n".join(lines)
+        return _bounded_resource(lines)
 
     @mcp.resource("comsol://model/{name}/tree")
     def get_model_tree(name: str) -> str:
@@ -138,7 +160,7 @@ def register_model_resources(mcp: MCPServer) -> None:
                     )
                 lines.append("")
 
-            return "\n".join(lines)
+            return _bounded_resource(lines)
         except Exception:
             logger.exception("Model-tree resource failed")
             return "# Error\n\nModel tree is unavailable."
@@ -177,7 +199,7 @@ def register_model_resources(mcp: MCPServer) -> None:
                     f"{_markdown_text(desc)} |"
                 )
 
-            return "\n".join(lines)
+            return _bounded_resource(lines)
         except Exception:
             logger.exception("Model-parameters resource failed")
             return "# Error\n\nModel parameters are unavailable."
@@ -222,7 +244,7 @@ def register_model_resources(mcp: MCPServer) -> None:
             if not physics_list and not multiphysics_list:
                 lines.append("No physics interfaces defined.")
 
-            return "\n".join(lines)
+            return _bounded_resource(lines)
         except Exception:
             logger.exception("Model-physics resource failed")
             return "# Error\n\nModel physics is unavailable."

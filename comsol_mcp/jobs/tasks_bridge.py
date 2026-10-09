@@ -238,6 +238,13 @@ class TasksMappingStore:
         if len(encoded) > MAX_TASK_ROW_BYTES:
             raise TasksMappingError("mapping_row_too_large", "task mapping row exceeds its bound")
         self.root.mkdir(parents=True, exist_ok=True)
+        # Discard only an incomplete trailing record before appending.  Without
+        # this step the new JSON object joins the old fragment and hides all
+        # earlier task mappings after a restart.
+        report = read_complete_jsonl(self.journal_path)
+        if report.get("state") == "incomplete":
+            with self.journal_path.open("r+b") as handle:
+                handle.truncate(int(report["complete_byte_count"]))
         append_jsonl_record(self.journal_path, payload)
 
     def rows(self) -> list[TaskRow]:
@@ -408,6 +415,12 @@ class TasksBridge:
         job_id = _bounded(submission.get("job_id"), "job_id", 256)
         existing = self._store.latest_for_job(job_id)
 
+        if existing is not None and existing.owner != self._owner:
+            raise TasksMappingError(
+                "task_owner_conflict",
+                "an identical durable job belongs to another task owner",
+            )
+
         created = self._clock_ms()
         if existing is not None:
             task_id = existing.task_id
@@ -433,10 +446,11 @@ class TasksBridge:
                 "mapping_not_durable",
                 "the task mapping row was not durable after writing; refusing to acknowledge",
             )
+        task_status = task_status_from_job_state(submission.get("status"))
         return {
             "resultType": "task",
             "taskId": task_id,
-            "status": "working",
+            "status": task_status,
             "createdAt": _iso_ms(created),
             "lastUpdatedAt": _iso_ms(created),
             "ttlMs": ttl,

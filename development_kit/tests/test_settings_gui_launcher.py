@@ -423,3 +423,30 @@ def test_read_handshake_enforces_size_bound_on_bytes_actually_read(tmp_path):
     path.write_text(json.dumps({"state": "ready", "padding": "x" * (MAX_HANDSHAKE_BYTES + 8)}))
 
     assert read_handshake(path) is None
+
+
+def test_first_run_explicit_settings_path_creates_parent_before_lock(tmp_path, monkeypatch):
+    """A new Linux user can reach the child launch with no config directory."""
+    target = tmp_path / "config" / "comsol-mcp" / "settings.json"
+    launched = {}
+
+    class Process:
+        def poll(self):
+            return None
+
+        def wait(self):
+            return 0
+
+    def start(_command, **kwargs):
+        launched["yes"] = True
+        assert handshake_module.publish_handshake("ready", kwargs["env"])
+        return Process()
+
+    result = launcher.launch_settings_gui(
+        environ={"COMSOL_MCP_SETTINGS_PATH": str(target)},
+        runtime_dir=tmp_path / "runtime",
+        popen_factory=start,
+    )
+    assert result["state"] == "launched"
+    assert launched["yes"] is True
+    assert target.parent.is_dir()

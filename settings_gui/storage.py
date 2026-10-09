@@ -152,7 +152,8 @@ class SettingsStore:
 
     def save(self, document: Mapping[str, Any]) -> str:
         raw = serialize_settings_document(document)
-        self.ownership.verify_unchanged()
+        if self.ownership.baseline is not None:
+            self.ownership.verify_unchanged()
         temporary = self.target.with_name(f".{self.target.name}.{os.getpid()}.{time.time_ns()}.tmp")
         descriptor: int | None = None
         try:
@@ -174,7 +175,21 @@ class SettingsStore:
             deadline = self._clock() + SAVE_RETRY_SECONDS
             while True:
                 self.ownership.reacquire_target_handle()
-                self.ownership.verify_unchanged()
+                baseline = self.ownership.baseline
+                if baseline is not None:
+                    current = self.target.lstat()
+                    if (
+                        int(current.st_dev),
+                        int(current.st_ino),
+                        int(current.st_size),
+                        int(current.st_mtime_ns),
+                    ) != (
+                        baseline.device,
+                        baseline.inode,
+                        baseline.size,
+                        baseline.modified_ns,
+                    ):
+                        raise SettingsConflict("settings target changed outside this editor")
                 self.ownership.release_target_handle()
                 try:
                     _replace_write_through(temporary, self.target)
@@ -252,6 +267,16 @@ class SettingsStore:
             else:
                 stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
                 backup = self.target.with_name(f"{self.target.stem}.damaged-{stamp}-unbounded.json")
+                baseline = self.ownership.baseline
+                if baseline is not None:
+                    current = self.target.lstat()
+                    if (
+                        int(current.st_dev),
+                        int(current.st_ino),
+                        int(current.st_size),
+                        int(current.st_mtime_ns),
+                    ) != (baseline.device, baseline.inode, baseline.size, baseline.modified_ns):
+                        raise SettingsConflict("settings target changed outside this editor")
                 os.replace(self.target, backup)
                 self.ownership.baseline = None
         ensure_default_directories(self.target.parent)
