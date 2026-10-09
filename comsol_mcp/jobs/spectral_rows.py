@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from comsol_mcp.evidence.contracts import validate_physical_evidence
+from comsol_mcp.path_policy import read_contained_file_snapshot
 
 from .journal import locked_journal, recover_jsonl_tail
 
@@ -18,6 +19,7 @@ SPECTRAL_ROW_SCHEMA_NAME = "comsol_mcp.durable_spectral_point"
 SPECTRAL_ROW_SCHEMA_VERSION = "1.0.0"
 MAX_SPECTRAL_ROW_BYTES = 128 * 1024
 MAX_SPECTRAL_ROWS = 1024
+MAX_SPECTRAL_ARTIFACT_BYTES = 16 * 1024 * 1024
 SPECTRAL_STAGE_KINDS = frozenset({"initial_locator", "window_expansion", "refinement"})
 
 
@@ -181,12 +183,13 @@ def _verify_artifact_bytes(
             raise ValueError(f"audit {prefix} artifact escapes the durable job directory") from exc
         if not path.is_file():
             raise ValueError(f"audit {prefix} artifact is missing")
-        # Read once and hash the exact bytes that will be parsed so a swap
-        # between verification and use cannot pass the integrity gate.
-        data = path.read_bytes()
-        if len(data) != artifact[f"{prefix}_size_bytes"]:
+        snapshot = read_contained_file_snapshot(
+            path, root=resolved_root, max_bytes=MAX_SPECTRAL_ARTIFACT_BYTES
+        )
+        data = snapshot["payload"]
+        if snapshot["byte_count"] != artifact[f"{prefix}_size_bytes"]:
             raise ValueError(f"audit {prefix} artifact size does not match")
-        if hashlib.sha256(data).hexdigest() != artifact[f"{prefix}_sha256"]:
+        if snapshot["sha256"] != artifact[f"{prefix}_sha256"]:
             raise ValueError(f"audit {prefix} artifact hash does not match")
         payloads[prefix] = data
     try:
@@ -206,6 +209,8 @@ def _verify_artifact_bytes(
     if physical["identity"]["config_id"] != point_fingerprint:
         raise ValueError("physical evidence point identity differs from the durable row")
     measurement_raw = inner.get("measurement")
+    if artifact["audit_status"] == "measurement_complete" and measurement_raw is None:
+        raise ValueError("measurement-complete audit is missing its measurement")
     if measurement_raw is not None:
         measurement = _mapping(measurement_raw, "audit measurement")
         wavelength = _mapping(measurement.get("wavelength"), "audit measurement wavelength")

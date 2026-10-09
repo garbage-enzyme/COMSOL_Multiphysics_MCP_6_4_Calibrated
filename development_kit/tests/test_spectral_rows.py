@@ -98,7 +98,18 @@ def _spec(tmp_path) -> dict:
     )
 
 
-def _artifact(root: Path, spec: dict, wavelength: float) -> dict:
+def _artifact(
+    root: Path,
+    spec: dict,
+    wavelength: float,
+    *,
+    absorption: float = 0.1,
+    reflectance: float | None = None,
+    transmission: float = 0.05,
+    solve_seconds: float = 0.2,
+    mesh_elements: int = 12,
+    mesh_vertices: int = 8,
+) -> dict:
     point = spectral_point_identity(spec, wavelength)
     physical = build_physical_evidence(
         {
@@ -131,6 +142,20 @@ def _artifact(root: Path, spec: dict, wavelength: float) -> dict:
             {
                 "audit_status": "measurement_complete",
                 "physical_evidence": physical,
+                "measurement": {
+                    "wavelength": {
+                        "requested_m": wavelength,
+                        "evaluated_parameter_m": wavelength,
+                        "solved_frequency_wavelength_m": wavelength,
+                    },
+                    "power": {
+                        "R": 0.95 - absorption if reflectance is None else reflectance,
+                        "T": transmission,
+                        "A": absorption,
+                    },
+                    "mesh": {"element_count": mesh_elements, "vertex_count": mesh_vertices},
+                    "solve": {"ran": True, "error": None, "seconds": solve_seconds},
+                },
             }
         ),
         encoding="utf-8",
@@ -185,6 +210,7 @@ def _append(
     absorption: float,
     *,
     reflectance: float | None = None,
+    artifact: dict | None = None,
 ):
     return append_spectral_row(
         path,
@@ -201,7 +227,12 @@ def _append(
         mesh_element_count=12,
         mesh_vertex_count=8,
         solve_seconds=0.2,
-        audit_artifact=_artifact(root, spec, wavelength),
+        audit_artifact=artifact if artifact is not None else _artifact(
+            root,
+            spec,
+            wavelength,
+            absorption=absorption if isinstance(absorption, float) else 0.1,
+        ),
         artifact_root=root,
         created_at_epoch=1000.0 + wavelength,
     )
@@ -279,7 +310,7 @@ def test_inner_artifact_is_parsed_from_the_verified_bytes(tmp_path, monkeypatch)
         inner.write_bytes(verified_bytes)
 
     assert len(rows) == 1
-    assert reads["inner"] == 1
+    assert reads["inner"] == 0
 
 
 @pytest.mark.parametrize(
@@ -309,7 +340,7 @@ def test_row_and_artifact_tampering_fail_before_resume(tmp_path):
     value = json.loads(journal.read_text(encoding="utf-8"))
     value["A"] = 0.2
     journal.write_text(json.dumps(value) + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="row hash"):
+    with pytest.raises(ValueError, match="row hash|audit measurement"):
         read_spectral_rows(journal, spec, artifact_root=root)
 
     journal.write_text(
@@ -324,7 +355,10 @@ def test_row_and_artifact_tampering_fail_before_resume(tmp_path):
 def test_append_hashes_the_accepted_canonical_row_representation(tmp_path):
     spec = _spec(tmp_path)
     root = tmp_path / "job"
-    artifact = _artifact(root, spec, 4e-6)
+    artifact = _artifact(
+        root, spec, 4e-6, absorption=1.0, reflectance=0.0, transmission=0.0,
+        solve_seconds=0.0, mesh_elements=0, mesh_vertices=0
+    )
     for field in (
         "wrapper_sha256",
         "inner_sha256",
@@ -388,6 +422,20 @@ def test_non_object_inner_artifact_uses_the_validation_error_boundary(tmp_path):
         )
 
 
+def test_measurement_complete_artifact_cannot_omit_measurement(tmp_path):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    artifact = _artifact(root, spec, 4e-6)
+    inner = root / artifact["inner_relative_path"]
+    payload = json.loads(inner.read_text(encoding="utf-8"))
+    payload.pop("measurement")
+    inner.write_text(json.dumps(payload), encoding="utf-8")
+    artifact["inner_sha256"] = hashlib.sha256(inner.read_bytes()).hexdigest()
+    artifact["inner_size_bytes"] = inner.stat().st_size
+    with pytest.raises(ValueError, match="missing its measurement"):
+        _append(root / "spectral_rows.jsonl", root, spec, 4e-6, 0.1, artifact=artifact)
+
+
 def test_changed_configuration_cannot_reuse_rows(tmp_path):
     spec = _spec(tmp_path)
     root = tmp_path / "job"
@@ -419,7 +467,7 @@ def test_one_ulp_wavelength_variants_share_one_canonical_point_identity(tmp_path
 
     root = tmp_path / "job"
     journal = root / "spectral_rows.jsonl"
-    artifact = _artifact(root, spec, 5e-6)
+    artifact = _artifact(root, spec, 5e-6, absorption=0.8, reflectance=0.15)
 
     def append_variant(wavelength):
         return append_spectral_row(
