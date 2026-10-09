@@ -539,6 +539,19 @@ def apply_blocks(
             _set_vector(node, "size", edit["size"])
             _set_vector(node, "pos", edit["pos"])
         after = _snapshot(model, component_tag, geometry_tag)
+        mismatches = []
+        for edit in preview["planned"]:
+            observed = after["blocks"].get(edit["block_tag"])
+            if observed is None:
+                mismatches.append(f"{edit['block_tag']}: feature disappeared")
+                continue
+            for key in ("size", "pos"):
+                if observed.get(key) != edit[key]:
+                    mismatches.append(
+                        f"{edit['block_tag']}.{key}: requested={edit[key]!r}, observed={observed.get(key)!r}"
+                    )
+        if mismatches:
+            raise ValueError("derived geometry readback mismatch: " + "; ".join(mismatches))
     except Exception as exc:
         for tag, values in captured.items():
             node = _get(geom.feature(), tag)

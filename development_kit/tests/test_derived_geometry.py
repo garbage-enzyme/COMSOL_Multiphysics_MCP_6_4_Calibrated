@@ -189,6 +189,33 @@ def test_block_preview_and_apply_never_run_geometry_or_mesh():
     assert result["after"]["blk1"]["size"][0] == "2[mm]"
 
 
+def test_block_apply_rejects_a_setter_that_silently_ignores_the_request():
+    model, _geom, record, state = fixture()
+    preview = preview_blocks(
+        model,
+        record,
+        expected_state_sha256=state,
+        component_tag="comp1",
+        geometry_tag="geom1",
+        block_edits=edits(),
+    )
+    target = (
+        model.java.component().get("comp1").geom().get("geom1").feature().get("blk2")
+    )
+    original_set = target.set
+
+    def ignore_size(name, value):
+        if name == "size":
+            return
+        original_set(name, value)
+
+    target.set = ignore_size
+    result = apply_blocks(model, record, preview, "comp1", "geom1")
+    assert result["success"] is False
+    assert "readback mismatch" in result["error"]
+    assert result["rollback_proved"] is True
+
+
 def test_stale_hash_invalid_feature_partial_vectors_and_nonpositive_size_fail():
     model, _geom, record, state = fixture()
     cases = [
