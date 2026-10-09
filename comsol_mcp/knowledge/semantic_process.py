@@ -221,8 +221,9 @@ class SemanticWorkerManager:
     def _read_startup_line(stream: Any, maximum: int = 64 * 1024) -> bytes:
         chunks: list[bytes] = []
         observed = 0
+        read = getattr(stream, "read1", stream.read)
         while observed <= maximum:
-            chunk = stream.read(min(4096, maximum - observed + 1))
+            chunk = read(min(4096, maximum - observed + 1))
             if not chunk:
                 break
             chunks.append(chunk)

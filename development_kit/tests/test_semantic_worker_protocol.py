@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import queue
 import shutil
 import socket
 import subprocess
@@ -28,6 +29,35 @@ from src.tools.ownership import SolverOwnership
 
 from development_kit.tests.platform_fixtures import platform_test_root
 from development_kit.tests.semantic_test_support import isolated_semantic_environment
+
+
+def test_short_startup_line_returns_while_worker_pipe_remains_open():
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.buffer.write(b'ready\\n'); "
+            "sys.stdout.flush(); sys.stdin.read()",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=isolated_semantic_environment(),
+    )
+    result = queue.Queue(maxsize=1)
+    reader = threading.Thread(
+        target=lambda: result.put(SemanticWorkerManager._read_startup_line(process.stdout)),
+        daemon=True,
+    )
+    reader.start()
+    try:
+        assert result.get(timeout=5.0) == b"ready\n"
+        assert process.poll() is None
+    finally:
+        process.kill()
+        process.communicate(timeout=5.0)
+        reader.join(timeout=5.0)
+    assert not reader.is_alive()
 
 
 def _raw_request(
