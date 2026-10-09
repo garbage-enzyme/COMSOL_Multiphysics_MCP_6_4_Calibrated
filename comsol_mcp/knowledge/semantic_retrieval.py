@@ -151,6 +151,10 @@ class HybridRetriever:
         )
         if len(self.chunks) != self.embeddings.shape[0]:
             raise ValueError("chunk/vector count mismatch at retriever load")
+        norms = np.linalg.norm(self.embeddings, axis=1)
+        if not np.isfinite(norms).all() or np.any(norms <= 0):
+            raise ValueError("index contains zero or non-finite embedding vectors")
+        self._embedding_norms = norms.astype(np.float32)
         factory = encoder_factory or (
             lambda path, dimension: SentenceTransformerEncoder(path, dimension=dimension)
         )
@@ -246,7 +250,13 @@ class HybridRetriever:
         if not math.isfinite(norm) or norm <= 0:
             raise ValueError("query encoder returned a zero or non-finite vector")
         vector = encoded[0] / norm
-        scores = np.asarray(self.embeddings @ vector, dtype=np.float32)
+        norms = getattr(self, "_embedding_norms", np.linalg.norm(self.embeddings, axis=1))
+        if not np.isfinite(norms).all() or np.any(norms <= 0):
+            raise ValueError("index contains zero or non-finite embedding vectors")
+        scores = np.asarray(
+            (self.embeddings / norms[:, None]) @ vector,
+            dtype=np.float32,
+        )
         eligible = np.fromiter(
             (_filters_match(record, filters) for record in self.chunks),
             dtype=np.bool_,
