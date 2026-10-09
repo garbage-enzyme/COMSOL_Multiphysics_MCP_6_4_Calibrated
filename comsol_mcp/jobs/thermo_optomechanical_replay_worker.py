@@ -276,10 +276,9 @@ def _run(
                 fault_hook("during_cleanup", {"job_id": job_id, "attempt": attempt})
             except Exception as exc:
                 cleanup_errors.append(f"cleanup_hook:{type(exc).__name__}:{exc}")
-        # The store-backed lease never touches the JVM, so it must be released
-        # even when the native cancel monitor is still in flight; only the
-        # client clear/disconnect pair waits for the daemon thread to exit.
-        if ownership is not None and lease_acquired:
+        # The lease protects solver admission even though its storage is
+        # independent of the JVM. Retain it while native cancellation runs.
+        if ownership is not None and lease_acquired and not native_cancel_inflight:
             try:
                 release = ownership.release()
                 if not release.get("success"):

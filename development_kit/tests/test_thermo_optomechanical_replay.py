@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -934,7 +935,7 @@ def test_native_cancel_monitor_failure_becomes_durable_worker_error(ascii_tmp_pa
     assert "native cancel monitor failed" in state["cancel"]["worker_error"]["message"]
 
 
-def test_stuck_native_monitor_still_releases_the_ownership_lease(ascii_tmp_path, monkeypatch):
+def test_stuck_native_monitor_retains_the_ownership_lease(ascii_tmp_path, monkeypatch):
     spec = normalize_thermo_optomechanical_replay_spec(
         _raw_spec(ascii_tmp_path / "native-monitor-stuck")
     )
@@ -953,8 +954,12 @@ def test_stuck_native_monitor_still_releases_the_ownership_lease(ascii_tmp_path,
         },
     )
 
+    entered = threading.Event()
+    release = threading.Event()
+
     def blocked_probe():
-        time.sleep(1.6)
+        entered.set()
+        assert release.wait(timeout=10)
         return {"requested": False}
 
     monkeypatch.setattr("src.jobs.native_cancel_probe.request_native_cancel_once", blocked_probe)
@@ -966,26 +971,38 @@ def test_stuck_native_monitor_still_releases_the_ownership_lease(ascii_tmp_path,
             if not requested:
                 requested = True
                 store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
-                time.sleep(0.1)
+                assert entered.wait(timeout=2)
             return _payload(stage, current_spec)
 
         return execute
 
     ownership = _Ownership()
-    code = run_worker(
-        str(store.root),
-        job_id,
-        ownership_factory=lambda *_args: ownership,
-        client_factory=lambda _spec: _Client(),
-        stage_executor_factory=factory,
-        native_cancel_enabled=True,
-    )
-    state = store.read_state(job_id)
+    try:
+        code = run_worker(
+            str(store.root),
+            job_id,
+            ownership_factory=lambda *_args: ownership,
+            client_factory=lambda _spec: _Client(),
+            stage_executor_factory=factory,
+            native_cancel_enabled=True,
+        )
+        state = store.read_state(job_id)
 
-    assert code == 1
-    assert ownership.released is True
-    recorded = state["cancel"]["worker_error"]["cleanup_errors"]
-    assert any("native_cancel_thread:still_active_after_join_timeout" in item for item in recorded)
+        assert code == 1
+        assert ownership.released is False
+        assert state["status"] in {"cancel_requested", "cancelling"}
+        recorded = state["cancel"]["worker_error"]["cleanup_errors"]
+        assert any(
+            "native_cancel_thread:still_active_after_join_timeout" in item for item in recorded
+        )
+    finally:
+        monitors = [
+            thread for thread in threading.enumerate() if thread.name == "comsol-native-cancel"
+        ]
+        release.set()
+        for monitor in monitors:
+            monitor.join(timeout=2)
+            assert not monitor.is_alive()
 
 
 def test_worker_rejects_changed_submission_manifest_before_client_start(ascii_tmp_path):
