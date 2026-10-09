@@ -155,7 +155,9 @@ def verify_evidence_integrity(
         "source_mutation_performed": False,
     }
     if receipt_metadata is not None:
-        base.update(deepcopy(dict(receipt_metadata)))
+        if set(receipt_metadata) != {"artifact_root_validation"}:
+            raise ValueError("receipt metadata must contain only artifact_root_validation")
+        base["artifact_root_validation"] = deepcopy(receipt_metadata["artifact_root_validation"])
     if status.get("configuration_state") != "valid":
         return _finalize(
             {

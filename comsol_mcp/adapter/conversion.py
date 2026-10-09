@@ -53,7 +53,7 @@ def require_int(value: Any, *, field: str) -> int:
 def require_float(value: Any, *, field: str) -> float:
     """Return ``value`` as a finite float.
 
-    An ``int`` is accepted because widening to float is exact and intended; a
+    An ``int`` is accepted only when its float representation is exact; a
     string or ``None`` is not, and a non-finite value is refused because it
     cannot be written into a COMSOL property meaningfully.
     """
@@ -63,10 +63,10 @@ def require_float(value: Any, *, field: str) -> float:
         result = float(value)
     except (OverflowError, ValueError) as exc:
         raise _reject(f"{field} cannot be represented as a finite float") from exc
-    if isinstance(value, int) and int(result) != value:
-        raise _reject(f"{field} integer is not exactly representable as float64")
     if not math.isfinite(result):
         raise _reject(f"{field} must be finite")
+    if isinstance(value, int) and int(result) != value:
+        raise _reject(f"{field} integer is not exactly representable as float64")
     return result
 
 

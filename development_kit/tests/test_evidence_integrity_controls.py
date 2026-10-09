@@ -164,15 +164,12 @@ def test_degraded_project_settings_disable_strict_verification_and_emit_warning(
 
     project = integrity_controls_module.load_settings({})
     monkeypatch.delenv(EVIDENCE_SETTINGS_ENV, raising=False)
-    monkeypatch.setattr(integrity_controls_module, "load_settings", lambda: project)
     monkeypatch.setattr(
         integrity_controls_module,
-        "settings_status",
+        "load_settings_report",
         lambda: {
-            "success": True,
-            "configuration_state": "degraded",
-            "reason_code": "settings_invalid",
-            "settings_errors": [{"reason_code": "settings_invalid"}],
+            "settings": project,
+            "errors": [{"reason_code": "settings_invalid"}],
         },
     )
 
@@ -183,6 +180,23 @@ def test_degraded_project_settings_disable_strict_verification_and_emit_warning(
     assert status["strict_verification_active"] is False
     assert status["warning_codes"] == [INVALID_SETTINGS_WARNING_CODE]
     assert warning_fields(status)["strictly_verified"] is False
+
+
+def test_project_settings_are_read_once_for_status_and_checks(monkeypatch):
+    import src.evidence.integrity_controls as controls
+
+    project = controls.load_settings({})
+    calls = []
+
+    def report():
+        calls.append(True)
+        assert len(calls) == 1
+        return {"settings": project, "errors": []}
+
+    monkeypatch.delenv(EVIDENCE_SETTINGS_ENV, raising=False)
+    monkeypatch.setattr(controls, "load_settings_report", report)
+    assert load_evidence_integrity_status()["strict_verification_active"] is True
+    assert calls == [True]
 
 
 def test_capabilities_report_effective_checks_without_exposing_settings_path(tmp_path, monkeypatch):

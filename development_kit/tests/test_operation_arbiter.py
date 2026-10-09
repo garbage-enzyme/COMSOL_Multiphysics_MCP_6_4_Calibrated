@@ -24,7 +24,21 @@ def test_operation_lock_fifo_is_reported_without_blocking(tmp_path):
     )
     result = arbiter.inspect()
     assert result["state"] == "uncertain"
-    assert "regular file" in result["error"]
+    assert result["error"] == "operation lock cannot be read: OSError"
+    assert fifo.exists()
+
+
+def test_operation_lock_rejects_oversized_file_without_read_bytes(tmp_path, monkeypatch):
+    arbiter = OperationArbiter(
+        tmp_path, pid=100, process_create_time=10.0, process_probe=lambda _: 10.0
+    )
+    arbiter.lock_path.write_bytes(b"x" * (arbiter_module.MAX_OPERATION_LOCK_BYTES + 1))
+    monkeypatch.setattr(
+        type(arbiter.lock_path), "read_bytes",
+        lambda _path: (_ for _ in ()).throw(AssertionError("unbounded reading")),
+    )
+    assert arbiter.inspect()["state"] == "uncertain"
+    assert arbiter.try_acquire(tool_name="param_set", side_effect_class="model_mutation")[0] is None
 
 
 def test_concurrent_comsol_bound_calls_fail_fast_with_retry_evidence(tmp_path, monkeypatch):

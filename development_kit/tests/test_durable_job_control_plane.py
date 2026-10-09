@@ -29,19 +29,21 @@ from src.jobs.store import (
 )
 
 
-def test_job_store_rejects_symlinked_job_directory(tmp_path):
-    outside = tmp_path / "outside"
+def test_job_store_rejects_symlinked_job_directory(ascii_tmp_path):
+    from development_kit.tests.platform_fixtures import create_directory_link, remove_directory_link
+
+    outside = ascii_tmp_path / "outside"
     outside.mkdir()
-    root = tmp_path / "jobs"
+    root = ascii_tmp_path / "jobs"
     store = JobStore(root)
     root.mkdir(parents=True, exist_ok=True)
     link = root / "job-linked"
+    create_directory_link(str(outside), str(link))
     try:
-        link.symlink_to(outside, target_is_directory=True)
-    except (OSError, NotImplementedError):
-        pytest.skip("directory symlinks unavailable")
-    with pytest.raises(ValueError, match="symlink or junction"):
-        store.job_dir("job-linked")
+        with pytest.raises(ValueError, match="symlink or junction"):
+            store.job_dir("job-linked")
+    finally:
+        remove_directory_link(link)
 
 
 @pytest.fixture()

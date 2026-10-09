@@ -389,9 +389,7 @@ class JobStore:
         path = self.root / job_id
         if path.parent.resolve() != self.root.resolve():
             raise ValueError("Job path escapes the runtime root")
-        if path.exists() and (
-            path.is_symlink() or getattr(path, "is_junction", lambda: False)()
-        ):
+        if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
             raise ValueError("Job directory must not be a symlink or junction")
         if path.exists() and path.resolve(strict=True).parent != self.root.resolve(strict=True):
             raise ValueError("Job path escapes the runtime root")

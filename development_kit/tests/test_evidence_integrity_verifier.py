@@ -317,6 +317,10 @@ def test_mcp_verify_tool_enforces_owned_artifact_root_and_returns_no_path(
     assert result["strictly_verified"] is True
     assert result["artifact_root_validation"]["validated_root_count"] == 1
     assert result["artifact_root_validation"]["paths_included"] is False
+    from src.evidence.contracts import canonical_sha256
+
+    body = {key: value for key, value in result.items() if key != "verification_sha256"}
+    assert result["verification_sha256"] == canonical_sha256(body)
     assert str(ascii_artifact_root) not in json.dumps(result)
 
 
@@ -390,6 +394,10 @@ def test_degraded_settings_with_supplied_roots_reports_they_were_discarded(monke
     assert result["artifact_root_validation"]["enforced"] is False
     assert result["artifact_root_validation"]["accepted"] is False
     assert result["artifact_root_validation"]["discarded_root_count"] == 1
+    from src.evidence.contracts import canonical_sha256
+
+    body = {key: value for key, value in result.items() if key != "verification_sha256"}
+    assert result["verification_sha256"] == canonical_sha256(body)
 
 
 def test_forbidden_roots_with_disabled_checks_are_reported_without_enforcement(monkeypatch):

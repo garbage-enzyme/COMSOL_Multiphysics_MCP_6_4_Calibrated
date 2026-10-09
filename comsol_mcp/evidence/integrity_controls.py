@@ -14,7 +14,6 @@ from comsol_mcp.durable import read_file_bytes_bounded
 from comsol_mcp.settings import (
     load_settings_report,
     settings_fingerprint,
-    settings_status,
 )
 
 load_settings = _settings.load_settings
@@ -220,8 +219,6 @@ def load_evidence_integrity_status(
             "settings_errors": report.get("errors", []),
             "reason_code": "settings_invalid" if report.get("errors") else None,
         }
-        if not report.get("errors"):
-            project_status = settings_status()
         effective = {
             "schema_name": EVIDENCE_SETTINGS_SCHEMA,
             "schema_version": EVIDENCE_INTEGRITY_VERSION,

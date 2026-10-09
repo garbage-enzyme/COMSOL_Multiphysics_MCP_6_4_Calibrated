@@ -6,7 +6,6 @@ import functools
 import inspect
 import json
 import os
-import stat
 import threading
 import time
 import uuid
@@ -16,7 +15,7 @@ from typing import Any, Callable, get_type_hints
 
 import psutil
 
-from comsol_mcp.durable.io import unlink_if_content
+from comsol_mcp.durable.io import read_file_bytes_bounded, unlink_if_content
 from comsol_mcp.utils.runtime_paths import default_runtime_dir
 
 OPERATION_LOCK_SCHEMA = "comsol_mcp.operation_lock"
@@ -48,23 +47,10 @@ def _write_all(descriptor: int, payload: bytes) -> int:
 
 def _read_lock_bytes(path: Path) -> bytes:
     """Read one regular lock file without following FIFO or oversized input."""
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NONBLOCK"):
-        flags |= os.O_NONBLOCK
-    descriptor = os.open(path, flags)
     try:
-        stat_result = os.fstat(descriptor)
-        if not stat.S_ISREG(stat_result.st_mode):
-            raise OSError("operation lock is not a regular file")
-        payload = bytearray()
-        while len(payload) <= MAX_OPERATION_LOCK_BYTES:
-            chunk = os.read(descriptor, MAX_OPERATION_LOCK_BYTES + 1 - len(payload))
-            if not chunk:
-                return bytes(payload)
-            payload.extend(chunk)
-        raise OSError("operation lock exceeds the byte limit")
-    finally:
-        os.close(descriptor)
+        return read_file_bytes_bounded(path, max_bytes=MAX_OPERATION_LOCK_BYTES)
+    except ValueError as exc:
+        raise OSError("operation lock failed bounded regular-file validation") from exc
 
 
 @dataclass(frozen=True)

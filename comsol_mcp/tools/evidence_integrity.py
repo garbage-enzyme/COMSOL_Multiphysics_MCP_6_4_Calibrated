@@ -46,13 +46,15 @@ def register_evidence_integrity_tools(mcp: MCPServer) -> None:
                     resumed=resumed,
                     producer_compatibility=producer_compatibility,
                     settings_status=status,
+                    receipt_metadata={
+                        "artifact_root_validation": {
+                            "enforced": False,
+                            "accepted": False,
+                            "paths_included": False,
+                            "discarded_root_count": len(artifact_roots),
+                        }
+                    },
                 )
-                result["artifact_root_validation"] = {
-                    "enforced": False,
-                    "accepted": False,
-                    "paths_included": False,
-                    "discarded_root_count": len(artifact_roots),
-                }
                 return result
             except TypeError, ValueError:
                 logger.exception("Evidence integrity request was rejected")
