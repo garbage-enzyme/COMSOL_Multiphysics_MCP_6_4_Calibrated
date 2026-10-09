@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -165,7 +166,7 @@ def test_completed_rows_require_existing_bounded_manifest_snapshot(tmp_path):
     artifact.parent.mkdir(parents=True)
     payload = b"valid-manifest"
     artifact.write_bytes(payload)
-    summary = _summary("off", digest=__import__("hashlib").sha256(payload).hexdigest())
+    summary = _summary("off", digest=hashlib.sha256(payload).hexdigest())
     summary["manifest_size_bytes"] = len(payload)
     append_validation_row(
         path,
@@ -196,7 +197,7 @@ def test_completed_rows_reject_manifest_symlink(tmp_path):
     except OSError, NotImplementedError:
         pytest.skip("symlink creation is unavailable")
     payload = outside.read_bytes()
-    summary = _summary("off", digest=__import__("hashlib").sha256(payload).hexdigest())
+    summary = _summary("off", digest=hashlib.sha256(payload).hexdigest())
     summary["manifest_size_bytes"] = len(payload)
     append_validation_row(
         path,

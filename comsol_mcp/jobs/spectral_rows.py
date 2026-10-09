@@ -240,6 +240,42 @@ def _verify_artifact_bytes(
         for field, artifact_value in expected.items():
             if artifact_value != row_values.get(field):
                 raise ValueError(f"audit measurement {field} differs from the durable row")
+    try:
+        wrapper = _mapping(json.loads(payloads["wrapper"].decode("utf-8")), "audit wrapper")
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("audit wrapper is not valid JSON") from exc
+    from .spectral_audit import build_spectral_audit_point
+
+    point = build_spectral_audit_point(spec, row_values["requested_wavelength_m"])
+    wrapped_point = _mapping(wrapper.get("point"), "audit wrapper point")
+    if wrapper.get("schema_name") != "comsol_mcp.validation_matrix_collector":
+        raise ValueError("audit wrapper schema is unsupported")
+    if wrapper.get("collector") != spec["collector"]["name"]:
+        raise ValueError("audit wrapper collector differs from the job")
+    if any(
+        wrapped_point.get(field) != point[field]
+        for field in ("point_id", "point_fingerprint", "configuration_sha256", "wavelength")
+    ):
+        raise ValueError("audit wrapper point differs from the durable row")
+    if wrapper.get("source_model_sha256") != expected_source:
+        raise ValueError("audit wrapper source differs from the immutable job")
+    if wrapper.get("audit_status") != artifact["audit_status"]:
+        raise ValueError("audit wrapper status differs from the durable row")
+    descriptor = _mapping(wrapper.get("inner_manifest"), "audit wrapper inner descriptor")
+    if set(descriptor) != {"relative_path", "sha256", "size_bytes"}:
+        raise ValueError("audit wrapper inner descriptor fields are invalid")
+    relative = _portable_relative_path(descriptor["relative_path"], "inner descriptor path")
+    wrapper_path = resolved_root / artifact["wrapper_relative_path"]
+    if (wrapper_path.parent / relative).resolve() != (
+        resolved_root / artifact["inner_relative_path"]
+    ).resolve():
+        raise ValueError("audit wrapper references a different inner artifact")
+    if (
+        descriptor["sha256"] != artifact["inner_sha256"]
+        or isinstance(descriptor["size_bytes"], bool)
+        or descriptor["size_bytes"] != artifact["inner_size_bytes"]
+    ):
+        raise ValueError("audit wrapper inner identity differs from the durable row")
 
 
 def _normalize_row_body(

@@ -110,6 +110,57 @@ def _raw_spec(spec):
     }
 
 
+@pytest.mark.parametrize("interruption", ["none", "cancel", "resume", "completed"])
+def test_driver_validation_failure_preserves_concurrent_state(
+    tmp_path, ascii_root, monkeypatch, interruption
+):
+    store, _spec, job_id = _created_job(tmp_path, ascii_root)
+    directory = store.job_dir(job_id)
+
+    def fail_validation(_spec):
+        if interruption == "cancel":
+            store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+        elif interruption in {"resume", "completed"}:
+            state = store.read_state(job_id)
+            if interruption == "resume":
+                state.update({"attempt": 2, "status": "starting"})
+            else:
+                state["status"] = "completed"
+            atomic_write_json(directory / "state.json", state)
+        raise ValueError("driver identity mismatch")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("startup validation failure must not acquire a solver or create a client")
+
+    monkeypatch.setattr(
+        spectral_worker_module, "validate_spectral_driver_identity", fail_validation
+    )
+    assert (
+        _run(
+            str(store.root),
+            job_id,
+            ownership_factory=forbidden,
+            client_factory=forbidden,
+            native_cancel_enabled=False,
+        )
+        == 1
+    )
+    state = store.read_state(job_id)
+    if interruption == "none":
+        assert state["status"] == "failed"
+        assert state["last_error"] == {"type": "ValueError", "message": "driver identity mismatch"}
+    elif interruption == "cancel":
+        assert state["status"] == "cancel_requested"
+        assert state["cancel"]["cooperative_observation"]
+    elif interruption == "resume":
+        assert state["attempt"] == 2
+        assert state["status"] == "starting"
+        assert state["last_error"] is None
+    else:
+        assert state["status"] == "completed"
+        assert state["last_error"] is None
+
+
 @pytest.mark.parametrize("value", ["false", 0, 1, None])
 def test_worker_boolean_controls_require_exact_booleans(tmp_path, value):
     with pytest.raises(ValueError, match="native_cancel_enabled must be boolean"):
@@ -416,11 +467,19 @@ def test_posix_source_mutation_rejects_spectral_success(tmp_path, ascii_root):
     store, spec, job_id = _created_job(tmp_path, ascii_root)
     ownership = _Ownership()
     client = _Client(spec["source_model_path"], attempt_mutation=True)
+
     def collect(point, _collector, artifact_dir):
         return write_fake_point_audit(artifact_dir, spec, point, absorption=0.5)
-    code = _run(str(store.root), job_id,
-        ownership_factory=lambda *_: ownership, client_factory=lambda _: client,
-        collector_executor=collect, telemetry_provider=_telemetry, native_cancel_enabled=False)
+
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_: ownership,
+        client_factory=lambda _: client,
+        collector_executor=collect,
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+    )
     assert code != 0
     assert store.read_state(job_id)["status"] != "completed"
     assert ownership.released is True

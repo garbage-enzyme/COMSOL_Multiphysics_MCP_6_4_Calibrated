@@ -62,20 +62,26 @@ def _run(
     spec = store.read_spec(job_id)
     if spec.get("job_type") != "spectral_characterization":
         raise ValueError("Spectral worker accepts only spectral_characterization jobs")
+    startup_attempt = int(store.read_state(job_id).get("attempt", 1))
     try:
         validate_spectral_driver_identity(spec)
     except Exception as exc:
-        store.update_state(
+        publication = store.record_startup_failure(
             job_id,
-            "failed",
-            patch={
-                "last_error": {
-                    "type": type(exc).__name__,
-                    "message": str(exc)[:240],
-                }
+            attempt=startup_attempt,
+            error={
+                "type": type(exc).__name__,
+                "message": str(exc)[:240],
             },
             event="spectral_driver_validation_failed",
         )
+        if publication.get("reason") == "cancellation_owns_state":
+            store.record_cooperative_cancel_observed(
+                job_id,
+                attempt=startup_attempt,
+                message="Stopped during driver validation",
+                worker_error={"type": type(exc).__name__, "message": str(exc)[:240]},
+            )
         return 1
     identity = process_identity(os.getpid())
     store.bind_worker_identity(job_id, identity)

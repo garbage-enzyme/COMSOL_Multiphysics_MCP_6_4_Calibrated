@@ -795,6 +795,30 @@ class JobStore:
             state = self.read_state(job_id)
             self._append_event_unlocked(job_id, event, data or {}, str(state["status"]))
 
+    def record_startup_failure(
+        self, job_id: str, *, attempt: int, error: dict[str, str], event: str
+    ) -> dict[str, Any]:
+        """Publish startup failure only while this attempt still owns startup.
+
+        Cancellation remains owned by its coordinator. A resumed or terminal
+        attempt must not be overwritten by an older worker's validation error.
+        """
+        with self.lock(job_id):
+            state = self.read_state(job_id)
+            if state.get("attempt", 1) != attempt:
+                return {"recorded": False, "reason": "attempt_mismatch"}
+            control = self.read_control(job_id)
+            if state["status"] in {"cancel_requested", "cancelling"} or (
+                cancel_request_targets_attempt(control, attempt)
+            ):
+                return {"recorded": False, "reason": "cancellation_owns_state"}
+            if state["status"] not in {"submitted", "starting"}:
+                return {"recorded": False, "reason": "startup_no_longer_owned"}
+            state.update({"status": "failed", "last_error": error, "updated_at_epoch": time.time()})
+            atomic_write_json(self.job_dir(job_id) / "state.json", state)
+            self._append_event_unlocked(job_id, event, {}, "failed")
+            return {"recorded": True}
+
     def _read_resource_journal_unlocked_path(self, path: Path) -> list[dict[str, Any]]:
         from .resource_admission import RESOURCE_JOURNAL_MAX_ENTRIES
 
