@@ -282,6 +282,8 @@ def test_uppercase_source_hash_in_spec_passes_artifact_verification(tmp_path):
 
 
 def test_inner_artifact_is_parsed_from_the_verified_bytes(tmp_path, monkeypatch):
+    import comsol_mcp.jobs.spectral_rows as rows_module
+
     spec = _spec(tmp_path)
     root = tmp_path / "job"
     journal = root / "spectral_rows.jsonl"
@@ -291,20 +293,20 @@ def test_inner_artifact_is_parsed_from_the_verified_bytes(tmp_path, monkeypatch)
     )
     verified_bytes = inner.read_bytes()
     swapped = json.dumps({"audit_status": "measurement_complete"}).encode("utf-8")
-    original_read_bytes = Path.read_bytes
+    original_snapshot = rows_module.read_contained_file_snapshot
     reads = {"inner": 0}
 
-    def swap_after_first_read(self):
-        data = original_read_bytes(self)
-        if self == inner:
+    def swap_after_first_read(path, **kwargs):
+        snapshot = original_snapshot(path, **kwargs)
+        if Path(path) == inner:
             reads["inner"] += 1
             if reads["inner"] == 1:
                 # Simulate a swap between the hash gate and the JSON parse of
                 # a separate second read; the fix parses the hashed buffer.
                 inner.write_bytes(swapped)
-        return data
+        return snapshot
 
-    monkeypatch.setattr(Path, "read_bytes", swap_after_first_read)
+    monkeypatch.setattr(rows_module, "read_contained_file_snapshot", swap_after_first_read)
     try:
         rows = read_spectral_rows(journal, spec, artifact_root=root)
     finally:
@@ -312,7 +314,7 @@ def test_inner_artifact_is_parsed_from_the_verified_bytes(tmp_path, monkeypatch)
         inner.write_bytes(verified_bytes)
 
     assert len(rows) == 1
-    assert reads["inner"] == 0
+    assert reads["inner"] == 1
 
 
 @pytest.mark.parametrize(
@@ -443,6 +445,84 @@ def test_measurement_complete_artifact_cannot_omit_measurement(tmp_path):
     artifact["inner_size_bytes"] = inner.stat().st_size
     with pytest.raises(ValueError, match="missing its measurement"):
         _append(root / "spectral_rows.jsonl", root, spec, 4e-6, 0.1, artifact=artifact)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "requested",
+        "evaluated",
+        "frequency",
+        "power",
+        "mesh",
+        "solve_seconds",
+        "solve_not_run",
+        "solve_error",
+        "measurement_errors",
+        "integrity_errors",
+        "wrapper_point",
+        "wrapper_inner",
+    ],
+)
+@pytest.mark.parametrize("mode", ["append", "replay"])
+def test_resealed_audit_semantic_changes_are_rejected(tmp_path, mutation, mode):
+    spec = _spec(tmp_path)
+    root = tmp_path / "job"
+    journal = root / "spectral_rows.jsonl"
+    artifact = _artifact(root, spec, 4e-6)
+    row = None
+    if mode == "replay":
+        row = _append(journal, root, spec, 4e-6, 0.1, artifact=artifact)
+    inner_path = root / artifact["inner_relative_path"]
+    wrapper_path = root / artifact["wrapper_relative_path"]
+    inner = json.loads(inner_path.read_text(encoding="utf-8"))
+    wrapper = json.loads(wrapper_path.read_text(encoding="utf-8"))
+    measurement = inner["measurement"]
+    if mutation in {"requested", "evaluated", "frequency"}:
+        key = {
+            "requested": "requested_m",
+            "evaluated": "evaluated_parameter_m",
+            "frequency": "solved_frequency_wavelength_m",
+        }[mutation]
+        measurement["wavelength"][key] = 5e-6
+    elif mutation == "power":
+        measurement["power"]["A"] = 0.2
+    elif mutation == "mesh":
+        measurement["mesh"]["element_count"] = 13
+    elif mutation == "solve_seconds":
+        measurement["solve"]["seconds"] = 10.0
+    elif mutation == "solve_not_run":
+        measurement["solve"]["ran"] = False
+    elif mutation == "solve_error":
+        measurement["solve"]["error"] = "failed"
+    elif mutation in {"measurement_errors", "integrity_errors"}:
+        measurement[mutation] = ["failure"]
+    elif mutation == "wrapper_point":
+        wrapper["point"]["wavelength"]["value"] = 5e-6
+    inner_path.write_text(json.dumps(inner), encoding="utf-8")
+    artifact["inner_sha256"] = hashlib.sha256(inner_path.read_bytes()).hexdigest()
+    artifact["inner_size_bytes"] = inner_path.stat().st_size
+    wrapper["inner_manifest"]["sha256"] = artifact["inner_sha256"]
+    wrapper["inner_manifest"]["size_bytes"] = artifact["inner_size_bytes"]
+    if mutation == "wrapper_inner":
+        wrapper["inner_manifest"]["relative_path"] = "other.json"
+    wrapper_path.write_text(json.dumps(wrapper), encoding="utf-8")
+    artifact["wrapper_sha256"] = hashlib.sha256(wrapper_path.read_bytes()).hexdigest()
+    artifact["wrapper_size_bytes"] = wrapper_path.stat().st_size
+    if mode == "replay":
+        row["audit_artifact"] = artifact
+        body = {key: value for key, value in row.items() if key != "row_sha256"}
+        row["row_sha256"] = hashlib.sha256(
+            json.dumps(
+                body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+            ).encode("utf-8")
+        ).hexdigest()
+        journal.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="audit"):
+        if mode == "append":
+            _append(journal, root, spec, 4e-6, 0.1, artifact=artifact)
+        else:
+            read_spectral_rows(journal, spec, artifact_root=root)
 
 
 def test_changed_configuration_cannot_reuse_rows(tmp_path):
