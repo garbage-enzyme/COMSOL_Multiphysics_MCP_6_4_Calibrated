@@ -24,14 +24,15 @@ PYTHON = Path(sys.executable)
 DEFAULT_OUTPUT_ROOT = platform_test_root()
 OUTPUT = DEFAULT_OUTPUT_ROOT / "semantic_feature" / "live_feature.json"
 RUN_LOCK = OUTPUT.parent / "acceptance.lock"
-MODEL = Path("D:/comsol_semantic/models/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41")
+MODEL_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 PROFILE_COUNTS = {
-    "core": 47,
-    "basic_fem": 109,
-    "wave_optics": 76,
-    "experimental": 97,
-    "full": 150,
+    "core": 56,
+    "basic_fem": 118,
+    "wave_optics": 85,
+    "experimental": 110,
+    "full": 166,
 }
+SEMANTIC_CORE_COUNT = 64
 
 
 def _decode(result: Any) -> dict[str, Any]:
@@ -68,11 +69,23 @@ def _server(
             "COMSOL_MCP_RUNTIME_DIR": str(runtime_dir),
             "COMSOL_MCP_ENABLE_LEXICAL_DOCS": str(semantic_enabled).lower(),
             "COMSOL_MCP_ENABLE_SEMANTIC_DOCS": str(semantic_enabled).lower(),
-            "COMSOL_SEMANTIC_ROOT": "D:/comsol_semantic",
-            "COMSOL_SEMANTIC_LEXICAL_INDEX": "D:/comsol_docs_fts/manuals.sqlite3",
-            "COMSOL_SEMANTIC_MODEL_PATH": str(MODEL),
         }
     )
+    if semantic_enabled:
+        default_root = (
+            Path("D:/comsol_semantic") if os.name == "nt" else DEFAULT_OUTPUT_ROOT / "semantic"
+        )
+        root = Path(environment.get("COMSOL_SEMANTIC_ROOT", str(default_root)))
+        lexical = (
+            Path("D:/comsol_docs_fts/manuals.sqlite3")
+            if os.name == "nt"
+            else root / "manuals.sqlite3"
+        )
+        environment.setdefault("COMSOL_SEMANTIC_ROOT", str(root))
+        environment.setdefault("COMSOL_SEMANTIC_LEXICAL_INDEX", str(lexical))
+        environment.setdefault(
+            "COMSOL_SEMANTIC_MODEL_PATH", str(root / "models" / "all-MiniLM-L6-v2" / MODEL_REVISION)
+        )
     return StdioServerParameters(
         command=str(PYTHON),
         args=["-m", "src.server"],
@@ -148,7 +161,7 @@ async def _semantic_flow(runtime_dir: Path) -> dict[str, Any]:
     assert capabilities["payload"]["semantic_search"]["available"] is True
     assert capabilities["payload"]["profile"] == "core"
     assert capabilities["payload"]["enabled_features"] == ["manuals", "semantic_docs"]
-    assert capabilities["payload"]["tool_count"] == 55
+    assert capabilities["payload"]["tool_count"] == SEMANTIC_CORE_COUNT
     assert reset["payload"]["success"] is True
     assert stopped["payload"]["worker"]["state"] == "stopped"
     assert lexical["payload"]["success"] is True and lexical["payload"]["results"]

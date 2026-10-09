@@ -15,7 +15,11 @@ from typing import Any, Callable, get_type_hints
 
 import psutil
 
-from comsol_mcp.durable.io import read_file_bytes_bounded, unlink_if_content
+from comsol_mcp.durable.io import (
+    _open_parent_without_links,
+    read_file_bytes_bounded,
+    unlink_if_content,
+)
 from comsol_mcp.utils.runtime_paths import default_runtime_dir
 
 OPERATION_LOCK_SCHEMA = "comsol_mcp.operation_lock"
@@ -48,7 +52,9 @@ def _write_all(descriptor: int, payload: bytes) -> int:
 def _read_lock_bytes(path: Path) -> bytes:
     """Read one regular lock file without following FIFO or oversized input."""
     try:
-        return read_file_bytes_bounded(path, max_bytes=MAX_OPERATION_LOCK_BYTES)
+        return read_file_bytes_bounded(
+            path, max_bytes=MAX_OPERATION_LOCK_BYTES, no_symlink_parents=True
+        )
     except ValueError as exc:
         raise OSError("operation lock failed bounded regular-file validation") from exc
 
@@ -60,6 +66,7 @@ class OperationClaim:
     operation_id: str
     tool_name: str
     lock_bytes: bytes
+    file_identity: tuple[int, int]
 
 
 class OperationArbiter:
@@ -197,10 +204,15 @@ class OperationArbiter:
                 }
                 payload = _canonical_bytes(body)
                 try:
-                    descriptor = os.open(
-                        self.lock_path,
-                        os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-                    )
+                    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+                    if os.name == "nt":
+                        descriptor = os.open(self.lock_path, flags)
+                    else:
+                        directory = _open_parent_without_links(self.lock_path)
+                        try:
+                            descriptor = os.open(self.lock_path.name, flags, dir_fd=directory)
+                        finally:
+                            os.close(directory)
                 except FileExistsError:
                     lock, original, error = self._read_lock()
                     if error or lock is None or original is None:
@@ -239,6 +251,8 @@ class OperationArbiter:
                     written = 0
                     write_error: OSError | None = None
                     try:
+                        opened = os.fstat(descriptor)
+                        file_identity = (opened.st_dev, opened.st_ino)
                         written = _write_all(descriptor, payload)
                         os.fsync(descriptor)
                     except OSError as exc:
@@ -276,7 +290,7 @@ class OperationArbiter:
                             "retry_after_ms": None,
                             "error": "operation lock publication is incomplete",
                         }
-                    claim = OperationClaim(operation_id, tool_name, payload)
+                    claim = OperationClaim(operation_id, tool_name, payload, file_identity)
                     return claim, {
                         "state": "acquired",
                         "operation_id": operation_id,
@@ -304,7 +318,17 @@ class OperationArbiter:
                 }
             if current != claim.lock_bytes:
                 return {"released": False, "verified": False, "reason": "lock_changed"}
-            if not unlink_if_content(self.lock_path, claim.lock_bytes):
+            try:
+                removed = unlink_if_content(
+                    self.lock_path, claim.lock_bytes, expected_identity=claim.file_identity
+                )
+            except (OSError, RuntimeError) as exc:
+                return {
+                    "released": False,
+                    "verified": False,
+                    "reason": f"lock_cleanup_uncertain:{type(exc).__name__}",
+                }
+            if not removed:
                 return {
                     "released": False,
                     "verified": False,

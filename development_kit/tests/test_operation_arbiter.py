@@ -14,6 +14,56 @@ from src.operation_arbiter import OperationArbiter, get_operation_status, guard_
 from src.tools.catalog import TOOL_METADATA
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX ancestor replacement")
+@pytest.mark.parametrize("ancestor", [False, True])
+def test_replaced_parent_does_not_read_or_delete_external_lock(tmp_path, ancestor):
+    container = tmp_path / "container"
+    runtime = container / "runtime"
+    arbiter = OperationArbiter(runtime)
+    claim, result = arbiter.try_acquire(tool_name="param_set", side_effect_class="model_mutation")
+    assert result["state"] == "acquired"
+    outside = tmp_path / "outside"
+    external_root = outside / "runtime" if ancestor else outside
+    external_root.mkdir(parents=True)
+    external = external_root / "operation.lock"
+    external.write_bytes(claim.lock_bytes)
+    replaced = container if ancestor else runtime
+    saved = tmp_path / "saved"
+    replaced.rename(saved)
+    replaced.symlink_to(outside, target_is_directory=True)
+    try:
+        assert arbiter.inspect()["state"] == "uncertain"
+        assert (
+            arbiter.try_acquire(tool_name="param_set", side_effect_class="model_mutation")[0]
+            is None
+        )
+        receipt = arbiter.release(claim)
+        assert receipt["verified"] is False
+        assert receipt["released"] is False
+        assert external.read_bytes() == claim.lock_bytes
+        external.unlink()
+        assert (
+            arbiter.try_acquire(tool_name="param_set", side_effect_class="model_mutation")[0]
+            is None
+        )
+        assert not external.exists()
+    finally:
+        replaced.unlink()
+        saved.rename(replaced)
+    assert arbiter.release(claim)["verified"] is True
+
+
+def test_identical_bytes_at_different_inode_do_not_own_claim(tmp_path):
+    arbiter = OperationArbiter(tmp_path)
+    claim, result = arbiter.try_acquire(tool_name="param_set", side_effect_class="model_mutation")
+    assert result["state"] == "acquired"
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(claim.lock_bytes)
+    os.replace(replacement, arbiter.lock_path)
+    assert arbiter.release(claim)["verified"] is False
+    assert arbiter.lock_path.read_bytes() == claim.lock_bytes
+
+
 def test_operation_lock_fifo_is_reported_without_blocking(tmp_path):
     if os.name == "nt" or not hasattr(os, "mkfifo"):
         pytest.skip("POSIX FIFO regression")
@@ -34,7 +84,8 @@ def test_operation_lock_rejects_oversized_file_without_read_bytes(tmp_path, monk
     )
     arbiter.lock_path.write_bytes(b"x" * (arbiter_module.MAX_OPERATION_LOCK_BYTES + 1))
     monkeypatch.setattr(
-        type(arbiter.lock_path), "read_bytes",
+        type(arbiter.lock_path),
+        "read_bytes",
         lambda _path: (_ for _ in ()).throw(AssertionError("unbounded reading")),
     )
     assert arbiter.inspect()["state"] == "uncertain"

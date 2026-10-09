@@ -58,8 +58,12 @@ def _passive_live_session_provider() -> dict[str, Any] | None:
     if isinstance(models, list):
         if isinstance(current_model, str) and current_model:
             selected = next(
-                (row for row in models if isinstance(row, Mapping)
-                 and row.get("name") == current_model), None
+                (
+                    row
+                    for row in models
+                    if isinstance(row, Mapping) and row.get("name") == current_model
+                ),
+                None,
             )
         elif models and isinstance(models[0], Mapping):
             selected = models[0]

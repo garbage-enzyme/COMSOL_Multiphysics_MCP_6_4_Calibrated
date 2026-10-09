@@ -47,16 +47,20 @@ Frozen behaviours
 from __future__ import annotations
 
 import json
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Iterator, Mapping, Protocol
 from uuid import uuid4
 
 from comsol_mcp.durable import canonical_sha256_v1
 from comsol_mcp.durable.io import append_jsonl_record, read_complete_jsonl
 from comsol_mcp.protocol_identity import TASKS_EXTENSION_IDENTIFIER
+
+from .journal import locked_journal
 
 #: The only native Tasks wire generation this build emits.
 TASKS_WIRE_GENERATION = "2026-07-28"
@@ -231,8 +235,28 @@ class TasksMappingStore:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
         self.journal_path = self.root / "tasks.jsonl"
+        self._transaction_lock = threading.RLock()
+        self._transaction_depth = 0
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Serialize mapping admission and journal repair across processes."""
+        with self._transaction_lock:
+            if self._transaction_depth:
+                yield
+                return
+            with locked_journal(self.journal_path):
+                self._transaction_depth += 1
+                try:
+                    yield
+                finally:
+                    self._transaction_depth -= 1
 
     def append(self, row: TaskRow) -> None:
+        with self.transaction():
+            self._append_locked(row)
+
+    def _append_locked(self, row: TaskRow) -> None:
         payload = row.to_document()
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         if len(encoded) > MAX_TASK_ROW_BYTES:
@@ -413,39 +437,40 @@ class TasksBridge:
         # submission cannot launch a second simulation.
         submission = self._engine.submit(dict(raw_spec))
         job_id = _bounded(submission.get("job_id"), "job_id", 256)
-        existing = self._store.latest_for_job(job_id)
+        with self._store.transaction():
+            existing = self._store.latest_for_job(job_id)
 
-        if existing is not None and existing.owner != self._owner:
-            raise TasksMappingError(
-                "task_owner_conflict",
-                "an identical durable job belongs to another task owner",
-            )
+            if existing is not None and existing.owner != self._owner:
+                raise TasksMappingError(
+                    "task_owner_conflict",
+                    "an identical durable job belongs to another task owner",
+                )
 
-        created = self._clock_ms()
-        if existing is not None:
-            task_id = existing.task_id
-            created = existing.created_at_ms
-        else:
-            # Pre-generate the id so the durable mapping row is written *before*
-            # any task-shaped result is returned.
-            task_id = self._new_task_id()
-        row = TaskRow(
-            task_id=task_id,
-            job_id=job_id,
-            created_at_ms=created,
-            ttl_ms=ttl,
-            poll_interval_ms=interval,
-            spec_fingerprint=fingerprint,
-            owner=self._owner,
-            request_client=request_client,
-        )
-        self._store.append(row)
-        persisted = self._store.latest_for_task(task_id)
-        if persisted is None:
-            raise TasksMappingError(
-                "mapping_not_durable",
-                "the task mapping row was not durable after writing; refusing to acknowledge",
+            created = self._clock_ms()
+            if existing is not None:
+                task_id = existing.task_id
+                created = existing.created_at_ms
+            else:
+                # Pre-generate the id so the durable mapping row is written *before*
+                # any task-shaped result is returned.
+                task_id = self._new_task_id()
+            row = TaskRow(
+                task_id=task_id,
+                job_id=job_id,
+                created_at_ms=created,
+                ttl_ms=ttl,
+                poll_interval_ms=interval,
+                spec_fingerprint=fingerprint,
+                owner=self._owner,
+                request_client=request_client,
             )
+            self._store.append(row)
+            persisted = self._store.latest_for_task(task_id)
+            if persisted is None:
+                raise TasksMappingError(
+                    "mapping_not_durable",
+                    "the task mapping row was not durable after writing; refusing to acknowledge",
+                )
         task_status = task_status_from_job_state(submission.get("status"))
         return {
             "resultType": "task",

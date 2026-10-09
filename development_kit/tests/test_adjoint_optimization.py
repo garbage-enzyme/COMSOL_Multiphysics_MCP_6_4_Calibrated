@@ -25,6 +25,39 @@ def _resource_policy() -> dict:
     return {"max_mesh_elements": 1000}
 
 
+@pytest.mark.parametrize("failure", [None, "empty", "mismatch", "exited"])
+def test_watchdog_identity_confirmation_is_bounded_and_strict(monkeypatch, failure):
+    from comsol_mcp.jobs import manager as module
+
+    command = ["python", "-m", "owned-watchdog"]
+    signature = hashlib.sha256("\0".join(command).encode()).hexdigest()
+    expected = {"pid": 123, "process_create_time": 1.0, "command_signature": signature}
+    clock = [0.0]
+    calls = []
+
+    def observe(pid):
+        calls.append(pid)
+        if failure == "empty" or (failure is None and len(calls) == 1):
+            raise OSError("temporarily empty command line")
+        return {**expected, "command_signature": "0" * 64} if failure == "mismatch" else expected
+
+    monkeypatch.setattr(module, "process_identity", observe)
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        module.time, "sleep", lambda interval: clock.__setitem__(0, clock[0] + interval)
+    )
+    process = SimpleNamespace(pid=123, poll=lambda: 0 if failure == "exited" else None)
+    if failure is None:
+        assert module._wait_for_launched_identity(process, command) == expected
+        assert len(calls) == 2
+    else:
+        with pytest.raises(RuntimeError, match="identity could not be verified"):
+            module._wait_for_launched_identity(process, command)
+        assert clock[0] <= 2.01
+        if failure == "exited":
+            assert calls == []
+
+
 def _write_manifest(tmp_path):
     source = tmp_path / "source.mph"
     source.write_bytes(b"synthetic source")

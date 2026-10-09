@@ -16,6 +16,7 @@ from development_kit.tests.integration import clientapi_property_acceptance as p
 from development_kit.tests.integration import derived_geometry_acceptance as derived_gate
 from development_kit.tests.integration import live_profile_acceptance as live_profile_gate
 from development_kit.tests.integration import periodic_mesh_acceptance as periodic_mesh_gate
+from development_kit.tests.integration import semantic_feature_acceptance as semantic_gate
 from development_kit.tests.integration import test_native_cancel_candidate as native_cancel_gate
 from development_kit.tests.integration import test_real_comsol as real_comsol_gate
 from development_kit.tests.integration import wave_optics_point_audit_acceptance as point_gate
@@ -29,6 +30,34 @@ STANDALONE_PROBES = tuple(
 )
 if not STANDALONE_PROBES:
     raise RuntimeError("standalone integration probe collection must not be empty")
+
+
+def test_semantic_acceptance_profile_counts_match_frozen_snapshot():
+    frozen = json.loads(
+        (ROOT / "development_kit/tests/snapshots/profile_tool_names.json").read_text()
+    )
+    assert semantic_gate.PROFILE_COUNTS == {
+        name: len(frozen[name]) for name in semantic_gate.PROFILE_COUNTS
+    }
+    assert semantic_gate.SEMANTIC_CORE_COUNT == 64
+
+
+def test_semantic_acceptance_base_discovery_does_not_inject_deployment(monkeypatch, tmp_path):
+    for name in ("ROOT", "LEXICAL_INDEX", "MODEL_PATH"):
+        monkeypatch.delenv(f"COMSOL_SEMANTIC_{name}", raising=False)
+    base = semantic_gate._server("core", tmp_path)
+    assert not any(name.startswith("COMSOL_SEMANTIC_") for name in base.env)
+    enabled = semantic_gate._server("core", tmp_path, semantic_enabled=True)
+    for name in ("ROOT", "LEXICAL_INDEX", "MODEL_PATH"):
+        assert Path(enabled.env[f"COMSOL_SEMANTIC_{name}"]).is_absolute()
+    custom = str(tmp_path / "custom-model")
+    monkeypatch.setenv("COMSOL_SEMANTIC_MODEL_PATH", custom)
+    assert (
+        semantic_gate._server("core", tmp_path, semantic_enabled=True).env[
+            "COMSOL_SEMANTIC_MODEL_PATH"
+        ]
+        == custom
+    )
 
 
 def test_clientapi_property_acceptance_uses_explicit_runtime_checks():

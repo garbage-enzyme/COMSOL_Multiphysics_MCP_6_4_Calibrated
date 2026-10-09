@@ -46,6 +46,22 @@ class _PollableProcess(Protocol):
     def poll(self) -> int | None: ...
 
 
+def _wait_for_launched_identity(process: subprocess.Popen, command: list[str]) -> dict[str, Any]:
+    expected = hashlib.sha256("\0".join(command).encode("utf-8", errors="replace")).hexdigest()
+    deadline = time.monotonic() + 2.0
+    while process.poll() is None:
+        try:
+            observed = process_identity(process.pid)
+            if observed["pid"] == process.pid and observed["command_signature"] == expected:
+                return observed
+        except psutil.NoSuchProcess, psutil.ZombieProcess, OSError:
+            pass
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.01)
+    raise RuntimeError("Launched watchdog identity could not be verified before the deadline")
+
+
 logger = logging.getLogger(__name__)
 
 _DETACHED_PROCESS_LOCK = threading.Lock()
@@ -788,7 +804,7 @@ class JobManager:
                     start_new_session=(os.name != "nt"),
                 )
             _track_detached_process(process)
-            watchdog_identity = process_identity(process.pid)
+            watchdog_identity = _wait_for_launched_identity(process, command)
         except Exception as exc:
             atomic_write_json(
                 artifact,

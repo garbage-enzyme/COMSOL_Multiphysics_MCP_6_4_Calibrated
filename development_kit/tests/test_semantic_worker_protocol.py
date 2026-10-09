@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import queue
 import shutil
 import socket
@@ -14,7 +15,6 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -29,6 +29,44 @@ from src.tools.ownership import SolverOwnership
 
 from development_kit.tests.platform_fixtures import platform_test_root
 from development_kit.tests.semantic_test_support import isolated_semantic_environment
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process group cleanup")
+@pytest.mark.parametrize("startup_failure", [False, True])
+@pytest.mark.parametrize("detached", [False, True])
+def test_posix_reset_reclaims_worker_descendants(tmp_path, startup_failure, detached):
+    import psutil
+
+    pid_path = tmp_path / "descendant.json"
+    code = (
+        "import json,os,subprocess,sys,time; "
+        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'],"
+        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,"
+        f"start_new_session={detached}); "
+        f"open({str(pid_path)!r},'w').write(json.dumps([child.pid])); "
+        "print(json.dumps({'schema_version':'1','event':'ready','pid':os.getpid(),"
+        "'host':'127.0.0.1','port':9}),flush=True); time.sleep(30)"
+    )
+    manager = SemanticWorkerManager(startup_deadline=5)
+    manager._command = lambda: [sys.executable, "-c", code]
+    child = None
+    try:
+        started = manager.start()
+        assert started["success"], started
+        child = psutil.Process(json.loads(pid_path.read_text())[0])
+        assert child.is_running() and child.status() != psutil.STATUS_ZOMBIE
+        assert (os.getpgid(child.pid) == manager._process.pid) is not detached
+        assert os.getpgid(child.pid) != os.getpgrp()
+        if startup_failure:
+            result = manager._terminate_unverified_spawn("injected_startup_failure")
+        else:
+            result = manager.reset()["reset"]
+        assert result["absent"], result
+        assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE
+    finally:
+        manager.reset()
+        if child is not None and child.is_running():
+            child.kill()
 
 
 def test_short_startup_line_returns_while_worker_pipe_remains_open():
@@ -923,7 +961,7 @@ def test_termination_exceptions_still_clear_finished_process_resources(monkeypat
 
 
 def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search():
-    root = Path("D:/comsol_semantic_worker_test") / uuid.uuid4().hex
+    root = platform_test_root("semantic_worker") / uuid.uuid4().hex
     index = root / "manuals.sqlite3"
     runtime = root / "runtime"
     build_index_from_records(

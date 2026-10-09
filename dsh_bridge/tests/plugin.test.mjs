@@ -1,11 +1,15 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { publicToolName, normalizeConfig, apply } from "../lib/index.js";
 import { extractText } from "../lib/mcp-client-core.mjs";
 import { extractOwnerIdentity, ownerFromIdentity, mirrorDedupeKey } from "../lib/job-mirror.mjs";
 import { spawnFakeServer, createFakeJobs, quietLogger, FIXTURE } from "./helpers.mjs";
+
+const TEST_ROOT = process.platform === "win32" ? "D:\\mcp_tests" : tmpdir();
+mkdirSync(TEST_ROOT, { recursive: true });
 
 test("publicToolName keeps clean comsol names verbatim", () => {
 	for (const name of ["job_submit", "job_status", "comsol_start", "wave_optics_preflight"]) {
@@ -33,7 +37,7 @@ test("normalizeConfig merges defaults, env, and stateFile", () => {
 	assert.equal(cfg.command, "C:\\x\\mcp.exe");
 	assert.equal(cfg.cwd, "D:\\rt");
 	assert.equal(cfg.env.COMSOL_MCP_SETTINGS_PATH, "D:\\comsol_runtime\\settings.json"); // default env kept
-	assert.equal(cfg.stateFile, "D:\\rt\\.dsh-comsol-bridge-jobs.json");
+	assert.equal(cfg.stateFile, join(cfg.cwd, ".dsh-comsol-bridge-jobs.json"));
 	assert.equal(cfg.toolCallTimeoutMs, 600000);
 	assert.equal(cfg.jobMirrorEnabled, true);
 });
@@ -110,7 +114,7 @@ async function submitOnce(def, agent) {
 test("apply mirrors job_submit only after the mirror starts", { timeout: 20000 }, async () => {
 	// ASCII root per repo convention; the fake-server child's spawn cwd stays
 	// outside this directory so Windows rmSync cannot hit a cwd EPERM.
-	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b16plug"));
+	const stateDir = mkdtempSync(join(TEST_ROOT, "b16plug"));
 	try {
 		const jobs = createFakeJobs();
 		const ctx = makeCtx({ jobs });
@@ -118,7 +122,7 @@ test("apply mirrors job_submit only after the mirror starts", { timeout: 20000 }
 			command: process.execPath,
 			args: [FIXTURE],
 			env: fakeServer.extraEnv,
-			cwd: "D:\\mcp_tests",
+			cwd: TEST_ROOT,
 			stateFile: join(stateDir, "jobs-a.json"),
 			pollIntervalMs: 30,
 			cancelConfirmTimeoutMs: 50,
@@ -147,14 +151,14 @@ test("apply mirrors job_submit only after the mirror starts", { timeout: 20000 }
 });
 
 test("apply keeps failed mirror starts retryable in the state file", { timeout: 20000 }, async () => {
-	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b16plug"));
+	const stateDir = mkdtempSync(join(TEST_ROOT, "b16plug"));
 	try {
 		const ctx = makeCtx(); // no ctx.jobs registry available
 		await apply(ctx, {
 			command: process.execPath,
 			args: [FIXTURE],
 			env: fakeServer.extraEnv,
-			cwd: "D:\\mcp_tests",
+			cwd: TEST_ROOT,
 			stateFile: join(stateDir, "jobs-b.json"),
 			reconnect: { enabled: false },
 			initTimeoutMs: 5000,
@@ -175,7 +179,7 @@ test("apply keeps failed mirror starts retryable in the state file", { timeout: 
 });
 
 test("B02: unconfirmed dispose keeps the durable state row", { timeout: 20000 }, async () => {
-	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b02plug"));
+	const stateDir = mkdtempSync(join(TEST_ROOT, "b02plug"));
 	try {
 		const jobs = createFakeJobs();
 		const ctx = makeCtx({ jobs });
@@ -185,7 +189,7 @@ test("B02: unconfirmed dispose keeps the durable state row", { timeout: 20000 },
 			command: process.execPath,
 			args: [FIXTURE],
 			env: fakeServer.extraEnv,
-			cwd: "D:\\mcp_tests",
+			cwd: TEST_ROOT,
 			stateFile: join(stateDir, "jobs-c.json"),
 			pollIntervalMs: 30,
 			cancelConfirmTimeoutMs: 50,
@@ -248,7 +252,7 @@ test("B02a: mirrorDedupeKey includes attempt", () => {
 });
 
 test("B02a: submit persists owner identity for rehydrate", { timeout: 20000 }, async () => {
-	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b02aown"));
+	const stateDir = mkdtempSync(join(TEST_ROOT, "b02aown"));
 	try {
 		const jobs = createFakeJobs();
 		const ctx = makeCtx({ jobs });
@@ -256,7 +260,7 @@ test("B02a: submit persists owner identity for rehydrate", { timeout: 20000 }, a
 			command: process.execPath,
 			args: [FIXTURE],
 			env: fakeServer.extraEnv,
-			cwd: "D:\\mcp_tests",
+			cwd: TEST_ROOT,
 			stateFile: join(stateDir, "jobs.json"),
 			pollIntervalMs: 30,
 			cancelConfirmTimeoutMs: 50,
@@ -281,7 +285,7 @@ test("B02a: submit persists owner identity for rehydrate", { timeout: 20000 }, a
 });
 
 test("B02a: rehydrate restores owner and does not resubmit", { timeout: 25000 }, async () => {
-	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b02areh"));
+	const stateDir = mkdtempSync(join(TEST_ROOT, "b02areh"));
 	try {
 		const stateFile = join(stateDir, "jobs.json");
 		// Simulate a prior boot that submitted a job owned by agent-1.
@@ -308,7 +312,7 @@ test("B02a: rehydrate restores owner and does not resubmit", { timeout: 25000 },
 			command: process.execPath,
 			args: [FIXTURE],
 			env: fakeServer.extraEnv,
-			cwd: "D:\\mcp_tests",
+			cwd: TEST_ROOT,
 			stateFile,
 			pollIntervalMs: 30,
 			reconnect: { enabled: false },
@@ -340,7 +344,7 @@ test("B02a: rehydrate restores owner and does not resubmit", { timeout: 25000 },
 });
 
 test("B02a: rehydrate with missing owner keeps the row and blocks recovery", { timeout: 25000 }, async () => {
-	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b02aown2"));
+	const stateDir = mkdtempSync(join(TEST_ROOT, "b02aown2"));
 	try {
 		const stateFile = join(stateDir, "jobs.json");
 		// Legacy-style row without owner identity.
@@ -358,7 +362,7 @@ test("B02a: rehydrate with missing owner keeps the row and blocks recovery", { t
 			command: process.execPath,
 			args: [FIXTURE],
 			env: fakeServer.extraEnv,
-			cwd: "D:\\mcp_tests",
+			cwd: TEST_ROOT,
 			stateFile,
 			pollIntervalMs: 30,
 			reconnect: { enabled: false },
@@ -379,7 +383,7 @@ test("B02a: rehydrate with missing owner keeps the row and blocks recovery", { t
 });
 
 test("B02a: rehydrate with owner key but agent not live keeps the row blocked", { timeout: 25000 }, async () => {
-	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b02await"));
+	const stateDir = mkdtempSync(join(TEST_ROOT, "b02await"));
 	try {
 		const stateFile = join(stateDir, "jobs.json");
 		writeFileSync(stateFile, JSON.stringify([{
@@ -395,7 +399,7 @@ test("B02a: rehydrate with owner key but agent not live keeps the row blocked", 
 			command: process.execPath,
 			args: [FIXTURE],
 			env: fakeServer.extraEnv,
-			cwd: "D:\\mcp_tests",
+			cwd: TEST_ROOT,
 			stateFile,
 			pollIntervalMs: 30,
 			reconnect: { enabled: false },
@@ -413,7 +417,7 @@ test("B02a: rehydrate with owner key but agent not live keeps the row blocked", 
 
 for (const ownerAvailable of [true, false]) {
 test(`rehydrate preserves offline completion routing (owner available: ${ownerAvailable})`, { timeout: 25000 }, async () => {
-	const stateDir = mkdtempSync(join("D:\\mcp_tests", "b02aterm"));
+	const stateDir = mkdtempSync(join(TEST_ROOT, "b02aterm"));
 	try {
 		const stateFile = join(stateDir, "jobs.json");
 		writeFileSync(stateFile, JSON.stringify([{
@@ -433,7 +437,7 @@ test(`rehydrate preserves offline completion routing (owner available: ${ownerAv
 				command: process.execPath,
 				args: [FIXTURE],
 				env: termServer.extraEnv,
-				cwd: "D:\\mcp_tests",
+				cwd: TEST_ROOT,
 				stateFile,
 				pollIntervalMs: 30,
 				reconnect: { enabled: false },
@@ -464,7 +468,7 @@ test(`rehydrate preserves offline completion routing (owner available: ${ownerAv
 }
 
 test("rehydrate keeps a known attempt blocked when the server cannot confirm it", { timeout: 10000 }, async () => {
-	const dir = mkdtempSync(join("D:\\mcp_tests", "battempt"));
+	const dir = mkdtempSync(join(TEST_ROOT, "battempt"));
 	const owner = { id: "owner" };
 	const jobs = createFakeJobs();
 	const ctx = makeCtx({ jobs, agents: { get: () => owner } });
@@ -472,7 +476,7 @@ test("rehydrate keeps a known attempt blocked when the server cannot confirm it"
 		const stateFile = join(dir, "jobs.json");
 		writeFileSync(stateFile, JSON.stringify([{ jobId: "job-old", attempt: 1, ownerAgentKey: owner.id }]));
 		await apply(ctx, { command: process.execPath, args: [FIXTURE], env: fakeServer.extraEnv,
-			cwd: "D:\\mcp_tests", stateFile, reconnect: { enabled: false }, initTimeoutMs: 5000,
+			cwd: TEST_ROOT, stateFile, reconnect: { enabled: false }, initTimeoutMs: 5000,
 			failOnStartupError: true, rehydrateMaxAttempts: 0,
 		});
 		assert.equal(jobs.started.length, 0);

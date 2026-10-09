@@ -410,7 +410,18 @@ def _normalize(
         try:
             defaults = default_settings_document(environ=environment)
         except (OSError, RuntimeError, SettingsError) as exc:
-            _record_error(errors, "settings.environment", exc)
+            needs_path_defaults = not isinstance(document, dict) or any(
+                not isinstance(document.get(group), dict)
+                or field not in document[group]
+                or document[group][field] == _DEFAULT_SETTINGS[group][field]
+                for group, field in (
+                    ("runtime", "directory"),
+                    ("paths", "model_read_roots"),
+                    ("paths", "artifact_write_root"),
+                )
+            )
+            if needs_path_defaults:
+                _record_error(errors, "settings.environment", exc)
             defaults = deepcopy(_DEFAULT_SETTINGS)
         if isinstance(document, dict):
             document = deepcopy(document)

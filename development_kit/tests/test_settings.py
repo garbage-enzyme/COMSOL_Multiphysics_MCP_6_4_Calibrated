@@ -20,12 +20,36 @@ from src.settings import (
     settings_status,
 )
 
-
 from development_kit.tests.platform_fixtures import platform_test_root
 
 
 def _safe_defaults(environ=None) -> dict:
     return default_settings_document(environ=environ)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX XDG default contract")
+@pytest.mark.parametrize("xdg_key", ["XDG_DATA_HOME", "XDG_STATE_HOME"])
+def test_explicit_paths_do_not_depend_on_unused_unicode_defaults(monkeypatch, xdg_key, tmp_path):
+    from src.settings import serialize_settings_document
+
+    document = default_settings_document(
+        environ={"HOME": str(tmp_path)},
+        user_root=tmp_path / "models",
+        program_root=tmp_path / "state",
+    )
+    document["paths"]["model_read_roots"] = [str(tmp_path / "模型")]
+    environment = {"HOME": str(tmp_path), xdg_key: str(tmp_path / "用户")}
+    report = normalize_settings_document(document, environ=environment)
+    assert report["errors"] == []
+    assert report["settings"]["runtime"] == document["runtime"]
+    assert report["settings"]["paths"] == document["paths"]
+    monkeypatch.setenv(xdg_key, environment[xdg_key])
+    serialized = json.loads(serialize_settings_document(document))
+    assert serialized["paths"] == document["paths"]
+    for group, field in (("runtime", "directory"), ("paths", "artifact_write_root")):
+        incomplete = json.loads(json.dumps(document))
+        del incomplete[group][field]
+        assert normalize_settings_document(incomplete, environ=environment)["errors"]
 
 
 def _settings_path(tmp_path: Path, payload: object) -> Path:
@@ -264,8 +288,12 @@ def test_project_settings_fill_legacy_runtime_shape_for_existing_callers(tmp_pat
     )
     effective = settings_environment({SETTINGS_PATH_ENV: str(path)})
 
-    assert effective["COMSOL_MCP_RUNTIME_DIR"] == str(Path(str(platform_test_root("settings-runtime"))))
-    assert effective["COMSOL_MCP_JOBS_DIR"] == str(Path(str(platform_test_root("settings-runtime/jobs"))))
+    assert effective["COMSOL_MCP_RUNTIME_DIR"] == str(
+        Path(str(platform_test_root("settings-runtime")))
+    )
+    assert effective["COMSOL_MCP_JOBS_DIR"] == str(
+        Path(str(platform_test_root("settings-runtime/jobs")))
+    )
     assert effective["COMSOL_MCP_ENABLE_SHARED_SERVER"] == "true"
 
 
@@ -386,7 +414,9 @@ def test_legacy_override_preserves_itself_without_suppressing_project_defaults(t
     )
 
     assert effective["COMSOL_MCP_RUNTIME_DIR"] == "E:/explicit-runtime"
-    assert effective["COMSOL_MCP_JOBS_DIR"] == str(Path(str(platform_test_root("project-runtime/jobs"))))
+    assert effective["COMSOL_MCP_JOBS_DIR"] == str(
+        Path(str(platform_test_root("project-runtime/jobs")))
+    )
     assert effective["COMSOL_MCP_PROFILE"] == "wave_optics"
     assert effective["COMSOL_MCP_ENABLE_SHARED_SERVER"] == "true"
 
@@ -492,7 +522,10 @@ def test_current_feature_gates_are_boolean_composable_and_environment_visible(tm
             "profile": {"name": "wave_optics"},
             "shared_server": {"enabled": True},
             "manuals": {"root": str(platform_test_root("manuals"))},
-            "lexical_docs": {"enabled": True, "index_path": str(platform_test_root("manuals.sqlite3"))},
+            "lexical_docs": {
+                "enabled": True,
+                "index_path": str(platform_test_root("manuals.sqlite3")),
+            },
             "semantic_docs": {
                 "enabled": True,
                 "root": None,
@@ -512,5 +545,9 @@ def test_current_feature_gates_are_boolean_composable_and_environment_visible(tm
     assert effective["COMSOL_MCP_ENABLE_LEXICAL_DOCS"] == "true"
     assert effective["COMSOL_MCP_ENABLE_SEMANTIC_DOCS"] == "true"
     assert effective["COMSOL_MANUALS_ROOT"] == str(Path(str(platform_test_root("manuals"))))
-    assert effective["COMSOL_LEXICAL_DOCS_INDEX_PATH"] == str(Path(str(platform_test_root("manuals.sqlite3"))))
-    assert effective["COMSOL_SEMANTIC_LEXICAL_INDEX"] == str(Path(str(platform_test_root("manuals.sqlite3"))))
+    assert effective["COMSOL_LEXICAL_DOCS_INDEX_PATH"] == str(
+        Path(str(platform_test_root("manuals.sqlite3")))
+    )
+    assert effective["COMSOL_SEMANTIC_LEXICAL_INDEX"] == str(
+        Path(str(platform_test_root("manuals.sqlite3")))
+    )

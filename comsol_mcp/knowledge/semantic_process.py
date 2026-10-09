@@ -8,6 +8,7 @@ import json
 import os
 import queue
 import secrets
+import signal
 import socket
 import subprocess
 import sys
@@ -31,7 +32,7 @@ def _posix_process_create_time(pid: int) -> float | None:
 
     try:
         return float(psutil.Process(pid).create_time())
-    except (psutil.Error, OSError):
+    except psutil.Error, OSError:
         return None
 
 
@@ -180,6 +181,8 @@ class SemanticWorkerManager:
         self._process: subprocess.Popen[bytes] | None = None
         self._identity: dict[str, Any] | None = None
         self._job: _KillOnCloseJob | None = None
+        self._posix_group: int | None = None
+        self._posix_descendants: dict[int, float] = {}
         self._token: str | None = None
         self._port: int | None = None
         self._last_activity: float | None = None
@@ -233,10 +236,82 @@ class SemanticWorkerManager:
                 return line[: line.index(b"\n") + 1]
         raise ValueError("worker startup handshake exceeds the byte limit")
 
+    def _terminate_posix_group(self) -> tuple[bool, bool, list[str]]:
+        """Terminate the session created for this spawn and verify active members."""
+        group = self._posix_group
+        if os.name == "nt" or group is None:
+            return True, False, []
+        if group <= 1 or group == os.getpgrp():
+            return False, False, ["unsafe_process_group"]
+        import psutil
+
+        try:
+            if self._process is not None and self._process.poll() is None:
+                for child in psutil.Process(group).children(recursive=True):
+                    self._posix_descendants[child.pid] = child.create_time()
+        except psutil.NoSuchProcess:
+            pass
+        except (OSError, psutil.Error) as exc:
+            return False, False, [type(exc).__name__]
+
+        def active_members() -> list[int]:
+            if self._process is not None and self._process.poll() is not None:
+                if psutil.pid_exists(group):
+                    raise RuntimeError("process_group_leader_reused")
+            members = []
+            for index, process in enumerate(psutil.process_iter(["pid"])):
+                if index >= 32768:
+                    raise RuntimeError("process_inventory_limit")
+                try:
+                    if (
+                        os.getpgid(process.pid) == group
+                        and process.status() != psutil.STATUS_ZOMBIE
+                    ):
+                        members.append(process.pid)
+                except ProcessLookupError, psutil.NoSuchProcess:
+                    continue
+            for pid, created in self._posix_descendants.items():
+                try:
+                    child = psutil.Process(pid)
+                    if child.create_time() == created and child.status() != psutil.STATUS_ZOMBIE:
+                        if pid not in members:
+                            members.append(pid)
+                except psutil.NoSuchProcess:
+                    pass
+            return members
+
+        acted = False
+        try:
+            for requested_signal in (signal.SIGTERM, signal.SIGKILL):
+                if not active_members():
+                    return True, acted, []
+                try:
+                    os.killpg(group, requested_signal)
+                    acted = True
+                except ProcessLookupError:
+                    pass
+                for pid, created in self._posix_descendants.items():
+                    try:
+                        child = psutil.Process(pid)
+                        if child.create_time() == created:
+                            child.send_signal(requested_signal)
+                            acted = True
+                    except psutil.NoSuchProcess:
+                        pass
+                deadline = time.monotonic() + 2.0
+                while time.monotonic() < deadline:
+                    if self._process is not None:
+                        self._process.poll()
+                    if not active_members():
+                        return True, acted, []
+                    time.sleep(0.02)
+            return False, acted, ["process_group_still_active"]
+        except (OSError, psutil.Error, RuntimeError) as exc:
+            return False, acted, [type(exc).__name__]
+
     def _terminate_unverified_spawn(self, reason: str) -> dict[str, Any]:
         process = self._process
-        errors = []
-        acted = False
+        group_absent, acted, errors = self._terminate_posix_group()
         if process is not None:
             try:
                 if process.poll() is None:
@@ -258,13 +333,15 @@ class SemanticWorkerManager:
                     process.wait(timeout=2.0)
                 except (OSError, subprocess.SubprocessError) as kill_exc:
                     errors.append(type(kill_exc).__name__)
-        absent = process is None or process.poll() is not None
+        absent = group_absent and (process is None or process.poll() is not None)
         if process is not None and absent:
             self._close_process_resources(process)
         if absent:
             self._process = None
             self._identity = None
             self._job = None
+            self._posix_group = None
+            self._posix_descendants.clear()
             self._token = None
             self._port = None
             self._last_activity = None
@@ -361,6 +438,7 @@ class SemanticWorkerManager:
                     stderr=subprocess.PIPE,
                     env=environment,
                     creationflags=creationflags,
+                    start_new_session=os.name != "nt",
                 )
             except OSError as exc:
                 error = {
@@ -380,6 +458,8 @@ class SemanticWorkerManager:
                     },
                 }
             self._process = process
+            self._posix_group = process.pid if os.name != "nt" else None
+            self._posix_descendants.clear()
             self._start_pipe_drain(process.stderr, "stderr")
             created = (
                 _windows_process_create_time(int(process._handle))
@@ -406,6 +486,7 @@ class SemanticWorkerManager:
                 stdout = process.stdout
                 if stdout is None:
                     raise RuntimeError("semantic worker stdout pipe was not created")
+
                 def read_startup() -> None:
                     try:
                         line_queue.put(self._read_startup_line(stdout))
@@ -434,6 +515,18 @@ class SemanticWorkerManager:
                 if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65_535:
                     raise RuntimeError("worker startup port is invalid")
                 self._port = port
+                if self._posix_group is not None:
+                    import psutil
+
+                    try:
+                        self._posix_descendants.update(
+                            (child.pid, child.create_time())
+                            for child in psutil.Process(process.pid).children(recursive=True)
+                        )
+                    except psutil.NoSuchProcess:
+                        pass
+                    except psutil.Error as exc:
+                        raise RuntimeError("worker descendants could not be identified") from exc
                 self._last_activity = time.monotonic()
                 self._start_pipe_drain(stdout, "stdout")
                 return {
@@ -471,8 +564,7 @@ class SemanticWorkerManager:
     def _terminate_owned(self, reason: str) -> dict[str, Any]:
         state = self._identity_state()
         identity = dict(self._identity or {})
-        acted = False
-        cleanup_errors = []
+        group_absent, acted, cleanup_errors = self._terminate_posix_group()
         if self._process is not None and self._process.poll() is None:
             if self._job is not None:
                 try:
@@ -507,7 +599,7 @@ class SemanticWorkerManager:
                         cleanup_errors.append(type(kill_exc).__name__)
         elif self._process is not None and self._process.poll() is not None:
             acted = False
-        absent = self._process is None or self._process.poll() is not None
+        absent = group_absent and (self._process is None or self._process.poll() is not None)
         if self._job is not None:
             try:
                 self._job.close()
@@ -519,6 +611,8 @@ class SemanticWorkerManager:
             self._process = None
             self._identity = None
             self._job = None
+            self._posix_group = None
+            self._posix_descendants.clear()
             self._token = None
             self._port = None
             self._last_activity = None

@@ -37,15 +37,45 @@ class _FileSizeLimitError(ValueError):
     pass
 
 
-def _open_regular_file_descriptor(path: str | Path) -> tuple[int, os.stat_result]:
+def _open_parent_without_links(path: Path) -> int:
+    """Open each absolute POSIX ancestor relative to its verified parent."""
+    parent = Path(os.path.abspath(path.parent))
+    flags = os.O_RDONLY | int(getattr(os, "O_DIRECTORY")) | int(getattr(os, "O_NOFOLLOW"))
+    directory = os.open(parent.anchor, flags)
+    try:
+        for part in parent.parts[1:]:
+            following = os.open(part, flags, dir_fd=directory)
+            os.close(directory)
+            directory = following
+        return directory
+    except BaseException:
+        os.close(directory)
+        raise
+
+
+def _open_regular_file_descriptor(
+    path: str | Path, *, no_symlink_parents: bool = False
+) -> tuple[int, os.stat_result]:
     candidate = Path(path)
-    before = os.stat(candidate, follow_symlinks=False)
-    if not stat.S_ISREG(before.st_mode):
-        raise ValueError("bounded reading requires a regular file without links")
-    flags = os.O_RDONLY
-    for name in ("O_BINARY", "O_NOINHERIT", "O_NONBLOCK", "O_NOFOLLOW"):
-        flags |= getattr(os, name, 0)
-    descriptor = os.open(candidate, flags)
+    directory = (
+        _open_parent_without_links(candidate) if no_symlink_parents and os.name != "nt" else None
+    )
+    target = candidate.name if directory is not None else candidate
+    try:
+        before = os.stat(target, dir_fd=directory, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("bounded reading requires a regular file without links")
+        flags = os.O_RDONLY
+        for name in ("O_BINARY", "O_NOINHERIT", "O_NONBLOCK", "O_NOFOLLOW"):
+            flags |= getattr(os, name, 0)
+        descriptor = (
+            os.open(target, flags)
+            if directory is None
+            else os.open(target, flags, dir_fd=directory)
+        )
+    finally:
+        if directory is not None:
+            os.close(directory)
     try:
         opened = os.fstat(descriptor)
         if not stat.S_ISREG(opened.st_mode):
@@ -58,11 +88,13 @@ def _open_regular_file_descriptor(path: str | Path) -> tuple[int, os.stat_result
         raise
 
 
-def read_file_bytes_bounded(path: str | Path, *, max_bytes: int) -> bytes:
+def read_file_bytes_bounded(
+    path: str | Path, *, max_bytes: int, no_symlink_parents: bool = False
+) -> bytes:
     """Read at most one regular file's declared byte limit from one descriptor."""
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
         raise ValueError("max_bytes must be a non-negative integer")
-    descriptor, opened = _open_regular_file_descriptor(path)
+    descriptor, opened = _open_regular_file_descriptor(path, no_symlink_parents=no_symlink_parents)
     try:
         if opened.st_size > max_bytes:
             raise _FileSizeLimitError("file exceeds the declared reading limit")
@@ -362,11 +394,7 @@ def _posix_unlink_opened_file_if(
     directory_flags = os.O_RDONLY | int(getattr(os, "O_DIRECTORY")) | int(getattr(os, "O_NOFOLLOW"))
     # O_NONBLOCK is required before fstat().  A FIFO must never make cleanup
     # wait for a writer.  The regular-file check below rejects the descriptor.
-    read_flags = (
-        os.O_RDONLY
-        | int(getattr(os, "O_NOFOLLOW"))
-        | int(getattr(os, "O_NONBLOCK", 0))
-    )
+    read_flags = os.O_RDONLY | int(getattr(os, "O_NOFOLLOW")) | int(getattr(os, "O_NONBLOCK", 0))
 
     def restore() -> None:
         nonlocal moved, restoration_attempted
@@ -387,7 +415,7 @@ def _posix_unlink_opened_file_if(
         moved = False
 
     try:
-        directory = os.open(path.parent, directory_flags)
+        directory = _open_parent_without_links(path)
         descriptor = os.open(path.name, read_flags, dir_fd=directory)
         opened = os.fstat(descriptor)
         if not stat.S_ISREG(opened.st_mode) or not predicate(descriptor, opened):
@@ -431,13 +459,21 @@ def _unlink_opened_file_if(path: Path, predicate: Callable[[int, os.stat_result]
     return _posix_unlink_opened_file_if(path, predicate)
 
 
-def unlink_if_content(path: str | Path, expected: bytes, *, allow_prefix: bool = False) -> bool:
+def unlink_if_content(
+    path: str | Path,
+    expected: bytes,
+    *,
+    allow_prefix: bool = False,
+    expected_identity: tuple[int, int] | None = None,
+) -> bool:
     """Remove only an opened regular file whose bytes match the expected publication."""
     if not isinstance(expected, bytes):
         raise ValueError("expected content must be bytes")
     target = Path(path)
 
-    def matches(descriptor: int, _opened: os.stat_result) -> bool:
+    def matches(descriptor: int, opened: os.stat_result) -> bool:
+        if expected_identity is not None and (opened.st_dev, opened.st_ino) != expected_identity:
+            return False
         observed = _read_descriptor_bounded(descriptor, len(expected))
         return expected.startswith(observed) if allow_prefix else observed == expected
 
