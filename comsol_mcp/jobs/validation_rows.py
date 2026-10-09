@@ -54,6 +54,43 @@ def _hex_digest(value: object, name: str) -> str:
     return value.lower()
 
 
+def _validate_nested_manifest_snapshot(manifest: Path, payload: bytes, *, root: Path) -> None:
+    """Validate the bounded wrapper-to-inner manifest link used by collectors."""
+    try:
+        document = json.loads(payload.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("validation manifest is not valid JSON") from exc
+    if not isinstance(document, Mapping):
+        raise ValueError("validation manifest must be a JSON object")
+    if document.get("schema_name") != "comsol_mcp.validation_matrix_collector":
+        return
+    inner = document.get("inner_manifest")
+    if not isinstance(inner, Mapping):
+        raise ValueError("validation collector manifest has no inner manifest")
+    if set(inner) != {"relative_path", "sha256", "size_bytes"}:
+        raise ValueError("validation collector inner manifest descriptor is invalid")
+    relative = _normalize_manifest_path(inner.get("relative_path"), "inner_manifest.relative_path")
+    expected_hash = _hex_digest(inner.get("sha256"), "inner_manifest.sha256")
+    size = inner.get("size_bytes")
+    if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+        raise ValueError("inner_manifest.size_bytes must be a positive integer")
+    candidate_raw = manifest.parent / relative
+    candidate = candidate_raw.resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("validation inner manifest escapes the artifact root") from exc
+    if candidate_raw.is_symlink() or not candidate.is_file():
+        raise ValueError("validation inner manifest is missing or is not a regular file")
+    snapshot = read_contained_file_snapshot(
+        candidate_raw, root=root, max_bytes=MAX_VALIDATION_MANIFEST_BYTES
+    )
+    if snapshot["byte_count"] != size:
+        raise ValueError("validation inner manifest size differs from its wrapper")
+    if snapshot["sha256"] != expected_hash:
+        raise ValueError("validation inner manifest hash differs from its wrapper")
+
+
 def _identifier(value: object, name: str) -> str:
     if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
         raise ValueError(f"{name} must be a bounded portable identifier")
@@ -345,6 +382,7 @@ def completed_point_fingerprints(
                 raise ValueError("validation manifest size differs from the durable row")
             if snapshot["sha256"] != summary["manifest_sha256"]:
                 raise ValueError("validation manifest hash differs from the durable row")
+            _validate_nested_manifest_snapshot(candidate, snapshot["payload"], root=root)
         completed.add(row["point_fingerprint"])
     return completed
 
