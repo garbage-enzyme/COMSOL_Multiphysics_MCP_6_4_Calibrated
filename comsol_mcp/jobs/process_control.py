@@ -6,8 +6,8 @@ import ctypes
 import hashlib
 import math
 import os
-from pathlib import Path
 from ctypes import wintypes
+from pathlib import Path
 from typing import Any
 
 import psutil

@@ -18,7 +18,7 @@ import math
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
-from comsol_mcp.durable import canonical_sha256_v1
+from comsol_mcp.durable import canonical_sha256_v1, read_file_bytes_bounded
 from comsol_mcp.path_policy import PathPolicy, ReadPinError, pin_validated_reads
 
 OFFLINE_EXPORT_MANIFEST_SCHEMA_NAME = "comsol_mcp.offline_export_manifest"
@@ -487,9 +487,9 @@ def validate_offline_export_manifest(
         try:
             if manifest_pin is not None:
                 with pin_validated_reads((manifest_pin,)):
-                    raw = path.read_bytes()
+                    raw = read_file_bytes_bounded(path, max_bytes=max_manifest_bytes)
             else:
-                raw = path.read_bytes()
+                raw = read_file_bytes_bounded(path, max_bytes=max_manifest_bytes)
         except (OSError, ReadPinError, RuntimeError, ValueError):
             rejected = _invalid_verdict(["manifest_unavailable"])
             rejected["path_evidence"] = path_evidence

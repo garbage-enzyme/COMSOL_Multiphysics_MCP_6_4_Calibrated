@@ -6,6 +6,7 @@ import functools
 import inspect
 import json
 import os
+import stat
 import threading
 import time
 import uuid
@@ -22,6 +23,7 @@ OPERATION_LOCK_SCHEMA = "comsol_mcp.operation_lock"
 OPERATION_LOCK_VERSION = "1.0.0"
 PROCESS_CREATE_TIME_TOLERANCE_SECONDS = 1.0
 RETRY_AFTER_MS = 250
+MAX_OPERATION_LOCK_BYTES = 16 * 1024
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -42,6 +44,27 @@ def _write_all(descriptor: int, payload: bytes) -> int:
             raise OSError("operation lock write made no progress")
         written += count
     return written
+
+
+def _read_lock_bytes(path: Path) -> bytes:
+    """Read one regular lock file without following FIFO or oversized input."""
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
+    descriptor = os.open(path, flags)
+    try:
+        stat_result = os.fstat(descriptor)
+        if not stat.S_ISREG(stat_result.st_mode):
+            raise OSError("operation lock is not a regular file")
+        payload = bytearray()
+        while len(payload) <= MAX_OPERATION_LOCK_BYTES:
+            chunk = os.read(descriptor, MAX_OPERATION_LOCK_BYTES + 1 - len(payload))
+            if not chunk:
+                return bytes(payload)
+            payload.extend(chunk)
+        raise OSError("operation lock exceeds the byte limit")
+    finally:
+        os.close(descriptor)
 
 
 @dataclass(frozen=True)
@@ -77,7 +100,7 @@ class OperationArbiter:
 
     def _read_lock(self) -> tuple[dict[str, Any] | None, bytes | None, str | None]:
         try:
-            payload = self.lock_path.read_bytes()
+            payload = _read_lock_bytes(self.lock_path)
         except FileNotFoundError:
             return None, None, None
         except OSError as exc:
@@ -251,7 +274,7 @@ class OperationArbiter:
                             ),
                         }
                     try:
-                        published = self.lock_path.read_bytes()
+                        published = _read_lock_bytes(self.lock_path)
                     except OSError as exc:
                         return None, {
                             "state": "uncertain",
@@ -284,7 +307,7 @@ class OperationArbiter:
         """Release only the exact bytes written by this claim."""
         with self._thread_lock:
             try:
-                current = self.lock_path.read_bytes()
+                current = _read_lock_bytes(self.lock_path)
             except FileNotFoundError:
                 return {"released": False, "verified": False, "reason": "lock_missing"}
             except OSError as exc:

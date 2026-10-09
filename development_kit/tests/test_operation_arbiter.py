@@ -4,12 +4,27 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import threading
 
 import psutil
+import pytest
 import src.operation_arbiter as arbiter_module
 from src.operation_arbiter import OperationArbiter, get_operation_status, guard_tool_call
 from src.tools.catalog import TOOL_METADATA
+
+
+def test_operation_lock_fifo_is_reported_without_blocking(tmp_path):
+    if os.name == "nt" or not hasattr(os, "mkfifo"):
+        pytest.skip("POSIX FIFO regression")
+    fifo = tmp_path / "operation.lock"
+    os.mkfifo(fifo)
+    arbiter = OperationArbiter(
+        tmp_path, pid=100, process_create_time=10.0, process_probe=lambda _: 10.0
+    )
+    result = arbiter.inspect()
+    assert result["state"] == "uncertain"
+    assert "regular file" in result["error"]
 
 
 def test_concurrent_comsol_bound_calls_fail_fast_with_retry_evidence(tmp_path, monkeypatch):

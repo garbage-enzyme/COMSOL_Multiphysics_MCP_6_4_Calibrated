@@ -12,6 +12,7 @@ from comsol_mcp.artifact_chain import (
     _verify_artifact_chain_snapshot,
     validate_artifact_chain_manifest,
 )
+from comsol_mcp.durable import read_file_bytes_bounded
 
 from .contracts import canonical_json_bytes, canonical_sha256
 from .outcome_contract import validate_outcome_contract
@@ -274,7 +275,7 @@ def _read_cited_artifact(
         raise ValueError("cited artifact path escapes its artifact root") from exc
     if not path.is_file():
         raise ValueError("cited artifact must be a regular non-symlink file")
-    payload = path.read_bytes()
+    payload = read_file_bytes_bounded(path, max_bytes=int(artifact["byte_count"]))
     if len(payload) != artifact["byte_count"]:
         raise ValueError("cited artifact byte count changed after chain verification")
     if hashlib.sha256(payload).hexdigest() != artifact["sha256"]:

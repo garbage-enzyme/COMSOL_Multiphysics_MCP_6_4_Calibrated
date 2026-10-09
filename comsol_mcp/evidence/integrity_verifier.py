@@ -128,6 +128,7 @@ def verify_evidence_integrity(
     resumed: bool = False,
     producer_compatibility: Mapping[str, Any] | None = None,
     settings_status: Mapping[str, Any] | None = None,
+    receipt_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run every enabled deterministic check and disclose every skipped check."""
     if not isinstance(resumed, bool):
@@ -153,6 +154,8 @@ def verify_evidence_integrity(
         "paths_included": False,
         "source_mutation_performed": False,
     }
+    if receipt_metadata is not None:
+        base.update(deepcopy(dict(receipt_metadata)))
     if status.get("configuration_state") != "valid":
         return _finalize(
             {
