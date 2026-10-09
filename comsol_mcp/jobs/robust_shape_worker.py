@@ -6,10 +6,12 @@ import copy
 import os
 import sys
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
+from comsol_mcp.path_policy import pin_validated_reads, validated_read_pin
 from comsol_mcp.research.robust_finalist_evidence import assess_robust_finalist_validation
 from comsol_mcp.research.robust_objectives import evaluate_robust_absolute_contrast
 from comsol_mcp.research.robust_outer_gcmma import (
@@ -801,6 +803,8 @@ def _run_licensed(root: str, job_id: str) -> int:
     shared_client = None
     previous_temporary_directory = os.environ.get("COMSOL_TMPDIR")
     source = Path(spec["source_model_path"])
+    source_pins = ExitStack()
+    source_pins.enter_context(pin_validated_reads((validated_read_pin(source, source.parent),)))
     source_before = source.read_bytes()
     try:
         store.bind_worker_identity(job_id, process_identity(os.getpid()))
@@ -1226,6 +1230,7 @@ def _run_licensed(root: str, job_id: str) -> int:
             os.environ.pop("COMSOL_TMPDIR", None)
         else:
             os.environ["COMSOL_TMPDIR"] = previous_temporary_directory
+        source_pins.close()
         source_unchanged = source.exists() and source.read_bytes() == source_before
         cleanup_payload = _finalize_licensed_cleanup(
             directory,

@@ -9,10 +9,12 @@ import os
 import sys
 import threading
 import time
+from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from comsol_mcp.path_policy import pin_validated_reads, validated_read_pin
 from comsol_mcp.shared_session.locking import build_shared_model_revision
 
 from .attached_runtime import (
@@ -346,7 +348,12 @@ def _run(root: str, job_id: str) -> int:
     attached_completion_count: int | None = None
     native_monitor_stop = threading.Event()
     native_monitor: threading.Thread | None = None
+    source_pins = ExitStack()
     try:
+        source_path = Path(spec["source_model_path"])
+        source_pins.enter_context(
+            pin_validated_reads((validated_read_pin(source_path, source_path.parent),))
+        )
         from comsol_mcp.tools.ownership import SolverOwnership
 
         ownership = SolverOwnership(
@@ -804,6 +811,7 @@ def _run(root: str, job_id: str) -> int:
                     print(json.dumps(release, ensure_ascii=False), file=sys.stderr, flush=True)
             except Exception as exc:
                 print(f"Ownership release warning: {exc}", file=sys.stderr, flush=True)
+        source_pins.close()
 
 
 def run(root: str, job_id: str) -> int:
