@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -368,6 +369,43 @@ def test_native_cancel_monitor_failure_is_bound_to_the_attempt(tmp_path, ascii_r
     assert code == 1
     assert state["status"] == "cancel_requested"
     assert "native cancel monitor failed" in state["cancel"]["worker_error"]["message"]
+
+
+def test_blocked_native_cancel_preserves_client_and_lease(tmp_path, ascii_root, monkeypatch):
+    store, spec, job_id = _created_job(tmp_path, ascii_root)
+    ownership = _Ownership()
+    client = _Client(spec["source_model_path"])
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocked_cancel():
+        entered.set()
+        release.wait(5.0)
+        return {"attempted": True}
+
+    monkeypatch.setattr("src.jobs.native_cancel_probe.request_native_cancel_once", blocked_cancel)
+
+    def collect(point, _collector, artifact_dir):
+        store.request_cancel(job_id, requester_identity=process_identity(os.getpid()))
+        assert entered.wait(2.0)
+        return write_fake_point_audit(artifact_dir, spec, point, absorption=0.5)
+
+    code = _run(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda _root, _owner: ownership,
+        client_factory=lambda _spec: client,
+        collector_executor=collect,
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=True,
+    )
+    state = store.read_state(job_id)
+    release.set()
+    assert code == 1
+    assert state["status"] == "cancel_requested"
+    assert "native_cancel_thread_still_active" in state["cancel"]["worker_error"]["cleanup_errors"]
+    assert client.cleared is False
+    assert ownership.released is False
 
 
 def test_final_source_rehash_failure_still_publishes_terminal_failure(
