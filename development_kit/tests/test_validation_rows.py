@@ -168,8 +168,13 @@ def test_completed_rows_require_existing_bounded_manifest_snapshot(tmp_path):
     summary = _summary("off", digest=__import__("hashlib").sha256(payload).hexdigest())
     summary["manifest_size_bytes"] = len(payload)
     append_validation_row(
-        path, spec, attempt=1, point_id="off", status="ok",
-        collector_summaries=[summary], created_at_epoch=1.0,
+        path,
+        spec,
+        attempt=1,
+        point_id="off",
+        status="ok",
+        collector_summaries=[summary],
+        created_at_epoch=1.0,
     )
     assert completed_point_fingerprints(path, spec, artifact_root=tmp_path) == {
         spec["points"][0]["point_fingerprint"]
@@ -188,14 +193,19 @@ def test_completed_rows_reject_manifest_symlink(tmp_path):
     artifact.parent.mkdir(parents=True)
     try:
         artifact.symlink_to(outside)
-    except (OSError, NotImplementedError):
+    except OSError, NotImplementedError:
         pytest.skip("symlink creation is unavailable")
     payload = outside.read_bytes()
     summary = _summary("off", digest=__import__("hashlib").sha256(payload).hexdigest())
     summary["manifest_size_bytes"] = len(payload)
     append_validation_row(
-        path, spec, attempt=1, point_id="off", status="ok",
-        collector_summaries=[summary], created_at_epoch=1.0,
+        path,
+        spec,
+        attempt=1,
+        point_id="off",
+        status="ok",
+        collector_summaries=[summary],
+        created_at_epoch=1.0,
     )
     with pytest.raises(ValueError, match="symlink|regular|snapshot|manifest"):
         completed_point_fingerprints(path, spec, artifact_root=tmp_path)

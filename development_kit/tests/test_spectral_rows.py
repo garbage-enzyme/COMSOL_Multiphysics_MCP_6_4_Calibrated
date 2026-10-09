@@ -227,7 +227,9 @@ def _append(
         mesh_element_count=12,
         mesh_vertex_count=8,
         solve_seconds=0.2,
-        audit_artifact=artifact if artifact is not None else _artifact(
+        audit_artifact=artifact
+        if artifact is not None
+        else _artifact(
             root,
             spec,
             wavelength,
@@ -356,8 +358,15 @@ def test_append_hashes_the_accepted_canonical_row_representation(tmp_path):
     spec = _spec(tmp_path)
     root = tmp_path / "job"
     artifact = _artifact(
-        root, spec, 4e-6, absorption=1.0, reflectance=0.0, transmission=0.0,
-        solve_seconds=0.0, mesh_elements=0, mesh_vertices=0
+        root,
+        spec,
+        4e-6,
+        absorption=1.0,
+        reflectance=0.0,
+        transmission=0.0,
+        solve_seconds=0.0,
+        mesh_elements=0,
+        mesh_vertices=0,
     )
     for field in (
         "wrapper_sha256",
