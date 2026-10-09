@@ -237,8 +237,7 @@ class MphBackendBase:
             return None
         client = self._client
         try:
-            versions = list(client.versions())
-            comsol_version = versions[0] if versions else None
+            comsol_version = getattr(client, "version", None)
         except Exception:
             # An unreadable version is reported as unknown rather than guessed.
             comsol_version = None
@@ -492,9 +491,26 @@ class MphBackendBase:
         spurious type mismatch. Only backend-produced values are unwrapped;
         caller-supplied values stay strictly checked.
         """
+        accessors = {
+            "str": "getString",
+            "bool": "getBoolean",
+            "int": "getInt",
+            "float": "getDouble",
+            "str_matrix": "getStringMatrix",
+            "bool_matrix": "getBooleanMatrix",
+            "int_matrix": "getIntMatrix",
+            "float_matrix": "getDoubleMatrix",
+        }
+        accessor = accessors.get(form)
+        if accessor is None:
+            raise AdapterError(
+                "conversion_not_representable",
+                f"unsupported property read form: {form}",
+                operation="property_read",
+            )
         try:
             java = self._java_node(node.path)
-            raw = java.getString(name)
+            raw = getattr(java, accessor)(name)
         except AdapterError:
             raise
         except Exception as exc:

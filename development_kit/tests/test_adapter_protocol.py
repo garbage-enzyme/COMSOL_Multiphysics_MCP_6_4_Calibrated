@@ -286,6 +286,16 @@ def test_an_unsupported_form_is_refused() -> None:
         convert_explicitly(1, form="complex_matrix")
 
 
+def test_integer_to_float_conversion_requires_exact_float64_representation() -> None:
+    with pytest.raises(AdapterError, match="exactly representable"):
+        convert_explicitly(2**53 + 1, form="float")
+
+
+def test_integer_to_float_overflow_is_a_stable_adapter_error() -> None:
+    with pytest.raises(AdapterError, match="finite float"):
+        convert_explicitly(10**1000, form="float")
+
+
 def test_an_oversized_matrix_is_refused_rather_than_materialized() -> None:
     from comsol_mcp.adapter.conversion import MAX_MATRIX_ELEMENTS
 

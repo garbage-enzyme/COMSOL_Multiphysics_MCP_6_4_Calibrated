@@ -59,7 +59,12 @@ def require_float(value: Any, *, field: str) -> float:
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise _reject(f"{field} must be a number, got {type(value).__name__}")
-    result = float(value)
+    try:
+        result = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise _reject(f"{field} cannot be represented as a finite float") from exc
+    if isinstance(value, int) and int(result) != value:
+        raise _reject(f"{field} integer is not exactly representable as float64")
     if not math.isfinite(result):
         raise _reject(f"{field} must be finite")
     return result
