@@ -1,6 +1,6 @@
 # COMSOL MCP 设置指南
 
-适用于 COMSOL MCP `0.6.5` 和设置 schema `1.2.0`。
+适用于 COMSOL MCP `0.7.8` 和设置 schema `1.3.0`。
 
 普通用户优先使用设置界面，不需要手工编辑 JSON。直接修改 `settings.json` 的方式仍然
 保留，适合开发者、获得用户明确授权的 agent、批量安装、自动部署，以及界面无法打开时
@@ -155,7 +155,7 @@ English (en)
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
 | `schema_name` | `"comsol_mcp.settings"` | 设置格式名称，只读，必须完全一致。 |
-| `schema_version` | `"1.2.0"` | 新保存的文件使用 `1.2.0`。旧版 `1.0.0` 和 `1.1.0` 可以读取，并在内存中转换。 |
+| `schema_version` | `"1.3.0"` | 新保存的文件使用 `1.3.0`。旧版 `1.0.0`、`1.1.0` 和 `1.2.0` 可以读取，并在内存中转换。 |
 | `gui.language` | `"zh-cn"` | 只能是 `"en"`、`"zh-cn"` 或 `"zh-tw"`。 |
 | `gui.scale` | `"system"` | 可选 `"system"`、`"100"`、`"125"`、`"150"` 或 `"200"`。界面把数字显示为百分比。 |
 
@@ -258,7 +258,7 @@ PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数�
 ```json
 {
   "schema_name": "comsol_mcp.settings",
-  "schema_version": "1.2.0",
+  "schema_version": "1.3.0",
   "profile": {"name": "core"},
   "runtime": {
     "directory": "%PROGRAMDATA%/comsol_mcp/runtime",
@@ -332,7 +332,7 @@ setup_required: false
 
 文件缺失、JSON 损坏、key 重复、不是 UTF-8、超过大小限制或使用不支持的未来 schema 时，
 设置界面只提供恢复或退出，不会猜测如何修补。用户确认恢复后，程序会保留一份受大小限制
-的损坏文件副本，再用原子写入方式保存标准 `1.2.0` 设置。
+的损坏文件副本，再用原子写入方式保存标准 `1.3.0` 设置。
 
 证据检查的详细含义见
 [`../evidence_integrity/README_CN.md`](../evidence_integrity/README_CN.md)。默认关闭的共享

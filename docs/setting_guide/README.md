@@ -1,6 +1,6 @@
 # COMSOL MCP Settings Guide
 
-Applies to COMSOL MCP `0.6.5` and settings schema `1.2.0`.
+Applies to COMSOL MCP `0.7.8` and settings schema `1.3.0`.
 
 The Settings GUI is the primary way to configure COMSOL MCP. Direct JSON editing
 remains supported for developers, agents, automation, recovery, and advanced
@@ -180,7 +180,7 @@ the GUI before save and by backend validation when JSON is edited directly.
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
 | `schema_name` | `"comsol_mcp.settings"` | Read-only schema identity. Must match exactly. |
-| `schema_version` | `"1.2.0"` | New writes use `1.2.0`. `1.0.0` and `1.1.0` are read and migrated in memory. |
+| `schema_version` | `"1.3.0"` | New writes use `1.3.0`. `1.0.0`, `1.1.0`, and `1.2.0` are read and migrated in memory. |
 | `gui.language` | `"zh-cn"` | `"en"`, `"zh-cn"`, or `"zh-tw"`. |
 | `gui.scale` | `"system"` | `"system"`, `"100"`, `"125"`, `"150"`, or `"200"`. The GUI displays the numeric choices as percentages. |
 
@@ -291,7 +291,7 @@ Canonical default template:
 ```json
 {
   "schema_name": "comsol_mcp.settings",
-  "schema_version": "1.2.0",
+  "schema_version": "1.3.0",
   "profile": {"name": "core"},
   "runtime": {
     "directory": "%PROGRAMDATA%/comsol_mcp/runtime",
@@ -369,7 +369,7 @@ setup_required: false
 
 If the file is missing, malformed, duplicated-key, non-UTF-8, oversized, or uses
 an unsupported future schema, the GUI offers only bounded recovery or exit. A
-confirmed recovery preserves one damaged copy and writes canonical `1.2.0`
+confirmed recovery preserves one damaged copy and writes canonical `1.3.0`
 settings atomically.
 
 For the evidence-check meanings, see
