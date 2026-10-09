@@ -257,6 +257,19 @@ def test_entry_count_is_rejected_before_central_directory_expansion(tmp_path, mo
     _refuse(fixture, "mph_too_many_entries", MphInspectionLimits(max_entries=3))
 
 
+def test_underreported_entry_count_is_rejected_by_bounded_directory_scan(tmp_path):
+    fixture = tmp_path / "underreported-count.mph"
+    with zipfile.ZipFile(fixture, "w") as archive:
+        archive.writestr("one.txt", b"1")
+        archive.writestr("two.txt", b"2")
+    raw = bytearray(fixture.read_bytes())
+    eocd = raw.rfind(b"PK\x05\x06")
+    assert eocd >= 0
+    raw[eocd + 10 : eocd + 12] = (1).to_bytes(2, "little")
+    fixture.write_bytes(raw)
+    _refuse(fixture, "mph_too_many_entries", MphInspectionLimits(max_entries=1))
+
+
 def test_missing_required_markers_fail_closed_as_unsupported(tmp_path):
     fixture = _write_valid_mph(tmp_path / "nodmodel.mph", include_dmodel=False)
     _refuse(fixture, "mph_unsupported_format")

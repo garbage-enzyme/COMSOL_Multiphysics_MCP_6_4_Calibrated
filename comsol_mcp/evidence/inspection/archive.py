@@ -22,10 +22,7 @@ from comsol_mcp.contracts.mph_inspection import MphInspectionLimits
 _STREAM_CHUNK_BYTES = 1_048_576
 _UNIX_FILE_TYPE_MASK = 0o170_000
 _UNIX_LINK_FILE_TYPE = 0o120_000
-_ZIP_EOCD_SIGNATURE = b"PK\x05\x06"
-_ZIP_EOCD_STRUCT = struct.Struct("<4s4H2LH")
-_ZIP_EOCD_MIN_BYTES = _ZIP_EOCD_STRUCT.size
-_ZIP_EOCD_MAX_COMMENT = 65_535
+_ZIP_CENTRAL_HEADER_BYTES = 46
 
 
 class MphInspectionError(ValueError):
@@ -37,25 +34,48 @@ class MphInspectionError(ValueError):
 
 
 def _preflight_entry_count(path: Path, max_entries: int) -> None:
-    """Reject an over-limit central-directory count before ZipFile expands it."""
-    read_size = min(path.stat().st_size, _ZIP_EOCD_MIN_BYTES + _ZIP_EOCD_MAX_COMMENT)
+    """Count bounded directory records before ZipFile allocates their metadata.
+
+    The stdlib EOCD reader handles ZIP64 and reads a bounded archive tail.
+    Scan fixed-size headers to check the actual count too: a declared count
+    can be smaller than the number of directory records.
+    """
     try:
         with path.open("rb") as stream:
-            stream.seek(-read_size, 2)
-            tail = stream.read(read_size)
-    except OSError as exc:
+            end = zipfile._EndRecData(stream)
+            if end is None:
+                raise zipfile.BadZipFile("missing end record")
+            if end[zipfile._ECD_ENTRIES_TOTAL] > max_entries:
+                raise MphInspectionError(
+                    "mph_too_many_entries", "archive exceeds the caller entry-count limit"
+                )
+            directory_bytes = end[zipfile._ECD_SIZE]
+            directory_start = end[zipfile._ECD_LOCATION] - directory_bytes
+            if end[zipfile._ECD_SIGNATURE] == zipfile.stringEndArchive64:
+                directory_start -= zipfile.sizeEndCentDir64 + zipfile.sizeEndCentDir64Locator
+            if directory_start < 0:
+                raise zipfile.BadZipFile("invalid directory offset")
+            stream.seek(directory_start)
+            consumed = 0
+            count = 0
+            while consumed < directory_bytes:
+                header = stream.read(_ZIP_CENTRAL_HEADER_BYTES)
+                if len(header) != _ZIP_CENTRAL_HEADER_BYTES or header[:4] != b"PK\x01\x02":
+                    raise zipfile.BadZipFile("invalid central directory record")
+                count += 1
+                if count > max_entries:
+                    raise MphInspectionError(
+                        "mph_too_many_entries", "archive exceeds the caller entry-count limit"
+                    )
+                variable_bytes = sum(struct.unpack_from("<3H", header, 28))
+                consumed += _ZIP_CENTRAL_HEADER_BYTES + variable_bytes
+                if consumed > directory_bytes:
+                    raise zipfile.BadZipFile("truncated central directory record")
+                stream.seek(variable_bytes, 1)
+    except (OSError, zipfile.BadZipFile, struct.error) as exc:
         raise MphInspectionError(
-            "mph_source_unavailable", "the requested archive could not be accessed"
+            "mph_invalid_zip", "the file is not a readable ZIP archive"
         ) from exc
-    offset = tail.rfind(_ZIP_EOCD_SIGNATURE)
-    if offset < 0 or offset + _ZIP_EOCD_MIN_BYTES > len(tail):
-        return
-    record = _ZIP_EOCD_STRUCT.unpack_from(tail, offset)
-    declared_count = record[4]
-    if declared_count > max_entries:
-        raise MphInspectionError(
-            "mph_too_many_entries", "archive exceeds the caller entry-count limit"
-        )
 
 
 @dataclass(frozen=True)
