@@ -766,6 +766,7 @@ def _normalize_continuation_policy(value: Any, *, states: Mapping[str, Any]) -> 
         raise ValueError("continuation_policy.continuity_evidence exceeds transition count")
     normalized_evidence = []
     evidence_indexes = set()
+    indexed_evidence = []
     for evidence_position, evidence_value in enumerate(continuity_evidence):
         evidence_label = f"continuation_policy.continuity_evidence[{evidence_position}]"
         evidence = _exact_fields(evidence_value, _CONTINUITY_EVIDENCE_FIELDS, evidence_label)
@@ -779,11 +780,26 @@ def _normalize_continuation_policy(value: Any, *, states: Mapping[str, Any]) -> 
         if transition_index in evidence_indexes:
             raise ValueError("continuation_policy contains duplicate continuity evidence")
         evidence_indexes.add(transition_index)
+        indexed_evidence.append((transition_index, evidence_position, evidence))
+    evidence_by_index = {index: evidence for index, _, evidence in indexed_evidence}
+    for transition_index, evidence_position, evidence in sorted(indexed_evidence):
+        evidence_label = f"continuation_policy.continuity_evidence[{evidence_position}]"
         previous = states["states"][transition_index]
         current = states["states"][transition_index + 1]
         if current["candidate"]["classification"] != "multi_candidate":
             raise ValueError(f"{evidence_label} is only valid for a multi-candidate state")
-        previous_peak = previous["candidate"]["peak_wavelength_m"]
+        previous_peak = states["states"][0]["candidate"]["peak_wavelength_m"]
+        for prior_state_index in range(1, transition_index + 1):
+            prior_state = states["states"][prior_state_index]
+            if prior_state["candidate"]["classification"] == "multi_candidate":
+                prior_evidence = evidence_by_index.get(prior_state_index - 1)
+                previous_peak = (
+                    prior_evidence["selected_candidate_wavelength_m"]
+                    if prior_evidence is not None
+                    else None
+                )
+            else:
+                previous_peak = prior_state["candidate"]["peak_wavelength_m"]
         if previous_peak is None:
             raise ValueError(f"{evidence_label} requires a preceding measured peak")
         selected_wavelength = _finite(
