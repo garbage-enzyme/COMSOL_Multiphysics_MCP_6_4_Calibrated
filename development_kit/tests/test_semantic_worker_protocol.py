@@ -131,6 +131,23 @@ def test_non_object_startup_handshake_is_contained_and_reaped(monkeypatch):
     assert result["cleanup"]["absent"] is True
 
 
+def test_oversized_startup_handshake_is_rejected_before_json_decode(monkeypatch):
+    manager = SemanticWorkerManager(startup_deadline=2.0)
+    command = [
+        sys.executable,
+        "-c",
+        "import sys,time; sys.stdout.write('x'*70000+'\\n'); sys.stdout.flush(); time.sleep(30)",
+    ]
+    monkeypatch.setattr(manager, "_command", lambda: command)
+    try:
+        result = manager.start()
+    finally:
+        manager.reset()
+    assert result["success"] is False
+    assert result["error"]["code"] == "startup_failed"
+    assert result["cleanup"]["absent"] is True
+
+
 @pytest.mark.parametrize("port", [True, 0, 65_536, "1234"])
 def test_invalid_startup_port_is_contained_and_reaped(monkeypatch, port):
     manager = SemanticWorkerManager(startup_deadline=2.0)

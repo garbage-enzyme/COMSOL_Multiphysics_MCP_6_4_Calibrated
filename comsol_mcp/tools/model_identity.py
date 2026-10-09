@@ -54,32 +54,34 @@ def _passive_live_session_provider() -> dict[str, Any] | None:
         return snapshot
     models = status.get("models")
     current_model = status.get("current_model")
-    active_tag = None
-    if isinstance(current_model, str) and current_model:
-        active_tag = current_model
-    elif isinstance(models, list) and models:
-        first = models[0]
-        if isinstance(first, Mapping) and isinstance(first.get("name"), str):
-            active_tag = first["name"]
-    if not active_tag:
+    selected = None
+    if isinstance(models, list):
+        if isinstance(current_model, str) and current_model:
+            selected = next(
+                (row for row in models if isinstance(row, Mapping)
+                 and row.get("name") == current_model), None
+            )
+        elif models and isinstance(models[0], Mapping):
+            selected = models[0]
+    if selected is None:
         # A connected client with no tracked model has no active identity to
         # report; that is a structured absence, never a guessable state.
         snapshot = _unavailable_snapshot("no_active_tracked_model")
         snapshot["shared_session"] = shared_attached
         return snapshot
-    revision = None
-    if isinstance(models, list):
-        for row in models:
-            if isinstance(row, Mapping) and row.get("name") == active_tag:
-                candidate = row.get("revision_sha256")
-                revision = candidate if isinstance(candidate, str) and candidate else None
-                break
+    active_tag = selected.get("java_tag")
+    if not isinstance(active_tag, str) or not active_tag:
+        snapshot = _unavailable_snapshot("active_model_tag_unavailable")
+        snapshot["shared_session"] = shared_attached
+        return snapshot
+    candidate = selected.get("revision_sha256")
+    revision = candidate if isinstance(candidate, str) and candidate else None
     comsol_version = status.get("version")
     return {
         "available": True,
         "active_model_tag": active_tag,
         "bound_model_tag": active_tag,
-        "label": None,
+        "label": selected.get("name"),
         "revision": revision,
         "comsol_version": comsol_version if isinstance(comsol_version, str) else None,
         "shared_session": shared_attached,

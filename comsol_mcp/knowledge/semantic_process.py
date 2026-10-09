@@ -217,6 +217,21 @@ class SemanticWorkerManager:
             thread.join(timeout=0.2)
         self._pipe_threads.clear()
 
+    @staticmethod
+    def _read_startup_line(stream: Any, maximum: int = 64 * 1024) -> bytes:
+        chunks: list[bytes] = []
+        observed = 0
+        while observed <= maximum:
+            chunk = stream.read(min(4096, maximum - observed + 1))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            observed += len(chunk)
+            if b"\n" in chunk:
+                line = b"".join(chunks)
+                return line[: line.index(b"\n") + 1]
+        raise ValueError("worker startup handshake exceeds the byte limit")
+
     def _terminate_unverified_spawn(self, reason: str) -> dict[str, Any]:
         process = self._process
         errors = []
@@ -390,11 +405,17 @@ class SemanticWorkerManager:
                 stdout = process.stdout
                 if stdout is None:
                     raise RuntimeError("semantic worker stdout pipe was not created")
-                startup_reader = threading.Thread(
-                    target=lambda: line_queue.put(stdout.readline()), daemon=True
-                )
+                def read_startup() -> None:
+                    try:
+                        line_queue.put(self._read_startup_line(stdout))
+                    except Exception as exc:
+                        line_queue.put(exc)
+
+                startup_reader = threading.Thread(target=read_startup, daemon=True)
                 startup_reader.start()
                 line = line_queue.get(timeout=self.startup_deadline)
+                if isinstance(line, Exception):
+                    raise line
                 startup_reader.join(timeout=0.2)
                 if startup_reader.is_alive():
                     raise RuntimeError("worker startup reader did not terminate")

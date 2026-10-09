@@ -527,7 +527,8 @@ def test_passive_provider_degrades_a_connected_model_free_session(monkeypatch):
             return {
                 "connected": True,
                 "current_model": None,
-                "models": [{"name": "m9", "revision_sha256": "e" * 64}],
+                "models": [{"name": "Model with spaces", "java_tag": "m9",
+                            "revision_sha256": "e" * 64}],
                 "version": None,
             }
 
@@ -536,6 +537,24 @@ def test_passive_provider_degrades_a_connected_model_free_session(monkeypatch):
     assert available_snapshot["available"] is True
     assert available_snapshot["active_model_tag"] == "m9"
     assert available_snapshot["revision"] == "e" * 64
+    assert available_snapshot["label"] == "Model with spaces"
+
+
+def test_passive_provider_refuses_display_name_without_cached_java_tag(monkeypatch):
+    from comsol_mcp.tools import model_identity as adapter
+    from comsol_mcp.tools import session as session_module
+
+    class Manager:
+        def get_status(self):
+            return {
+                "connected": True, "current_model": "Model with spaces",
+                "models": [{"name": "Model with spaces", "revision_sha256": "e" * 64}],
+            }
+
+    monkeypatch.setattr(session_module, "session_manager", Manager())
+    snapshot = adapter._passive_live_session_provider()
+    assert snapshot["available"] is False
+    assert snapshot["reason_codes"] == ["active_model_tag_unavailable"]
 
 
 def test_identity_modules_never_import_solver_or_process_dependencies():

@@ -480,7 +480,7 @@ def validate_offline_export_manifest(
             rejected = _invalid_verdict([code])
             rejected["failures"][0]["detail"] = str(exc)[:160]
             rejected["path_evidence"] = path_evidence
-            return rejected
+            return _seal_verdict(rejected)
         manifest_pin = decision.read_pin
         _record_path(decision.kind, decision.root_id)
         path = decision.normalized_path
@@ -493,41 +493,41 @@ def validate_offline_export_manifest(
         except (OSError, ReadPinError, RuntimeError, ValueError):
             rejected = _invalid_verdict(["manifest_unavailable"])
             rejected["path_evidence"] = path_evidence
-            return rejected
+            return _seal_verdict(rejected)
         base_directory = base_directory or path.parent
         if len(raw) > max_manifest_bytes:
             rejected = _invalid_verdict(["manifest_too_large"])
             rejected["path_evidence"] = path_evidence
-            return rejected
+            return _seal_verdict(rejected)
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             rejected = _invalid_verdict(["manifest_not_valid_json"])
             rejected["path_evidence"] = path_evidence
-            return rejected
+            return _seal_verdict(rejected)
     elif isinstance(manifest_source, (bytes, bytearray)):
         raw = bytes(manifest_source)
         if len(raw) > max_manifest_bytes:
             rejected = _invalid_verdict(["manifest_too_large"])
             rejected["path_evidence"] = path_evidence
-            return rejected
+            return _seal_verdict(rejected)
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             rejected = _invalid_verdict(["manifest_not_valid_json"])
             rejected["path_evidence"] = path_evidence
-            return rejected
+            return _seal_verdict(rejected)
         if base_directory is None:
             rejected = _invalid_verdict(["base_directory_undeclared"])
             rejected["path_evidence"] = path_evidence
-            return rejected
+            return _seal_verdict(rejected)
     else:
         payload = manifest_source
         raw = None
         if base_directory is None:
             rejected = _invalid_verdict(["base_directory_undeclared"])
             rejected["path_evidence"] = path_evidence
-            return rejected
+            return _seal_verdict(rejected)
 
     try:
         manifest = normalize_offline_export_manifest(payload)
@@ -546,7 +546,7 @@ def validate_offline_export_manifest(
         rejected = _invalid_verdict([code])
         rejected["failures"][0]["detail"] = detail[:160]
         rejected["path_evidence"] = path_evidence
-        return rejected
+        return _seal_verdict(rejected)
 
     # B12: hash the exact bytes that were normalized.
     if isinstance(manifest_source, (str, Path, bytes, bytearray)):
@@ -595,7 +595,7 @@ def validate_offline_export_manifest(
         rejected = _invalid_verdict(["base_directory_outside_allowed_root"])
         rejected["failures"][0]["detail"] = str(exc)[:160]
         rejected["path_evidence"] = path_evidence
-        return rejected
+        return _seal_verdict(rejected)
     base = base_decision.normalized_path
     _record_path(base_decision.kind, base_decision.root_id)
 
@@ -710,3 +710,8 @@ __all__ = [
     "normalize_offline_export_manifest",
     "validate_offline_export_manifest",
 ]
+
+
+def _seal_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
+    body = {key: value for key, value in verdict.items() if key != "validation_sha256"}
+    return {**body, "validation_sha256": canonical_sha256_v1(body)}
