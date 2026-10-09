@@ -239,6 +239,24 @@ def test_entry_count_limits_are_enforced(tmp_path):
     _refuse(fixture, "mph_too_many_entries", limits)
 
 
+def test_entry_count_is_rejected_before_central_directory_expansion(tmp_path, monkeypatch):
+    """The EOCD count guard runs before ``infolist`` allocates metadata."""
+    fixture = tmp_path / "forged-count.mph"
+    with zipfile.ZipFile(fixture, "w") as archive:
+        archive.writestr("only.txt", b"x")
+    raw = bytearray(fixture.read_bytes())
+    eocd = raw.rfind(b"PK\x05\x06")
+    assert eocd >= 0
+    raw[eocd + 10 : eocd + 12] = (65_535).to_bytes(2, "little")
+    fixture.write_bytes(raw)
+
+    def _must_not_expand(_self):
+        raise AssertionError("central directory expanded before the bound check")
+
+    monkeypatch.setattr(zipfile.ZipFile, "infolist", _must_not_expand)
+    _refuse(fixture, "mph_too_many_entries", MphInspectionLimits(max_entries=3))
+
+
 def test_missing_required_markers_fail_closed_as_unsupported(tmp_path):
     fixture = _write_valid_mph(tmp_path / "nodmodel.mph", include_dmodel=False)
     _refuse(fixture, "mph_unsupported_format")

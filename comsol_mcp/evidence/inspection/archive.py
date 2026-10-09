@@ -9,6 +9,7 @@ path-bearing diagnostics.
 from __future__ import annotations
 
 import hashlib
+import struct
 import types
 import unicodedata
 import zipfile
@@ -21,6 +22,10 @@ from comsol_mcp.contracts.mph_inspection import MphInspectionLimits
 _STREAM_CHUNK_BYTES = 1_048_576
 _UNIX_FILE_TYPE_MASK = 0o170_000
 _UNIX_LINK_FILE_TYPE = 0o120_000
+_ZIP_EOCD_SIGNATURE = b"PK\x05\x06"
+_ZIP_EOCD_STRUCT = struct.Struct("<4s4H2LH")
+_ZIP_EOCD_MIN_BYTES = _ZIP_EOCD_STRUCT.size
+_ZIP_EOCD_MAX_COMMENT = 65_535
 
 
 class MphInspectionError(ValueError):
@@ -29,6 +34,28 @@ class MphInspectionError(ValueError):
     def __init__(self, reason_code: str, message: str):
         super().__init__(message)
         self.reason_code = reason_code
+
+
+def _preflight_entry_count(path: Path, max_entries: int) -> None:
+    """Reject an over-limit central-directory count before ZipFile expands it."""
+    read_size = min(path.stat().st_size, _ZIP_EOCD_MIN_BYTES + _ZIP_EOCD_MAX_COMMENT)
+    try:
+        with path.open("rb") as stream:
+            stream.seek(-read_size, 2)
+            tail = stream.read(read_size)
+    except OSError as exc:
+        raise MphInspectionError(
+            "mph_source_unavailable", "the requested archive could not be accessed"
+        ) from exc
+    offset = tail.rfind(_ZIP_EOCD_SIGNATURE)
+    if offset < 0 or offset + _ZIP_EOCD_MIN_BYTES > len(tail):
+        return
+    record = _ZIP_EOCD_STRUCT.unpack_from(tail, offset)
+    declared_count = record[4]
+    if declared_count > max_entries:
+        raise MphInspectionError(
+            "mph_too_many_entries", "archive exceeds the caller entry-count limit"
+        )
 
 
 @dataclass(frozen=True)
@@ -145,6 +172,7 @@ def inspect_archive_inventory(
                     "archive grew beyond the caller byte limit during hashing",
                 )
             digest.update(chunk)
+    _preflight_entry_count(path, bounds.max_entries)
     try:
         archive = zipfile.ZipFile(path)
     except (zipfile.BadZipFile, OSError, ValueError) as exc:
