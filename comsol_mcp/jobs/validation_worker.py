@@ -120,7 +120,7 @@ def _run(
         source = Path(spec["source_model_path"])
         if _sha256_file(source) != spec["source_model_sha256"]:
             raise RuntimeError("Immutable validation source hash changed before client startup")
-        completed_point_fingerprints(directory / "matrix_rows.jsonl", spec)
+        completed_point_fingerprints(directory / "matrix_rows.jsonl", spec, artifact_root=directory)
         ownership = ownership_factory(store.root.parent, f"job:{job_id}")
         preflight = ownership.preflight(
             model_path=str(source),
@@ -150,7 +150,7 @@ def _run(
         rows_path = directory / "matrix_rows.jsonl"
 
         def completed_ids() -> set[str]:
-            return completed_point_fingerprints(rows_path, spec)
+            return completed_point_fingerprints(rows_path, spec, artifact_root=directory)
 
         def sample(stage: str, point_id: str) -> dict[str, Any]:
             if telemetry_provider is not None:

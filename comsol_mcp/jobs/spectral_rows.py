@@ -168,6 +168,7 @@ def _verify_artifact_bytes(
     *,
     spec: Mapping[str, Any],
     point_fingerprint: str,
+    row_values: Mapping[str, Any],
 ) -> None:
     resolved_root = root.resolve()
     expected_source = _hex_digest(spec.get("source_model_sha256"), "spec source_model_sha256")
@@ -204,6 +205,26 @@ def _verify_artifact_bytes(
         raise ValueError("physical evidence source hash differs from the immutable job")
     if physical["identity"]["config_id"] != point_fingerprint:
         raise ValueError("physical evidence point identity differs from the durable row")
+    measurement_raw = inner.get("measurement")
+    if measurement_raw is not None:
+        measurement = _mapping(measurement_raw, "audit measurement")
+        wavelength = _mapping(measurement.get("wavelength"), "audit measurement wavelength")
+        power = _mapping(measurement.get("power"), "audit measurement power")
+        mesh = _mapping(measurement.get("mesh"), "audit measurement mesh")
+        solve = _mapping(measurement.get("solve"), "audit measurement solve")
+        expected = {
+            "evaluated_wavelength_m": wavelength.get("evaluated_parameter_m"),
+            "frequency_wavelength_m": wavelength.get("solved_frequency_wavelength_m"),
+            "R": power.get("R"),
+            "T": power.get("T"),
+            "A": power.get("A"),
+            "mesh_element_count": mesh.get("element_count"),
+            "mesh_vertex_count": mesh.get("vertex_count"),
+            "solve_seconds": solve.get("seconds"),
+        }
+        for field, artifact_value in expected.items():
+            if artifact_value != row_values.get(field):
+                raise ValueError(f"audit measurement {field} differs from the durable row")
 
 
 def _normalize_row_body(
@@ -333,6 +354,7 @@ def _normalize_row_body(
             artifact_root,
             spec=spec,
             point_fingerprint=identity["point_fingerprint"],
+            row_values=normalized,
         )
     return normalized
 

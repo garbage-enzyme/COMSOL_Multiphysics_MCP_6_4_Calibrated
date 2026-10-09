@@ -125,7 +125,7 @@ def run_pending_validation_points(
     directory = Path(job_directory).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     rows_path = directory / "matrix_rows.jsonl"
-    completed = completed_point_fingerprints(rows_path, spec)
+    completed = completed_point_fingerprints(rows_path, spec, artifact_root=directory)
     points = spec.get("points")
     if not isinstance(points, list) or not points:
         raise ValueError("validation_matrix points are unavailable")

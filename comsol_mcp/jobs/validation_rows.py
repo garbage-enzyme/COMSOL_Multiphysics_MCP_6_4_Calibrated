@@ -315,13 +315,33 @@ def read_validation_rows(path: str | Path, spec: Mapping[str, Any]) -> list[dict
         return _read_validation_rows_unlocked(journal, spec)
 
 
-def completed_point_fingerprints(path: str | Path, spec: Mapping[str, Any]) -> set[str]:
+def completed_point_fingerprints(
+    path: str | Path, spec: Mapping[str, Any], *, artifact_root: str | Path | None = None
+) -> set[str]:
     """Return only exact valid point identities with one complete durable row."""
-    return {
-        row["point_fingerprint"]
-        for row in read_validation_rows(path, spec)
-        if row["status"] == "ok"
-    }
+    rows = read_validation_rows(path, spec)
+    if artifact_root is None:
+        return {row["point_fingerprint"] for row in rows if row["status"] == "ok"}
+    root = Path(artifact_root).resolve()
+    completed: set[str] = set()
+    for row in rows:
+        if row["status"] != "ok":
+            continue
+        for summary in row["collector_summaries"]:
+            candidate = (root / summary["manifest_relative_path"]).resolve()
+            try:
+                candidate.relative_to(root)
+            except ValueError as exc:
+                raise ValueError("validation manifest escapes the artifact root") from exc
+            if not candidate.is_file():
+                raise ValueError("validation manifest is missing for a completed row")
+            payload = candidate.read_bytes()
+            if len(payload) != summary["manifest_size_bytes"]:
+                raise ValueError("validation manifest size differs from the durable row")
+            if hashlib.sha256(payload).hexdigest() != summary["manifest_sha256"]:
+                raise ValueError("validation manifest hash differs from the durable row")
+        completed.add(row["point_fingerprint"])
+    return completed
 
 
 def append_validation_row(
