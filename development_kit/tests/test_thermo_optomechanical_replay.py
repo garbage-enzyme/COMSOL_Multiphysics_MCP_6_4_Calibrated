@@ -778,6 +778,18 @@ def test_thermo_evidence_rejects_inconsistent_energy_and_negative_displacement_r
         build_stage_evidence(spec, "state_evidence", state)
 
 
+def test_thermo_optical_evidence_uses_bounded_wavelength_tolerance(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path))
+    payload = _payload("optical_replay", spec)
+    payload["rows"][0]["solved_wavelength_m"] = math.nextafter(
+        payload["rows"][0]["requested_wavelength_m"], float("inf")
+    )
+    assert build_stage_evidence(spec, "optical_replay", payload)
+    payload["rows"][0]["solved_wavelength_m"] = 1.6e-6
+    with pytest.raises(ValueError, match="wavelength readback"):
+        build_stage_evidence(spec, "optical_replay", payload)
+
+
 def test_rollback_availability_requires_a_persisted_checkpoint(ascii_tmp_path):
     spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "rollback"))
     executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")

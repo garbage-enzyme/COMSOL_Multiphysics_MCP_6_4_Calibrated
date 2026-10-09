@@ -385,7 +385,7 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             )
             requested = _finite(row["requested_wavelength_m"], "requested wavelength")
             solved = _finite(row["solved_wavelength_m"], "solved wavelength")
-            if requested != solved:
+            if not math.isclose(requested, solved, rel_tol=1.0e-12, abs_tol=1.0e-15):
                 raise ValueError("optical replay wavelength readback is not exact")
             # Validate against the declared grid before hashing so a malformed
             # array/object branch yields the intended ValueError, never a
