@@ -150,6 +150,9 @@ _RECEIPT_HOST_FIELDS = {
     "scientific_review_eligible",
     "delivered_artifacts",
     "calibration_id",
+    "max_images",
+    "max_total_bytes",
+    "supported_media_types",
 }
 
 
@@ -833,6 +836,15 @@ def build_visual_review_receipt(
         reasons.append("received_artifacts_incomplete_or_mismatched")
     if any(delivered.get(key) != value for key, value in expected.items()):
         reasons.append("capability_delivery_does_not_cover_request")
+    if len(request["artifacts"]) > capability["max_images"]:
+        reasons.append("request_exceeds_reviewer_image_limit")
+    if sum(item["byte_count"] for item in request["artifacts"]) > capability["max_total_bytes"]:
+        reasons.append("request_exceeds_reviewer_byte_limit")
+    if any(
+        item["media_type"] not in capability["supported_media_types"]
+        for item in request["artifacts"]
+    ):
+        reasons.append("request_contains_unsupported_media_type")
     if not visual_inspection_performed:
         reasons.append("visual_inspection_not_performed")
     if set(request["questions"]) - finding_questions:
@@ -874,6 +886,9 @@ def build_visual_review_receipt(
                 if capability.get("calibration")
                 else None
             ),
+            "max_images": capability["max_images"],
+            "max_total_bytes": capability["max_total_bytes"],
+            "supported_media_types": capability["supported_media_types"],
         },
     }
     payload["contract_sha256"] = _visual_contract_sha256(payload)
@@ -970,6 +985,27 @@ def validate_visual_review_receipt(value: Any) -> dict[str, Any]:
     ]
     if len({ref["artifact_id"] for ref in delivered}) != len(delivered):
         raise ValueError("visual_review_receipt host delivered artifacts are duplicated")
+    max_images = host.get("max_images")
+    if (
+        isinstance(max_images, bool)
+        or not isinstance(max_images, int)
+        or not 1 <= max_images <= MAX_ARTIFACTS
+    ):
+        raise ValueError("visual_review_receipt host image limit is invalid")
+    max_bytes = host.get("max_total_bytes")
+    if (
+        isinstance(max_bytes, bool)
+        or not isinstance(max_bytes, int)
+        or not 1 <= max_bytes <= MAX_TOTAL_ARTIFACT_BYTES
+    ):
+        raise ValueError("visual_review_receipt host byte limit is invalid")
+    media_types = _strings(
+        host.get("supported_media_types"),
+        "visual_review_receipt.host_capability_evidence.supported_media_types",
+        16,
+    )
+    if any(media_type not in ALLOWED_IMAGE_MEDIA_TYPES for media_type in media_types):
+        raise ValueError("visual_review_receipt host media types are unsupported")
     expected_inspection = "performed" if item["visual_inspection_performed"] else "not_performed"
     if item.get("inspection_status") != expected_inspection:
         raise ValueError("visual_review_receipt inspection status is inconsistent")

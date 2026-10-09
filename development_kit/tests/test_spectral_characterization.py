@@ -413,6 +413,25 @@ def test_analytic_lorentzian_fit_recovers_peak_fwhm_and_quality_factor():
     assert candidate["peak"]["diagnostics"]["covariance_kind"] == "curve_fit_estimate"
 
 
+def test_irregular_fit_does_not_extrapolate_missing_half_prominence_crossing():
+    center = 5.0e-6
+    wavelengths = [4.95e-6, 4.98e-6, center, 5.15e-6, 5.25e-6]
+    values = [0.9 - 0.8 * ((wavelength - center) / 0.3e-6) ** 2 for wavelength in wavelengths]
+    bundle, decision, result = _characterize(
+        values,
+        wavelengths=wavelengths,
+        measurement=_fit_measurement("local_polynomial_fit", 5, []),
+    )
+    assert result["measurement_state"] == "measured", result
+    candidate = result["candidate"]
+    assert candidate["fwhm"]["state"] == "unbracketed"
+    assert candidate["fwhm"]["missing_sides"] == ["left"]
+    assert candidate["fwhm"]["left_crossing_m"] is None
+    assert center < candidate["fwhm"]["right_crossing_m"] <= wavelengths[-1]
+    assert candidate["quality_factor"]["value"] is None
+    assert validate_spectral_characterization(result, bundle=bundle, decision=decision) == result
+
+
 def test_analytic_fano_fit_recovers_peak_and_declared_half_prominence_width():
     center = 5.0e-6
     half_width = 0.04e-6

@@ -188,7 +188,7 @@ def register_field_evidence_tools(mcp: MCPServer) -> None:
                 if source_after != source_before:
                     raise RuntimeError("loaded source changed during read-only field extraction")
                 artifact_root.mkdir(parents=True, exist_ok=True)
-                os.rename(staging_root, artifact_root / view["view_fingerprint"])
+                os.rename(staging_root / view["view_fingerprint"], view_root)
             finally:
                 source_hash_error = None
                 if source_after is None:

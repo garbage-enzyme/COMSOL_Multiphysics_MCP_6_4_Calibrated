@@ -256,13 +256,16 @@ def test_opencode_image_metadata_requires_a_confirmed_attachment_part():
 
 def test_opencode_string_false_does_not_enable_image_input():
     capability = normalize_opencode_capability(
-        provider="opencode-go", model="text-model",
+        provider="opencode-go",
+        model="text-model",
         provider_metadata={
             "id": "opencode-go/text-model",
             "capabilities": {"input": {"image": "false"}},
         },
-        cli_attachment_supported=True, attachment_part_confirmed=True,
-        delivered_artifacts=_refs(), calibration=_calibration(),
+        cli_attachment_supported=True,
+        attachment_part_confirmed=True,
+        delivered_artifacts=_refs(),
+        calibration=_calibration(),
     )
     assert capability["image_input"] is False
     assert capability["host_capability_confirmed"] is False
@@ -421,6 +424,32 @@ def test_complete_receipt_requires_calibration_delivery_hashes_inspection_and_fi
     assert "known_answer_calibration_incomplete" in no_calibration["incomplete_reasons"]
     assert "received_artifacts_incomplete_or_mismatched" in missing_artifact["incomplete_reasons"]
     assert "visual_inspection_not_performed" in no_inspection["incomplete_reasons"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("max_total_bytes", 2299, "request_exceeds_reviewer_byte_limit"),
+        ("supported_media_types", ["image/jpeg"], "request_contains_unsupported_media_type"),
+    ],
+)
+def test_receipt_checks_reviewer_limits_against_actual_request(field, value, reason):
+    capability = _codex()
+    capability[field] = value
+    _rehash_visual_contract(capability)
+    assert validate_reviewer_capability(capability) == capability
+    receipt = _receipt(capability)
+    assert receipt["status"] == "visual_review_required"
+    assert reason in receipt["incomplete_reasons"]
+    assert validate_visual_review_receipt(receipt) == receipt
+
+
+def test_receipt_accepts_exact_reviewer_byte_and_media_boundary():
+    capability = _codex()
+    capability["max_total_bytes"] = 2300
+    capability["supported_media_types"] = ["image/png"]
+    _rehash_visual_contract(capability)
+    assert _receipt(capability)["status"] == "visual_review_complete"
 
 
 def test_inspected_receipt_requires_findings_for_every_question_independently():

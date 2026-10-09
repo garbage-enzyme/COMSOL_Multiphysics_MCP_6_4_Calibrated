@@ -205,7 +205,9 @@ def test_public_field_extract_returns_existing_artifact_without_evaluating(
     model.file = lambda: str(source)
     runtime = ascii_tmp_path / "runtime"
     relative_root = Path("field_evidence") / canonical_request["request_fingerprint"]
-    (runtime / relative_root).mkdir(parents=True)
+    (runtime / relative_root / canonical_request["views"][0]["view_fingerprint"]).mkdir(
+        parents=True
+    )
     monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: model)
     monkeypatch.setattr(
         field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True}
@@ -227,6 +229,50 @@ def test_public_field_extract_returns_existing_artifact_without_evaluating(
     assert result["already_present"] is True
     assert result["evaluation_skipped"] is True
     assert result["artifact_root_id"] == relative_root.as_posix()
+
+
+def test_public_field_extract_publishes_both_views_and_reuses_only_matching_view(
+    tmp_path, ascii_tmp_path, monkeypatch
+):
+    import json
+    from copy import deepcopy
+
+    from src.tools import field_evidence
+
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"immutable-mph-fixture")
+    raw = _extraction_request(source)
+    second = deepcopy(raw["views"][0])
+    second["view_id"] = "off"
+    second["wavelength_m"] = 5.1e-6
+    second["source"]["solution_number"] = 2
+    second["outputs"] = {
+        "array_artifact_id": "field-off-npz",
+        "manifest_artifact_id": "field-off-json",
+    }
+    raw["views"].append(second)
+    request = normalize_field_evidence_request(raw)
+    model = _DatasetModel()
+    model.file = lambda: str(source)
+    runtime = ascii_tmp_path / "runtime"
+    monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda _name: model)
+    monkeypatch.setattr(
+        field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True}
+    )
+    monkeypatch.setattr(field_evidence.ownership_manager, "runtime_dir", runtime)
+    tool = _tool("wave_optics_field_extract")
+    for view_id in ("on", "off"):
+        result = tool(model_name="fixture", request=request, view_id=view_id)
+        assert result["success"] is True, result
+        assert result.get("evaluation_skipped") is not True
+        root = runtime / result["artifact_root_id"]
+        manifest_path = root / result["manifest_artifact"]["relative_path"]
+        assert json.loads(manifest_path.read_text(encoding="utf-8"))["view_id"] == view_id
+        assert (root / result["array_artifact"]["relative_path"]).is_file()
+    assert len(model.calls) == 2
+    repeated = tool(model_name="fixture", request=request, view_id="on")
+    assert repeated["evaluation_skipped"] is True
+    assert len(model.calls) == 2
 
 
 def test_public_field_extract_rejects_source_mismatch_before_evaluation(tmp_path, monkeypatch):
