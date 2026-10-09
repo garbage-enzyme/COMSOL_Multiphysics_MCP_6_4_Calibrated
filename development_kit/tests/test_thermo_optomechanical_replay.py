@@ -919,6 +919,51 @@ def test_worker_publishes_completion_only_after_client_and_lease_cleanup(ascii_t
     assert client.clear_count == 1
     assert owner.acquired is True
     assert owner.released is True
+    resource_entries = store.read_resource_journal(job_id)
+    assert resource_entries
+    assert {entry["stage"] for entry in resource_entries} >= {"pre_mesh", "pre_solve", "post_solve"}
+
+
+def test_worker_refuses_thermo_stage_when_resource_budget_is_exceeded(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "resource-refusal"))
+    store = JobStore(ascii_tmp_path / "resource-refusal-runtime" / "jobs")
+    job_id = store.create(
+        spec,
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "worker_pid": None,
+            "worker_process_create_time": None,
+            "worker_command_signature": None,
+            "progress": {"completed": 0, "total": 5},
+            "last_error": None,
+        },
+    )
+
+    def over_budget(stage, _point_id, _client, _directory, _elapsed):
+        return {"stage": stage, "elapsed_wall_seconds": 301.0}
+
+    code = run_worker(
+        str(store.root),
+        job_id,
+        ownership_factory=lambda *_args: _Ownership(),
+        client_factory=lambda _spec: _Client(),
+        stage_executor_factory=lambda *_args: (
+            lambda *_stage_args: pytest.fail("stage executor must not start")
+        ),
+        native_cancel_enabled=False,
+        telemetry_provider=over_budget,
+    )
+    state = store.read_state(job_id)
+    assert code == 1
+    assert state["status"] == "failed"
+    assert "Resource admission refused" in state["last_error"]["message"]
+    entries = store.read_resource_journal(job_id)
+    assert entries
+    assert entries[-1]["entry_type"] == "admission"
+    assert entries[-1]["decision"] == "refuse"
+    assert entries[-1]["start_authorized"] is False
 
 
 def test_native_cancel_monitor_failure_becomes_durable_worker_error(ascii_tmp_path, monkeypatch):

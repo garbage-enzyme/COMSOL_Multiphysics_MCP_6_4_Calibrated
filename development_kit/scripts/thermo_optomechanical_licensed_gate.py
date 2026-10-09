@@ -350,6 +350,10 @@ def build_fixture(client: Any, source_path: Path) -> dict[str, Any]:
     source = heat.feature().create("hs1", "HeatSource", 3)
     source.selection().set(_jint([1]))
     source.set("Q0", "Qvol")
+    convection = heat.feature().create("hf1", "ConvectiveHeatFlux", 2)
+    convection.selection().set(_jint(all_boundaries))
+    convection.set("h", "hconv")
+    convection.set("Text", "Tamb")
 
     solid = component.physics().create("solid", "SolidMechanics", str(geometry.getSDim()))
     solid.selection().set(_jint([1]))
