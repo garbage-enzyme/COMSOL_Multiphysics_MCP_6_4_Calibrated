@@ -519,6 +519,58 @@ def test_apply_without_node_creation_requires_an_existing_function() -> None:
     assert backend.studies == {}
 
 
+def test_existing_function_properties_are_restored_after_a_late_write_failure() -> None:
+    backend = FakeBackend()
+    apply_surrogate_configuration(backend, _configuration())
+    function = backend.functions[DNN_FUNCTION_TAG]
+    function["args"] = {"w": "w", "h": "h", "R": "R"}
+    function["globaldnnfunction"] = {"1": DNN_FUNCTION_TAG}
+    original = {key: value for key, value in function.items()}
+    original_write = backend.write_scalar
+    failed = {"value": False}
+
+    def fail_once(feature, name, value, kind):
+        if name == "layertype" and not failed["value"]:
+            failed["value"] = True
+            raise RuntimeError("injected failure at write:layertype")
+        return original_write(feature, name, value, kind)
+
+    backend.write_scalar = fail_once
+    result = apply_surrogate_configuration(
+        backend, _configuration(activation="relu"), create_nodes=False, data_source_bound=True
+    )
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert result["rollback_errors"] == []
+    assert function == original
+
+
+def test_existing_function_rollback_failure_is_reported_as_unproved() -> None:
+    backend = FakeBackend()
+    apply_surrogate_configuration(backend, _configuration())
+    backend.functions[DNN_FUNCTION_TAG]["args"] = {"w": "w", "h": "h", "R": "R"}
+    backend.functions[DNN_FUNCTION_TAG]["globaldnnfunction"] = {"1": DNN_FUNCTION_TAG}
+    backend.fail_on = "write:layertype"
+    original_remove = backend.write_scalar
+
+    activation_writes = {"count": 0}
+
+    def fail_restore(feature, name, value, kind):
+        if name == "activation":
+            activation_writes["count"] += 1
+        if name == "activation" and activation_writes["count"] > 1:
+            raise RuntimeError("restore failed")
+        return original_remove(feature, name, value, kind)
+
+    backend.write_scalar = fail_restore
+    result = apply_surrogate_configuration(
+        backend, _configuration(activation="relu"), create_nodes=False, data_source_bound=True
+    )
+    assert result["success"] is False
+    assert result["rolled_back"] is False
+    assert any(item.startswith("existing:") for item in result["rollback_errors"])
+
+
 def test_bind_data_source_resolves_args_by_name_when_header_is_preserved() -> None:
     from comsol_mcp.surrogate.dnn_adapter import bind_data_source_and_arguments
 

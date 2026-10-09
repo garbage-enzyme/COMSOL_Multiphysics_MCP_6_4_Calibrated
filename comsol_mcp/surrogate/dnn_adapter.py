@@ -54,6 +54,7 @@ STUDY_TAG = "std1"
 STUDY_STEP_TAG = "smt1"
 SURROGATE_STUDY_STEP_TYPE = "SurrogateModelTraining"
 DNN_FUNCTION_TYPE = "DNN"
+_MISSING_EXISTING_PROPERTY = object()
 
 # COMSOL-owned defaults that S0 read back and that must never stay implicit.
 # Values are the exact strings the licensed probe returned, not normalised
@@ -524,7 +525,29 @@ def apply_surrogate_configuration(
     plan = build_write_plan(configuration, data_source_bound=data_source_bound)
     created: list[tuple[str, str]] = []
     rollback_created: list[tuple[str, str, str | None]] = []
+    rollback_existing: list[tuple[Any, str, Any, str, Any]] = []
     readback: dict[str, Any] = {}
+
+    def restore_existing() -> list[str]:
+        errors: list[str] = []
+        for feature, name, value, writer, kind in reversed(rollback_existing):
+            try:
+                if value is _MISSING_EXISTING_PROPERTY:
+                    errors.append(f"existing:{name}:pre_state_unavailable")
+                    continue
+                if writer == "stringMap":
+                    backend.write_string_map(feature, name, value)
+                elif writer == "entries":
+                    backend.write_entries(feature, name, value)
+                else:
+                    backend.write_scalar(feature, name, value, kind)
+                read = backend.read_property(feature, name)
+                if read.get("readable") is not True or read.get("value") != value:
+                    errors.append(f"existing:{name}:readback_mismatch")
+            except Exception as rollback_exc:
+                errors.append(f"existing:{name}:{type(rollback_exc).__name__}")
+        return errors
+
     try:
         existing_studies = set(backend.study_tags())
         existing_functions = set(backend.func_tags())
@@ -554,7 +577,18 @@ def apply_surrogate_configuration(
                 )
 
         dnn = backend.get_dnn_function(plan["dnn_function_tag"])
+
+        def snapshot_existing(feature: Any, name: str, writer: str, kind: str) -> None:
+            if create_nodes:
+                return
+            read = backend.read_property(feature, name)
+            if not isinstance(read, Mapping) or read.get("readable") is not True:
+                rollback_existing.append((feature, name, _MISSING_EXISTING_PROPERTY, writer, kind))
+            else:
+                rollback_existing.append((feature, name, read.get("value"), writer, kind))
+
         for write in plan["scalar_writes"]:
+            snapshot_existing(dnn, write["property"], "scalar", write["kind"])
             try:
                 backend.write_scalar(dnn, write["property"], write["value"], write["kind"])
             except Exception as exc:
@@ -563,6 +597,7 @@ def apply_surrogate_configuration(
                     f"(kind {write['kind']}): {type(exc).__name__}: {exc}"
                 ) from exc
         for write in plan["entry_writes"]:
+            snapshot_existing(dnn, write["property"], write["writer"], "")
             try:
                 if write["writer"] == "stringMap":
                     backend.write_string_map(dnn, write["property"], write["entries"])
@@ -621,7 +656,7 @@ def apply_surrogate_configuration(
         for name in ("activation", "optmethod", "loss", "validation", "test"):
             allowed[name] = backend.read_allowed_values(dnn, name)
     except Exception as exc:
-        rollback_errors: list[str] = []
+        rollback_errors: list[str] = restore_existing()
         for item in reversed(rollback_created):
             try:
                 kind = item[0]
