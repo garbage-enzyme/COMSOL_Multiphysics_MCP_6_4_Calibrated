@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import os
 import sys
 import time
@@ -805,6 +806,11 @@ def _run_licensed(root: str, job_id: str) -> int:
     source = Path(spec["source_model_path"])
     source_pins = ExitStack()
     source_pins.enter_context(pin_validated_reads((validated_read_pin(source, source.parent),)))
+    expected_source_sha = spec.get("source_model_sha256")
+    if not isinstance(expected_source_sha, str) or len(expected_source_sha) != 64:
+        raise ValueError("robust shape source_model_sha256 is missing or invalid")
+    if hashlib.sha256(source.read_bytes()).hexdigest() != expected_source_sha:
+        raise RuntimeError("Immutable source SHA-256 changed before robust worker startup")
     source_before = source.read_bytes()
     try:
         store.bind_worker_identity(job_id, process_identity(os.getpid()))

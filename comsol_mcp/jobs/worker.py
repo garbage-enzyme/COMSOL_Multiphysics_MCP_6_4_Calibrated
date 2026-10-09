@@ -354,6 +354,8 @@ def _run(root: str, job_id: str) -> int:
         source_pins.enter_context(
             pin_validated_reads((validated_read_pin(source_path, source_path.parent),))
         )
+        if _source_sha256(str(source_path)) != spec["source_model_sha256"]:
+            raise RuntimeError("Immutable source SHA-256 changed before worker startup")
         from comsol_mcp.tools.ownership import SolverOwnership
 
         ownership = SolverOwnership(
@@ -740,8 +742,16 @@ def _run(root: str, job_id: str) -> int:
         return 1
     finally:
         native_monitor_stop.set()
+        native_monitor_active = False
         if native_monitor is not None:
             native_monitor.join(timeout=1.0)
+            native_monitor_active = native_monitor.is_alive()
+            if native_monitor_active:
+                print(
+                    "Native cancel monitor is still active; preserving client and lease",
+                    file=sys.stderr,
+                    flush=True,
+                )
         if attached_target is not None:
             cleanup = _cleanup_attached_execution(
                 client=client,
@@ -794,7 +804,7 @@ def _run(root: str, job_id: str) -> int:
                     event_data={"success": cleanup["success"]},
                 )
         else:
-            if client is not None:
+            if client is not None and not native_monitor_active:
                 try:
                     client.clear()
                 except Exception as exc:
@@ -804,7 +814,12 @@ def _run(root: str, job_id: str) -> int:
                         client.disconnect()
                     except Exception as exc:
                         print(f"Client disconnect warning: {exc}", file=sys.stderr, flush=True)
-        if attached_target is None and ownership is not None and lease_acquired:
+        if (
+            attached_target is None
+            and ownership is not None
+            and lease_acquired
+            and not native_monitor_active
+        ):
             try:
                 release = ownership.release()
                 if not release.get("success"):

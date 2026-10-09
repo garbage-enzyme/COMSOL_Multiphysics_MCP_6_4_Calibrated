@@ -333,13 +333,17 @@ def _run(
         worker_error = exc
     finally:
         cancel_stop.set()
+        native_cancel_active = False
         if cancel_thread is not None:
             cancel_thread.join(timeout=1.0)
+            native_cancel_active = cancel_thread.is_alive()
+            if native_cancel_active:
+                cleanup_errors.append("native_cancel_thread_still_active")
         if native_monitor_errors and worker_error is None:
             worker_error = RuntimeError(
                 f"native cancel monitor failed: {type(native_monitor_errors[0]).__name__}"
             )
-        if client is not None:
+        if client is not None and not native_cancel_active:
             try:
                 client.clear()
                 client_cleared = True
@@ -355,7 +359,7 @@ def _run(
                 fault_hook("during_cleanup", {"job_id": job_id, "attempt": attempt})
             except Exception as exc:
                 cleanup_errors.append(f"cleanup_hook:{type(exc).__name__}:{exc}")
-        if ownership is not None and lease_acquired:
+        if ownership is not None and lease_acquired and not native_cancel_active:
             try:
                 release = ownership.release()
                 lease_released = bool(release.get("success"))
