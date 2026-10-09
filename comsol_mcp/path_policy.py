@@ -117,7 +117,10 @@ def read_contained_file_snapshot(
     """Read one contained immutable snapshot with its exact size and digest."""
     from comsol_mcp.durable.io import read_file_bytes_bounded
 
-    pin = validated_read_pin(path, root)
+    requested_path = Path(path)
+    if requested_path.is_symlink():
+        raise ValueError("snapshot requires a regular file without links")
+    pin = validated_read_pin(requested_path, root)
     with pin_validated_reads((pin,)):
         if os.name == "nt":
             payload = read_file_bytes_bounded(pin.path, max_bytes=max_bytes)

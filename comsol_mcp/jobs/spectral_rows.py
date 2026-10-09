@@ -176,7 +176,8 @@ def _verify_artifact_bytes(
     expected_source = _hex_digest(spec.get("source_model_sha256"), "spec source_model_sha256")
     payloads: dict[str, bytes] = {}
     for prefix in ("wrapper", "inner"):
-        path = (resolved_root / artifact[f"{prefix}_relative_path"]).resolve()
+        path_raw = resolved_root / artifact[f"{prefix}_relative_path"]
+        path = path_raw.resolve()
         try:
             path.relative_to(resolved_root)
         except ValueError as exc:
@@ -184,7 +185,7 @@ def _verify_artifact_bytes(
         if not path.is_file():
             raise ValueError(f"audit {prefix} artifact is missing")
         snapshot = read_contained_file_snapshot(
-            path, root=resolved_root, max_bytes=MAX_SPECTRAL_ARTIFACT_BYTES
+            path_raw, root=resolved_root, max_bytes=MAX_SPECTRAL_ARTIFACT_BYTES
         )
         data = snapshot["payload"]
         if snapshot["byte_count"] != artifact[f"{prefix}_size_bytes"]:
@@ -209,15 +210,24 @@ def _verify_artifact_bytes(
     if physical["identity"]["config_id"] != point_fingerprint:
         raise ValueError("physical evidence point identity differs from the durable row")
     measurement_raw = inner.get("measurement")
-    if artifact["audit_status"] == "measurement_complete" and measurement_raw is None:
-        raise ValueError("measurement-complete audit is missing its measurement")
+    if measurement_raw is None:
+        raise ValueError("complete audit is missing its measurement")
     if measurement_raw is not None:
         measurement = _mapping(measurement_raw, "audit measurement")
         wavelength = _mapping(measurement.get("wavelength"), "audit measurement wavelength")
         power = _mapping(measurement.get("power"), "audit measurement power")
         mesh = _mapping(measurement.get("mesh"), "audit measurement mesh")
         solve = _mapping(measurement.get("solve"), "audit measurement solve")
+        if solve.get("ran") is not True or solve.get("error") is not None:
+            raise ValueError("audit solve did not complete cleanly")
+        if measurement.get("integrity_errors") not in ([], None):
+            raise ValueError("audit contains integrity errors")
+        if measurement.get("measurement_errors") not in ([], None):
+            raise ValueError("audit contains measurement errors")
         expected = {
+            "requested_wavelength_m": normalize_spectral_wavelength_m(
+                _finite(wavelength.get("requested_m"), "requested wavelength", positive=True)
+            ),
             "evaluated_wavelength_m": wavelength.get("evaluated_parameter_m"),
             "frequency_wavelength_m": wavelength.get("solved_frequency_wavelength_m"),
             "R": power.get("R"),

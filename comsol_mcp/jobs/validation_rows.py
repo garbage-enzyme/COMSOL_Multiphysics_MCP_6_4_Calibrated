@@ -12,12 +12,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from comsol_mcp.durable.io import fsync_directory
+from comsol_mcp.path_policy import read_contained_file_snapshot
 
 from .journal import locked_journal, recover_jsonl_tail
 
 VALIDATION_ROW_SCHEMA_VERSION = "1.0.0"
 MAX_VALIDATION_ROWS = 256
 MAX_VALIDATION_ROW_BYTES = 128 * 1024
+MAX_VALIDATION_MANIFEST_BYTES = 16 * 1024 * 1024
 _COMPLETE_AUDIT_STATES = frozenset({"measurement_complete", "policy_evaluated"})
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
@@ -328,17 +330,20 @@ def completed_point_fingerprints(
         if row["status"] != "ok":
             continue
         for summary in row["collector_summaries"]:
-            candidate = (root / summary["manifest_relative_path"]).resolve()
+            candidate_raw = root / summary["manifest_relative_path"]
+            candidate = candidate_raw.resolve()
             try:
                 candidate.relative_to(root)
             except ValueError as exc:
                 raise ValueError("validation manifest escapes the artifact root") from exc
             if not candidate.is_file():
                 raise ValueError("validation manifest is missing for a completed row")
-            payload = candidate.read_bytes()
-            if len(payload) != summary["manifest_size_bytes"]:
+            snapshot = read_contained_file_snapshot(
+                candidate_raw, root=root, max_bytes=MAX_VALIDATION_MANIFEST_BYTES
+            )
+            if snapshot["byte_count"] != summary["manifest_size_bytes"]:
                 raise ValueError("validation manifest size differs from the durable row")
-            if hashlib.sha256(payload).hexdigest() != summary["manifest_sha256"]:
+            if snapshot["sha256"] != summary["manifest_sha256"]:
                 raise ValueError("validation manifest hash differs from the durable row")
         completed.add(row["point_fingerprint"])
     return completed
