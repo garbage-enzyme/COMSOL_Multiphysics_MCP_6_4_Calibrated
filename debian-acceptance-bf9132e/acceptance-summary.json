@@ -1,0 +1,19 @@
+{
+  "target_commit": "bf9132e6a7b567853c2b89d7e5d1087891a4d4bd",
+  "original_reproductions": "all five original scenarios corrected",
+  "independent_cases": 24,
+  "independent_passed": 20,
+  "independent_failed": 4,
+  "failed_cases": [
+    "BUG-004__concurrent",
+    "BUG-005__concurrent",
+    "BUG-041__parent_replacement",
+    "BUG-041__ancestor_replacement"
+  ],
+  "independent_timeouts": 0,
+  "batch_acceptance": "not_passed",
+  "ci_run": 37904487424,
+  "ci_status": "failure",
+  "remote_raw_ci_logs_available": false,
+  "report": "/workspace/code-review/alpha7-8-debian-acceptance/acceptance-report.md"
+}

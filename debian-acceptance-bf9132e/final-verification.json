@@ -1,0 +1,20 @@
+{
+  "target_commit": "bf9132e6a7b567853c2b89d7e5d1087891a4d4bd",
+  "target_checkout_clean": true,
+  "baseline_checkout_clean": true,
+  "original_evidence_files_unchanged": true,
+  "original_203_bug_zip_unchanged": true,
+  "original_zip_sha256": "d612896c92f56ba2a6b2f63035218d102d43ac2424d765e720e2b26b178fd703",
+  "independent_cases": 24,
+  "passed": 20,
+  "failed": 4,
+  "outer_timeouts": 0,
+  "acceptance_bug_records": 8,
+  "all_six_fields_valid": true,
+  "semantic_regression_before_after_confirmed": true,
+  "schema_changed_tools": 25,
+  "dependency_shards_seconds": 292.196,
+  "ci_failed_test_nodes": 18,
+  "solver_started": false,
+  "remote_raw_ci_logs_available": false
+}
