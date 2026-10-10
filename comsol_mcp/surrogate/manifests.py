@@ -181,7 +181,7 @@ def validate_schema_manifest(value: Any) -> SurrogateSchemaManifest:
     )
     if rebuilt != manifest:
         raise ValueError("schema manifest content is not canonical")
-    return manifest  # type: ignore[return-value]
+    return rebuilt
 
 
 def build_training_transforms(
@@ -245,7 +245,7 @@ def validate_training_transforms(value: Any) -> SurrogateTrainingTransforms:
     )
     if rebuilt != manifest:
         raise ValueError("training transforms content is not canonical")
-    return manifest  # type: ignore[return-value]
+    return rebuilt
 
 
 def build_dataset_manifest(

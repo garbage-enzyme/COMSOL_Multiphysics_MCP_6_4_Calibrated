@@ -15,7 +15,7 @@ import unicodedata
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, Callable, cast
 
 from comsol_mcp.contracts.mph_inspection import MphInspectionLimits
 
@@ -23,6 +23,8 @@ _STREAM_CHUNK_BYTES = 1_048_576
 _UNIX_FILE_TYPE_MASK = 0o170_000
 _UNIX_LINK_FILE_TYPE = 0o120_000
 _ZIP_CENTRAL_HEADER_BYTES = 46
+_ZIP64_END_SIGNATURE = b"PK\x06\x06"
+_ZIP64_END_AND_LOCATOR_BYTES = 56 + 20
 
 
 class MphInspectionError(ValueError):
@@ -42,21 +44,24 @@ def _preflight_entry_count(path: Path, max_entries: int) -> None:
     """
     try:
         with path.open("rb") as stream:
-            end = zipfile._EndRecData(stream)
+            end_reader = cast(
+                Callable[[BinaryIO], list[Any] | None], getattr(zipfile, "_EndRecData")
+            )
+            end = end_reader(stream)
             if end is None:
                 raise zipfile.BadZipFile("missing end record")
-            if end[zipfile._ECD_ENTRIES_TOTAL] > max_entries:
+            if end[4] > max_entries:
                 raise MphInspectionError(
                     "mph_too_many_entries", "archive exceeds the caller entry-count limit"
                 )
-            directory_bytes = end[zipfile._ECD_SIZE]
-            directory_start = end[zipfile._ECD_LOCATION] - directory_bytes
-            if end[zipfile._ECD_SIGNATURE] == zipfile.stringEndArchive64:
+            directory_bytes = end[5]
+            directory_start = end[9] - directory_bytes
+            if end[0] == _ZIP64_END_SIGNATURE:
                 # New stdlib readers point at the ZIP64 end record. Older
                 # readers retain the ordinary end-record location.
-                stream.seek(end[zipfile._ECD_LOCATION])
-                if stream.read(4) != zipfile.stringEndArchive64:
-                    directory_start -= zipfile.sizeEndCentDir64 + zipfile.sizeEndCentDir64Locator
+                stream.seek(end[9])
+                if stream.read(4) != _ZIP64_END_SIGNATURE:
+                    directory_start -= _ZIP64_END_AND_LOCATOR_BYTES
             if directory_start < 0:
                 raise zipfile.BadZipFile("invalid directory offset")
             stream.seek(directory_start)

@@ -181,15 +181,17 @@ def _run(
                         mesh_elements = mesh.get("mesh", {}).get("num_elements")
                 except Exception:  # noqa: S110 - missing telemetry remains unavailable
                     pass
-            return collect_resource_telemetry(
-                stage=stage,
-                runtime_path=store.root,
-                process_id=os.getpid(),
-                mesh_elements=mesh_elements,
-                elapsed_wall_seconds=time.monotonic() - worker_started,
-                durable_result_epoch=(
-                    stage_journal.stat().st_mtime if stage_journal.is_file() else None
-                ),
+            return dict(
+                collect_resource_telemetry(
+                    stage=stage,
+                    runtime_path=store.root,
+                    process_id=os.getpid(),
+                    mesh_elements=mesh_elements,
+                    elapsed_wall_seconds=time.monotonic() - worker_started,
+                    durable_result_epoch=(
+                        stage_journal.stat().st_mtime if stage_journal.is_file() else None
+                    ),
+                )
             )
 
         resource = ResourceStageAdapter(

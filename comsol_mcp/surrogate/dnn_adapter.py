@@ -664,6 +664,8 @@ def apply_surrogate_configuration(
                     tag = item[1]
                     backend.remove_function(tag)
                 elif kind == "study_step":
+                    if item[2] is None:
+                        raise ValueError("study-step rollback identity is missing")
                     backend.remove_study_step(item[1], item[2])
                 else:
                     backend.remove_study(item[1])

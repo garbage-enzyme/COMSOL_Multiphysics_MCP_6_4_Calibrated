@@ -832,7 +832,8 @@ def test_dnn_adapter_module_is_solver_free() -> None:
     """The contract/plan module must stay importable without jpype or COMSOL."""
     import comsol_mcp.surrogate.dnn_adapter as module
 
-    source = open(module.__file__, encoding="utf-8").read().lower()
+    with open(module.__file__, encoding="utf-8") as handle:
+        source = handle.read().lower()
     for banned in SOLVER_FREE_BANNED:
         assert banned not in source, f"dnn_adapter references {banned}"
 
@@ -850,7 +851,8 @@ def test_clientapi_backend_owns_no_java_typing_of_its_own() -> None:
 
     import comsol_mcp.surrogate.dnn_clientapi_backend as module
 
-    source = open(module.__file__, encoding="utf-8").read()
+    with open(module.__file__, encoding="utf-8") as handle:
+        source = handle.read()
     tree = ast.parse(source)
     java_attribute_reads = [
         node.lineno
