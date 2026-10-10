@@ -169,6 +169,57 @@ def test_adapter_preserves_declared_optimization_direction(direction):
     assert receipt["optimization"]["objectivetype"]["readback"] == expected
 
 
+def test_adapter_binds_differentiable_scalar_constraints_with_units_and_bounds():
+    support = _support()
+    support["constraints"] = [
+        {
+            "constraint_id": "transmission_bound",
+            "kind": "differentiable_scalar",
+            "expression": "ewfd.Tport1",
+            "unit": "1",
+            "lower": 0.0,
+            "upper": 0.1,
+            "derivative_supported": True,
+        },
+        {
+            "constraint_id": "loss_bound",
+            "kind": "differentiable_scalar",
+            "expression": "ewfd.loss",
+            "unit": "W",
+            "lower": None,
+            "upper": 2.5,
+            "derivative_supported": True,
+        },
+    ]
+    backend = _Backend()
+    receipt = configure_native_adjoint(backend, support, _optimizer())
+    node = backend.studies["std2"]._features.nodes["opt_a71"]
+    assert node.values["constraint"] == ["ewfd.loss", "ewfd.Tport1"]
+    assert node.values["constraintL"] == ["", "0[1]"]
+    assert node.values["constraintU"] == ["2.5[W]", "0.10000000000000001[1]"]
+    assert receipt["optimization"]["constraint"]["readback"] == node.values["constraint"]
+
+
+def test_adapter_rejects_forward_only_constraint_before_backend_mutation():
+    support = _support()
+    support["constraints"] = [
+        {
+            "constraint_id": "power",
+            "kind": "forward_only",
+            "expression": "R+T+A",
+            "unit": "1",
+            "lower": 0.99,
+            "upper": 1.01,
+            "derivative_supported": False,
+        }
+    ]
+    backend = _Backend()
+    original = backend.snapshot()
+    with pytest.raises(ValueError, match="differentiable scalar"):
+        configure_native_adjoint(backend, support, _optimizer())
+    assert backend.snapshot() == original
+
+
 def test_adapter_rolls_back_when_a_fixed_property_fails():
     backend = _Backend()
     original = backend.snapshot()

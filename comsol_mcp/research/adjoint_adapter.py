@@ -371,6 +371,21 @@ def _native_objective_type(support: Mapping[str, Any]) -> str:
     return "maximization" if direction == "maximize" else "minimization"
 
 
+def _constraint_strings(support: Mapping[str, Any]) -> dict[str, list[str]]:
+    """Build the native global-constraint arrays from the trusted contract."""
+    expressions: list[str] = []
+    lower: list[str] = []
+    upper: list[str] = []
+    for item in support["constraints"]:
+        if item["kind"] != "differentiable_scalar" or item["derivative_supported"] is not True:
+            raise ValueError("native adjoint requires differentiable scalar constraints")
+        unit = item["unit"]
+        expressions.append(item["expression"])
+        lower.append("" if item["lower"] is None else f"{item['lower']:.17g}[{unit}]")
+        upper.append("" if item["upper"] is None else f"{item['upper']:.17g}[{unit}]")
+    return {"expressions": expressions, "lower": lower, "upper": upper}
+
+
 def configure_native_adjoint(
     backend: AdjointStudyBackend,
     support: object,
@@ -391,6 +406,7 @@ def configure_native_adjoint(
     if normalized_support["derivative_method"] != "adjoint":
         raise ValueError("accepted native lane requires adjoint")
     objective_type = _native_objective_type(normalized_support)
+    constraints = _constraint_strings(normalized_support)
     values = _variable_strings(normalized_support, initial_values)
     objective_expression = normalized_support["objective"]["expression"]
     snapshot = dict(backend.snapshot())
@@ -435,6 +451,15 @@ def configure_native_adjoint(
             "lbound": _array(optimization, "lbound", values["lower"]),
             "ubound": _array(optimization, "ubound", values["upper"]),
             "optobj": _array(optimization, "optobj", [objective_expression]),
+            "constraint": _array(optimization, "constraint", constraints["expressions"])
+            if constraints["expressions"]
+            else {"requested": [], "readback": []},
+            "constraintL": _array(optimization, "constraintL", constraints["lower"])
+            if constraints["expressions"]
+            else {"requested": [], "readback": []},
+            "constraintU": _array(optimization, "constraintU", constraints["upper"])
+            if constraints["expressions"]
+            else {"requested": [], "readback": []},
             "nsolvemax": _scalar(
                 optimization,
                 "nsolvemax",
