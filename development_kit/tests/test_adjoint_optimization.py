@@ -457,6 +457,52 @@ def _minimal_adjoint_runtime_spec(tmp_path):
     }
 
 
+def test_native_runtime_passes_manifest_initial_values_to_adapter(ascii_tmp_path, monkeypatch):
+    envelope, _source, _manifest = _write_manifest(ascii_tmp_path)
+    spec = expand_adjoint_optimization_manifest(envelope)
+    spec["initial_values"] = [800.0]
+    seen = []
+
+    def configure(_backend, support, optimizer, *, initial_values):
+        seen.append((initial_values, support["variables"][0]["baseline"]))
+        raise RuntimeError("stop after configuration boundary")
+
+    monkeypatch.setattr(native_adjoint_runtime, "configure_native_adjoint", configure)
+    client = SimpleNamespace(load=lambda _path: object(), clear=lambda: None)
+    with pytest.raises(RuntimeError, match="configuration boundary"):
+        native_adjoint_runtime.execute_native_adjoint_optimization(
+            spec, ascii_tmp_path / "initial-runtime", client_factory=lambda **_kwargs: client
+        )
+    assert seen == [([800.0], 856.0)]
+
+
+def test_freeze_wavelength_preserves_caller_initial_vector(monkeypatch):
+    from comsol_mcp.research.derivative_support import normalize_derivative_support
+
+    values = {}
+    nodes = {
+        tag: SimpleNamespace(set=lambda key, value, tag=tag: values.__setitem__((tag, key), value))
+        for tag in ("sweep1", "step1", "sens_a71")
+    }
+    study = SimpleNamespace(feature=lambda tag: nodes[tag])
+    model = SimpleNamespace(
+        java=SimpleNamespace(
+            study=lambda tag: study,
+            param=lambda: SimpleNamespace(
+                set=lambda key, value: values.__setitem__(("param", key), value)
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        native_adjoint_runtime, "_set_vector", lambda node, key, value: node.set(key, value)
+    )
+    support = normalize_derivative_support(_support())
+    native_adjoint_runtime._freeze_wavelength(model, support, [800.0])
+    assert values[("sens_a71", "initval")] == ["800[nm]"]
+    assert values[("sens_a71", "pname")] == ["patch_length_x"]
+    assert support["variables"][0]["baseline"] == 856.0
+
+
 def test_cleanup_failure_records_errors_and_preserves_original_error(ascii_tmp_path):
     class FailingClearClient:
         def load(self, _path):

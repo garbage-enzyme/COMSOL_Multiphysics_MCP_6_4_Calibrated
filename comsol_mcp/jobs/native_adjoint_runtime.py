@@ -80,7 +80,12 @@ def _forward_sweep_dataset(model: Any) -> Any:
     return matches[0]
 
 
-def _freeze_wavelength(model: Any, support: Mapping[str, Any]) -> None:
+def _freeze_wavelength(
+    model: Any, support: Mapping[str, Any], initial_values: object | None = None
+) -> None:
+    from comsol_mcp.research.adjoint_adapter import _variable_strings
+
+    initial = _variable_strings(support, initial_values)["values"]
     study = model.java.study("std1")
     sweep = study.feature("sweep1")
     wavelength = study.feature("step1")
@@ -97,7 +102,7 @@ def _freeze_wavelength(model: Any, support: Mapping[str, Any]) -> None:
     _set_vector(
         sensitivity,
         "initval",
-        [f"{item['baseline']:.17g}[{item['unit']}]" for item in variables],
+        initial,
     )
     _set_vector(
         sensitivity,
@@ -185,8 +190,13 @@ def execute_native_adjoint_optimization(
             client_factory = mph.Client
         client = client_factory(cores=spec["cores"], version=spec["version"])
         model = client.load(str(source))
-        configure_native_adjoint(ClientapiAdjointStudyBackend(model), support, optimizer)
-        _freeze_wavelength(model, support)
+        configure_native_adjoint(
+            ClientapiAdjointStudyBackend(model),
+            support,
+            optimizer,
+            initial_values=spec["initial_values"],
+        )
+        _freeze_wavelength(model, support, spec["initial_values"])
         model.java.save(str(configured), True)
         client.remove(model)
 

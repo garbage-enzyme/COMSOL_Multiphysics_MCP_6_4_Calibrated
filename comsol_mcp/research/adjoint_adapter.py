@@ -323,11 +323,32 @@ def _scalar(node: Any, name: str, value: str) -> dict[str, Any]:
     return {"requested": value, "readback": observed}
 
 
-def _variable_strings(support: Mapping[str, Any]) -> dict[str, list[str]]:
+def _variable_strings(
+    support: Mapping[str, Any], initial_values: object | None = None
+) -> dict[str, list[str]]:
     variables = support["variables"]
+    if initial_values is None:
+        starting_values = [item["baseline"] for item in variables]
+    else:
+        if not isinstance(initial_values, list) or len(initial_values) != len(variables):
+            raise ValueError("initial_values must match the support variable count")
+        starting_values = []
+        for value, variable in zip(initial_values, variables, strict=True):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError("initial_values must contain finite numbers within support bounds")
+            try:
+                number = float(value)
+            except (OverflowError, ValueError) as exc:
+                raise ValueError("initial_values must contain finite numbers") from exc
+            if not math.isfinite(number) or not variable["lower"] <= number <= variable["upper"]:
+                raise ValueError("initial_values must contain finite numbers within support bounds")
+            starting_values.append(number)
     names = [item["variable_id"] for item in variables]
     units = [item["unit"] for item in variables]
-    values = [f"{item['baseline']:.17g}[{item['unit']}]" for item in variables]
+    values = [
+        f"{value:.17g}[{item['unit']}]"
+        for item, value in zip(variables, starting_values, strict=True)
+    ]
     scales = [f"{item['scale']:.17g}[{item['unit']}]" for item in variables]
     lower = [f"{item['lower']:.17g}[{item['unit']}]" for item in variables]
     upper = [f"{item['upper']:.17g}[{item['unit']}]" for item in variables]
@@ -346,6 +367,7 @@ def configure_native_adjoint(
     support: object,
     optimizer: object,
     *,
+    initial_values: object | None = None,
     sensitivity_study_tag: str = "std1",
     sensitivity_feature_tag: str = "sens_a71",
     optimization_study_tag: str = "std2",
@@ -359,7 +381,7 @@ def configure_native_adjoint(
         raise ValueError("native adjoint adapter refuses an untrusted structure family")
     if normalized_support["derivative_method"] != "adjoint":
         raise ValueError("accepted native lane requires adjoint")
-    values = _variable_strings(normalized_support)
+    values = _variable_strings(normalized_support, initial_values)
     objective_expression = normalized_support["objective"]["expression"]
     snapshot = dict(backend.snapshot())
     created: list[str] = []

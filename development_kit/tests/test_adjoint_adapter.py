@@ -130,6 +130,26 @@ def test_adapter_configures_fixed_nodes_and_canonicalizes_units():
     ]
 
 
+def test_adapter_uses_caller_initial_values_without_changing_source_baseline():
+    support = _support()
+    original = copy.deepcopy(support)
+    backend = _Backend()
+    receipt = configure_native_adjoint(backend, support, _optimizer(), initial_values=[800.0])
+    assert receipt["optimization"]["initval"] == {"requested": ["800[nm]"], "readback": ["800[nm]"]}
+    assert receipt["sensitivity"]["initval"]["readback"] == ["800[nm]"]
+    assert receipt["controls"]["parameters"]["patch_length_x"] == "856.0[nm]"
+    assert support == original
+
+
+@pytest.mark.parametrize("values", [[True], [float("nan")], [float("inf")], [0.0], [], [800, 800]])
+def test_adapter_rejects_invalid_initial_values_before_model_mutation(values):
+    backend = _Backend()
+    original = backend.snapshot()
+    with pytest.raises(ValueError, match="initial_values"):
+        configure_native_adjoint(backend, _support(), _optimizer(), initial_values=values)
+    assert backend.snapshot() == original
+
+
 def test_adapter_rolls_back_when_a_fixed_property_fails():
     backend = _Backend()
     original = backend.snapshot()
