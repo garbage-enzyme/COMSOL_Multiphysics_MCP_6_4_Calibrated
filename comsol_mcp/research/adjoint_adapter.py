@@ -362,6 +362,15 @@ def _variable_strings(
     }
 
 
+def _native_objective_type(support: Mapping[str, Any]) -> str:
+    direction = support["objective"]["direction"]
+    if direction == "match":
+        raise ValueError("native match objective requires an explicit target contract")
+    if direction not in {"minimize", "maximize"}:
+        raise ValueError("native objective direction is unsupported")
+    return "maximization" if direction == "maximize" else "minimization"
+
+
 def configure_native_adjoint(
     backend: AdjointStudyBackend,
     support: object,
@@ -381,6 +390,7 @@ def configure_native_adjoint(
         raise ValueError("native adjoint adapter refuses an untrusted structure family")
     if normalized_support["derivative_method"] != "adjoint":
         raise ValueError("accepted native lane requires adjoint")
+    objective_type = _native_objective_type(normalized_support)
     values = _variable_strings(normalized_support, initial_values)
     objective_expression = normalized_support["objective"]["expression"]
     snapshot = dict(backend.snapshot())
@@ -417,13 +427,7 @@ def configure_native_adjoint(
             raise ValueError("Optimization feature type readback mismatch")
         optimization_readback = {
             "optmethod": _scalar(optimization, "optmethod", normalized_optimizer["method"]),
-            "objectivetype": _scalar(
-                optimization,
-                "objectivetype",
-                "maximization"
-                if normalized_support["objective"]["direction"] == "maximize"
-                else "minimization",
-            ),
+            "objectivetype": _scalar(optimization, "objectivetype", objective_type),
             "pname": _array(optimization, "pname", values["names"]),
             "punit": _array(optimization, "punit", values["units"]),
             "initval": _array(optimization, "initval", values["values"]),

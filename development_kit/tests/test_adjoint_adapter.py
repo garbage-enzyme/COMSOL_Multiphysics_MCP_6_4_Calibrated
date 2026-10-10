@@ -150,6 +150,25 @@ def test_adapter_rejects_invalid_initial_values_before_model_mutation(values):
     assert backend.snapshot() == original
 
 
+def test_adapter_rejects_match_objective_without_a_native_target_before_mutation():
+    support = _support()
+    support["objective"]["direction"] = "match"
+    backend = _Backend()
+    original = backend.snapshot()
+    with pytest.raises(ValueError, match="match.*target"):
+        configure_native_adjoint(backend, support, _optimizer())
+    assert backend.snapshot() == original
+
+
+@pytest.mark.parametrize("direction", ["minimize", "maximize"])
+def test_adapter_preserves_declared_optimization_direction(direction):
+    support = _support()
+    support["objective"]["direction"] = direction
+    receipt = configure_native_adjoint(_Backend(), support, _optimizer())
+    expected = "minimization" if direction == "minimize" else "maximization"
+    assert receipt["optimization"]["objectivetype"]["readback"] == expected
+
+
 def test_adapter_rolls_back_when_a_fixed_property_fails():
     backend = _Backend()
     original = backend.snapshot()

@@ -12,6 +12,7 @@ from typing import Any
 from comsol_mcp.durable import atomic_write_json
 from comsol_mcp.research.adjoint_adapter import (
     ClientapiAdjointStudyBackend,
+    _native_objective_type,
     configure_native_adjoint,
 )
 from comsol_mcp.tools.derived_geometry import _set_vector
@@ -163,6 +164,7 @@ def execute_native_adjoint_optimization(
     if source_before != spec["source_model_sha256"]:
         raise ValueError("native optimization source identity changed")
     support = spec["support"]
+    _native_objective_type(support)
     optimizer = spec["optimizer"]
     if optimizer["method"] != "gcmma":
         raise ValueError("licensed product runtime accepts only validated gcmma")

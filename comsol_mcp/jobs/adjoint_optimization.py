@@ -9,6 +9,7 @@ from typing import Any
 
 from comsol_mcp.durable import validate_finite_json
 from comsol_mcp.jobs.resource_admission import normalize_resource_policy
+from comsol_mcp.research.adjoint_adapter import _native_objective_type
 from comsol_mcp.research.derivative_support import normalize_derivative_support
 from comsol_mcp.research.gradient_contracts import normalize_native_optimizer_configuration
 
@@ -141,6 +142,7 @@ def expand_adjoint_optimization_manifest(submission: object) -> dict[str, Any]:
     if digest != source_hash:
         raise ValueError("adjoint optimization source SHA-256 changed")
     support = normalize_derivative_support(raw["support"])
+    _native_objective_type(support)
     if support["source_identity"] != source_hash:
         raise ValueError("adjoint support source identity differs from manifest source")
     optimizer = normalize_native_optimizer_configuration(raw["optimizer"])

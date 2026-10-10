@@ -138,6 +138,33 @@ def test_manifest_rejects_source_mutation_after_submission(ascii_tmp_path):
         expand_adjoint_optimization_manifest(envelope)
 
 
+def test_manifest_rejects_match_without_an_explicit_native_target(ascii_tmp_path):
+    envelope, _, manifest = _write_manifest(ascii_tmp_path)
+    raw = json.loads(manifest.read_text(encoding="utf-8"))
+    raw["support"]["objective"]["direction"] = "match"
+    payload = json.dumps(raw).encode()
+    manifest.write_bytes(payload)
+    envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+    with pytest.raises(ValueError, match="match.*target"):
+        expand_adjoint_optimization_manifest(envelope)
+
+
+def test_native_runtime_rejects_match_before_client_or_workdir(ascii_tmp_path):
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
+    spec = expand_adjoint_optimization_manifest(envelope)
+    spec["support"]["objective"]["direction"] = "match"
+    root = ascii_tmp_path / "refused-native-runtime"
+
+    def unexpected_client(**kwargs):
+        pytest.fail("unsupported match must not construct a native client")
+
+    with pytest.raises(ValueError, match="match.*target"):
+        native_adjoint_runtime.execute_native_adjoint_optimization(
+            spec, root, client_factory=unexpected_client
+        )
+    assert not root.exists()
+
+
 def test_manifest_rejects_oversized_or_non_numeric_initial_values(ascii_tmp_path):
     envelope, _, manifest = _write_manifest(ascii_tmp_path)
 
@@ -446,7 +473,10 @@ def _minimal_adjoint_runtime_spec(tmp_path):
     return {
         "source_model_path": str(source),
         "source_model_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-        "support": {"support_fingerprint": "a" * 64},
+        "support": {
+            "support_fingerprint": "a" * 64,
+            "objective": {"direction": "maximize"},
+        },
         "optimizer": {
             "method": "gcmma",
             "optimizer_fingerprint": "b" * 64,
