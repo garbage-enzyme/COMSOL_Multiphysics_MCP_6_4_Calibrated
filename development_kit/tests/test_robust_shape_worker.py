@@ -258,6 +258,36 @@ def test_condition_runtime_rejects_stale_receipt_with_drifted_condition_paramete
         )
 
 
+@pytest.mark.parametrize("field", ["absorption", "mesh_elements", "minimum_mesh_quality"])
+def test_condition_runtime_revalidates_science_and_mesh_on_receipt_recovery(ascii_tmp_path, field):
+    spec = _condition_runtime_spec()
+    spec["condition_table"]["conditions"] = spec["condition_table"]["conditions"][:1]
+    execute_robust_conditions(
+        spec,
+        ascii_tmp_path,
+        attempt=1,
+        backend=_ConditionBackend(),
+        cancel_requested=lambda: False,
+    )
+    receipt_path = ascii_tmp_path / "condition-0000.json"
+    receipt = read_json(receipt_path)
+    if field == "absorption":
+        receipt[field] = 0.5
+    elif field == "mesh_elements":
+        receipt[field] = 1001
+    else:
+        receipt[field] = 0.1
+    atomic_write_json(receipt_path, receipt)
+    with pytest.raises(ValueError, match="persisted robust condition receipt is invalid"):
+        execute_robust_conditions(
+            spec,
+            ascii_tmp_path,
+            attempt=1,
+            backend=_ConditionBackend(),
+            cancel_requested=lambda: False,
+        )
+
+
 @pytest.mark.parametrize(
     ("backend", "message"),
     [

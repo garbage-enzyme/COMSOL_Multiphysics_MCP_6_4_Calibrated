@@ -216,6 +216,30 @@ def execute_robust_conditions(
                     abs_tol=1e-18,
                 )
             )
+            try:
+                persisted_result = {
+                    field: receipt[field]
+                    for field in (
+                        "condition_id",
+                        "observable_id",
+                        "observable_value",
+                        "requested_wavelength_m",
+                        "evaluated_wavelength_m",
+                        "solved_wavelength_m",
+                        "reflectance",
+                        "transmittance",
+                        "absorption",
+                        "mesh_elements",
+                        "minimum_mesh_quality",
+                        "dataset_id",
+                        "solution_id",
+                    )
+                }
+                normalized_receipt = _normalize_receipt(
+                    condition, persisted_result, controls, mesh_policy
+                )
+            except KeyError, TypeError, ValueError:
+                normalized_receipt = None
             if (
                 receipt.get("schema_name") != CONDITION_RECEIPT_SCHEMA_NAME
                 or any(
@@ -223,11 +247,7 @@ def execute_robust_conditions(
                     for field, expected in expected_condition_fields.items()
                 )
                 or not wavelength_matches
-                or receipt.get("receipt_fingerprint")
-                != domain_sha256_v2(
-                    CONDITION_RECEIPT_SCHEMA_NAME,
-                    {key: value for key, value in receipt.items() if key != "receipt_fingerprint"},
-                )
+                or normalized_receipt != receipt
             ):
                 raise ValueError("persisted robust condition receipt is invalid")
         elif row is not None:
