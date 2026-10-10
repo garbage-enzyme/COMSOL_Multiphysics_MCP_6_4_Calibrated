@@ -195,6 +195,8 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     if not git["clean"]:
         raise RuntimeError("finite-difference gate requires a clean source tree")
     source_before = _sha(spec["source"])
+    if source_before != spec["source_sha256"]:
+        raise ValueError("finite-difference source identity changed after compilation")
     resource_preflight = _native._resource_preflight(
         spec["optimizer"]["budget"]["max_commit_fraction"]
     )
@@ -342,25 +344,19 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         receipt["error"] = {"code": "finite_difference_failed", "type": type(exc).__name__}
         private["error"] = f"{type(exc).__name__}: {exc}"
     finally:
+        cleanup = {"client_clear": True}
         if client is not None:
             try:
                 client.clear()
-                receipt["cleanup"] = {
-                    "client_clear": True,
-                    "source_unchanged": _sha(spec["source"]) == source_before,
-                }
             except Exception as exc:
-                receipt["cleanup"] = {
-                    "client_clear": False,
-                    "source_unchanged": _sha(spec["source"]) == source_before,
-                }
+                cleanup["client_clear"] = False
                 private["cleanup_error"] = f"{type(exc).__name__}: {exc}"
-        else:
-            receipt["cleanup"] = {
-                "client_clear": True,
-                "source_unchanged": _sha(spec["source"]) == source_before,
-            }
-        receipt["success"] = receipt.get("success") is True and all(receipt["cleanup"].values())
+        source_cleanup = _structural._cleanup_source_entry(spec["source"], source_before)
+        if "source_hash_error" in source_cleanup:
+            private["source_hash_error"] = source_cleanup.pop("source_hash_error")
+        cleanup.update(source_cleanup)
+        receipt["cleanup"] = cleanup
+        receipt["success"] = receipt.get("success") is True and all(cleanup.values())
     return receipt, private
 
 
