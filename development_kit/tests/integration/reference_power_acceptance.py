@@ -52,6 +52,23 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
     atomic_write_json_exclusive(path, payload)
 
 
+def _capture_loaded_source_identity(path: str | Path, expected_sha256: str) -> dict[str, str]:
+    """Capture a source identity only when the current file matches the frozen hash."""
+    source_path = Path(path).expanduser().resolve(strict=True)
+    digest = hashlib.sha256()
+    with source_path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    observed_sha256 = digest.hexdigest()
+    if observed_sha256 != expected_sha256.lower():
+        raise ValueError("loaded source file differs from the frozen source hash")
+    return {
+        "source_path": str(source_path),
+        "source_sha256": observed_sha256,
+        "capture": "reference_power_worker_load",
+    }
+
+
 def _runtime_root() -> Path:
     return Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime")).resolve()
 
@@ -320,7 +337,17 @@ def _run_worker(args: argparse.Namespace) -> int:
         if not claim.get("success"):
             raise RuntimeError("solver lease acquisition failed")
         client = mph.Client(cores=args.cores)
+        loaded_source_identity = _capture_loaded_source_identity(
+            spec["source_model_path"], spec["expected_source_sha256"]
+        )
         source_model = client.load(spec["source_model_path"])
+        if (
+            _capture_loaded_source_identity(
+                spec["source_model_path"], spec["expected_source_sha256"]
+            )
+            != loaded_source_identity
+        ):
+            raise RuntimeError("source file changed while COMSOL loaded the model")
         policies = build_reference_power_policies(contract)
         artifact_root = Path(spec["artifact_dir"]).resolve()
         artifact_root.mkdir(parents=True, exist_ok=True)
@@ -373,6 +400,7 @@ def _run_worker(args: argparse.Namespace) -> int:
             validation_policy=policies["declared_flux"],
             session_state={"connected": True, "models": [source_model.name()]},
             active_profile="wave_optics",
+            loaded_source_identity=loaded_source_identity,
             ownership_preflight={"ready": True},
         )
         evaluation = evaluate_reference_power_results(contract, reference_result, point_result)
