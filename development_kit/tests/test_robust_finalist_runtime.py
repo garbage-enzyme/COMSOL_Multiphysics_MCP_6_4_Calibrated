@@ -252,9 +252,7 @@ def test_finalist_runtime_skips_off_design_when_not_requested(ascii_tmp_path, mo
         }
         application = {
             **body,
-            "receipt_fingerprint": domain_sha256_v2(
-                "comsol_mcp.robust_shape_application", body
-            ),
+            "receipt_fingerprint": domain_sha256_v2("comsol_mcp.robust_shape_application", body),
         }
         atomic_write_json(directory / "shape-application.json", application)
         (directory / "robust-working.mph").write_bytes(candidate["spec_fingerprint"].encode())

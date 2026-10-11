@@ -2317,7 +2317,4 @@ def test_full_gradient_request_covers_declared_conditions(execution_limit, decla
     [(5, 3, False), (6, 3, True), (100, 24, True)],
 )
 def test_initial_gradient_budget_requires_forward_and_gradient_batches(budget, declared, expected):
-    assert (
-        robust_shape_worker._initial_gradient_budget_is_sufficient(budget, declared)
-        is expected
-    )
+    assert robust_shape_worker._initial_gradient_budget_is_sufficient(budget, declared) is expected

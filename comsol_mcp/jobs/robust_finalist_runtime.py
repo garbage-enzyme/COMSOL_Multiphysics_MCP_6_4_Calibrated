@@ -357,54 +357,58 @@ def run_licensed_finalist(
         }
         maximum_delta = max(external_deltas.values())
         external_body = {
-        "schema_name": "comsol_mcp.external_fidelity_validation_receipt",
-        "schema_version": "1.0.0",
-        "validation_id": "lin2025-finalist-independent-comsol",
-        "backend": {
-            "kind": "independent_comsol",
-            "provider": "COMSOL",
-            "version": str(spec["version"]),
-            "execution_location": "local",
-            "license_authority": "caller_authorized",
-        },
-        "fallback": {
-            "mode": "primary",
-            "prior_backend": None,
-            "prior_receipt_sha256": None,
-            "authorization_sha256": None,
-        },
-        "environment_identity_sha256": domain_sha256_v2(
-            "comsol_mcp.robust_finalist_environment",
-            {"version": spec["version"], "cores": spec["cores"]},
-        ),
-        "geometry_mapping_sha256": baseline_app["shape_controls"]["shape_support_fingerprint"],
-        "material_mapping_sha256": spec["material_tensor_binding"]["binding_fingerprint"],
-        "excitation_mapping_sha256": spec["condition_table"]["condition_table_fingerprint"],
-        "known_non_equivalences": [],
-        "sampling_sha256": spec["condition_table"]["condition_table_fingerprint"],
-        "discretization_sha256": baseline_mesh,
-        "convergence_sha256": domain_sha256_v2(
-            "comsol_mcp.robust_finalist_convergence",
-            {
-                "baseline": baseline_objective["receipt_fingerprint"],
-                "finer": finer_objective["receipt_fingerprint"],
+            "schema_name": "comsol_mcp.external_fidelity_validation_receipt",
+            "schema_version": "1.0.0",
+            "validation_id": "lin2025-finalist-independent-comsol",
+            "backend": {
+                "kind": "independent_comsol",
+                "provider": "COMSOL",
+                "version": str(spec["version"]),
+                "execution_location": "local",
+                "license_authority": "caller_authorized",
             },
-        ),
-        "raw_artifact_sha256": [baseline_model, finer_model, baseline_app["receipt_fingerprint"]],
-        "comparison_metrics": {
-            "maximum_absolute_condition_delta": maximum_delta,
-            "baseline_objective": baseline_objective["smooth_worst_case_absolute_contrast"],
-            "accepted_objective": accepted_objective_value,
-        },
-        "comparison_tolerances": {
-            "maximum_absolute_condition_delta": policy["external_fidelity"][
-                "maximum_absolute_condition_delta"
-            ]
-        },
-        "disposition": "validated"
-        if maximum_delta <= policy["external_fidelity"]["maximum_absolute_condition_delta"]
-        else "disagreed",
-        "retention_disposition": "hash_bound_local_only",
+            "fallback": {
+                "mode": "primary",
+                "prior_backend": None,
+                "prior_receipt_sha256": None,
+                "authorization_sha256": None,
+            },
+            "environment_identity_sha256": domain_sha256_v2(
+                "comsol_mcp.robust_finalist_environment",
+                {"version": spec["version"], "cores": spec["cores"]},
+            ),
+            "geometry_mapping_sha256": baseline_app["shape_controls"]["shape_support_fingerprint"],
+            "material_mapping_sha256": spec["material_tensor_binding"]["binding_fingerprint"],
+            "excitation_mapping_sha256": spec["condition_table"]["condition_table_fingerprint"],
+            "known_non_equivalences": [],
+            "sampling_sha256": spec["condition_table"]["condition_table_fingerprint"],
+            "discretization_sha256": baseline_mesh,
+            "convergence_sha256": domain_sha256_v2(
+                "comsol_mcp.robust_finalist_convergence",
+                {
+                    "baseline": baseline_objective["receipt_fingerprint"],
+                    "finer": finer_objective["receipt_fingerprint"],
+                },
+            ),
+            "raw_artifact_sha256": [
+                baseline_model,
+                finer_model,
+                baseline_app["receipt_fingerprint"],
+            ],
+            "comparison_metrics": {
+                "maximum_absolute_condition_delta": maximum_delta,
+                "baseline_objective": baseline_objective["smooth_worst_case_absolute_contrast"],
+                "accepted_objective": accepted_objective_value,
+            },
+            "comparison_tolerances": {
+                "maximum_absolute_condition_delta": policy["external_fidelity"][
+                    "maximum_absolute_condition_delta"
+                ]
+            },
+            "disposition": "validated"
+            if maximum_delta <= policy["external_fidelity"]["maximum_absolute_condition_delta"]
+            else "disagreed",
+            "retention_disposition": "hash_bound_local_only",
         }
         external = normalize_external_validation_receipt(external_body)
         atomic_write_json(directory / "external-validation.json", external)
