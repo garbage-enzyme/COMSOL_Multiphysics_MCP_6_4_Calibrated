@@ -238,6 +238,20 @@ def test_saved_mode_rejects_lexically_distinct_aliases_of_one_path():
     assert "distinct absolute ASCII path" in completed.stderr
 
 
+@pytest.mark.parametrize("collision", ["source", "working"])
+def test_saved_mode_rejects_receipt_collision(collision):
+    source = Path(_ascii_source())
+    working = Path(_ascii_working_model())
+    receipt = source if collision == "source" else working
+    args = gate._parser().parse_args([
+        "--mode", "saved", "--model-tag", "Model1", "--expected-label", "source.mph",
+        "--expected-desktop-value", "29[mm]", "--expected-file-path", str(working),
+        "--immutable-source-path", str(source), "--receipt", str(receipt), "--dry-run",
+    ])
+    with pytest.raises(ValueError, match="receipt must be distinct"):
+        gate._spec(args)
+
+
 @pytest.mark.parametrize(
     ("failure", "error_type"),
     [

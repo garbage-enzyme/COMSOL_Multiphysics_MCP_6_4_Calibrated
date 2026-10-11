@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 
 import psutil
 import pytest
 
 from development_kit.scripts import python_compatibility_licensed_gate as gate
+
+
+def test_worker_poll_loops_are_rate_limited():
+    source = inspect.getsource(gate._run_parent)
+    assert source.count("time.sleep(0.25)") >= 2
 
 
 class _FakeProcess:

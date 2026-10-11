@@ -172,6 +172,9 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         source_path = None
     if not args.receipt.is_absolute() or not str(args.receipt).isascii():
         raise ValueError("receipt must be an absolute ASCII path")
+    receipt_path = args.receipt.expanduser().resolve(strict=False)
+    if receipt_path in {working_path, source_path}:
+        raise ValueError("receipt must be distinct from the immutable source and working model")
     selector = {
         "tag": args.model_tag,
         "expected_label": args.expected_label,
@@ -574,7 +577,7 @@ def main() -> int:
         json.dumps(
             {
                 "success": result["success"],
-                "receipt": str(args.receipt),
+        "receipt": str(receipt_path),
                 "receipt_sha256": _sha256(args.receipt),
                 "error": result.get("error"),
             },

@@ -221,6 +221,12 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         or source_hash != manifest["source_identity"]["source_sha256"]
     ):
         raise ValueError("source model differs from the trusted manifest")
+    fixed_outputs = {
+        (root / name).resolve(strict=False)
+        for name in ("base.mph", "configured.mph", "rollback.mph")
+    }
+    if source in fixed_outputs:
+        raise ValueError("source model must be distinct from every fixed output path")
     return {
         "root": root,
         "source": source,

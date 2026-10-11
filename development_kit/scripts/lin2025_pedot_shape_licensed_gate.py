@@ -110,6 +110,10 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
     source_hash = _sha(source)
     if source_hash != fixture["source_identity"]["source_sha256"]:
         raise ValueError("source model differs from the trusted PEDOT fixture")
+    base_copy = root / "base.mph"
+    configured_copy = root / "configured.mph"
+    if source in {base_copy.resolve(strict=False), configured_copy.resolve(strict=False)}:
+        raise ValueError("source model must be distinct from every fixed output path")
     return {
         "root": root,
         "source": source,
@@ -123,8 +127,8 @@ def _spec(args: argparse.Namespace) -> dict[str, Any]:
         "support_sha256": hashlib.sha256(args.support.read_bytes()).hexdigest(),
         "state_tensors_sha256": hashlib.sha256(args.state_tensors.read_bytes()).hexdigest(),
         "cores": args.cores,
-        "base_copy": root / "base.mph",
-        "configured_copy": root / "configured.mph",
+        "base_copy": base_copy,
+        "configured_copy": configured_copy,
         "receipt": root / "licensed-receipt.json",
         "private_receipt": root / "licensed-private.json",
     }

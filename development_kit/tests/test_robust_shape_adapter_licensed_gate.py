@@ -76,6 +76,16 @@ def test_dry_run_binds_only_caller_owned_limits_without_importing_mph(
     assert receipt["paths_included"] is False
 
 
+def test_spec_rejects_source_that_is_a_fixed_output(tmp_path, gate_root):
+    source, manifest, audit = _inputs(tmp_path)
+    target = gate_root / "base.mph"
+    target.write_bytes(source.read_bytes())
+    source.unlink()
+    args = _args(gate_root, target, manifest, audit)
+    with pytest.raises(ValueError, match="distinct"):
+        gate._spec(args)
+
+
 def test_shape_policy_records_minimum_gap_as_not_requested_for_s3_structural_gate(
     tmp_path, gate_root, monkeypatch
 ):
