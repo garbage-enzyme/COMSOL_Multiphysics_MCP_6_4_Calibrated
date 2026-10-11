@@ -2010,6 +2010,19 @@
         "title": "Component Name",
         "type": "string"
       },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
+      },
       "geometry_name": {
         "anyOf": [
           {
@@ -2190,6 +2203,19 @@
         "maxLength": 16384,
         "title": "Component Name",
         "type": "string"
+      },
+      "expected_model_revision": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Model Revision"
       },
       "geometry_name": {
         "anyOf": [

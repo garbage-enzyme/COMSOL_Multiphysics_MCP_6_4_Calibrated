@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnFakeServer, makeConnection, createFakeJobs, quietLogger } from "./helpers.mjs";
+import { FIXTURE, spawnFakeServer, makeConnection, createFakeJobs, quietLogger } from "./helpers.mjs";
 import { createComsolConnection } from "../lib/mcp-client-core.mjs";
 import { createJobMirror } from "../lib/job-mirror.mjs";
 
@@ -87,6 +87,30 @@ test("server that never answers initialize fails after the init timeout", async 
 		assert.equal(ok, false);
 		conn.dispose();
 	} finally { await s.close(); }
+});
+
+test("initialize timeout releases single-flight occupancy for a healthy replacement", { timeout: 10000 }, async () => {
+	const env = { FAKE_MODE: "no-initialize" };
+	const conn = createComsolConnection({
+		command: process.execPath,
+		args: [FIXTURE],
+		env,
+		logger: quietLogger(),
+		initTimeoutMs: 100,
+		reconnect: { enabled: true, initialDelayMs: 20, maxDelayMs: 40, maxAttempts: 3 },
+	});
+	try {
+		assert.equal(await conn.connect(), false);
+		// Model a corrected child on the next bounded replacement attempt.
+		env.FAKE_MODE = "";
+		const deadline = Date.now() + 3000;
+		while (!conn.connected && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+		assert.equal(conn.connected, true, "replacement should complete initialize and tool discovery");
+		const result = await conn.callTool("capabilities", {});
+		assert.match(result.text, /package_version/);
+	} finally {
+		conn.dispose();
+	}
 });
 
 test("malformed tool list fails closed", async () => {

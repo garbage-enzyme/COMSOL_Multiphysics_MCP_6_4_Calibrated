@@ -206,6 +206,15 @@ def test_model_mutating_mim_patch_build_requires_a_model_revision():
     assert metadata.advances_model_revision is True
 
 
+@pytest.mark.parametrize("name", ["geometry_get_boundaries", "geometry_probe_domains"])
+def test_geometry_inspection_that_runs_geometry_requires_and_advances_revision(name):
+    metadata = TOOL_METADATA[name]
+
+    assert metadata.side_effect_class == "model_mutation"
+    assert metadata.requires_model_revision is True
+    assert metadata.advances_model_revision is True
+
+
 def test_profile_registrar_selection_is_derived_from_tool_specs():
     core = registrars_for_profile("core")
     full = registrars_for_profile("full")

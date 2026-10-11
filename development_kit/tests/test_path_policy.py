@@ -21,6 +21,7 @@ from src.path_policy import (
     ReadPinError,
     pin_validated_reads,
     pin_validated_writes,
+    validate_tool_paths,
 )
 from src.tools.capabilities import get_capabilities
 from src.tools.profiles import ProfileSelection
@@ -224,6 +225,7 @@ def test_model_read_rejects_missing_wrong_suffix_and_directory_inputs(tmp_path, 
 
 def test_artifact_writes_are_ascii_new_and_contained(tmp_path, ascii_root):
     policy, _, write_root = _policy(tmp_path, ascii_root)
+    write_root.mkdir(parents=True, exist_ok=True)
     accepted = policy.validate_artifact_write(str(write_root / "result.json"))
     assert accepted.normalized_path == (write_root / "result.json").resolve()
     existing = write_root / "existing.json"
@@ -234,6 +236,77 @@ def test_artifact_writes_are_ascii_new_and_contained(tmp_path, ascii_root):
         policy.validate_artifact_write(str(write_root / "结果.json"))
     with pytest.raises(ValueError, match="escapes"):
         policy.validate_artifact_write(str(write_root / ".." / "outside.json"))
+
+
+def test_explicit_journal_continuation_allows_only_existing_owned_regular_files(
+    tmp_path, ascii_root
+):
+    policy, _, write_root = _policy(tmp_path, ascii_root)
+    write_root.mkdir(parents=True, exist_ok=True)
+    existing = write_root / "journal.csv"
+    existing.write_text("status\n", encoding="ascii")
+
+    update = policy.validate_artifact_update(str(existing))
+
+    assert update.kind == "artifact_update"
+    assert update.normalized_path == existing.resolve()
+    assert update.write_pin is not None
+    outside = ascii_root / "outside.csv"
+    outside.write_text("status\n", encoding="ascii")
+    with pytest.raises(ValueError, match="escapes"):
+        policy.validate_artifact_update(str(outside))
+    with pytest.raises(ValueError, match="must not already exist"):
+        policy.validate_artifact_write(str(existing))
+
+
+def test_sweep_and_mesh_continuation_path_contract(tmp_path, ascii_root, monkeypatch):
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    source = read_root / "source.mph"
+    source.write_bytes(b"model")
+    csv_path = write_root / "rows.csv"
+    csv_path.write_text("old rows", encoding="ascii")
+    manifest_path = write_root / "rows.manifest.json"
+    manifest_path.write_text("{}", encoding="ascii")
+
+    def mesh_convergence_study(
+        *,
+        source_model_path=None,
+        csv_path=None,
+        manifest_path=None,
+        append_csv=False,
+        resume_csv=False,
+    ):
+        pass
+
+    _args, normalized, evidence, read_pins, write_pins = validate_tool_paths(
+        mesh_convergence_study,
+        (),
+        {
+            "source_model_path": str(source),
+            "csv_path": str(csv_path),
+            "manifest_path": str(manifest_path),
+            "resume_csv": True,
+        },
+        tool_name="mesh_convergence_study",
+        profile_name="experimental",
+    )
+
+    assert normalized["source_model_path"] == str(source.resolve())
+    assert evidence["enforced"] is True
+    assert {pin.path for pin in read_pins} == {source.resolve()}
+    assert len(write_pins) == 2
+
+    with pytest.raises(ValueError, match="must not already exist"):
+        validate_tool_paths(
+            mesh_convergence_study,
+            (),
+            {"csv_path": str(csv_path)},
+            tool_name="mesh_convergence_study",
+            profile_name="experimental",
+        )
 
 
 def test_ascii_temp_directory_skips_unusable_candidate(ascii_tmp_path):
