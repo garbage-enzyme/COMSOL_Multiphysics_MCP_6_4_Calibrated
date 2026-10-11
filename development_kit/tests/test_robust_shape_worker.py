@@ -2310,3 +2310,14 @@ def test_full_gradient_request_covers_declared_conditions(execution_limit, decla
         robust_shape_worker._requests_full_condition_gradients(execution_limit, declared)
         is expected
     )
+
+
+@pytest.mark.parametrize(
+    ("budget", "declared", "expected"),
+    [(5, 3, False), (6, 3, True), (100, 24, True)],
+)
+def test_initial_gradient_budget_requires_forward_and_gradient_batches(budget, declared, expected):
+    assert (
+        robust_shape_worker._initial_gradient_budget_is_sufficient(budget, declared)
+        is expected
+    )

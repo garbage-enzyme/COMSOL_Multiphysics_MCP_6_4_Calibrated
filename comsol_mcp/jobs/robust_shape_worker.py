@@ -777,6 +777,11 @@ def _requests_full_condition_gradients(
     return execution_limit is None or execution_limit >= declared_conditions
 
 
+def _initial_gradient_budget_is_sufficient(max_condition_solves: int, declared_conditions: int) -> bool:
+    """Require forward and native-gradient batches before the first solve."""
+    return max_condition_solves >= 2 * declared_conditions
+
+
 def run(root: str, job_id: str) -> int:
     store = JobStore(Path(root))
     spec = store.read_spec(job_id)
@@ -885,6 +890,12 @@ def _run_licensed(root: str, job_id: str) -> int:
         full_condition_run = _requests_full_condition_gradients(
             execution_limit, declared_conditions
         )
+        if full_condition_run and not _initial_gradient_budget_is_sufficient(
+            int(spec["native_optimizer"]["budget"]["max_solves"]), declared_conditions
+        ):
+            raise ValueError(
+                "licensed robust optimizer budget cannot cover the initial forward and gradient batches"
+            )
         result = execute_lin2025_conditions(
             spec,
             directory,
