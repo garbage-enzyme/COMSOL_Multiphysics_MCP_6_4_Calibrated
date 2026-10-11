@@ -154,6 +154,43 @@ def test_ask_windows_completed_observations_to_the_acquisition_limit(monkeypatch
     assert captured["count"] == module.MAX_GP_OBSERVATIONS
 
 
+def test_checkpoint_restore_preserves_the_same_latest_observation_window(monkeypatch):
+    module = importlib.import_module("comsol_mcp.research.adaptive_acquisition")
+    optimizer = _optimizer()(_space(), seed=17001, warmup_count=2, candidate_pool_count=320)
+    arguments = {
+        "status": "completed",
+        "score_fingerprint": "b" * 64,
+        "losses": {"peak": 1.0, "q": 0.5},
+    }
+    for index in range(300):
+        proposal = optimizer.ask()
+        candidate_fingerprint = f"{299 - index:064x}"
+        assert optimizer.tell(
+            proposal,
+            candidate_fingerprint=candidate_fingerprint,
+            **arguments,
+        )
+
+    checkpoint = optimizer.checkpoint(
+        campaign_fingerprint="c" * 64,
+        decision_fingerprint="d" * 64,
+        created_at="2026-08-07T00:00:00Z",
+    )
+    restored = _optimizer().restore(_space(), checkpoint)
+    captured = []
+    real = module.select_expected_improvement_candidate
+
+    def spy(space, observations, candidates):
+        captured.append(observations)
+        return real(space, observations, candidates)
+
+    monkeypatch.setattr(module, "select_expected_improvement_candidate", spy)
+    optimizer.ask()
+    restored.ask()
+
+    assert captured[0] == captured[1]
+
+
 def test_numerically_singular_covariance_reports_the_public_value_error():
     # Two observations separated by less than one scaled ULP make the RBF
     # covariance numerically singular. numpy raises LinAlgError, which

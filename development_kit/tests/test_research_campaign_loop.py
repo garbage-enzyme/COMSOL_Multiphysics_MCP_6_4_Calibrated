@@ -74,6 +74,19 @@ def test_campaign_loop_stops_only_on_measured_success_and_checkpoints(ascii_tmp_
     assert (ascii_tmp_path / "optimizer_checkpoint.json").is_file()
 
 
+def test_campaign_without_all_success_thresholds_cannot_report_success(ascii_tmp_path):
+    goal = _goal()
+    goal["objectives"][0]["tolerance"] = None
+    manifest = compile_campaign_manifest(goal, _space(), _approval())
+    loop = _loop(ascii_tmp_path, manifest, lambda _values: {"peak_wavelength_nm": 1550.0})
+
+    result = loop.step()
+
+    assert manifest["success_claim_allowed"] is False
+    assert result["success"] is False
+    assert result["stop_reason"] == "success_claim_not_allowed"
+
+
 def test_impossible_campaign_exhausts_budget_without_manufacturing_success(ascii_tmp_path):
     loop = _loop(
         ascii_tmp_path,

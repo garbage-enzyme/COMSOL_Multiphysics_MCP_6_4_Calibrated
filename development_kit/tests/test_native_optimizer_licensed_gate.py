@@ -108,6 +108,23 @@ def test_requested_solver_iterations_are_separate_from_budget_cap():
         gate._requested_optimizer_iterations(args, {"max_iterations": 3})
 
 
+def test_total_solve_budget_reserves_baseline_and_fresh_finalist():
+    assert gate._optimizer_solve_budget(3) == 1
+    assert gate._optimizer_solve_budget(150) == 148
+    with pytest.raises(ValueError, match="baseline"):
+        gate._optimizer_solve_budget(2)
+
+
+def test_runtime_budget_checks_wall_clock_and_disk_usage(tmp_path, monkeypatch):
+    (tmp_path / "payload").write_bytes(b"x" * 10)
+    monkeypatch.setattr(gate.time, "monotonic", lambda: 12.0)
+    gate._check_runtime_budget(10.0, max_wall_time_seconds=3, root=tmp_path, max_disk_bytes=10)
+    with pytest.raises(ValueError, match="disk"):
+        gate._check_runtime_budget(10.0, max_wall_time_seconds=3, root=tmp_path, max_disk_bytes=9)
+    with pytest.raises(TimeoutError, match="wall"):
+        gate._check_runtime_budget(1.0, max_wall_time_seconds=3, root=tmp_path, max_disk_bytes=100)
+
+
 def test_move_limit_is_a_required_positive_caller_input():
     args = type("Args", (), {"move_limit": 0.05})()
     assert gate._requested_move_limit(args) == 0.05

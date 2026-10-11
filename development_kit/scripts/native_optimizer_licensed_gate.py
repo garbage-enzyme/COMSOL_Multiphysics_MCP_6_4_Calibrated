@@ -145,6 +145,46 @@ def _requested_optimizer_iterations(args: argparse.Namespace, budget: dict) -> i
     return requested
 
 
+def _optimizer_solve_budget(total_solves: object) -> int:
+    """Reserve one solve for baseline and one for the fresh finalist."""
+    if isinstance(total_solves, bool) or not isinstance(total_solves, int) or total_solves < 3:
+        raise ValueError("max_solves must cover baseline, optimization, and finalist solves")
+    return total_solves - 2
+
+
+def _disk_usage(root: Path) -> int:
+    return sum(
+        path.stat().st_size
+        for path in root.rglob("*")
+        if path.is_file() and not path.is_symlink()
+    )
+
+
+def _check_runtime_budget(
+    started: float,
+    *,
+    max_wall_time_seconds: object,
+    root: Path,
+    max_disk_bytes: object,
+) -> None:
+    if (
+        isinstance(max_wall_time_seconds, bool)
+        or not isinstance(max_wall_time_seconds, int)
+        or max_wall_time_seconds < 1
+    ):
+        raise ValueError("max_wall_time_seconds must be a positive integer")
+    if (
+        isinstance(max_disk_bytes, bool)
+        or not isinstance(max_disk_bytes, int)
+        or max_disk_bytes < 1
+    ):
+        raise ValueError("max_disk_bytes must be a positive integer")
+    if time.monotonic() - started > max_wall_time_seconds:
+        raise TimeoutError("native optimizer wall budget exhausted")
+    if _disk_usage(root) > max_disk_bytes:
+        raise ValueError("native optimizer disk budget exhausted")
+
+
 def _requested_move_limit(args: argparse.Namespace) -> float:
     if isinstance(args.move_limit, bool):
         raise ValueError("move_limit must be a caller-supplied positive finite number")
@@ -238,6 +278,7 @@ def _configure_solver_move_limit(
 
 def run(args: argparse.Namespace) -> dict:
     spec = structural._spec(args)
+    optimization_solve_budget = _optimizer_solve_budget(spec["optimizer"]["budget"]["max_solves"])
     requested_iterations = _requested_optimizer_iterations(args, spec["optimizer"]["budget"])
     requested_move_limit = _requested_move_limit(args)
     deformation_policy = _deformation_feasibility_policy(args)
@@ -315,7 +356,7 @@ def run(args: argparse.Namespace) -> dict:
         model = client.load(str(spec["configured_copy"]))
         std2 = model.java.study("std2")
         optimization = std2.feature("opt_a71")
-        optimization.set("nsolvemax", str(spec["optimizer"]["budget"]["max_solves"]))
+        optimization.set("nsolvemax", str(optimization_solve_budget))
         receipt["solver_move_limit"] = _configure_solver_move_limit(
             model,
             std2,
@@ -331,13 +372,19 @@ def run(args: argparse.Namespace) -> dict:
                 abs_tol=0.0,
             ):
                 raise ValueError("native optimizer solver move-limit readback drifted")
-        if time.monotonic() - started > spec["optimizer"]["budget"]["max_wall_time_seconds"]:
-            raise TimeoutError("native optimizer wall budget exhausted before optimization")
+        _check_runtime_budget(
+            started,
+            max_wall_time_seconds=spec["optimizer"]["budget"]["max_wall_time_seconds"],
+            root=spec["root"],
+            max_disk_bytes=args.max_disk_bytes,
+        )
         std2.run()
-        if time.monotonic() - started > spec["optimizer"]["budget"]["max_wall_time_seconds"]:
-            # The declared bounded-run contract covers the solve itself, not
-            # only the moment before it starts.
-            raise TimeoutError("native optimizer wall budget exhausted during optimization")
+        _check_runtime_budget(
+            started,
+            max_wall_time_seconds=spec["optimizer"]["budget"]["max_wall_time_seconds"],
+            root=spec["root"],
+            max_disk_bytes=args.max_disk_bytes,
+        )
         phase = "final_objective"
         optimizer_dataset = _dataset_for_solution(
             model, receipt["solver_move_limit"]["solution_tag"]
@@ -377,6 +424,12 @@ def run(args: argparse.Namespace) -> dict:
             minimum_quality=args.minimum_element_quality,
         )
         finalist_study.run()
+        _check_runtime_budget(
+            started,
+            max_wall_time_seconds=spec["optimizer"]["budget"]["max_wall_time_seconds"],
+            root=spec["root"],
+            max_disk_bytes=args.max_disk_bytes,
+        )
         finalist_dataset = _forward_sweep_dataset(finalist)
         finalist_dataset_tag = str(finalist_dataset.tag())
         fresh_series = _numeric_series(
@@ -455,6 +508,12 @@ def run(args: argparse.Namespace) -> dict:
         )
         if not math.isclose(fresh_final, final, rel_tol=1e-6, abs_tol=1e-9):
             raise ValueError("fresh forward objective differs from native optimizer result")
+        _check_runtime_budget(
+            started,
+            max_wall_time_seconds=spec["optimizer"]["budget"]["max_wall_time_seconds"],
+            root=spec["root"],
+            max_disk_bytes=args.max_disk_bytes,
+        )
         client.remove(finalist)
         model = None
         phase = "parameter_readback"

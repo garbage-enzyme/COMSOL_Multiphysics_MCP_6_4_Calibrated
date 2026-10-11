@@ -90,6 +90,7 @@ def register_research_tools(mcp: MCPServer) -> None:
             from comsol_mcp.research.adaptive_acquisition import (
                 GaussianProcessExpectedImprovementOptimizer,
             )
+            from comsol_mcp.research.state import normalize_optimizer_checkpoint
 
             if checkpoint is None:
                 if feedback is not None:
@@ -101,8 +102,11 @@ def register_research_tools(mcp: MCPServer) -> None:
                     candidate_pool_count=candidate_pool_count,
                 )
             else:
+                normalized_checkpoint = normalize_optimizer_checkpoint(checkpoint)
+                if normalized_checkpoint["campaign_fingerprint"] != campaign_fingerprint:
+                    raise ValueError("optimizer checkpoint belongs to a different campaign")
                 optimizer = GaussianProcessExpectedImprovementOptimizer.restore(
-                    design_space, checkpoint
+                    design_space, normalized_checkpoint
                 )
                 if feedback is not None:
                     required = {
