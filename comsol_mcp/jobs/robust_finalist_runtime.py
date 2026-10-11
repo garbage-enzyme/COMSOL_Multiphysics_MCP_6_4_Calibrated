@@ -348,12 +348,15 @@ def run_licensed_finalist(
         spec["condition_table"],
         label="independent baseline",
     )
-    external_deltas = {
-        condition_id: abs(accepted_by_id[condition_id]["value"] - observation["value"])
-        for condition_id, observation in baseline_by_id.items()
-    }
-    maximum_delta = max(external_deltas.values())
-    external_body = {
+    external = None
+    maximum_delta = None
+    if policy["external_fidelity"]["mode"] == "required":
+        external_deltas = {
+            condition_id: abs(accepted_by_id[condition_id]["value"] - observation["value"])
+            for condition_id, observation in baseline_by_id.items()
+        }
+        maximum_delta = max(external_deltas.values())
+        external_body = {
         "schema_name": "comsol_mcp.external_fidelity_validation_receipt",
         "schema_version": "1.0.0",
         "validation_id": "lin2025-finalist-independent-comsol",
@@ -402,9 +405,9 @@ def run_licensed_finalist(
         if maximum_delta <= policy["external_fidelity"]["maximum_absolute_condition_delta"]
         else "disagreed",
         "retention_disposition": "hash_bound_local_only",
-    }
-    external = normalize_external_validation_receipt(external_body)
-    atomic_write_json(directory / "external-validation.json", external)
+        }
+        external = normalize_external_validation_receipt(external_body)
+        atomic_write_json(directory / "external-validation.json", external)
     evidence = {
         "candidate_fingerprint": candidate_fingerprint,
         "optimizer_execution_fingerprint": optimizer_execution_fingerprint,
@@ -478,7 +481,9 @@ def run_licensed_finalist(
             "finer_objective": finer_objective["smooth_worst_case_absolute_contrast"],
             "off_design_row_count": len(off_rows),
             "external_maximum_absolute_condition_delta": maximum_delta,
-            "external_validation_receipt_fingerprint": external["receipt_fingerprint"],
+            "external_validation_receipt_fingerprint": (
+                external["receipt_fingerprint"] if external is not None else None
+            ),
             "receipt_fingerprint": receipt["receipt_fingerprint"],
         },
     )

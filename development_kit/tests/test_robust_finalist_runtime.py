@@ -201,6 +201,13 @@ def test_finalist_runtime_skips_off_design_when_not_requested(ascii_tmp_path, mo
         "wavelength_relative_offsets": [],
         "angle_offsets_deg": [],
     }
+    policy["external_fidelity"] = {
+        "mode": "not_requested",
+        "primary_backend": None,
+        "fallback_mode": "not_requested",
+        "automatic_fallback": False,
+        "maximum_absolute_condition_delta": 1e-6,
+    }
     spec["finalist_validation_policy"] = normalize_robust_finalist_validation_policy(policy)
     spec["finalist_validation_solve_count"] = 48
     calls = []
@@ -264,7 +271,7 @@ def test_finalist_runtime_skips_off_design_when_not_requested(ascii_tmp_path, mo
         for condition in spec["condition_table"]["conditions"]
         if condition["active"] and condition["objective_role"] == "objective"
     ]
-    robust_finalist_runtime.run_licensed_finalist(
+    receipt = robust_finalist_runtime.run_licensed_finalist(
         spec,
         ascii_tmp_path / "finalist-no-off",
         attempt=1,
@@ -278,6 +285,9 @@ def test_finalist_runtime_skips_off_design_when_not_requested(ascii_tmp_path, mo
         cancel_requested=lambda: False,
     )
     assert calls == ["baseline", "finer"]
+    assert receipt["checks"]["external_fidelity"] is True
+    assert receipt["external_validation_receipt_fingerprint"] is None
+    assert not (ascii_tmp_path / "finalist-no-off" / "external-validation.json").exists()
 
 
 @pytest.mark.parametrize("mutation", ["reordered", "duplicated"])
