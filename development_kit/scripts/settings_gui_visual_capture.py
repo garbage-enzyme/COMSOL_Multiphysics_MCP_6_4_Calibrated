@@ -7,7 +7,6 @@ import ctypes
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -324,7 +323,6 @@ def capture_matrix(output_root: Path) -> dict:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if completed.returncode != 0:
-            shutil.rmtree(output_root, ignore_errors=True)
             stdout = completed.stdout[-2048:]
             stderr = completed.stderr[-2048:]
             raise RuntimeError(

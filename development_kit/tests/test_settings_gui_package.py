@@ -301,9 +301,14 @@ def test_visual_capture_matrix_surfaces_bounded_child_diagnostics(tmp_path, monk
         ),
     )
 
+    output_root = tmp_path / "matrix"
+    output_root.mkdir()
+    sentinel = output_root / "caller-owned.txt"
+    sentinel.write_text("keep", encoding="ascii")
     with pytest.raises(RuntimeError, match="language=zh-cn, dpi=200") as caught:
-        settings_gui_visual_capture.capture_matrix(tmp_path / "matrix")
+        settings_gui_visual_capture.capture_matrix(output_root)
 
     assert len(str(caught.value)) < 4300
     assert "err-" not in str(caught.value)
     assert "yyyy" in str(caught.value)
+    assert sentinel.read_text(encoding="ascii") == "keep"
