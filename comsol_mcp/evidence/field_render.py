@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -121,6 +122,7 @@ def render_field_png_bundle(
 
     root = Path(output_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
+    staging_root = Path(tempfile.mkdtemp(prefix=f".render-{uuid.uuid4().hex[:12]}-", dir=root))
     normalized = []
     array_pins = []
     seen_ids = set()
@@ -145,9 +147,10 @@ def render_field_png_bundle(
             raise ValueError(f"views[{index}].array_path is missing or oversized")
         array_pins.append(validated_read_pin(array_path, array_path.parent))
         safe_name = hashlib.sha256(view_id.encode("utf-8")).hexdigest()[:16]
-        png_path = root / f"{safe_name}.png"
-        if png_path.exists():
+        final_png_path = root / f"{safe_name}.png"
+        if final_png_path.exists():
             raise FileExistsError(f"field PNG already exists: {view_id}")
+        png_path = staging_root / f"{safe_name}.png"
         normalized.append(
             {
                 "view_id": view_id,
@@ -155,6 +158,7 @@ def render_field_png_bundle(
                 "array_sha256": array_sha256.lower(),
                 "png_artifact_id": artifact_id,
                 "png_path": str(png_path),
+                "final_png_path": str(final_png_path),
             }
         )
 
@@ -164,7 +168,10 @@ def render_field_png_bundle(
         "coordinate_unit": coordinate_unit.strip(),
         "color_scale": color_scale,
         "shared_color_limits": shared_color_limits,
-        "views": normalized,
+        "views": [
+            {key: value for key, value in item.items() if key != "final_png_path"}
+            for item in normalized
+        ],
     }
     try:
         with pin_validated_reads(tuple(array_pins)):
@@ -222,11 +229,18 @@ def render_field_png_bundle(
             with path.open("rb") as handle:
                 if handle.read(8) != b"\x89PNG\r\n\x1a\n":
                     raise RuntimeError("field plot worker output is not a PNG")
+            final_path = Path(view["final_png_path"])
+            try:
+                os.link(path, final_path)
+            except FileExistsError as exc:
+                raise FileExistsError(
+                    f"field PNG was published concurrently: {view['view_id']}"
+                ) from exc
             descriptors.append(
                 {
                     "view_id": view["view_id"],
                     "artifact_id": view["png_artifact_id"],
-                    "relative_path": path.relative_to(root).as_posix(),
+                    "relative_path": final_path.relative_to(root).as_posix(),
                     "media_type": "image/png",
                     "sha256": _sha256_file(path),
                     "byte_count": path.stat().st_size,
@@ -253,6 +267,11 @@ def render_field_png_bundle(
             except OSError:
                 pass
         raise
+    finally:
+        try:
+            staging_root.rmdir()
+        except OSError:
+            pass
 
 
 __all__ = ["DEFAULT_RENDER_TIMEOUT_SECONDS", "render_field_png_bundle"]

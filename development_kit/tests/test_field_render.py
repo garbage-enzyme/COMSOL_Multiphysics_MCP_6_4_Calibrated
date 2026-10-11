@@ -65,6 +65,30 @@ def test_isolated_single_field_png_is_hash_bound_and_unlabeled(tmp_path):
     assert descriptor["sha256"] == hashlib.sha256(png.read_bytes()).hexdigest()
 
 
+def test_renderer_refuses_concurrent_final_publication(tmp_path, monkeypatch):
+    array = tmp_path / "race.npz"
+    digest = _array(array)
+    output = tmp_path / "race-output"
+    real_link = os.link
+
+    def competing_link(source, destination, *args, **kwargs):
+        Path(destination).write_bytes(b"competing-publisher")
+        raise FileExistsError(destination)
+
+    monkeypatch.setattr(field_render_module.os, "link", competing_link)
+    with pytest.raises(FileExistsError, match="published concurrently"):
+        render_field_png_bundle(
+            views=[_view("race", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=output,
+        )
+    monkeypatch.setattr(field_render_module.os, "link", real_link)
+
+
 def test_renderer_rejects_malformed_array_digest_before_worker_start(tmp_path):
     array = tmp_path / "invalid-hash.npz"
     _array(array)
