@@ -53,7 +53,17 @@ def _save_model_file(
     path = Path(target).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     overwrite = path.exists()
-    staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}.save")
+    extension_by_format = {
+        "comsol": ".mph",
+        "mph": ".mph",
+        "java": ".java",
+        "matlab": ".m",
+        "vba": ".vba",
+    }
+    staging_suffix = extension_by_format.get(normalized_format)
+    if staging_suffix is None:
+        raise ValueError(f"Unsupported save format: {format!r}")
+    staging = path.with_name(f".{path.stem}.{uuid.uuid4().hex}.stage{staging_suffix}")
     try:
         if normalized_format not in {"comsol", "mph"}:
             model.save(path=str(staging), format=format)
@@ -292,6 +302,8 @@ def register_model_tools(mcp: MCPServer) -> None:
         if client is None:
             return {"success": False, "error": "Client not available."}
 
+        model = None
+        registered = False
         try:
             path = Path(file_path).resolve()
             if not path.exists():
@@ -303,20 +315,7 @@ def register_model_tools(mcp: MCPServer) -> None:
             model = client.load(str(path))
             source_hash_after = _sha256_file(path)
             if source_hash_after != source_hash_before:
-                try:
-                    client.remove(model)
-                except Exception:
-                    return {
-                        "success": False,
-                        "error": (
-                            "Model source changed while it was being loaded, and the "
-                            "loaded model could not be removed. Reset the session."
-                        ),
-                    }
-                return {
-                    "success": False,
-                    "error": "Model source changed while it was being loaded.",
-                }
+                raise RuntimeError("Model source changed while it was being loaded.")
             name = session_manager.add_model(
                 model,
                 source_identity={
@@ -325,6 +324,7 @@ def register_model_tools(mcp: MCPServer) -> None:
                     "capture": "load_bracketed",
                 },
             )
+            registered = True
 
             if set_current:
                 session_manager.set_current_model(name)
@@ -343,6 +343,17 @@ def register_model_tools(mcp: MCPServer) -> None:
                 },
             }
         except Exception as e:
+            if model is not None and not registered:
+                try:
+                    client.remove(model)
+                except Exception as cleanup_error:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Failed to load model: {e}; loaded model cleanup failed: "
+                            f"{cleanup_error}. Reset the session."
+                        ),
+                    }
             return {"success": False, "error": f"Failed to load model: {str(e)}"}
 
     @mcp.tool()

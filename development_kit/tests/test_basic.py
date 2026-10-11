@@ -303,6 +303,48 @@ class TestSessionManager:
         assert sm.current_model is None
         assert sm.models == {}
 
+    def test_add_model_rejects_duplicate_name_without_replacing_revision(self, tmp_path):
+        from src.tools.session import SessionManager
+
+        class FakeModel:
+            def __init__(self, marker):
+                self.marker = marker
+
+            def name(self):
+                return "duplicate"
+
+            def file(self):
+                return None
+
+        sm = SessionManager()
+        sm._client = object()
+        sm._models = {}
+        sm._model_paths = {}
+        sm._model_source_identities = {}
+        sm._model_java_tags = {}
+        sm._model_revisions = {}
+        sm._model_cleanup_paths = {}
+        sm._current_model = None
+        try:
+            first = FakeModel("first")
+            sm.add_model(first)
+            revision = sm.get_model_revision("duplicate")
+
+            with pytest.raises(ValueError, match="already registered"):
+                sm.add_model(FakeModel("second"))
+
+            assert sm.get_model("duplicate") is first
+            assert sm.get_model_revision("duplicate") == revision
+        finally:
+            sm._client = None
+            sm._models = {}
+            sm._model_paths = {}
+            sm._model_source_identities = {}
+            sm._model_java_tags = {}
+            sm._model_revisions = {}
+            sm._model_cleanup_paths = {}
+            sm._current_model = None
+
     def test_get_status_disconnected(self):
         from src.tools.session import SessionManager
 

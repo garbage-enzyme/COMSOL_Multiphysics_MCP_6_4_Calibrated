@@ -1217,12 +1217,7 @@ class SessionManager:
                 captured_identity = None
         with self._start_lock:
             if name in self._models:
-                self._notify_model_removed_locked(name)
-            if name in self._model_cleanup_paths:
-                self._cleanup_model_artifact(name)
-            self._model_revisions.pop(name, None)
-            self._model_source_identities.pop(name, None)
-            self._model_java_tags.pop(name, None)
+                raise ValueError(f"A model named {name!r} is already registered")
             self._models[name] = model
             if java_tag is not None:
                 self._model_java_tags[name] = java_tag
