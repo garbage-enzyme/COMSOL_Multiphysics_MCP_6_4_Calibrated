@@ -445,6 +445,13 @@ def test_legacy_synthetic_profiles_migrate_to_independent_feature_gates() -> Non
             "shared_server": {"enabled": False},
         }
     )
+    shared_default = normalize_settings_document(
+        {
+            "schema_name": SETTINGS_SCHEMA,
+            "schema_version": "1.1.0",
+            "profile": {"name": "desktop_shared"},
+        }
+    )
     full = normalize_settings_document(
         {
             "schema_name": SETTINGS_SCHEMA,
@@ -459,7 +466,9 @@ def test_legacy_synthetic_profiles_migrate_to_independent_feature_gates() -> Non
     assert semantic["settings"]["semantic_docs"]["enabled"] is True
     assert shared["errors"] == []
     assert shared["settings"]["profile"]["name"] == "core"
-    assert shared["settings"]["shared_server"]["enabled"] is True
+    assert shared["settings"]["shared_server"]["enabled"] is False
+    assert shared_default["errors"] == []
+    assert shared_default["settings"]["shared_server"]["enabled"] is True
     assert full["errors"] == []
     assert full["settings"]["profile"]["name"] == "full"
     assert full["settings"]["semantic_docs"]["enabled"] is True

@@ -206,7 +206,13 @@ function Get-DurableTerminalDisposition {
     $Status = ([string]$Snapshot.Status).Trim().ToLowerInvariant()
     if (
         [int]$Snapshot.Completed -ge [int]$Snapshot.Planned -and
-        $Status -in @('complete', 'completed', 'succeeded', 'success')
+        $Status -in @(
+            'complete',
+            'completed',
+            'succeeded',
+            'success',
+            'solver_and_postprocess_complete_unclassified'
+        )
     ) {
         return 'success'
     }

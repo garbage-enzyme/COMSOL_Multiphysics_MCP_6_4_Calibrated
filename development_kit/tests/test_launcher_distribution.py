@@ -244,7 +244,7 @@ def test_launcher_acceptance_in_windows_powershell_and_pwsh(tmp_path: Path) -> N
         main = _run_powershell(
             "Test_DurableLauncher.ps1",
             host,
-            ["-TestRoot", str(host_root / "main"), "-PythonPath", sys.executable],
+            ["-TestRoot", str(host_root / "main_test"), "-PythonPath", sys.executable],
         )
         assert "DURABLE_LAUNCHER_TEST_PASS" in main
         presentation = _run_powershell(
