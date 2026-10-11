@@ -78,6 +78,7 @@ function createOutput(rawName) {
 			properties: {
 				content: { type: "array", items: {} },
 				structuredContent: {},
+				trackingWarning: { type: "string" },
 			},
 			required: ["content"],
 			additionalProperties: false,
@@ -140,6 +141,7 @@ export async function apply(ctx, config) {
 	function createExecutor(rawName) {
 		return async (args, exec) => {
 			const res = await connection.callTool(rawName, args, { signal: exec.signal });
+			let trackingWarning;
 			if (rawName === "job_submit" && cfg.jobMirrorEnabled) {
 				// Prefer the structured result when the server provides one;
 				// parsing res.text alone no-ops when content carries no text.
@@ -153,18 +155,21 @@ export async function apply(ctx, config) {
 					// Mark as mirrored only after the mirror actually started;
 					// a failed start must stay retryable instead of being
 					// pinned in the mirrored set with no onTerminal cleanup.
-					stateStore.add(jobId, jobType);
-					if (ownerIdentity) {
-						stateStore.update(jobId, {
+					let persisted = stateStore.add(jobId, jobType);
+					if (persisted && ownerIdentity) {
+						persisted = stateStore.update(jobId, {
 							ownerAgentKey: ownerIdentity.key,
 							ownerSessionId: ownerIdentity.sessionId,
 							ownerKind: ownerIdentity.kind,
 							attempt,
 						});
-					} else if (attempt != null) {
-						stateStore.update(jobId, { attempt });
+					} else if (persisted && attempt != null) {
+						persisted = stateStore.update(jobId, { attempt });
 					}
-					if (startMirror(jobId, jobType, exec?.agent, attempt)) {
+					if (!persisted) {
+						trackingWarning = `COMSOL job ${jobId} was submitted, but bridge tracking could not be persisted; automatic restart recovery is unavailable.`;
+						logger.error?.(`comsol-bridge: ${trackingWarning}`);
+					} else if (startMirror(jobId, jobType, exec?.agent, attempt)) {
 						mirrored.add(jobId);
 						mirroredKeys.add(mirrorDedupeKey(jobId, attempt));
 					} else {
@@ -176,7 +181,13 @@ export async function apply(ctx, config) {
 					}
 				}
 			}
-			return { content: res.content, ...(res.structuredContent !== undefined ? { structuredContent: res.structuredContent } : {}) };
+			return {
+				content: trackingWarning
+					? [...(res.content ?? []), { type: "text", text: `WARNING: ${trackingWarning}` }]
+					: res.content,
+				...(res.structuredContent !== undefined ? { structuredContent: res.structuredContent } : {}),
+				...(trackingWarning ? { trackingWarning } : {}),
+			};
 		};
 	}
 

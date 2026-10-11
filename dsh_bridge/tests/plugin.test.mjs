@@ -178,6 +178,35 @@ test("apply keeps failed mirror starts retryable in the state file", { timeout: 
 	} finally { rmSync(stateDir, { recursive: true, force: true }); }
 });
 
+test("job_submit reports when bridge tracking cannot be persisted", { timeout: 20000 }, async () => {
+	const stateDir = mkdtempSync(join(TEST_ROOT, "b17plug"));
+	const blockedParent = join(stateDir, "not-a-directory");
+	writeFileSync(blockedParent, "block mkdir");
+	try {
+		const jobs = createFakeJobs();
+		const ctx = makeCtx({ jobs });
+		await apply(ctx, {
+			command: process.execPath,
+			args: [FIXTURE],
+			env: fakeServer.extraEnv,
+			cwd: TEST_ROOT,
+			stateFile: join(blockedParent, "jobs.json"),
+			reconnect: { enabled: false },
+			initTimeoutMs: 5000,
+			failOnStartupError: true,
+		});
+		const submit = ctx.registered.find((d) => d.name === "job_submit");
+		assert.ok(submit);
+		const result = await submitOnce(submit);
+		const submitted = JSON.parse(result.content.find((block) => block.type === "text" && block.text.includes("job_id")).text);
+		assert.match(submitted.job_id, /^job-\d+$/);
+		assert.match(result.trackingWarning, /was submitted.*could not be persisted/);
+		assert.ok(result.content.some((block) => block.text?.includes("automatic restart recovery is unavailable")));
+		assert.equal(jobs.started.length, 0, "volatile mirror must not claim recoverable tracking");
+		ctx.dispose();
+	} finally { rmSync(stateDir, { recursive: true, force: true }); }
+});
+
 test("B02: unconfirmed dispose keeps the durable state row", { timeout: 20000 }, async () => {
 	const stateDir = mkdtempSync(join(TEST_ROOT, "b02plug"));
 	try {
