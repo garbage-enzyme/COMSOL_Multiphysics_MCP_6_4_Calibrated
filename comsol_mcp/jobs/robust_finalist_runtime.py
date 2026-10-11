@@ -294,8 +294,8 @@ def run_licensed_finalist(
     finer_result, finer = execute("finer", finer_spec)
 
     if policy["off_design"]["mode"] == "not_requested":
-        off_mapping = {}
-        off_result = {"observations": []}
+        off_mapping: dict[str, tuple[str, str, float]] = {}
+        off_result: dict[str, Any] = {"observations": []}
     else:
         off_table, off_mapping = _off_design_table(spec["condition_table"], policy["off_design"])
         off_spec = _candidate_spec(
