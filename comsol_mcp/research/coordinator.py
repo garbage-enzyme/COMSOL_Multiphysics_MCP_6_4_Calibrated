@@ -98,11 +98,17 @@ class ResearchCampaignCoordinator:
                 runtime = json.loads(self.runtime_path.read_text(encoding="utf-8"))
                 if runtime.get("campaign_fingerprint") != self.campaign_fingerprint:
                     raise ValueError("campaign runtime identity is inconsistent")
+                if runtime.get("evaluator_identity") != self.evaluator_identity:
+                    raise ValueError("campaign runtime evaluator identity is inconsistent")
             else:
                 now = self._now()
                 atomic_write_json(
                     self.runtime_path,
-                    {"campaign_fingerprint": self.campaign_fingerprint, "started_at_epoch": now},
+                    {
+                        "campaign_fingerprint": self.campaign_fingerprint,
+                        "evaluator_identity": self.evaluator_identity,
+                        "started_at_epoch": now,
+                    },
                 )
 
     def _runtime(self) -> dict[str, Any]:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from comsol_mcp.durable import domain_sha256_v2
 from comsol_mcp.research.adaptive_acquisition import GaussianProcessExpectedImprovementOptimizer
 from comsol_mcp.research.campaign_loop import BoundedResearchCampaignLoop
@@ -110,6 +112,29 @@ def test_duplicate_terminal_failure_replays_through_the_failed_path(ascii_tmp_pa
     assert result["success"] is False
     assert result["evaluation"]["status"] == "failed"
     assert result["evaluation"]["candidate_fingerprint"] == "f" * 64
+
+
+def test_campaign_recovery_rejects_a_different_evaluator_identity(ascii_tmp_path):
+    manifest = _manifest()
+
+    def evaluator(_values):
+        return {"peak_wavelength_nm": 1550.0}
+
+    ResearchCampaignCoordinator(
+        ascii_tmp_path,
+        manifest,
+        evaluator,
+        evaluator_identity="b" * 64,
+        clock=lambda: 1000.0,
+    )
+    with pytest.raises(ValueError, match="evaluator identity"):
+        ResearchCampaignCoordinator(
+            ascii_tmp_path,
+            manifest,
+            evaluator,
+            evaluator_identity="c" * 64,
+            clock=lambda: 1000.0,
+        )
 
 
 def test_checkpoint_restart_replays_exact_next_adaptive_decision(ascii_tmp_path):
