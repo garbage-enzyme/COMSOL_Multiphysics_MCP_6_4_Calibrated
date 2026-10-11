@@ -284,6 +284,15 @@ def _write_dataset(path: Path) -> list[dict[str, float]]:
     return rows
 
 
+def _save_fem_artifact(model: Any, path: Path) -> str:
+    """Save and hash the actual solved COMSOL model artifact."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.save(str(path))
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise RuntimeError("COMSOL did not produce a durable FEM model artifact")
+    return _sha256_file(path)
+
+
 def _run_worker(output: Path, cores: int, workspace: Path) -> int:
     result: dict[str, Any] = {
         "schema_name": f"{SCHEMA_NAME}_worker",
@@ -525,19 +534,21 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
             except Exception as exc:
                 fem_error = f"{type(exc).__name__}: {exc}"
 
+            fem_artifact_sha256 = None
+            if fem_value is not None:
+                # Bind the FEM measurement to a durable, reviewable result
+                # artifact. A digest of an in-memory summary is not an artifact
+                # identity and must never satisfy the evidence contract.
+                artifact_path = workspace / "fem-results" / f"{candidate_id}.mph"
+                fem_artifact_sha256 = _save_fem_artifact(fem_model, artifact_path)
+
             fem_results.append(
                 record_fem_result(
                     candidate_id=candidate_id,
                     predicted_objective=record["predicted_objective"],
                     measured_objective=fem_value,
                     fem_evidence_state="verified" if fem_value is not None else "failed",
-                    fem_artifact_sha256=(
-                        hashlib.sha256(
-                            f"{candidate_id}:{a1}:{a2}:{fem_value}".encode("utf-8")
-                        ).hexdigest()
-                        if fem_value is not None
-                        else None
-                    ),
+                    fem_artifact_sha256=fem_artifact_sha256,
                     absolute_tolerance=1e-6,
                 )
             )

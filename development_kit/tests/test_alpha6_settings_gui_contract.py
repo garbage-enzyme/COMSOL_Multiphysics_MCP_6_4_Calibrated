@@ -69,6 +69,20 @@ def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(t
     assert report["settings"]["gui"]["language"] == "zh-cn"
 
 
+def test_legacy_profile_migration_preserves_explicit_feature_opt_outs(tmp_path):
+    for profile, feature in (("semantic_docs", "semantic_docs"), ("desktop_shared", "shared_server")):
+        legacy = tmp_path / f"legacy-{feature}.json"
+        legacy.write_text(json.dumps({
+            "schema_name": "comsol_mcp.settings",
+            "schema_version": "1.0.0",
+            "profile": {"name": profile},
+            feature: {"enabled": False},
+        }), encoding="utf-8")
+        report = settings_module.load_settings_report({settings_module.SETTINGS_PATH_ENV: str(legacy)})
+        assert report["errors"] == []
+        assert report["settings"][feature]["enabled"] is False
+
+
 def test_alpha6_installed_location_uses_localappdata_before_bundled_template(tmp_path):
     local_appdata = tmp_path / "non-ascii-user-配置"
     bundled = tmp_path / "site-packages" / "comsol_mcp" / "settings.json"

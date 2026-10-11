@@ -436,6 +436,15 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
         except Exception as exc:
             result["step_side_binding"] = {"error": f"{type(exc).__name__}: {exc}"}
 
+        expected_identity = {
+            "study_tags": [str(item) for item in list(jm.study().tags())],
+            "func_tags": [str(item) for item in list(jm.func().tags())],
+            "dnn_type": str(backend.get_dnn_function(DNN_FUNCTION_TAG).getType()),
+            "seed_readback": dict(result["seed_readback"]),
+            "step_type": str(backend.get_study_step(STUDY_TAG, STUDY_STEP_TAG).getType()),
+        }
+        result["pre_save_identity"] = expected_identity
+
         # ---- Phase 2: save / reload identity -------------------------------
         model_path = workspace / "surrogate_dnn_gate.mph"
         model.save(str(model_path))
@@ -457,6 +466,13 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
         }
         rstep = reload_backend.get_study_step(STUDY_TAG, STUDY_STEP_TAG)
         result["reload"]["step_type"] = str(rstep.getType())
+        result["reload"]["identity_matches_pre_save"] = (
+            result["reload"]["study_tags"] == expected_identity["study_tags"]
+            and result["reload"]["func_tags"] == expected_identity["func_tags"]
+            and result["reload"]["dnn_type"] == expected_identity["dnn_type"]
+            and result["reload"]["seed_readback"] == expected_identity["seed_readback"]
+            and result["reload"]["step_type"] == expected_identity["step_type"]
+        )
 
         # ---- Phase 3: rollback leaves no partial tree -----------------------
         # Re-create the same tags on the reloaded model; the adapter must refuse
@@ -471,6 +487,10 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
             "study_tags": [str(item) for item in list(rjm.study().tags())],
             "func_tags": [str(item) for item in list(rjm.func().tags())],
         }
+        result["refusal_on_existing_tags"]["tags_unchanged"] = (
+            result["post_refusal_tags"]
+            == {key: result["reload"][key] for key in ("study_tags", "func_tags")}
+        )
 
         # ---- Phase 4: injected mid-batch failure rolls back -----------------
         # A second model keeps the rollback proof independent of the reload.
@@ -674,6 +694,8 @@ def _run_parent(args) -> int:
             and worker_result.get("post_rollback_tags") == {"study_tags": [], "func_tags": []}
             and refusal.get("success") is False
             and refusal.get("created_nodes") == []
+            and refusal.get("tags_unchanged") is True
+            and (worker_result.get("reload") or {}).get("identity_matches_pre_save") is True
             and active.get("durable_jobs", {}).get("active_count") == 0
         )
         if not phase_passed:
