@@ -736,8 +736,8 @@ internal static class ComsolMcpStandaloneLauncher
             {
                 started(process);
             }
-            Task<string> stdout = process.StandardOutput.ReadToEndAsync();
-            Task<string> stderr = process.StandardError.ReadToEndAsync();
+            Task<byte[]> stdout = ReadBoundedAsync(process.StandardOutput.BaseStream, MaximumLogBytes);
+            Task<byte[]> stderr = ReadBoundedAsync(process.StandardError.BaseStream, MaximumLogBytes);
             bool timedOut = !process.WaitForExit(timeoutMilliseconds);
             if (timedOut)
             {
@@ -768,14 +768,38 @@ internal static class ComsolMcpStandaloneLauncher
                     "owned_process_streams_not_drained", drainFailure
                 );
             }
-            string combined = stdout.Result + stderr.Result;
-            byte[] payload = new UTF8Encoding(false).GetBytes(combined);
+            byte[] stdoutPayload = stdout.Result;
+            byte[] stderrPayload = stderr.Result;
+            byte[] payload = new byte[stdoutPayload.Length + stderrPayload.Length];
+            Buffer.BlockCopy(stdoutPayload, 0, payload, 0, stdoutPayload.Length);
+            Buffer.BlockCopy(stderrPayload, 0, payload, stdoutPayload.Length, stderrPayload.Length);
             if (payload.Length > MaximumLogBytes)
             {
                 throw new InvalidDataException("owned_process_log_exceeds_bound");
             }
             DurableAtomicWrite(processLog, payload);
             return process.ExitCode;
+        }
+    }
+
+    private static async Task<byte[]> ReadBoundedAsync(Stream stream, int maximumBytes)
+    {
+        using (MemoryStream buffer = new MemoryStream(Math.Min(maximumBytes, 65536)))
+        {
+            byte[] chunk = new byte[8192];
+            while (true)
+            {
+                int read = await stream.ReadAsync(chunk, 0, chunk.Length).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    return buffer.ToArray();
+                }
+                if (buffer.Length + read > maximumBytes)
+                {
+                    throw new InvalidDataException("owned_process_log_exceeds_bound");
+                }
+                buffer.Write(chunk, 0, read);
+            }
         }
     }
 

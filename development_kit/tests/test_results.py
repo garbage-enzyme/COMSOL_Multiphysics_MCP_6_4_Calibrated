@@ -149,3 +149,35 @@ def test_staging_preserves_the_destination_suffix(tmp_path):
     assert seen["staging"].endswith(".png")
     assert destination.read_bytes() == b"png"
     assert not list(tmp_path.glob(".*"))
+
+
+def test_export_restores_mph_node_filename_after_staging(tmp_path):
+    destination = tmp_path / "field.csv"
+
+    class ExportNode:
+        def __init__(self):
+            self.values = {"filename": "caller.csv", "type": "Data"}
+
+        def properties(self):
+            return dict(self.values)
+
+        def property(self, name, value=None):
+            if value is None:
+                return self.values[name]
+            self.values[name] = value
+
+    class ExportModel:
+        def __init__(self):
+            self.node = ExportNode()
+
+        def __truediv__(self, value):
+            return self if value == "exports" else self.node
+
+        def export(self, _node_name, staging):
+            self.node.values["filename"] = staging
+            Path(staging).write_bytes(b"csv")
+
+    model = ExportModel()
+    export_result_file(model, "data1", str(destination))
+
+    assert model.node.values["filename"] == "caller.csv"

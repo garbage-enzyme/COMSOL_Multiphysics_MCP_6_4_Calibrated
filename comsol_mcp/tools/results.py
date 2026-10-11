@@ -49,6 +49,35 @@ def _json_safe_solution_axis(values: Any) -> list[Any]:
     return normalized
 
 
+def _export_node_snapshot(model: Any, node_name: str) -> tuple[Any, dict[str, Any]] | None:
+    """Capture filename settings that MPh mutates when it runs an export node."""
+    try:
+        node = model / "exports" / node_name
+        properties = node.properties()
+    except Exception:
+        return None
+    names = {
+        "filename",
+        "type",
+        "movietype",
+        "giffilename",
+        "flashfilename",
+        "avifilename",
+        "webmfilename",
+        "imagefilename",
+    }
+    return node, {name: properties[name] for name in names if name in properties}
+
+
+def _restore_export_node_snapshot(snapshot: tuple[Any, dict[str, Any]] | None) -> None:
+    if snapshot is None:
+        return
+    node, properties = snapshot
+    for name, value in properties.items():
+        if value is not None:
+            node.property(name, value)
+
+
 def evaluate_result(
     model,
     expression: Union[str, Sequence[str]],
@@ -113,8 +142,12 @@ def export_result_file(model, node_name: str | None, file_path: str) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     overwrite = path.exists()
     staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}{path.suffix}")
+    snapshot = _export_node_snapshot(model, node_name)
     try:
-        model.export(node_name, str(staging))
+        try:
+            model.export(node_name, str(staging))
+        finally:
+            _restore_export_node_snapshot(snapshot)
         if not staging.is_file():
             raise RuntimeError("result export did not create the staging artifact")
         if overwrite:

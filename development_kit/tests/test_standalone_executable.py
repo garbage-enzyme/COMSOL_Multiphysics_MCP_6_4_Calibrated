@@ -469,7 +469,10 @@ def test_embedded_launcher_preserves_bounded_durable_process_and_resume_contract
     assert 'throw new InvalidDataException("campaign_reference_physics_is_not_positive")' in source
     assert "TryWriteFailureStatus(exception.Message, committedCount);" in source
     assert '{"completed", completed}' in source
-    assert source.index("ReadToEndAsync()") < source.index(
+    assert "ReadToEndAsync()" not in source
+    assert "ReadBoundedAsync(process.StandardOutput.BaseStream, MaximumLogBytes)" in source
+    assert "ReadBoundedAsync(process.StandardError.BaseStream, MaximumLogBytes)" in source
+    assert source.index("ReadBoundedAsync(") < source.index(
         "process.WaitForExit(timeoutMilliseconds)"
     )
 
