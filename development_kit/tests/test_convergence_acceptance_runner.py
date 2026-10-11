@@ -45,6 +45,23 @@ def test_receipt_is_never_overwritten(tmp_path, ascii_root):
         )
 
 
+def test_receipt_publish_refuses_target_created_after_precheck(tmp_path, monkeypatch):
+    from development_kit.tests.integration import convergence_campaign_acceptance as runner
+
+    output = tmp_path / "raced.json"
+    real_link = runner.os.link
+
+    def publish_competitor_then_link(source, destination):
+        output.write_text("competitor", encoding="ascii")
+        return real_link(source, destination)
+
+    monkeypatch.setattr(runner.os, "link", publish_competitor_then_link)
+    with pytest.raises(FileExistsError):
+        runner._write_json(output, {"ours": True})
+
+    assert output.read_text(encoding="ascii") == "competitor"
+
+
 def test_non_ascii_runtime_fails_before_worker(tmp_path):
     with pytest.raises(ValueError, match="ASCII"):
         run_acceptance(

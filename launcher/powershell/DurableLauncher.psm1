@@ -204,7 +204,10 @@ function Get-DurableTerminalDisposition {
     param([Parameter(Mandatory = $true)][object]$Snapshot)
     if ([bool]$Snapshot.Running) { return 'running' }
     $Status = ([string]$Snapshot.Status).Trim().ToLowerInvariant()
-    if ([int]$Snapshot.Completed -ge [int]$Snapshot.Planned -and $Status -match 'complete') {
+    if (
+        [int]$Snapshot.Completed -ge [int]$Snapshot.Planned -and
+        $Status -in @('complete', 'completed', 'succeeded', 'success')
+    ) {
         return 'success'
     }
     if ($Status -match 'gate_failed|threshold_not_met|quality_not_met|policy_refused|scientific_not_accepted|acceptance_failed|mesh_not_converged') {

@@ -102,6 +102,7 @@ export async function apply(ctx, config) {
 	// a second poller for the same durable identity.
 	const mirroredKeys = new Set();
 	let generation = new Map();
+	let generationDefinitions = new Map();
 	let disposedPlugin = false;
 	let rehydrateTimer = null;
 
@@ -126,16 +127,28 @@ export async function apply(ctx, config) {
 				...(cfg.toolCallTimeoutMs > 0 ? { timeoutMs: cfg.toolCallTimeoutMs } : {}),
 			});
 		}
+		const previousDefinitions = generationDefinitions;
+		for (const d of generation.values()) d();
+		generation = new Map();
 		const disposers = new Map();
 		try {
 			for (const [publicName, def] of next) disposers.set(publicName, ctx.tools.register(def));
 		} catch (e) {
 			for (const d of disposers.values()) d();
-			logger.error?.(`comsol-bridge: tool registration failed, no tools registered: ${e.message}`);
+			const restored = new Map();
+			try {
+				for (const [publicName, def] of previousDefinitions) restored.set(publicName, ctx.tools.register(def));
+				generation = restored;
+				generationDefinitions = previousDefinitions;
+			} catch (restoreError) {
+				for (const d of restored.values()) d();
+				logger.error?.(`comsol-bridge: tool registration failed (${e.message}); previous generation restore failed (${restoreError.message})`);
+			}
+			if (restored.size === previousDefinitions.size) logger.error?.(`comsol-bridge: tool registration failed; previous generation restored: ${e.message}`);
 			return;
 		}
-		for (const d of generation.values()) d();
 		generation = disposers;
+		generationDefinitions = next;
 	}
 
 	function createExecutor(rawName) {
@@ -156,6 +169,7 @@ export async function apply(ctx, config) {
 					// a failed start must stay retryable instead of being
 					// pinned in the mirrored set with no onTerminal cleanup.
 					let persisted = stateStore.add(jobId, jobType);
+					if (ownerIdentity && !ownerIdentity.sessionId) persisted = false;
 					if (persisted && ownerIdentity) {
 						persisted = stateStore.update(jobId, {
 							ownerAgentKey: ownerIdentity.key,
@@ -167,9 +181,12 @@ export async function apply(ctx, config) {
 						persisted = stateStore.update(jobId, { attempt });
 					}
 					if (!persisted) {
-						trackingWarning = `COMSOL job ${jobId} was submitted, but bridge tracking could not be persisted; automatic restart recovery is unavailable.`;
+						const reason = ownerIdentity && !ownerIdentity.sessionId
+							? "the DSH owner has no session identity"
+							: "the bridge state file could not be persisted";
+						trackingWarning = `COMSOL job ${jobId} was submitted, but ${reason}; automatic restart recovery is unavailable.`;
 						logger.error?.(`comsol-bridge: ${trackingWarning}`);
-					} else if (startMirror(jobId, jobType, exec?.agent, attempt)) {
+					} else if (startMirror(jobId, jobType, ownerIdentity?.sessionId, attempt)) {
 						mirrored.add(jobId);
 						mirroredKeys.add(mirrorDedupeKey(jobId, attempt));
 					} else {
@@ -282,9 +299,8 @@ export async function apply(ctx, config) {
 					logger.warn?.(`comsol-bridge: rehydrate blocked for ${rec.jobId}: missing owner identity`);
 					continue;
 				}
-				// B02a: DSH jobs.start requires the live registered Agent
-				// instance, not a string key. Resolve it from the agents
-				// registry; never invent an agent or pass the raw string.
+				// DSH 0.2 jobs.start accepts a SessionId, not a live Agent object.
+				// Resolve the session first to ensure this controller still exists.
 				const agents = ctx.get("agents");
 				const liveOwner = agents?.get?.(owner);
 				if (!liveOwner) {
@@ -306,7 +322,7 @@ export async function apply(ctx, config) {
 				}
 				// Restore the original owner so jobs.start routes to that
 				// agent's controller (B02a). Failures leave the row retryable.
-				if (startMirror(rec.jobId, rec.jobType, liveOwner, rec.attempt ?? null)) {
+				if (startMirror(rec.jobId, rec.jobType, owner, rec.attempt ?? null)) {
 					mirrored.add(rec.jobId);
 					mirroredKeys.add(dedupeKey);
 					stateStore.update(rec.jobId, { lastObservedState: state });
@@ -354,6 +370,7 @@ export async function apply(ctx, config) {
 		connection.dispose();
 		for (const d of generation.values()) d();
 		generation = new Map();
+		generationDefinitions = new Map();
 	}, "comsol-bridge.lifecycle");
 
 	const connected = await connection.connect();

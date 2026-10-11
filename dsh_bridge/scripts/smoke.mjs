@@ -13,7 +13,12 @@ const conn = createComsolConnection({ command: process.execPath, args: [FIXTURE]
 
 const jobs = {
 	started: [],
-	start(spec) { const r = { id: `comsol-${this.started.length + 1}`, hooks: spec.run() }; this.started.push(r); return r.id; },
+	start(spec) {
+		const r = { id: `comsol-${this.started.length + 1}`, output: "" };
+		r.hooks = spec.run({ id: r.id, append: (text) => { r.output += text; }, updateProgress: () => {} });
+		this.started.push(r);
+		return r.id;
+	},
 };
 
 try {
@@ -31,7 +36,7 @@ try {
 	const rec = jobs.started[0];
 	const outcome = await Promise.race([rec.hooks.done, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 8000))]);
 	log(`mirror outcome: ${JSON.stringify(outcome)}`);
-	const tail = rec.hooks.readOutput();
+	const tail = rec.output;
 	log(`progress stream (${tail.length} chars): ${tail.split("\n").slice(0, 3).join(" | ")}`);
 	if (outcome.status !== "completed") throw new Error("expected completed");
 	if (tail.length === 0) throw new Error("expected progress stream");

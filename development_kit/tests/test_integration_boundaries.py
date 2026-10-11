@@ -767,6 +767,42 @@ def test_point_audit_requires_an_identifiable_wavelength_step():
         )
 
 
+def test_point_audit_cleanup_failures_are_explicit_and_fail_closed():
+    class Client:
+        def clear(self):
+            raise OSError("injected clear failure")
+
+    class Owner:
+        def __init__(self):
+            self.calls = 0
+
+        def release(self):
+            self.calls += 1
+            raise OSError("injected lease failure")
+
+    owner = Owner()
+    cleanup = point_gate._cleanup_resources(Client(), owner)
+
+    assert cleanup["passed"] is False
+    assert cleanup["client_clear"]["success"] is False
+    assert cleanup["lease_release_success"] is False
+    assert owner.calls == 1
+
+
+def test_point_audit_cleanup_passes_only_after_both_resources_are_clean():
+    class Client:
+        def clear(self):
+            return None
+
+    class Owner:
+        def release(self):
+            return {"success": True, "released": True}
+
+    cleanup = point_gate._cleanup_resources(Client(), Owner())
+
+    assert cleanup["passed"] is True
+
+
 def test_preflight_fixture_prerequisites_fail_with_explicit_errors():
     with pytest.raises(ValueError, match="no component"):
         preflight_gate._select_preflight_tags([], [], [])

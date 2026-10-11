@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from mcp.shared.exceptions import MCPError
 
 from development_kit.scripts.installed_stdio_probe import (
     _expect_rejection,
+    _probe_modern_isolated,
     _spectral_arguments,
     _stdio_environment,
     _tool_payload,
@@ -190,3 +194,54 @@ def test_installed_spectral_probe_arguments_are_bounded_and_passive():
     assert all(abs(row["R"] + row["T"] + row["A"] - 1.0) < 1.0e-12 for row in rows)
     assert all(0.0 <= row[quantity] <= 1.0 for row in rows for quantity in ("R", "T", "A"))
     assert arguments["measurement_configuration"]["peak_method"] == "measured_grid"
+
+
+def test_modern_probe_uses_a_fresh_temporary_root_on_repeated_runs(tmp_path, monkeypatch):
+    observed = []
+
+    async def fake_probe(_command, workdir):
+        observed.append(workdir)
+        (workdir / "runtime").mkdir()
+        return {"status": "pass"}
+
+    monkeypatch.setattr("development_kit.scripts.installed_stdio_probe._probe_modern", fake_probe)
+
+    assert _probe_modern_isolated(Path("python"), tmp_path) == {"status": "pass"}
+    assert _probe_modern_isolated(Path("python"), tmp_path) == {"status": "pass"}
+
+    assert len(observed) == 2
+    assert observed[0] != observed[1]
+    assert all(not path.exists() for path in observed)
+
+
+def test_study_mesh_probe_fails_when_both_client_cleanup_steps_fail(monkeypatch):
+    class Client:
+        def create(self, _name):
+            java = MagicMock()
+            component = java.component.return_value.create.return_value
+            geometry = component.geom.return_value.create.return_value
+            geometry.getSDim.return_value = "3"
+            geometry.getNDomains.return_value = 1
+            geometry.getNBoundaries.return_value = 6
+            component.mesh.return_value.create.return_value.getNumElem.return_value = 10
+            return SimpleNamespace(java=java)
+
+        def clear(self):
+            raise OSError("clear failed")
+
+        def disconnect(self):
+            raise OSError("disconnect failed")
+
+    monkeypatch.setitem(sys.modules, "mph", SimpleNamespace(Client=lambda **_kwargs: Client()))
+    monkeypatch.setitem(sys.modules, "jpype", SimpleNamespace())
+
+    probe_path = (
+        Path(__file__).parent / "integration" / "probes" / "study_mesh.py"
+    )
+    spec = importlib.util.spec_from_file_location("study_mesh_cleanup_probe", probe_path)
+    assert spec is not None and spec.loader is not None
+    study_mesh = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(study_mesh)
+
+    with pytest.raises(RuntimeError, match="cleanup failed: clear, disconnect"):
+        study_mesh.main()

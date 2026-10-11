@@ -95,9 +95,9 @@ export function extractOwnerIdentity(agent) {
  */
 export function ownerFromIdentity(record) {
 	if (!record || typeof record !== "object") return undefined;
-	const key = typeof record.ownerAgentKey === "string" ? record.ownerAgentKey.trim() : "";
-	if (!key) return undefined;
-	return key;
+	const sessionId = typeof record.ownerSessionId === "string" ? record.ownerSessionId.trim() : "";
+	if (sessionId) return sessionId;
+	return undefined;
 }
 
 export function mirrorDedupeKey(jobId, attempt) {
@@ -128,16 +128,18 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, attempt = n
 		label: `comsol job ${jobId}${jobType ? ` (${jobType})` : ""}`,
 		...(agent ? { owner: agent } : {}),
 		outputLimitBytes: cfg.outputLimitBytes,
-		run: () => {
+		run: (job) => {
 			let settled = false;
 			let resolveDone;
 			const done = new Promise((res) => { resolveDone = res; });
 			let pollTimer = null;
 			let tailTimer = null;
-			let outputBuffer = "";
 			let lastTail = "";
 			let cancelDeadline = null;
 			let cancelTimer = null;
+			let attemptVerified = attempt == null;
+			let cancelRequested = false;
+			let cancelSent = false;
 			// The callTool timeout exceeds the poll interval, so each loop
 			// must skip ticks while its previous call is still in flight;
 			// otherwise overlapping tails duplicate progress deltas.
@@ -172,6 +174,12 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, attempt = n
 				}
 			};
 
+			const sendCancel = () => {
+				if (settled || cancelSent || !cancelRequested || !attemptVerified) return;
+				cancelSent = true;
+				void core.callTool("job_cancel", { job_id: jobId }, { timeoutMs: 30000 }).catch(() => {});
+			};
+
 			const poll = async () => {
 				if (settled || pollInFlight) return;
 				pollInFlight = true;
@@ -201,6 +209,8 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, attempt = n
 							finish("failed", "server attempt differs or is unavailable; durable job remains tracked", { confirmedTerminal: false, lastObservedState: state });
 							return;
 						}
+						attemptVerified = true;
+						sendCancel();
 						if (state !== undefined && isTerminal(state, cfg.terminalStates)) {
 							finish(mapOutcome(state), `state=${state}`, {
 								confirmedTerminal: true,
@@ -235,8 +245,7 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, attempt = n
 					if (text && text !== lastTail) {
 						const delta = text.startsWith(lastTail) ? text.slice(lastTail.length) : text;
 						lastTail = text;
-						outputBuffer += delta;
-						if (outputBuffer.length > cfg.outputLimitBytes) outputBuffer = outputBuffer.slice(-cfg.outputLimitBytes);
+						if (delta) job.append(delta, { channel: "log" });
 					}
 				} catch {
 					/* keep last buffer; server unreachable */
@@ -262,6 +271,7 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, attempt = n
 						return;
 					}
 					cancelDeadline = Date.now() + cfg.cancelConfirmTimeoutMs;
+					cancelRequested = true;
 					// Dedicated deadline timer: settlement must not depend on a
 					// poll tick surviving a slow or unreachable server.
 					if (cancelTimer) clearTimeout(cancelTimer);
@@ -272,14 +282,9 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, attempt = n
 							});
 						}
 					}, Math.max(0, cfg.cancelConfirmTimeoutMs + 5));
-					void core.callTool("job_cancel", { job_id: jobId }, { timeoutMs: 30000 }).catch(() => {});
+					sendCancel();
 				},
 				done,
-				readOutput: () => {
-					const out = outputBuffer;
-					outputBuffer = "";
-					return out;
-				},
 			};
 		},
 	});

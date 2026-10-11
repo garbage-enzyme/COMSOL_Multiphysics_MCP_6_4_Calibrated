@@ -9,6 +9,7 @@ import mph
 def main() -> None:
     """Verify mesh creation and the full Stationary study type."""
     client = None
+    cleanup_errors = []
     try:
         client = mph.Client(version="6.4")
         model = client.create("StudyMeshProbe")
@@ -47,10 +48,16 @@ def main() -> None:
                 client.clear()
             except Exception as exc:
                 print(f"study+mesh cleanup warning: clear failed: {exc}", file=sys.stderr)
+                cleanup_errors.append("clear")
             try:
                 client.disconnect()
             except Exception as exc:
                 print(f"study+mesh cleanup warning: disconnect failed: {exc}", file=sys.stderr)
+                cleanup_errors.append("disconnect")
+        if cleanup_errors:
+            raise RuntimeError(
+                "study+mesh cleanup failed: " + ", ".join(cleanup_errors)
+            )
 
 
 if __name__ == "__main__":

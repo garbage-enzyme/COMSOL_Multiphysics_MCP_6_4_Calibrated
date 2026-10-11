@@ -78,16 +78,22 @@ after(() => fakeServer.close());
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function makeCtx({ jobs, agents } = {}) {
+function makeCtx({ jobs, agents, strictTools = false } = {}) {
 	const registered = [];
 	const disposers = [];
+	const names = new Set();
+	let registerAttempts = 0;
 	return {
 		registered,
+		get registerAttempts() { return registerAttempts; },
 		logger: quietLogger(),
 		tools: {
 			register(def) {
+				registerAttempts += 1;
+				if (strictTools && names.has(def.name)) throw new Error(`tool ${def.name} already registered`);
+				names.add(def.name);
 				registered.push(def);
-				return () => {};
+				return () => { names.delete(def.name); };
 			},
 		},
 		get: (key) => {
@@ -103,6 +109,32 @@ function makeCtx({ jobs, agents } = {}) {
 		},
 	};
 }
+
+test("tool-list refresh replaces an overlapping generation without dropping it", { timeout: 10000 }, async () => {
+	const stateDir = mkdtempSync(join(TEST_ROOT, "b18tools"));
+	const refreshServer = spawnFakeServer({ FAKE_MODE: "notify-list-changed" });
+	try {
+		const ctx = makeCtx({ strictTools: true });
+		await apply(ctx, {
+			command: process.execPath,
+			args: [FIXTURE],
+			env: refreshServer.extraEnv,
+			cwd: TEST_ROOT,
+			stateFile: join(stateDir, "jobs.json"),
+			reconnect: { enabled: false },
+			initTimeoutMs: 5000,
+			failOnStartupError: true,
+		});
+		const deadline = Date.now() + 3000;
+		while (ctx.registerAttempts < 14 && Date.now() < deadline) await sleep(10);
+		assert.equal(ctx.registerAttempts, 14, "both tool generations should register completely");
+		assert.equal(ctx.registered.filter((tool) => tool.name === "job_status").length, 2);
+		ctx.dispose();
+	} finally {
+		await refreshServer.close();
+		rmSync(stateDir, { recursive: true, force: true });
+	}
+});
 
 async function submitOnce(def, agent) {
 	return def.execute(
@@ -133,7 +165,7 @@ test("apply mirrors job_submit only after the mirror starts", { timeout: 20000 }
 		const submit = ctx.registered.find((d) => d.name === "job_submit");
 		assert.ok(submit, "job_submit must be registered natively");
 
-		const result = await submitOnce(submit, "agent-1");
+		const result = await submitOnce(submit, { id: "agent-1", sessionId: "session-1" });
 		const text = result.content.map((b) => b.text ?? "").join("\n");
 		const jobId = JSON.parse(text).job_id;
 		assert.match(jobId, /^job-\d+$/);
@@ -227,7 +259,7 @@ test("B02: unconfirmed dispose keeps the durable state row", { timeout: 20000 },
 			failOnStartupError: true,
 		});
 		const submit = ctx.registered.find((d) => d.name === "job_submit");
-		const result = await submitOnce(submit, "agent-1");
+		const result = await submitOnce(submit, { id: "agent-1", sessionId: "session-1" });
 		const jobId = JSON.parse(result.content.map((b) => b.text ?? "").join("\n")).job_id;
 		assert.equal(jobs.started.length, 1);
 
@@ -264,8 +296,9 @@ test("B02a: extractOwnerIdentity handles string, object, and unusable agents", (
 });
 
 test("B02a: ownerFromIdentity restores only persisted keys; never invents", () => {
-	assert.equal(ownerFromIdentity({ ownerAgentKey: "agent-1" }), "agent-1");
-	assert.equal(ownerFromIdentity({ ownerAgentKey: "  agent-2  " }), "agent-2");
+	assert.equal(ownerFromIdentity({ ownerAgentKey: "agent-1", ownerSessionId: "session-1" }), "session-1");
+	assert.equal(ownerFromIdentity({ ownerAgentKey: "agent-2", ownerSessionId: "  session-2  " }), "session-2");
+	assert.equal(ownerFromIdentity({ ownerAgentKey: "agent-1" }), undefined, "agent keys cannot stand in for DSH SessionId");
 	assert.equal(ownerFromIdentity({ ownerAgentKey: null }), undefined);
 	assert.equal(ownerFromIdentity({}), undefined);
 	assert.equal(ownerFromIdentity(null), undefined);
@@ -299,14 +332,15 @@ test("B02a: submit persists owner identity for rehydrate", { timeout: 20000 }, a
 			rehydrateMaxAttempts: 0,
 		});
 		const submit = ctx.registered.find((d) => d.name === "job_submit");
-		const result = await submitOnce(submit, "agent-1");
+	const result = await submitOnce(submit, { id: "agent-1", sessionId: "session-1" });
 		const jobId = JSON.parse(result.content.map((b) => b.text ?? "").join("\n")).job_id;
 		const rows = JSON.parse(readFileSync(join(stateDir, "jobs.json"), "utf8"));
 		assert.equal(rows.length, 1);
 		assert.equal(rows[0].jobId, jobId);
 		assert.equal(rows[0].ownerAgentKey, "agent-1");
-		assert.equal(rows[0].ownerKind, "agent_key");
-		assert.equal(jobs.started[0].spec.owner, "agent-1");
+		assert.equal(rows[0].ownerSessionId, "session-1");
+		assert.equal(rows[0].ownerKind, "agent_object");
+		assert.equal(jobs.started[0].spec.owner, "session-1", "DSH 0.2 requires owner SessionId");
 		jobs.started[0].hooks.cancel();
 		ctx.dispose();
 		await Promise.race([jobs.started[0].done, sleep(2000)]);
@@ -324,7 +358,7 @@ test("B02a: rehydrate restores owner and does not resubmit", { timeout: 25000 },
 			at: Date.now(),
 			schemaVersion: 2,
 			ownerAgentKey: "agent-1",
-			ownerSessionId: "agent-1",
+			ownerSessionId: "session-1",
 			ownerKind: "agent_key",
 			attempt: null,
 			unconfirmed: true,
@@ -334,8 +368,8 @@ test("B02a: rehydrate restores owner and does not resubmit", { timeout: 25000 },
 
 		const jobs = createFakeJobs();
 		// DSH requires the live registered Agent instance for jobs.start owner.
-		const liveAgent = { id: "agent-1" };
-		const agents = { get: (id) => (id === "agent-1" ? liveAgent : undefined) };
+		const liveAgent = { id: "agent-1", sessionId: "session-1" };
+		const agents = { get: (id) => (id === "session-1" ? liveAgent : undefined) };
 		const ctx = makeCtx({ jobs, agents });
 		await apply(ctx, {
 			command: process.execPath,
@@ -352,7 +386,7 @@ test("B02a: rehydrate restores owner and does not resubmit", { timeout: 25000 },
 
 		// Rehydrate must start exactly one mirror with the restored live owner.
 		assert.equal(jobs.started.length, 1, `expected 1 rehydrated mirror, got ${jobs.started.length}`);
-		assert.equal(jobs.started[0].spec.owner, liveAgent);
+		assert.equal(jobs.started[0].spec.owner, "session-1");
 		assert.equal(jobs.started[0].spec.label, "comsol job job-1 (staged_sweep)");
 
 		const rows = JSON.parse(readFileSync(stateFile, "utf8"));
@@ -420,6 +454,7 @@ test("B02a: rehydrate with owner key but agent not live keeps the row blocked", 
 			jobType: "staged_sweep",
 			schemaVersion: 2,
 			ownerAgentKey: "agent-1",
+			ownerSessionId: "session-1",
 		}], null, 2));
 		const jobs = createFakeJobs();
 		const agents = { get: () => undefined };
@@ -454,14 +489,15 @@ test(`rehydrate preserves offline completion routing (owner available: ${ownerAv
 			jobType: "staged_sweep",
 			schemaVersion: 2,
 			ownerAgentKey: "agent-1",
+			ownerSessionId: "session-1",
 		}], null, 2));
 
 		// Fake server: FAKE_POLLS=1 means the first job_status returns completed.
 		const termServer = spawnFakeServer({ FAKE_POLLS: "1" });
 		try {
 			const jobs = createFakeJobs();
-			const owner = { id: "agent-1" };
-			const ctx = makeCtx({ jobs, agents: { get: (id) => ownerAvailable && id === owner.id ? owner : undefined } });
+			const owner = { id: "agent-1", sessionId: "session-1" };
+			const ctx = makeCtx({ jobs, agents: { get: (id) => ownerAvailable && id === owner.sessionId ? owner : undefined } });
 			await apply(ctx, {
 				command: process.execPath,
 				args: [FIXTURE],
@@ -476,7 +512,7 @@ test(`rehydrate preserves offline completion routing (owner available: ${ownerAv
 			});
 			if (ownerAvailable) {
 				assert.equal(jobs.started.length, 1, "offline completion must reach the original controller");
-				assert.equal(jobs.started[0].spec.owner, owner);
+				assert.equal(jobs.started[0].spec.owner, owner.sessionId);
 				const outcome = await Promise.race([jobs.started[0].done, sleep(3000)]);
 				assert.equal(outcome.status, "completed");
 				assert.deepEqual(JSON.parse(readFileSync(stateFile, "utf8")), []);
@@ -498,12 +534,12 @@ test(`rehydrate preserves offline completion routing (owner available: ${ownerAv
 
 test("rehydrate keeps a known attempt blocked when the server cannot confirm it", { timeout: 10000 }, async () => {
 	const dir = mkdtempSync(join(TEST_ROOT, "battempt"));
-	const owner = { id: "owner" };
+	const owner = { id: "owner", sessionId: "session-owner" };
 	const jobs = createFakeJobs();
 	const ctx = makeCtx({ jobs, agents: { get: () => owner } });
 	try {
 		const stateFile = join(dir, "jobs.json");
-		writeFileSync(stateFile, JSON.stringify([{ jobId: "job-old", attempt: 1, ownerAgentKey: owner.id }]));
+		writeFileSync(stateFile, JSON.stringify([{ jobId: "job-old", attempt: 1, ownerAgentKey: owner.id, ownerSessionId: owner.sessionId }]));
 		await apply(ctx, { command: process.execPath, args: [FIXTURE], env: fakeServer.extraEnv,
 			cwd: TEST_ROOT, stateFile, reconnect: { enabled: false }, initTimeoutMs: 5000,
 			failOnStartupError: true, rehydrateMaxAttempts: 0,

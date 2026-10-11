@@ -47,7 +47,12 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
         handle.write(payload)
         handle.flush()
         os.fsync(handle.fileno())
-    os.replace(temporary, path)
+    try:
+        # A hard link publishes the complete inode without replacing a target
+        # created after the earlier existence check.
+        os.link(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _ascii_root(path: Path) -> Path:
