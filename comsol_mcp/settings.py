@@ -304,28 +304,25 @@ def _migrate_legacy_document(document: Any) -> Any:
     profile = migrated.get("profile")
     raw_profile = profile.get("name") if isinstance(profile, dict) else None
     normalized_profile = raw_profile.strip().casefold() if isinstance(raw_profile, str) else None
-    semantic = migrated.get("semantic_docs")
-    if not isinstance(semantic, dict):
-        semantic = {}
-        migrated["semantic_docs"] = semantic
-    lexical_docs = migrated.get("lexical_docs")
-    if not isinstance(lexical_docs, dict):
-        lexical_docs = {}
-        migrated["lexical_docs"] = lexical_docs
-    manuals = migrated.get("manuals")
-    if not isinstance(manuals, dict):
-        manuals = {}
-        migrated["manuals"] = manuals
-    shared = migrated.get("shared_server")
-    if not isinstance(shared, dict):
-        shared = {}
-        migrated["shared_server"] = shared
-    model_manager = migrated.get("model_manager")
-    if not isinstance(model_manager, dict):
+    def migration_group(name: str) -> dict:
+        value = migrated.get(name)
+        if isinstance(value, dict):
+            return value
+        if name in migrated:
+            # Keep malformed values visible to `_object` so it can report them.
+            return {}
+        migrated[name] = {}
+        return migrated[name]
+
+    semantic = migration_group("semantic_docs")
+    lexical_docs = migration_group("lexical_docs")
+    manuals = migration_group("manuals")
+    shared = migration_group("shared_server")
+    model_manager = migration_group("model_manager")
+    if "model_manager" not in document:
         # A migrated file predates the Model Manager gate, so it gets the
         # default rather than inheriting any other feature's state.
-        model_manager = {}
-        migrated["model_manager"] = model_manager
+        model_manager["enabled"] = False
 
     if normalized_profile == "semantic_docs":
         migrated.setdefault("profile", {})["name"] = "core"

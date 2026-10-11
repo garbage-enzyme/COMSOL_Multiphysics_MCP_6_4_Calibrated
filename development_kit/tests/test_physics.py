@@ -319,9 +319,13 @@ class ListingComponentList:
         self.component = component
 
     def tags(self):
+        if isinstance(self.component, dict):
+            return list(self.component)
         return ["comp1"]
 
     def get(self, tag):
+        if isinstance(self.component, dict):
+            return self.component[tag]
         return self.component
 
 
@@ -332,7 +336,12 @@ class JavaTagListingComponentList(ListingComponentList):
 
 class ListingJava:
     def __init__(self, physics):
-        self.component_list = ListingComponentList(ListingComponent(physics))
+        component = (
+            {tag: ListingComponent(nodes) for tag, nodes in physics.items()}
+            if physics and all(isinstance(value, dict) for value in physics.values())
+            else ListingComponent(physics)
+        )
+        self.component_list = ListingComponentList(component)
 
     def component(self):
         return self.component_list
@@ -403,6 +412,23 @@ def test_remove_physics_interface_reports_available_nodes():
 
     assert result["success"] is False
     assert result["available"][0]["tag"] == "ewfd"
+
+
+def test_remove_physics_interface_refuses_cross_component_label_ambiguity():
+    model = ListingModel(
+        {
+            "comp1": {"ewfd": FakePhysicsNode()},
+            "comp2": {"ewfd2": FakePhysicsNode()},
+        }
+    )
+
+    result = remove_physics_interface(model, "Electromagnetic Waves, Frequency Domain")
+
+    assert result["success"] is False
+    assert "ambiguous" in result["error"]
+    assert len(result["matches"]) == 2
+    assert model.java.component_list.component["comp1"].physics_nodes.keys() == {"ewfd"}
+    assert model.java.component_list.component["comp2"].physics_nodes.keys() == {"ewfd2"}
 
 
 def test_physics_helpers_normalize_java_string_tags():
@@ -601,6 +627,17 @@ class FailingBoundaryFeatureList(BoundaryFeatureList):
         return feature
 
 
+class FailingBoundaryCreationList(BoundaryFeatureList):
+    def __init__(self, fail_on_create_number):
+        super().__init__()
+        self.fail_on_create_number = fail_on_create_number
+
+    def create(self, tag, feature_type, entity_dimension):
+        if len(self.created) + 1 == self.fail_on_create_number:
+            raise RuntimeError("native feature creation failed")
+        return super().create(tag, feature_type, entity_dimension)
+
+
 class FailingPropertyBoundaryFeature(BoundaryFeature):
     def set(self, name, value):
         raise RuntimeError(f"property failure: {name}={value}")
@@ -769,6 +806,9 @@ class MaterialSelection:
     def set(self, domains):
         self.domains = domains
 
+    def all(self):
+        self.domains = "all"
+
 
 class MaterialGroup:
     def __init__(self):
@@ -852,6 +892,20 @@ def test_assign_material_reuses_existing_material_in_physics_component():
     assert materials.created == []
     assert existing.selection_node.domains == [1]
     assert existing.group.properties["density"] == ["2329[kg/m^3]"]
+
+
+def test_assign_material_explicitly_selects_all_domains_when_omitted():
+    existing = MaterialNode("mat1", "Silicon")
+    materials = MaterialList({"mat1": existing})
+    target = MaterialComponent(2, "ht", BoundaryPhysics(), materials)
+    model = FakeModel(FakeComponent())
+    model.java = MultiComponentJava({"comp2": target})
+
+    result = assign_material(model, "ht", "Silicon")
+
+    assert result["success"] is True
+    assert result["domain_selection"] == "all"
+    assert existing.selection_node.domains == "all"
 
 
 def test_assign_material_refuses_to_fabricate_empty_named_material():
@@ -1066,6 +1120,17 @@ def test_setup_flow_boundaries_rolls_back_earlier_features():
 def test_setup_flow_boundaries_rolls_back_partial_property_failure():
     physics = BoundaryPhysics()
     physics.features = FailingPropertyBoundaryFeatureList(2)
+
+    result = setup_flow_boundaries(FakeModel(BoundaryComponent(physics)), "ht", [1], [2])
+
+    assert result["success"] is False
+    assert result["composite_rolled_back"] is True
+    assert physics.features.created == []
+
+
+def test_setup_flow_boundaries_rolls_back_when_later_feature_creation_raises():
+    physics = BoundaryPhysics()
+    physics.features = FailingBoundaryCreationList(2)
 
     result = setup_flow_boundaries(FakeModel(BoundaryComponent(physics)), "ht", [1], [2])
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from comsol_mcp.server import create_server
 from comsol_mcp.tools.catalog import (
     ISOLATED_MODULE_PROFILES,
@@ -87,6 +89,7 @@ class FakeFeatureList:
             raise RuntimeError("module unavailable")
         node = FakeFeature(tag)
         node.feature_type = feature_type  # type: ignore[attr-defined]
+        node.entity_dimension = dim  # type: ignore[attr-defined]
         self._items[tag] = node
         return node
 
@@ -298,6 +301,9 @@ def test_configure_electrode_reaction_success_refusal_and_rollback() -> None:
     assert ok["success"] is True
     assert ok["feature"]["boundary_numbers"] == [1, 2]
     assert ok["feature"]["surface_resistivity"] == 1.5
+    created = model.component.physics().get("sec").feature()._items["es1"]
+    assert created.feature_type == "ElectrodeSurface"
+    assert model.component.physics().get("sec").feature()._items["es1"] is created
 
     kinetics = configure_electrode_reaction(
         model,
@@ -324,6 +330,24 @@ def test_configure_electrode_reaction_success_refusal_and_rollback() -> None:
     failed = configure_electrode_reaction(model2, boundary_numbers=[3])
     assert failed["success"] is False
     assert failed.get("rolled_back") is True
+
+
+@pytest.mark.parametrize(("space_dimension", "expected_dimension"), [(2, 1), (3, 2)])
+def test_electrode_surface_uses_component_boundary_dimension(
+    space_dimension: int, expected_dimension: int
+) -> None:
+    model = FakeModel()
+    component = model.java.component_node
+    component.geom = lambda _tag=None: SimpleNamespace(
+        tags=lambda: ["geom1"]
+    ) if _tag is None else SimpleNamespace(getSDim=lambda: space_dimension)
+    add_electrochemistry_interface(model)
+
+    result = configure_electrode_reaction(model, boundary_numbers=[1])
+
+    assert result["success"] is True
+    feature = model.component.physics().get("sec").feature()._items["es1"]
+    assert feature.entity_dimension == expected_dimension
 
 
 def test_configure_electrode_reaction_validates_coefficients() -> None:

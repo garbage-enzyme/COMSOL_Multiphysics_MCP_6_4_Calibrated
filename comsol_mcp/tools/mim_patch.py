@@ -277,6 +277,11 @@ def _require_mim_selections(
         raise ValueError("MIM patch build is missing required selections: " + ", ".join(missing))
 
 
+def _restore_selection(selection, entities: Sequence[int]) -> None:
+    """Restore one captured COMSOL selection through its original selection node."""
+    selection.set(list(entities))
+
+
 def _identify_patch_topology(
     boundaries: Sequence[dict],
     patch_size: Sequence[float],
@@ -588,6 +593,7 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
 
         geom = None
         created_features: list[str] = []
+        rollback_actions = []
         try:
             jm = model.java
             comp = jm.component(component_name)
@@ -641,6 +647,7 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
                 fin = geom.feature().get("fin")
                 action = fin.getString("action")
                 if action and action != "union":
+                    rollback_actions.append((fin, "action", str(action)))
                     fin.set("action", "union")
             except Exception:  # noqa: S110 - optional legacy fin action
                 pass
@@ -698,7 +705,9 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
             ltr = ewfd.feature().get(layered_transition_tag)
             if ltr is None:
                 raise ValueError(f"LayeredTransition feature not found: {layered_transition_tag}")
-            ltr.selection().set(patch_footprint)
+            ltr_selection = ltr.selection()
+            rollback_actions.append((ltr_selection, "selection", list(ltr_selection.entities())))
+            ltr_selection.set(patch_footprint)
             report["steps"].append(
                 f"LayeredTransition {layered_transition_tag} → boundaries {patch_footprint}"
             )
@@ -706,7 +715,9 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
             lib = ewfd.feature().get(layered_impedance_tag)
             if lib is None:
                 raise ValueError(f"LayeredImpedance feature not found: {layered_impedance_tag}")
-            lib.selection().set(bottom)
+            lib_selection = lib.selection()
+            rollback_actions.append((lib_selection, "selection", list(lib_selection.entities())))
+            lib_selection.set(bottom)
             report["steps"].append(
                 f"LayeredImpedance {layered_impedance_tag} → boundaries {bottom}"
             )
@@ -714,7 +725,9 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
             ps = ewfd.feature().get("ps1")
             if ps is None:
                 raise ValueError("PeriodicStructure feature not found: ps1")
-            ps.selection("excitedPortSelection").set(top)
+            ps_selection = ps.selection("excitedPortSelection")
+            rollback_actions.append((ps_selection, "selection", list(ps_selection.entities())))
+            ps_selection.set(top)
             report["steps"].append(f"PeriodicStructure excitedPort → boundaries {top}")
 
             # ---- Step 7: assign air material to patch domain ----
@@ -724,6 +737,7 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
                 raise ValueError(f"Air material not found: {air_material_tag}")
             cur = list(air_mat.selection().entities())
             if patch_dom not in cur:
+                rollback_actions.append((air_mat.selection(), "selection", cur))
                 air_mat.selection().set(cur + [patch_dom])
             report["steps"].append(f"Air material {air_material_tag} → domains {cur + [patch_dom]}")
 
@@ -757,6 +771,14 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
                     geom.run()
                 except Exception:
                     rollback_errors.append("geometry rerun after feature removal failed")
+            for node, kind, previous in reversed(rollback_actions):
+                try:
+                    if kind == "selection":
+                        _restore_selection(node, previous)
+                    else:
+                        node.set(kind, previous)
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"{kind}: {type(rollback_exc).__name__}")
             result = {"success": False, "error": f"mim_patch_build failed: {e}"}
             if created_features:
                 result["rolled_back"] = not rollback_errors

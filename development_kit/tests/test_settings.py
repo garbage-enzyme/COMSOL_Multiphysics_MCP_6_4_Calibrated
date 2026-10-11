@@ -499,6 +499,41 @@ def test_settings_1_2_moves_lexical_index_out_of_semantic_group() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "group",
+    ["semantic_docs", "lexical_docs", "manuals", "shared_server", "model_manager"],
+)
+@pytest.mark.parametrize("malformed", [[], "wrong-type"])
+def test_current_schema_migration_reports_malformed_object_groups(group, malformed):
+    document = {
+        "schema_name": SETTINGS_SCHEMA,
+        "schema_version": SETTINGS_VERSION,
+        "profile": {"name": "core"},
+        "runtime": {"directory": str(platform_test_root("runtime")), "jobs_directory": None},
+        "paths": {
+            "model_read_roots": [str(platform_test_root("models"))],
+            "artifact_write_root": str(platform_test_root("artifacts")),
+        },
+        "shared_server": {"enabled": False},
+        "discovery": {"pagination_enabled": False},
+        "model_manager": {"enabled": False, "upload_enabled": False},
+        "evidence_integrity": {"checks": {}},
+        "manuals": {"root": None},
+        "lexical_docs": {"enabled": False, "index_path": None},
+        "semantic_docs": {"enabled": False, "root": None, "model_path": None},
+        "ownership": {"owner": None},
+        "java": {"java_home": None, "jdk_home": None},
+        "comsol": {"installation_root": None},
+        "gui": {"language": "en", "scale": "normal"},
+    }
+    document[group] = malformed
+
+    report = normalize_settings_document(document)
+
+    assert report["errors"]
+    assert any(error["path"] == f"settings.{group}" for error in report["errors"])
+
+
 @pytest.mark.parametrize("schema_version", [[], {}])
 def test_malformed_legacy_schema_version_falls_back_without_type_error(schema_version) -> None:
     report = normalize_settings_document(
