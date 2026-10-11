@@ -117,6 +117,20 @@ def test_external_mph_client_blocks_acquisition(runtime_dir):
     assert not manager.lease_path.exists()
 
 
+@pytest.mark.parametrize("executable", ["comsolbatch.exe", "comsolclusterbatch.exe"])
+def test_native_batch_solver_process_blocks_acquisition(runtime_dir, executable):
+    own = process(10, 100.0, ["python.exe", "-m", "src.server"])
+    external = process(20, 200.0, [executable, "-inputfile", "job.class"])
+    manager = owner(runtime_dir, 10, 100.0, own["command_line"], [own, external])
+
+    status = manager.status()
+    claim = manager.acquire(mode="local-client")
+
+    assert status["collision"] is True
+    assert status["external_solver_processes"][0]["kind"] == "comsol-server"
+    assert claim["success"] is False
+
+
 def test_parent_control_script_is_not_an_external_solver(runtime_dir):
     parent = process(9, 90.0, ["python.exe", "probe_that_mentions_mph.Client.py"])
     own = process(10, 100.0, ["python.exe", "-m", "src.server"], parent_pid=9)

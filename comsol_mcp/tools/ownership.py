@@ -920,7 +920,16 @@ class SolverOwnership:
             command_line = [str(part) for part in item.get("command_line") or []]
             command = " ".join(command_line).casefold()
             kind = None
-            if "mphserver" in name or "comsolmphserver" in name:
+            if (
+                "mphserver" in name
+                or "comsolmphserver" in name
+                or name
+                in {
+                    "comsolbatch.exe",
+                    "comsolclusterbatch.exe",
+                    "comsolcluster.exe",
+                }
+            ):
                 kind = "comsol-server"
             elif name in {"java", "java.exe"} and "comsol" in command and "server" in command:
                 kind = "comsol-java-server"

@@ -762,16 +762,27 @@ class SessionManager:
                     client_retirement_attempted = True
                     client_reusable, cleanup_errors = self._retire_client(client)
                 with self._start_lock:
-                    self._client = None
-                    self._client_status = None
-                    self._client_status_client = None
-                    if not client_reusable:
-                        self._reusable_client = None
-                    if release_result is None:
+                    if cleanup_errors:
+                        self._client = client
+                        self._client_status = self._client_status_snapshot(client)
+                        self._client_status_client = client
+                        self._start_cleanup_pending = True
+                    else:
+                        self._client = None
+                        self._client_status = None
+                        self._client_status_client = None
+                        if not client_reusable:
+                            self._reusable_client = None
+                    if not cleanup_errors and release_result is None:
                         release_result = self._release_owned_lease()
-                    self._start_cleanup_pending = False
+                    if not cleanup_errors:
+                        self._start_cleanup_pending = False
                     self._starting = False
-                    state = "timed_out" if timed_out else "cancelled"
+                    state = (
+                        "cleanup_pending"
+                        if cleanup_errors
+                        else ("timed_out" if timed_out else "cancelled")
+                    )
                     self._record_startup_phase_locked(
                         "cleanup_completed",
                         state=state,

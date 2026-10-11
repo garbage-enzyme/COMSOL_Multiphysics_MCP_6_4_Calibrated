@@ -1425,6 +1425,48 @@ class TestSessionManager:
         assert sm._owns_solver_lease is False
         assert permissive_session_ownership._ownership.releases == 1
 
+    def test_cancelled_start_retains_uncertain_client_and_lease(
+        self, monkeypatch, permissive_session_ownership
+    ):
+        import src.tools.session as session_module
+
+        sm = session_module.SessionManager()
+
+        class StuckClient:
+            standalone = False
+            version = "6.4"
+
+            def clear(self):
+                raise RuntimeError("clear refused")
+
+            def disconnect(self):
+                raise RuntimeError("disconnect refused")
+
+        client = StuckClient()
+        monkeypatch.setattr(
+            session_module,
+            "_load_mph",
+            lambda: (
+                SimpleNamespace(Client=lambda **_kwargs: client),
+                SimpleNamespace(client=None),
+            ),
+        )
+
+        def fail_heartbeat(**_kwargs):
+            sm._start_cancel_requested = True
+            raise RuntimeError("heartbeat failed")
+
+        monkeypatch.setattr(sm._ownership, "heartbeat", fail_heartbeat)
+        sm._start_attempt_id = "test-stuck-attempt"
+        sm._starting = True
+
+        sm._start_worker("test-stuck-attempt", {})
+
+        assert sm.client is client
+        assert sm.get_status()["cleanup_pending"] is True
+        assert sm._owns_solver_lease is True
+        assert permissive_session_ownership._ownership.releases == 0
+
     def test_start_preflight_refusal_is_terminal_without_mph_client(
         self, monkeypatch, permissive_session_ownership
     ):
