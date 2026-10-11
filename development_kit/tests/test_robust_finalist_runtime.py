@@ -190,6 +190,96 @@ def test_finalist_runtime_collects_all_144_solves_and_validates_receipt(
     )
 
 
+def test_finalist_runtime_skips_off_design_when_not_requested(ascii_tmp_path, monkeypatch):
+    spec = _spec(ascii_tmp_path)
+    policy = copy.deepcopy(spec["finalist_validation_policy"])
+    policy.pop("policy_fingerprint")
+    policy["off_design"] = {
+        "mode": "not_requested",
+        "include_in_optimizer": False,
+        "validation_only": False,
+        "wavelength_relative_offsets": [],
+        "angle_offsets_deg": [],
+    }
+    spec["finalist_validation_policy"] = normalize_robust_finalist_validation_policy(policy)
+    spec["finalist_validation_solve_count"] = 48
+    calls = []
+
+    def fake_execute(candidate, directory, **_kwargs):
+        directory.mkdir(parents=True, exist_ok=True)
+        calls.append(directory.name)
+        shape_support = candidate["adapter_configuration"]["configuration"]["shape_support"]
+        body = {
+            "schema_name": "comsol_mcp.robust_shape_application",
+            "schema_version": "1.1.0",
+            "mode": "deformation_stage",
+            "initial_values": candidate["initial_values"],
+            "dataset_tag": "dset1",
+            "solution_tag": "sol1",
+            "mesh_elements": 100_000,
+            "minimum_mesh_quality": 0.2,
+            "solver_started": True,
+            "stage_fingerprint": "a" * 64,
+            "solved_shape": [
+                {
+                    "variable_id": variable["variable_id"],
+                    "observed_radius_m": value * 1e-9,
+                    "matches": True,
+                }
+                for variable, value in zip(
+                    candidate["support"]["variables"], candidate["initial_values"], strict=True
+                )
+            ],
+            "shape_controls": {
+                "shape_support_fingerprint": shape_support["support_fingerprint"],
+                "controls": {
+                    "deformed_geometry": {
+                        "free_domains": shape_support["free_domains"],
+                        "fixed_boundaries": shape_support["fixed_boundaries"],
+                        "pedot_boundaries": shape_support["pedot_boundaries"],
+                        "height_preserved": True,
+                        "center_preserved": True,
+                    }
+                },
+            },
+        }
+        application = {
+            **body,
+            "receipt_fingerprint": domain_sha256_v2(
+                "comsol_mcp.robust_shape_application", body
+            ),
+        }
+        atomic_write_json(directory / "shape-application.json", application)
+        (directory / "robust-working.mph").write_bytes(candidate["spec_fingerprint"].encode())
+        observations = [
+            _observation(condition)
+            for condition in candidate["condition_table"]["conditions"]
+            if condition["active"] and condition["objective_role"] == "objective"
+        ]
+        return {"shape_application": application, "observations": observations}
+
+    monkeypatch.setattr(robust_finalist_runtime, "execute_lin2025_conditions", fake_execute)
+    accepted = [
+        _observation(condition)
+        for condition in spec["condition_table"]["conditions"]
+        if condition["active"] and condition["objective_role"] == "objective"
+    ]
+    robust_finalist_runtime.run_licensed_finalist(
+        spec,
+        ascii_tmp_path / "finalist-no-off",
+        attempt=1,
+        candidate_values=[265.0, 264.5],
+        candidate_fingerprint="b" * 64,
+        accepted_observations=accepted,
+        accepted_objective_value=0.5,
+        optimizer_execution_fingerprint="c" * 64,
+        client_factory=lambda **_kwargs: object(),
+        java_environment_reader=lambda _name: str(ascii_tmp_path),
+        cancel_requested=lambda: False,
+    )
+    assert calls == ["baseline", "finer"]
+
+
 @pytest.mark.parametrize("mutation", ["reordered", "duplicated"])
 def test_finalist_runtime_rejects_condition_observation_drift(ascii_tmp_path, mutation):
     spec = _spec(ascii_tmp_path)

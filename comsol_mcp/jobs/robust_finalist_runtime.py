@@ -293,14 +293,18 @@ def run_licensed_finalist(
     )
     finer_result, finer = execute("finer", finer_spec)
 
-    off_table, off_mapping = _off_design_table(spec["condition_table"], policy["off_design"])
-    off_spec = _candidate_spec(
-        spec,
-        candidate_values,
-        mesh_reference_value=mesh_policy["baseline_mesh_reference_value"],
-        condition_table=off_table,
-    )
-    off_result, _ = execute("off-design", off_spec, aggregate_objective=False)
+    if policy["off_design"]["mode"] == "not_requested":
+        off_mapping = {}
+        off_result = {"observations": []}
+    else:
+        off_table, off_mapping = _off_design_table(spec["condition_table"], policy["off_design"])
+        off_spec = _candidate_spec(
+            spec,
+            candidate_values,
+            mesh_reference_value=mesh_policy["baseline_mesh_reference_value"],
+            condition_table=off_table,
+        )
+        off_result, _ = execute("off-design", off_spec, aggregate_objective=False)
     observed_validation_solves = (
         len(baseline_result["observations"])
         + len(finer_result["observations"])
