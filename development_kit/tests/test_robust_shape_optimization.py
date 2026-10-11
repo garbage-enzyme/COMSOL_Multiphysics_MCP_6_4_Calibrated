@@ -428,13 +428,13 @@ def test_manifest_rejects_untrusted_adapter_binding(ascii_tmp_path, field, messa
         expand_robust_shape_manifest(envelope)
 
 
-def test_submission_temporary_directory_rechecks_expansion_contract(tmp_path, monkeypatch):
+def test_submission_temporary_directory_rechecks_expansion_contract(ascii_tmp_path, monkeypatch):
     import os
 
     from comsol_mcp.jobs.robust_shape_optimization import normalize_robust_shape_submission
 
-    envelope, _target, _manifest = _write_manifest(tmp_path)
-    expanded = tmp_path / "expanded dir"
+    envelope, _target, _manifest = _write_manifest(ascii_tmp_path)
+    expanded = ascii_tmp_path / "expanded dir"
     expanded.mkdir()
     monkeypatch.setattr(
         os.path,
@@ -447,11 +447,11 @@ def test_submission_temporary_directory_rechecks_expansion_contract(tmp_path, mo
         normalize_robust_shape_submission(envelope)
 
 
-def test_manifest_source_rechecks_expansion_contract(tmp_path, monkeypatch):
+def test_manifest_source_rechecks_expansion_contract(ascii_tmp_path, monkeypatch):
     import os
     from pathlib import Path
 
-    envelope, _target, manifest = _write_manifest(tmp_path)
+    envelope, _target, manifest = _write_manifest(ascii_tmp_path)
     raw = json.loads(manifest.read_text(encoding="utf-8"))
     real_source = Path(raw["source_model_path"])
     assert real_source.is_file()
@@ -462,7 +462,7 @@ def test_manifest_source_rechecks_expansion_contract(tmp_path, monkeypatch):
 
     # pathlib hands only the leading "~" component to os.path.expanduser; map
     # it to an expanded home whose name violates the whitespace contract.
-    expanded_home = tmp_path / "home dir"
+    expanded_home = ascii_tmp_path / "home dir"
     expanded_home.mkdir()
     monkeypatch.setattr(
         os.path,
@@ -474,14 +474,14 @@ def test_manifest_source_rechecks_expansion_contract(tmp_path, monkeypatch):
         expand_robust_shape_manifest(envelope)
 
 
-def test_expanduser_helper_rejects_non_ascii_and_whitespace(tmp_path):
+def test_expanduser_helper_rejects_non_ascii_and_whitespace(ascii_tmp_path):
     from comsol_mcp.jobs.robust_shape_optimization import _require_ascii_without_whitespace
 
-    spaced = tmp_path / "has space"
+    spaced = ascii_tmp_path / "has space"
     with pytest.raises(ValueError, match="without whitespace"):
         _require_ascii_without_whitespace(spaced, "path must be without whitespace")
-    non_ascii = tmp_path / "路径"
+    non_ascii = ascii_tmp_path / "路径"
     with pytest.raises(ValueError, match="without whitespace"):
         _require_ascii_without_whitespace(non_ascii, "path must be without whitespace")
-    plain = tmp_path / "plain"
+    plain = ascii_tmp_path / "plain"
     _require_ascii_without_whitespace(plain, "path must be without whitespace")
