@@ -159,6 +159,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
     def __init__(self, model: Any, spec: Mapping[str, Any], *, working_model_path: Path):
         self.model = model
         self.working_model_path = working_model_path.resolve()
+        self.mesh_policy = dict(spec["shape_policy"]["mesh_admission"])
         configuration = spec["adapter_configuration"]["configuration"]
         self.controls = configuration["condition_controls"]
         self.fixture = configuration["fixture"]
@@ -351,6 +352,36 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         self._forward_stage_prepared = True
         return readback
 
+    def _admit_mesh(self, boundary: str) -> dict[str, Any]:
+        """Persist mesh admission before an owned study can start."""
+        mesh = _get(self.model.java.component(), self.controls["component_tag"]).mesh(
+            self.controls["mesh_tag"]
+        )
+        statistics = mesh.stat()
+        elements = int(statistics.getNumElem())
+        quality = float(statistics.getMinQuality())
+        measure = str(statistics.getQualityMeasure())
+        admitted = (
+            0 < elements <= self.mesh_policy["max_elements_per_model"]
+            and math.isfinite(quality)
+            and self.mesh_policy["minimum_element_quality"] <= quality <= 1.0
+            and measure == self.mesh_policy["quality_measure"]
+        )
+        receipt = {
+            "boundary": boundary,
+            "element_count": elements,
+            "minimum_quality": quality,
+            "quality_measure": measure,
+            "policy": self.mesh_policy,
+            "admitted": admitted,
+        }
+        atomic_write_json(
+            self.working_model_path.parent / f"mesh-admission-{boundary}.json", receipt
+        )
+        if not admitted:
+            raise ValueError(f"mesh admission refused at {boundary}")
+        return receipt
+
     def run_shape_application(self) -> dict[str, Any]:
         """Solve the deformation-only stage and prove the solved shape.
 
@@ -369,6 +400,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             raise RuntimeError("forward shape application requires prepared initial values")
         self.set_shape_deformation_active(True)
         self.model.java.save(str(self.working_model_path))
+        self._admit_mesh("before-shape-solve")
         self.study.run()
         dataset_tag = controls["dataset_tag"]
         dataset = _dataset_by_tag(self.model, dataset_tag)
@@ -519,6 +551,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         )
         mesh_reference = self._set_mesh_reference_policy()
         mesh.run()
+        self._admit_mesh("after-build")
         forward_shape = None
         if self.controls.get("schema_version") == FORWARD_SHAPE_CONTROLS_VERSION:
             forward_shape = self._prepare_forward_shape_stage()
@@ -682,6 +715,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         ):
             raise ValueError("study wavelength property readback differs")
         self.model.java.save(str(self.working_model_path))
+        self._admit_mesh("before-condition-solve")
         self.study.run()
         tag = f"robust_eval_{self._counter:04d}"
         evaluator = self.numerical.create(tag, "EvalGlobal")
@@ -962,6 +996,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         ):
             raise ValueError("native sensitivity stationary nonlinearity changed")
         self.model.java.save(str(self.working_model_path))
+        self._admit_mesh("before-sensitivity-solve")
         self.study.run()
         identity = _generated_sensitivity_identity(self.model)
         if [item["tag"] for item in identity["solutions"]] != controls["sensitivity_solution_tags"]:

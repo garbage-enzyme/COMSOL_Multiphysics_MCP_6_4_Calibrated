@@ -447,7 +447,21 @@ class FakeComsolBackend:
                 rejected=("getString: JException", "getDouble: JException"),
             )
         accessor, value = scripted
-        if form == "string_array" and accessor != "getStringArray":
+        accessors = {
+            "string": "getString",
+            "boolean": "getBoolean",
+            "int": "getInt",
+            "double": "getDouble",
+            "string_array": "getStringArray",
+            "int_array": "getIntArray",
+            "double_array": "getDoubleArray",
+            "string_matrix": "getStringMatrix",
+        }
+        if form != "auto" and form not in accessors:
+            raise AdapterError(
+                "conversion_not_representable", f"unsupported typed read form: {form}"
+            )
+        if form != "auto" and accessor != accessors[form]:
             raise AdapterError(
                 "property_not_found",
                 f"{name!r} on {tag} is not a string-array property",

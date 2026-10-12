@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from typing import Any, Protocol
 
 from comsol_mcp.durable.canonical import canonical_sha256_v1
@@ -526,6 +527,7 @@ def apply_surrogate_configuration(
     created: list[tuple[str, str]] = []
     rollback_created: list[tuple[str, str, str | None]] = []
     rollback_existing: list[tuple[Any, str, Any, str, Any]] = []
+    snapshots: list[tuple[Any, str, Any, str, Any]] = []
     readback: dict[str, Any] = {}
 
     def restore_existing() -> list[str]:
@@ -541,7 +543,12 @@ def apply_surrogate_configuration(
                     backend.write_entries(feature, name, value)
                 else:
                     backend.write_scalar(feature, name, value, kind)
-                read = backend.read_property(feature, name)
+                snapshot_reader = getattr(backend, "snapshot_property", None)
+                read = (
+                    snapshot_reader(feature, name, writer=writer, kind=kind)
+                    if callable(snapshot_reader)
+                    else backend.read_property(feature, name)
+                )
                 if read.get("readable") is not True or read.get("value") != value:
                     errors.append(f"existing:{name}:readback_mismatch")
             except Exception as rollback_exc:
@@ -581,14 +588,33 @@ def apply_surrogate_configuration(
         def snapshot_existing(feature: Any, name: str, writer: str, kind: str) -> None:
             if create_nodes:
                 return
-            read = backend.read_property(feature, name)
+            snapshot_reader = getattr(backend, "snapshot_property", None)
+            read = (
+                snapshot_reader(feature, name, writer=writer, kind=kind)
+                if callable(snapshot_reader)
+                else backend.read_property(feature, name)
+            )
             if not isinstance(read, Mapping) or read.get("readable") is not True:
-                rollback_existing.append((feature, name, _MISSING_EXISTING_PROPERTY, writer, kind))
-            else:
-                rollback_existing.append((feature, name, read.get("value"), writer, kind))
+                raise ValueError(
+                    f"cannot snapshot existing DNN property {name!r}; no writes applied"
+                )
+            snapshots.append(
+                (
+                    feature,
+                    name,
+                    deepcopy(read.get("value")),
+                    read.get("writer", "entries" if writer == "setEntry" else writer),
+                    read.get("kind", kind),
+                )
+            )
 
         for write in plan["scalar_writes"]:
             snapshot_existing(dnn, write["property"], "scalar", write["kind"])
+        for write in plan["entry_writes"]:
+            snapshot_existing(dnn, write["property"], write["writer"], "")
+        rollback_existing.extend(snapshots)
+
+        for write in plan["scalar_writes"]:
             try:
                 backend.write_scalar(dnn, write["property"], write["value"], write["kind"])
             except Exception as exc:
@@ -597,7 +623,6 @@ def apply_surrogate_configuration(
                     f"(kind {write['kind']}): {type(exc).__name__}: {exc}"
                 ) from exc
         for write in plan["entry_writes"]:
-            snapshot_existing(dnn, write["property"], write["writer"], "")
             try:
                 if write["writer"] == "stringMap":
                     backend.write_string_map(dnn, write["property"], write["entries"])

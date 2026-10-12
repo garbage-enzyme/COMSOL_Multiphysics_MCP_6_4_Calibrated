@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -273,34 +272,21 @@ def run_convergence_campaign(
         if fault_hook is not None:
             fault_hook("before_level", {"level_id": level["level_id"]})
         level_dir = convergence_level_directory(root, level["ordinal"])
-        if level_dir.exists():
-            try:
-                row = append_convergence_campaign_level(
-                    journal,
-                    spec,
-                    attempt=attempt,
-                    level_dir=level_dir,
-                    artifact_root=root,
-                )
-            except (OSError, ValueError) as err:
-                quarantine = level_dir.with_name(f".{level_dir.name}.invalid-{uuid.uuid4().hex}")
-                level_dir.replace(quarantine)
-                if fault_hook is not None:
-                    fault_hook(
-                        "level_row_quarantined",
-                        {
-                            "level_id": level["level_id"],
-                            "ordinal": level["ordinal"],
-                            "quarantine": str(quarantine),
-                            "error": f"{type(err).__name__}: {err}",
-                        },
-                    )
-            else:
-                if on_durable_level is not None:
-                    on_durable_level(dict(row))
-                if fault_hook is not None:
-                    fault_hook("after_level_row", row)
-                continue
+        # A partial spectrum has no summary. Resume its verified rows in place.
+        # Append or validation failures preserve artifacts and propagate.
+        if (level_dir / "analysis" / "summary.json").is_file():
+            row = append_convergence_campaign_level(
+                journal,
+                spec,
+                attempt=attempt,
+                level_dir=level_dir,
+                artifact_root=root,
+            )
+            if on_durable_level is not None:
+                on_durable_level(dict(row))
+            if fault_hook is not None:
+                fault_hook("after_level_row", row)
+            continue
         result = level_executor(level, level_dir)
         if not isinstance(result, Mapping):
             raise RuntimeError("spectral level executor returned an invalid result")

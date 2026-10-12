@@ -34,6 +34,27 @@ DIGEST_A = "a" * 64
 DIGEST_B = "b" * 64
 
 
+@pytest.mark.parametrize("damage", [b'{"partial":', b"invalid-json\n", b"{}\n"])
+@pytest.mark.parametrize("action", ["append", "accept", "accept_unknown", "resume"])
+def test_damaged_journal_refuses_new_work_without_changing_bytes(tmp_path, damage, action):
+    ledger = OperationLedger(tmp_path / "ledger")
+    _append(ledger, subject="completed", artifact_sha256=DIGEST_A)
+    with ledger.journal_path.open("ab") as handle:
+        handle.write(damage)
+    original = ledger.journal_path.read_bytes()
+    reopened = OperationLedger(ledger.root)
+    with pytest.raises(LedgerError, match="damaged"):
+        if action == "append":
+            _append(reopened, subject="next")
+        elif action.startswith("accept"):
+            reopened.evaluate_acceptance(
+                subject="next", artifact_sha256=None if action == "accept_unknown" else DIGEST_A
+            )
+        else:
+            reopened.evaluate_resume(subject="completed")
+    assert ledger.journal_path.read_bytes() == original
+
+
 class Clock:
     """A deterministic clock so ledger rows are reproducible."""
 

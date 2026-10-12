@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -807,6 +808,8 @@ def test_native_condition_saves_exact_configured_model_before_solve(ascii_tmp_pa
         "observed": "on",
     }
     backend.study_step = _Feature()
+    admissions = []
+    backend._admit_mesh = lambda boundary: admissions.append(boundary)
 
     class Study:
         def run(self):
@@ -823,6 +826,7 @@ def test_native_condition_saves_exact_configured_model_before_solve(ascii_tmp_pa
             },
             ["1"] * 9,
         )
+    assert admissions == ["before-condition-solve"]
     assert backend.model.java.saved == [
         (
             str(backend.working_model_path),
@@ -1544,6 +1548,11 @@ def _stage_backend(events, *, with_shape_support=True, solve_for_drift=None):
             }
         },
     }
+    backend.mesh_policy = {
+        "max_elements_per_model": 20000,
+        "minimum_element_quality": 0.1,
+        "quality_measure": "volcircum",
+    }
     backend.working_model_path = Path("C:/mcp_tests/robust-working.mph")
     return backend
 
@@ -1652,6 +1661,9 @@ def _application_model(
 
         def getMinQuality(self):
             return 0.2314
+
+        def getQualityMeasure(self):
+            return "volcircum"
 
     class Mesh:
         def stat(self):
@@ -1766,9 +1778,10 @@ def _application_model(
     return Model()
 
 
-def test_shape_application_solves_stage_and_reads_back_solved_shape():
+def test_shape_application_solves_stage_and_reads_back_solved_shape(ascii_tmp_path):
     events = []
     backend = _stage_backend(events)
+    backend.working_model_path = ascii_tmp_path / "working.mph"
     backend._prepare_forward_shape_stage()
     backend.model = _application_model(events)
 
@@ -1799,9 +1812,60 @@ def test_shape_application_solves_stage_and_reads_back_solved_shape():
     assert receipt["stage_fingerprint"] == backend._forward_stage_readback["receipt_fingerprint"]
 
 
-def test_shape_application_readback_mismatch_fails_closed():
+def test_shape_application_refuses_over_cap_mesh_before_study_run(ascii_tmp_path):
     events = []
     backend = _stage_backend(events)
+    backend._prepare_forward_shape_stage()
+    backend.model = _application_model(events)
+    backend.mesh_policy = {
+        "max_elements_per_model": 1,
+        "minimum_element_quality": 0.1,
+        "quality_measure": "volcircum",
+    }
+    backend.working_model_path = ascii_tmp_path / "working.mph"
+    backend.study = type("Study", (), {"run": lambda self: events.append(("study_run",))})()
+    with pytest.raises(ValueError, match="mesh admission refused"):
+        backend.run_shape_application()
+    assert ("study_run",) not in events
+    receipt = json.loads((ascii_tmp_path / "mesh-admission-before-shape-solve.json").read_text())
+    assert receipt["admitted"] is False
+    assert receipt["element_count"] == 18985
+
+
+@pytest.mark.parametrize(
+    "cap,quality,measure,admitted",
+    [
+        (18985, 0.2314, "volcircum", True),
+        (18984, 0.2314, "volcircum", False),
+        (18985, 0.2315, "volcircum", False),
+        (18985, 0.1, "other", False),
+    ],
+)
+def test_mesh_admission_checks_equality_quality_and_measure(
+    ascii_tmp_path, cap, quality, measure, admitted
+):
+    backend = _stage_backend([])
+    backend.model = _application_model([])
+    backend.working_model_path = ascii_tmp_path / "working.mph"
+    backend.mesh_policy = {
+        "max_elements_per_model": cap,
+        "minimum_element_quality": quality,
+        "quality_measure": measure,
+    }
+    if admitted:
+        assert backend._admit_mesh("after-build")["admitted"] is True
+    else:
+        with pytest.raises(ValueError, match="mesh admission refused"):
+            backend._admit_mesh("after-build")
+    receipt = read_json(ascii_tmp_path / "mesh-admission-after-build.json")
+    assert receipt["admitted"] is admitted
+    assert receipt["quality_measure"] == "volcircum"
+
+
+def test_shape_application_readback_mismatch_fails_closed(ascii_tmp_path):
+    events = []
+    backend = _stage_backend(events)
+    backend.working_model_path = ascii_tmp_path / "working.mph"
     backend._prepare_forward_shape_stage()
     backend.model = _application_model(events, moved=(1.0e-9, 1.0e-9))
 
@@ -1814,9 +1878,12 @@ def test_shape_application_readback_mismatch_fails_closed():
         backend.run_shape_application()
 
 
-def test_shape_application_does_not_widen_strict_relative_tolerance_to_one_nanometre():
+def test_shape_application_does_not_widen_strict_relative_tolerance_to_one_nanometre(
+    ascii_tmp_path,
+):
     events = []
     backend = _stage_backend(events)
+    backend.working_model_path = ascii_tmp_path / "working.mph"
     backend.controls["forward_solved_shape_relative_tolerance"] = 1e-6
     backend._prepare_forward_shape_stage()
     backend.model = _application_model(events, moved=(12.58e-9, 12.58e-9))
@@ -1830,9 +1897,10 @@ def test_shape_application_does_not_widen_strict_relative_tolerance_to_one_nanom
         backend.run_shape_application()
 
 
-def test_shape_application_zero_movement_readback_accepts_null_field():
+def test_shape_application_zero_movement_readback_accepts_null_field(ascii_tmp_path):
     events = []
     backend = _stage_backend(events)
+    backend.working_model_path = ascii_tmp_path / "working.mph"
     backend._prepare_forward_shape_stage()
     backend.model = _application_model(events, moved=(0.0, 0.0))
     backend._initial_values = [260.0, 260.0]
@@ -1851,7 +1919,7 @@ def test_shape_application_zero_movement_readback_accepts_null_field():
     )
 
 
-def test_shape_application_opposite_extreme_flip_reads_radius_magnitude():
+def test_shape_application_opposite_extreme_flip_reads_radius_magnitude(ascii_tmp_path):
     """Regression: the max |component| vertex may sit on the opposite side.
 
     The opposite extreme carries the same displacement magnitude with the
@@ -1861,6 +1929,7 @@ def test_shape_application_opposite_extreme_flip_reads_radius_magnitude():
     """
     events = []
     backend = _stage_backend(events)
+    backend.working_model_path = ascii_tmp_path / "working.mph"
     backend._prepare_forward_shape_stage()
     backend.model = _application_model(events, flipped_extreme=True)
 
@@ -1931,7 +2000,7 @@ def test_worker_projects_complete_native_gradient_to_public_row(ascii_tmp_path):
 
     rows = read_robust_shape_rows(path, job_fingerprint="a" * 64)
     assert rows[0]["kind"] == "gradient"
-    assert rows[0]["payload"]["evidence_state"] == "gradient_validated"
+    assert rows[0]["payload"]["evidence_state"] == "native_unchecked"
     assert rows[0]["payload"]["gradient_fingerprint"] == "c" * 64
 
 

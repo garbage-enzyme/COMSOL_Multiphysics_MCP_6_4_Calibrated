@@ -775,16 +775,15 @@ class SessionManager:
                             self._reusable_client = None
                     if not cleanup_errors and release_result is None:
                         release_result = self._release_owned_lease()
-                    if not cleanup_errors:
-                        self._start_cleanup_pending = False
+                    self._start_cleanup_pending = bool(cleanup_errors) or self._owns_solver_lease
                     self._starting = False
                     state = (
                         "cleanup_pending"
-                        if cleanup_errors
+                        if self._start_cleanup_pending
                         else ("timed_out" if timed_out else "cancelled")
                     )
                     self._record_startup_phase_locked(
-                        "cleanup_completed",
+                        "cleanup_pending" if self._start_cleanup_pending else "cleanup_completed",
                         state=state,
                         terminal=True,
                         details={
@@ -798,11 +797,15 @@ class SessionManager:
             elif cancelled and release_result is None:
                 with self._start_lock:
                     release_result = self._release_owned_lease()
-                    self._start_cleanup_pending = False
+                    self._start_cleanup_pending = self._owns_solver_lease
                     self._starting = False
                     self._record_startup_phase_locked(
-                        "cleanup_completed",
-                        state="timed_out" if timed_out else "cancelled",
+                        "cleanup_pending" if self._start_cleanup_pending else "cleanup_completed",
+                        state=(
+                            "cleanup_pending"
+                            if self._start_cleanup_pending
+                            else ("timed_out" if timed_out else "cancelled")
+                        ),
                         terminal=True,
                         details={
                             "client_reusable": False,
@@ -1041,9 +1044,7 @@ class SessionManager:
                         "tracking_key": name,
                         "java_tag": self._model_java_tags.get(name),
                         "identity_relation": (
-                            "session_model"
-                            if name in self._model_java_tags
-                            else "label_only"
+                            "session_model" if name in self._model_java_tags else "label_only"
                         ),
                     }
                     model_path = self._model_paths.get(name)

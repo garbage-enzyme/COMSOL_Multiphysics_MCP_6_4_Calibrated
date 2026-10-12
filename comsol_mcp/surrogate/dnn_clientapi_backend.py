@@ -245,6 +245,16 @@ class ClientapiSurrogateDnnBackend:
             "column_probe_errors": column_probe_errors,
         }
 
+    def snapshot_property(
+        self, feature: Any, name: str, *, writer: str, kind: str
+    ) -> dict[str, Any]:
+        """Capture the complete typed value for replacement during rollback."""
+        if writer in {"setEntry", "stringMap"}:
+            declared = self.adapter.java_value_type(_handle(feature), name)
+            kind = "string_matrix" if declared == "[[Ljava.lang.String;" else "string_array"
+        read = self.adapter.java_typed_read(_handle(feature), name, form=kind)
+        return {"readable": True, "value": read.value, "kind": kind, "writer": "scalar"}
+
     def read_property(self, feature: Any, name: str) -> dict[str, Any]:
         """Read one property through the adapter's typed accessors.
 

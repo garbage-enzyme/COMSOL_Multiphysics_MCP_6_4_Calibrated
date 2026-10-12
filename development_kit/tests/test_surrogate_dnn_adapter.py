@@ -499,6 +499,8 @@ def test_apply_without_node_creation_writes_onto_existing_function() -> None:
     """The deferred-write path must reuse an existing DNN function."""
     backend = FakeBackend()
     apply_surrogate_configuration(backend, _configuration())
+    # A bound data source exposes an empty argument map before configuration.
+    backend.functions[DNN_FUNCTION_TAG]["args"] = {}
     result = apply_surrogate_configuration(
         backend, _configuration(), create_nodes=False, data_source_bound=True
     )
@@ -543,6 +545,71 @@ def test_existing_function_properties_are_restored_after_a_late_write_failure() 
     assert result["rolled_back"] is True
     assert result["rollback_errors"] == []
     assert function == original
+
+
+def test_existing_snapshots_precede_every_write_and_copy_mutable_values():
+    from copy import deepcopy
+
+    backend = FakeBackend()
+    apply_surrogate_configuration(backend, _configuration())
+    feature = backend.functions[DNN_FUNCTION_TAG]
+    original = deepcopy(feature)
+    write = backend.write_scalar
+    failed = []
+
+    def mutate_then_fail(target, name, value, kind):
+        if not failed and name == "activation":
+            target["activation"][:] = ["changed"]
+            target["lr"] = 123.0
+        if not failed and name == "lr":
+            failed.append(True)
+            raise RuntimeError("late failure")
+        return write(target, name, value, kind)
+
+    backend.write_scalar = mutate_then_fail
+    result = apply_surrogate_configuration(backend, _configuration(), create_nodes=False)
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert feature == original
+
+
+def test_unreadable_existing_property_is_refused_before_any_write():
+    from copy import deepcopy
+
+    backend = FakeBackend()
+    apply_surrogate_configuration(backend, _configuration())
+    feature = backend.functions[DNN_FUNCTION_TAG]
+    original = deepcopy(feature)
+    read = backend.read_property
+    backend.read_property = lambda feature, name: (
+        {"readable": False} if name == "lr" else read(feature, name)
+    )
+    backend.calls.clear()
+    result = apply_surrogate_configuration(backend, _configuration(), create_nodes=False)
+    assert result["success"] is False
+    assert not [call for call in backend.calls if call.startswith("write")]
+    assert feature == original
+
+
+def test_clientapi_snapshot_uses_declared_types_and_replaces_entry_maps(monkeypatch):
+    from comsol_mcp.surrogate.dnn_clientapi_backend import ClientapiSurrogateDnnBackend
+    from development_kit.tests.test_adapter_protocol import _Step6Backend, _StubFeature, _handle
+
+    adapter = _Step6Backend()
+    bridge = object.__new__(ClientapiSurrogateDnnBackend)
+    bridge.adapter = adapter
+    feature = _StubFeature()
+    feature.getDouble = lambda name: 0.25
+    feature.getString = lambda name: "0.25"  # Must not replace the declared numeric accessor.
+    feature.string_arrays["args"] = ["old", "value", "extra", "keep"]
+    feature.declared_types["args"] = "[Ljava.lang.String;"
+    scalar = bridge.snapshot_property(_handle(feature), "lr", writer="scalar", kind="double")
+    assert scalar["value"] == 0.25
+    assert isinstance(scalar["value"], float)
+    entries = bridge.snapshot_property(_handle(feature), "args", writer="setEntry", kind="")
+    assert entries["value"] == ["old", "value", "extra", "keep"]
+    assert entries["writer"] == "scalar"
+    assert entries["kind"] == "string_array"
 
 
 def test_existing_function_rollback_failure_is_reported_as_unproved() -> None:

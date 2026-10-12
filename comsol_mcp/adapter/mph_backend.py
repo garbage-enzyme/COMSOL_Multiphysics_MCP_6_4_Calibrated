@@ -34,6 +34,7 @@ from typing import Any, Mapping, Sequence
 from comsol_mcp.adapter.conversion import (
     convert_explicitly,
     normalize_evaluation_result,
+    to_matrix_rows,
     unwrap_backend_value,
 )
 from comsol_mcp.adapter.protocol import (
@@ -519,8 +520,15 @@ class MphBackendBase:
                 f"no property {name!r} on {'/'.join(node.path)}",
                 operation="property_read",
             ) from exc
-        unwrapped = unwrap_backend_value(raw)
         try:
+            unwrapped = (
+                [
+                    [unwrap_backend_value(cell) for cell in row]
+                    for row in to_matrix_rows(raw, form=form)
+                ]
+                if form.endswith("_matrix")
+                else unwrap_backend_value(raw)
+            )
             return convert_explicitly(unwrapped, form=form)
         except AdapterError as exc:
             raise AdapterError(
@@ -727,8 +735,18 @@ class MphBackendBase:
         """
         java = self._resolve_handle(node)
         accessors: tuple[str, ...]
-        if form == "string_array":
-            accessors = ("getStringArray",)
+        explicit_accessors = {
+            "string": "getString",
+            "boolean": "getBoolean",
+            "int": "getInt",
+            "double": "getDouble",
+            "string_array": "getStringArray",
+            "int_array": "getIntArray",
+            "double_array": "getDoubleArray",
+            "string_matrix": "getStringMatrix",
+        }
+        if form in explicit_accessors:
+            accessors = (explicit_accessors[form],)
         elif form == "auto":
             accessors = (
                 "getString",
@@ -764,10 +782,17 @@ class MphBackendBase:
                     rejected=tuple(rejected),
                 )
             try:
-                rendered: Any = [str(item) for item in list(raw)]
+                rendered: Any = (
+                    [
+                        [unwrap_backend_value(cell) for cell in row]
+                        for row in to_matrix_rows(raw, form="str_matrix")
+                    ]
+                    if accessor.endswith("Matrix")
+                    else [unwrap_backend_value(item) for item in list(raw)]
+                )
             except Exception as exc:
                 rejected.append(f"{accessor}.render: {type(exc).__name__}")
-                rendered = str(raw)
+                continue
             return JavaTypedRead(
                 node=node,
                 name=name,

@@ -365,7 +365,8 @@ def _append_native_gradient_row(
             "iteration_id": iteration_id,
             "gradient_fingerprint": gradient_fingerprint,
             "acceptance_fingerprint": acceptance_fingerprint,
-            "evidence_state": "gradient_validated",
+            # A declared policy is not an independent gradient-check receipt.
+            "evidence_state": "native_unchecked",
         },
     )
 

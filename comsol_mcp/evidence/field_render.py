@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp.durable.io import unlink_if_identity
 from comsol_mcp.path_policy import pin_validated_reads, validated_read_pin
 
 MAX_RENDER_VIEWS = 2
@@ -122,7 +123,6 @@ def render_field_png_bundle(
 
     root = Path(output_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
-    staging_root = Path(tempfile.mkdtemp(prefix=f".render-{uuid.uuid4().hex[:12]}-", dir=root))
     normalized = []
     array_pins = []
     seen_ids = set()
@@ -150,18 +150,20 @@ def render_field_png_bundle(
         final_png_path = root / f"{safe_name}.png"
         if final_png_path.exists():
             raise FileExistsError(f"field PNG already exists: {view_id}")
-        png_path = staging_root / f"{safe_name}.png"
         normalized.append(
             {
                 "view_id": view_id,
                 "array_path": str(array_path),
                 "array_sha256": array_sha256.lower(),
                 "png_artifact_id": artifact_id,
-                "png_path": str(png_path),
                 "final_png_path": str(final_png_path),
             }
         )
 
+    staging_root = Path(tempfile.mkdtemp(prefix=f".render-{uuid.uuid4().hex[:12]}-", dir=root))
+    for view in normalized:
+        view["png_path"] = str(staging_root / Path(view["final_png_path"]).name)
+    published: list[tuple[Path, tuple[int, int]]] = []
     payload = {
         "quantity_name": quantity_name,
         "quantity_unit": quantity_unit.strip(),
@@ -230,12 +232,6 @@ def render_field_png_bundle(
                 if handle.read(8) != b"\x89PNG\r\n\x1a\n":
                     raise RuntimeError("field plot worker output is not a PNG")
             final_path = Path(view["final_png_path"])
-            try:
-                os.link(path, final_path)
-            except FileExistsError as exc:
-                raise FileExistsError(
-                    f"field PNG was published concurrently: {view['view_id']}"
-                ) from exc
             descriptors.append(
                 {
                     "view_id": view["view_id"],
@@ -247,6 +243,18 @@ def render_field_png_bundle(
                     "color_limits": limits_by_view[view["view_id"]],
                 }
             )
+        # Validate every output before publishing any member of the bundle.
+        for view in normalized:
+            path = Path(view["png_path"])
+            final_path = Path(view["final_png_path"])
+            try:
+                os.link(path, final_path)
+            except FileExistsError as exc:
+                raise FileExistsError(
+                    f"field PNG was published concurrently: {view['view_id']}"
+                ) from exc
+            identity = path.stat()
+            published.append((final_path, (identity.st_dev, identity.st_ino)))
         return {
             "success": True,
             "quantity_name": quantity_name,
@@ -258,6 +266,14 @@ def render_field_png_bundle(
             "plot_process_isolated": True,
         }
     except Exception:
+        # Roll back only links to our staging files, preserving other writers.
+        for final_path, identity in reversed(published):
+            try:
+                unlink_if_identity(final_path, identity)
+            except OSError:
+                pass
+        raise
+    finally:
         # Best-effort cleanup: a locked or read-only partial PNG must not
         # replace the original render/validation error, so each unlink is
         # guarded independently and cleanup failures are deliberately ignored.
@@ -266,8 +282,6 @@ def render_field_png_bundle(
                 Path(view["png_path"]).unlink(missing_ok=True)
             except OSError:
                 pass
-        raise
-    finally:
         try:
             staging_root.rmdir()
         except OSError:

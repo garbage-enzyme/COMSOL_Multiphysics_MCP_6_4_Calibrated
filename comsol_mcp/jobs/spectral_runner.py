@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from comsol_mcp.durable import append_jsonl_record
+
 from .spectral_audit import build_spectral_audit_point, extract_spectral_audit_result
 from .spectral_progress import build_spectral_progress
 from .spectral_rows import append_spectral_row, read_spectral_rows
@@ -214,6 +216,7 @@ def run_spectral_characterization(
     solved_this_attempt = 0
     skipped_complete = len(read_spectral_rows(rows_path, spec, artifact_root=root))
     skip_counts: dict[str, int] = {}
+    failed_points: set[str] = set()
     while True:
         plans = read_spectral_stage_plans(root, spec)
         rows = read_spectral_rows(rows_path, spec, artifact_root=root)
@@ -251,7 +254,20 @@ def run_spectral_characterization(
                 "progress": progress,
                 **receipt,
             }
-        pending = progress["pending_points"]
+        pending = [
+            point
+            for point in progress["pending_points"]
+            if point["point_fingerprint"] not in failed_points
+        ]
+        if not pending and failed_points:
+            return {
+                "completed": False,
+                "stop_reason": "point_errors",
+                "solved_this_attempt": solved_this_attempt,
+                "skipped_complete": skipped_complete,
+                "progress": progress,
+                "failed_point_count": len(failed_points),
+            }
         if not pending:
             raise RuntimeError("spectral progress requested solving without a pending point")
         target = pending[0]
@@ -286,15 +302,76 @@ def run_spectral_characterization(
         point = build_spectral_audit_point(spec, target["requested_wavelength_m"])
         if point["point_fingerprint"] != target["point_fingerprint"]:
             raise RuntimeError("frozen pending point identity changed before solve")
-        artifact_dir = root / "point_artifacts" / point["point_fingerprint"]
-        result = point_executor(point, artifact_dir)
-        projection = extract_spectral_audit_result(
-            job_dir=root,
-            artifact_dir=artifact_dir,
-            spec=spec,
-            point=point,
-            result=result,
-        )
+        projection = None
+        for retry_index in range(spec.get("max_retries", 0) + 1):
+            if retry_index:
+                retry_control = _hook_action(
+                    control_hook,
+                    {
+                        "phase": "before_solve",
+                        "attempt": attempt,
+                        "point": target,
+                        "completed_rows": len(rows),
+                        "retry_index": retry_index,
+                    },
+                )
+                if retry_control["action"] == "skip_point":
+                    break
+                if retry_control["action"] != "continue":
+                    return {
+                        "completed": False,
+                        "stop_reason": f"before_solve_{retry_control['action']}",
+                        "solved_this_attempt": solved_this_attempt,
+                        "skipped_complete": skipped_complete,
+                        "progress": progress,
+                    }
+            artifact_dir = (
+                root / "point_artifacts" / point["point_fingerprint"]
+                if retry_index == 0
+                else root
+                / "retry_artifacts"
+                / f"a{attempt}r{retry_index}"
+                / point["point_fingerprint"]
+            )
+            try:
+                result = point_executor(point, artifact_dir)
+                projection = extract_spectral_audit_result(
+                    job_dir=root,
+                    artifact_dir=artifact_dir,
+                    spec=spec,
+                    point=point,
+                    result=result,
+                )
+            except Exception as exc:
+                error_row = {
+                    "kind": "spectral_point_error",
+                    "spec_fingerprint": spec["spec_fingerprint"],
+                    "attempt": attempt,
+                    "retry_index": retry_index,
+                    "point_id": point["point_id"],
+                    "point_fingerprint": point["point_fingerprint"],
+                    "status": "error",
+                    "error_type": type(exc).__name__,
+                    "message": str(exc)[:2000],
+                }
+                append_jsonl_record(root / "spectral_errors.jsonl", error_row)
+                failed_control = _hook_action(after_durable_row_hook, error_row)
+                if failed_control["action"] != "continue":
+                    return {
+                        "completed": False,
+                        "stop_reason": f"after_durable_row_{failed_control['action']}",
+                        "solved_this_attempt": solved_this_attempt,
+                        "skipped_complete": skipped_complete,
+                        "progress": progress,
+                    }
+                if retry_index == spec.get("max_retries", 0):
+                    if not spec.get("continue_on_error", False):
+                        raise
+                    failed_points.add(point["point_fingerprint"])
+            else:
+                break
+        if projection is None:
+            continue
         row = append_spectral_row(
             rows_path,
             spec,

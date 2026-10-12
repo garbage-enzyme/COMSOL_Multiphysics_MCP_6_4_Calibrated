@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from src.jobs.validation_matrix import normalize_validation_matrix_spec
 from src.jobs.validation_rows import read_validation_rows
 from src.jobs.validation_runner import run_pending_validation_points
 
 
-def _spec(tmp_path, *, continue_on_error=False):
+def _spec(tmp_path, *, continue_on_error=False, max_retries=0):
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"controlled")
     points = []
@@ -34,6 +35,7 @@ def _spec(tmp_path, *, continue_on_error=False):
             "point_limit": 2,
             "cores": 1,
             "continue_on_error": continue_on_error,
+            "max_retries": max_retries,
             "resource_policy": {
                 "wall_time_budget_seconds": 120,
                 "minimum_next_point_seconds": 30,
@@ -41,6 +43,55 @@ def _spec(tmp_path, *, continue_on_error=False):
             },
         }
     )
+
+
+@pytest.mark.parametrize("failures,max_retries", [(1, 1), (3, 3), (4, 3)])
+def test_retry_policy_is_bounded_and_persists_every_failed_attempt(tmp_path, failures, max_retries):
+    spec = _spec(tmp_path, max_retries=max_retries)
+    directory = tmp_path / "job"
+    calls = []
+    admissions = []
+
+    def collect(point, collector, artifact_directory):
+        calls.append(artifact_directory)
+        if len(calls) <= failures:
+            raise RuntimeError("temporary collector failure")
+        return _complete_executor(point, collector, artifact_directory)
+
+    def admit(context):
+        admissions.append(context["point_id"])
+        return {"action": "start_point", "start_authorized": True}
+
+    result = run_pending_validation_points(
+        spec, directory, attempt=1, collector_executor=collect, before_point_hook=admit
+    )
+    rows = read_validation_rows(directory / "matrix_rows.jsonl", spec)
+    assert len(calls) == (failures + 2 if failures <= max_retries else max_retries + 1)
+    assert len(admissions) == len(calls)
+    assert len(set(calls)) == len(calls)
+    assert [row["status"] for row in rows] == ["error"] * min(failures, max_retries + 1) + (
+        ["ok", "ok"] if failures <= max_retries else []
+    )
+    assert result["success"] is (failures <= max_retries)
+
+
+def test_retry_observes_cancellation_before_second_collector_call(tmp_path):
+    spec = _spec(tmp_path, max_retries=3)
+    calls = []
+
+    def fail(point, _collector, _directory):
+        calls.append(point["point_id"])
+        raise RuntimeError("temporary failure")
+
+    result = run_pending_validation_points(
+        spec,
+        tmp_path / "job",
+        attempt=1,
+        collector_executor=fail,
+        should_stop=lambda: bool(calls),
+    )
+    assert len(calls) == 1
+    assert result["stop_reason"] == "control_request"
 
 
 def _complete_executor(point, _collector, artifact_directory: Path):

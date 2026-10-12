@@ -621,18 +621,85 @@ def test_posix_source_mutation_refuses_campaign_success(tmp_path, ascii_tmp_path
     """POSIX detects mutation; it does not claim Windows write-denying handles."""
     if os.name == "nt":
         import pytest
+
         pytest.skip("POSIX source-change detection")
     store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
     ownership = _Ownership()
     client = _Client(attempt_mutation=True)
     code = _run(
-        str(store.root), job_id,
+        str(store.root),
+        job_id,
         ownership_factory=lambda *_: ownership,
         client_factory=lambda _: client,
         collector_executor=_collector_for(spec),
-        telemetry_provider=_telemetry, native_cancel_enabled=False,
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
     )
     assert code != 0
     assert store.read_state(job_id)["status"] != "completed"
     assert ownership.released is True
     assert client.mutation_blocked == 0
+
+
+def test_partial_child_resume_preserves_points_and_rebuilds_progress(
+    tmp_path, ascii_tmp_path, monkeypatch
+):
+    from collections import Counter
+
+    from src.jobs.spectral_rows import read_spectral_rows
+
+    store, spec, job_id = _created_job(tmp_path, ascii_tmp_path)
+    calls = Counter()
+    collect = _collector_for(spec)
+
+    def counted(point, collector, directory):
+        calls[point["point_fingerprint"]] += 1
+        return collect(point, collector, directory)
+
+    original_update = store.__class__.update_state
+    events = []
+
+    def interrupt(self, *args, **kwargs):
+        if kwargs.get("event") == "durable_spectral_point":
+            events.append(1)
+            if len(events) == 3:
+                raise OSError("projection failed after durable point")
+        return original_update(self, *args, **kwargs)
+
+    monkeypatch.setattr(store.__class__, "update_state", interrupt)
+    kwargs = dict(
+        ownership_factory=lambda *_: _Ownership(),
+        client_factory=lambda _: _Client(),
+        collector_executor=counted,
+        telemetry_provider=_telemetry,
+        native_cancel_enabled=False,
+    )
+    assert _run(str(store.root), job_id, **kwargs) == 1
+    root = store.job_dir(job_id)
+    assert (
+        len(
+            read_spectral_rows(
+                root / "l0/spectral_rows.jsonl",
+                spec["levels"][0]["spectral_job"],
+                artifact_root=root / "l0",
+            )
+        )
+        == 3
+    )
+    monkeypatch.setattr(store.__class__, "update_state", original_update)
+    store.update_state(job_id, "starting", patch={"attempt": 2}, event="test_resume")
+    assert _run(str(store.root), job_id, **kwargs) == 0
+    completed = sum(
+        len(
+            read_spectral_rows(
+                root / f"l{state['ordinal']}/spectral_rows.jsonl",
+                state["spectral_job"],
+                artifact_root=root / f"l{state['ordinal']}",
+            )
+        )
+        for state in spec["levels"]
+    )
+    assert set(calls.values()) == {1}
+    assert sum(calls.values()) == completed
+    assert store.read_state(job_id)["progress"] == {"completed": completed, "total": completed}
+    assert not list(root.glob(".l*.invalid-*"))

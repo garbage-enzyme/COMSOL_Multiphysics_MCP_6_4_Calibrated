@@ -16,7 +16,7 @@ Scope
 The scan covers the packaged runtime (``comsol_mcp`` and the repository-only
 ``src`` compatibility layer) and the explicit licensed probes under
 ``development_kit/scripts`` and ``development_kit/tests/integration``.
-``development_kit/tests`` is deliberately **excluded**: those modules define
+Unit tests outside the integration probe root are deliberately **excluded**: they define
 test doubles such as a fake ``Model.java`` attribute, which is a stub rather
 than a call into MPh, so counting them would inflate the ledger without
 describing a real direct call.  The exclusion is a single documented rule
@@ -173,7 +173,8 @@ def measure_repository(root: Path) -> dict[str, dict[str, int]]:
     measured: dict[str, dict[str, int]] = {}
     for path in _scanned_files(root):
         relative = path.relative_to(root).as_posix()
-        if "__pycache__" in path.parts or relative.startswith(EXCLUDED_PREFIXES):
+        is_probe = any(relative.startswith(prefix + "/") for prefix in PROBE_ROOTS)
+        if "__pycache__" in path.parts or (relative.startswith(EXCLUDED_PREFIXES) and not is_probe):
             continue
         counts = measure_module_sites(path.read_text(encoding="utf-8", errors="replace"))
         if any(counts.values()):

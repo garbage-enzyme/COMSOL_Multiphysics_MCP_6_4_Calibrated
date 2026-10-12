@@ -329,6 +329,45 @@ def test_real_backend_typed_read_uses_declared_accessor(monkeypatch, form, acces
     assert calls == ["value"]
 
 
+@pytest.mark.parametrize(
+    "form,accessor,proxy_name,value",
+    [
+        ("float_matrix", "getDoubleMatrix", "java.lang.Double", 1.5),
+        ("int_matrix", "getIntMatrix", "java.lang.Integer", 3),
+        ("bool_matrix", "getBooleanMatrix", "java.lang.Boolean", True),
+        ("str_matrix", "getStringMatrix", "java.lang.String", "x"),
+    ],
+)
+def test_real_backend_matrix_read_unwraps_cells_without_flattening(
+    monkeypatch, form, accessor, proxy_name, value
+):
+    from comsol_mcp.adapter.protocol import NodeRef
+
+    class Cell:
+        def __float__(self):
+            return float(value)
+
+        def __int__(self):
+            return int(value)
+
+        def __bool__(self):
+            return bool(value)
+
+        def __str__(self):
+            return str(value)
+
+    Cell.__name__ = proxy_name
+    java = type("Java", (), {})()
+    setattr(java, accessor, lambda _name: [[Cell(), Cell()], [Cell(), Cell()]])
+    backend = MphBackendBase()
+    monkeypatch.setattr(backend, "_java_node", lambda _path: java)
+    node = NodeRef(tag="comp1", path=("comp1",), node_type=None)
+    assert backend.read_property(node, "matrix", form=form).value == [
+        [value, value],
+        [value, value],
+    ]
+
+
 def test_an_oversized_matrix_is_refused_rather_than_materialized() -> None:
     from comsol_mcp.adapter.conversion import MAX_MATRIX_ELEMENTS
 

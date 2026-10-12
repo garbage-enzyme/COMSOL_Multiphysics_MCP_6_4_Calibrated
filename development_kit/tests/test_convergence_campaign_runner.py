@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import os
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -225,7 +225,7 @@ def test_level_directory_stays_inside_the_windows_legacy_path_budget():
     assert len(str(directory / suffix)) <= 259
 
 
-def test_transient_append_failure_quarantines_level_and_notifies_fault_hook(tmp_path, monkeypatch):
+def test_transient_append_failure_preserves_level_for_retry(tmp_path, monkeypatch):
     import src.jobs.convergence_campaign_runner as runner_module
 
     spec = _spec(tmp_path, early=False, tolerance=20e-9)
@@ -258,20 +258,18 @@ def test_transient_append_failure_quarantines_level_and_notifies_fault_hook(tmp_
         return real_append(*_args, **_kwargs)
 
     monkeypatch.setattr(runner_module, "append_convergence_campaign_level", transient_oserror)
-    result = run_convergence_campaign(
-        spec, root, attempt=2, level_executor=execute, fault_hook=fault
-    )
-    assert result["completed"] is True
-    quarantined = [payload for phase, payload in events if phase == "level_row_quarantined"]
-    assert len(quarantined) == 1
-    assert quarantined[0]["level_id"] == "mesh-0"
-    assert quarantined[0]["error"].startswith("OSError:")
-    assert calls.count("mesh-0") == 2
+    child_root = convergence_level_directory(root, 0)
+    original_rows = (child_root / "spectral_rows.jsonl").read_bytes()
+    with pytest.raises(OSError, match="transient windows file lock"):
+        run_convergence_campaign(spec, root, attempt=2, level_executor=execute, fault_hook=fault)
+    assert (child_root / "spectral_rows.jsonl").read_bytes() == original_rows
+    assert not [payload for phase, payload in events if phase == "level_row_quarantined"]
+    assert calls.count("mesh-0") == 1
 
     monkeypatch.setattr(runner_module, "append_convergence_campaign_level", real_append)
     resumed = run_convergence_campaign(spec, root, attempt=3, level_executor=execute)
     assert resumed["completed"] is True
-    assert calls.count("mesh-0") == 2
+    assert calls.count("mesh-0") == 1
 
 
 def test_truthy_non_true_level_completion_is_accepted(tmp_path):

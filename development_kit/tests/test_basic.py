@@ -1380,8 +1380,9 @@ class TestSessionManager:
         assert sm._owns_solver_lease is False
         assert permissive_session_ownership._ownership.releases == 1
 
+    @pytest.mark.parametrize("release_failed", [False, True])
     def test_cancelled_start_retires_exact_client_only_once_after_failure(
-        self, monkeypatch, permissive_session_ownership
+        self, monkeypatch, permissive_session_ownership, release_failed
     ):
         import src.tools.session as session_module
 
@@ -1415,6 +1416,8 @@ class TestSessionManager:
             raise RuntimeError("heartbeat failed")
 
         monkeypatch.setattr(sm._ownership, "heartbeat", fail_heartbeat)
+        if release_failed:
+            monkeypatch.setattr(sm._ownership, "release", lambda: {"success": False})
         sm._start_attempt_id = "test-attempt"
         sm._starting = True
 
@@ -1422,8 +1425,9 @@ class TestSessionManager:
 
         assert client.calls == ["clear", "disconnect"]
         assert sm.client is None
-        assert sm._owns_solver_lease is False
-        assert permissive_session_ownership._ownership.releases == 1
+        assert sm._owns_solver_lease is release_failed
+        assert sm.get_status()["cleanup_pending"] is release_failed
+        assert permissive_session_ownership._ownership.releases == (0 if release_failed else 1)
 
     def test_cancelled_start_retains_uncertain_client_and_lease(
         self, monkeypatch, permissive_session_ownership

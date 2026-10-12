@@ -421,6 +421,7 @@ def test_real_adjoint_worker_dispatches_validated_runtime_and_persists_rows(
     assert terminal["status"] == "completed"
     assert terminal["solver_started"] is True
     assert [row["kind"] for row in persisted] == ["gradient", "iteration"]
+    assert persisted[0]["payload"]["evidence_state"] == "native_unchecked"
 
 
 def _real_adjoint_envelope(ascii_tmp_path):
