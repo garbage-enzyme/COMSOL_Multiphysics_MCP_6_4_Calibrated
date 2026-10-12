@@ -226,6 +226,49 @@ def test_adapter_rejects_forward_only_constraint_before_backend_mutation():
     assert backend.snapshot() == original
 
 
+@pytest.mark.parametrize(
+    "property_name",
+    ["constraintExpression", "constraintLbound", "constraintUbound", "constraintActive"],
+)
+@pytest.mark.parametrize("failure", ["write", "readback"])
+def test_constraint_configuration_failure_restores_original_state(
+    monkeypatch, property_name, failure
+):
+    support = _support()
+    support["constraints"] = [
+        {
+            "constraint_id": "transmission_bound",
+            "kind": "differentiable_scalar",
+            "expression": "ewfd.Tport1",
+            "unit": "1",
+            "lower": 0.0,
+            "upper": 0.1,
+            "derivative_supported": True,
+        }
+    ]
+    backend = _Backend()
+    backend.create_study("existing")
+    original = backend.snapshot()
+    original_set = _Node.set
+    original_get = _Node.getStringArray
+
+    def set_value(self, name, value):
+        if name == property_name and failure == "write":
+            raise RuntimeError("injected constraint write failure")
+        return original_set(self, name, value)
+
+    def get_value(self, name):
+        if name == property_name and failure == "readback":
+            return ["unexpected"]
+        return original_get(self, name)
+
+    monkeypatch.setattr(_Node, "set", set_value)
+    monkeypatch.setattr(_Node, "getStringArray", get_value)
+    with pytest.raises((RuntimeError, ValueError), match="failure|readback differs"):
+        configure_native_adjoint(backend, support, _optimizer())
+    assert backend.snapshot() == original
+
+
 def test_adapter_rolls_back_when_a_fixed_property_fails():
     backend = _Backend()
     original = backend.snapshot()
