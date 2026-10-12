@@ -1038,6 +1038,110 @@ def test_worker_default_mesh_telemetry_refuses_without_stage_execution(
     assert client.clear_count == 1
 
 
+@pytest.mark.parametrize("elements", [100, 101])
+def test_worker_prepares_resource_model_before_mesh_admission(
+    ascii_tmp_path, monkeypatch, elements
+):
+    from comsol_mcp.jobs.resource_admission import normalize_resource_policy
+    from comsol_mcp.tools import mesh as mesh_module
+
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "prepare"))
+    spec["resource_policy"] = normalize_resource_policy({"max_mesh_elements": 100})
+    store = JobStore(ascii_tmp_path / "prepare-runtime" / "jobs")
+    job_id = store.create(
+        spec,
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "progress": {"completed": 0, "total": 5},
+        },
+    )
+    calls = []
+    model = object()
+
+    class Executor:
+        model = None
+
+        def prepare_resource_model(self):
+            calls.append("prepare")
+            self.model = model
+
+        def __call__(self, stage, *_args):
+            calls.append(stage)
+            return _payload(stage, spec)
+
+    def mesh_info(current, *, component_name, mesh_name):
+        assert current is model
+        assert component_name == spec["model_contract"]["component_tag"]
+        assert mesh_name == spec["model_contract"]["mesh_tag"]
+        calls.append("sample")
+        return {"success": True, "mesh": {"num_elements": elements}}
+
+    monkeypatch.setattr(mesh_module, "get_mesh_info", mesh_info)
+    assert (
+        run_worker(
+            str(store.root),
+            job_id,
+            ownership_factory=lambda *_args: _Ownership(),
+            client_factory=lambda _spec: _Client(),
+            stage_executor_factory=lambda *_args: Executor(),
+            native_cancel_enabled=False,
+        )
+        == 0
+    )
+    assert calls[:2] == ["prepare", "sample"]
+    assert calls.count("prepare") == 1
+    state = store.read_state(job_id)
+    assert state["status"] == ("completed" if elements == 100 else "interrupted")
+    executed = [item for item in calls if item in THERMO_OPTOMECHANICAL_STAGES]
+    assert executed == (list(THERMO_OPTOMECHANICAL_STAGES) if elements == 100 else [])
+
+
+@pytest.mark.parametrize("derived", [False, True])
+@pytest.mark.parametrize("mutate_source", [False, True])
+def test_resource_preparation_loads_actual_model_without_solving(
+    ascii_tmp_path, derived, mutate_source
+):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "prepare-load"))
+    calls = []
+    model = object()
+
+    def load(path):
+        calls.append(("load", path))
+        if mutate_source:
+            Path(spec["source_model_path"]).write_bytes(b"changed during load")
+        return model
+
+    client = SimpleNamespace(clear=lambda: calls.append(("clear", None)), load=load)
+    executor = ThermoOptomechanicalComsolExecutor(client, spec, ascii_tmp_path / "job")
+    if derived:
+        executor.derived_path.parent.mkdir(parents=True)
+        executor.derived_path.write_bytes(b"derived")
+    expected = executor.derived_path if derived else executor.source
+    if mutate_source:
+        with pytest.raises(RuntimeError, match="source changed"):
+            executor.prepare_resource_model()
+    else:
+        executor.prepare_resource_model()
+        executor.prepare_resource_model()
+        assert executor.model is model
+    assert calls == [("clear", None), ("load", str(expected))]
+
+
+def test_resource_model_preparation_rejects_changed_source_before_load(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "changed"))
+    calls = []
+    client = SimpleNamespace(
+        clear=lambda: calls.append("clear"), load=lambda _: calls.append("load")
+    )
+    executor = ThermoOptomechanicalComsolExecutor(client, spec, ascii_tmp_path / "job")
+    Path(spec["source_model_path"]).write_bytes(b"changed")
+    with pytest.raises(RuntimeError, match="source changed"):
+        executor.prepare_resource_model()
+    assert calls == []
+
+
 def test_worker_refuses_thermo_stage_when_resource_budget_is_exceeded(ascii_tmp_path):
     spec = normalize_thermo_optomechanical_replay_spec(
         _raw_spec(ascii_tmp_path / "resource-refusal")

@@ -172,6 +172,12 @@ def _run(
                 )
             mesh_elements = None
             model = getattr(stage_executor, "model", None)
+            policy = resource.policy
+            if model is None and policy and "max_mesh_elements" in policy["rules"]:
+                prepare = getattr(stage_executor, "prepare_resource_model", None)
+                if callable(prepare):
+                    prepare()
+                    model = getattr(stage_executor, "model", None)
             if model is not None:
                 from comsol_mcp.tools.mesh import get_mesh_info
 

@@ -111,6 +111,16 @@ class ThermoOptomechanicalComsolExecutor:
         self._active_dataset = None
         return self.model
 
+    def prepare_resource_model(self) -> None:
+        """Load a verified source for admission without building or solving."""
+        self._verify_source()
+        if self.model is None:
+            if self.derived_path.is_file():
+                self._load_derived()
+            else:
+                self._load_source()
+        self._verify_source()
+
     def _load_derived(self) -> Any:
         if not self.derived_path.is_file():
             raise RuntimeError("derived thermo-optomechanical model is missing")
