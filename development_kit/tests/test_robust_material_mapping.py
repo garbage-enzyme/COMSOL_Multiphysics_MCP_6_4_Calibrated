@@ -171,6 +171,8 @@ def _tensor_rows() -> dict:
 def _condition_table() -> dict:
     states = []
     for state_id, marker in (("OX", "a"), ("MR", "b")):
+        mapping = _mapping(marker.upper(), state_id)
+        mapping["independent_variable"].update(valid_min=8000.0, valid_max=10000.0)
         states.append(
             {
                 "schema_name": "comsol_mcp.optimization_material_state",
@@ -178,7 +180,7 @@ def _condition_table() -> dict:
                 "state_id": state_id,
                 "material_ledger_sha256": marker * 64,
                 "optical_property_source_sha256": marker.upper() * 64,
-                "optical_property_mapping": _mapping(marker.upper(), state_id),
+                "optical_property_mapping": mapping,
                 "temperature_k": 300.0,
                 "provenance_disposition": "private_input_hash_bound",
             }
@@ -235,3 +237,36 @@ def test_tensor_rows_reject_source_temperature_or_wavelength_drift():
     value["states"][1]["rows"].pop()
     with pytest.raises(ValueError, match="active wavelengths"):
         bind_robust_material_tensor_rows(value, table, expected_temperature_k=300.0)
+
+
+@pytest.mark.parametrize("bounds", [(8000.1, 10000.0), (8000.0, 9999.9)])
+def test_tensor_rows_refuse_active_wavelengths_outside_declared_material_range(bounds):
+    raw = _condition_table()
+    raw["material_states"][0]["optical_property_mapping"]["independent_variable"].update(
+        valid_min=bounds[0], valid_max=bounds[1]
+    )
+    table = normalize_optimization_condition_table(raw)
+    with pytest.raises(ValueError, match="outside.*material.*range"):
+        bind_robust_material_tensor_rows(_tensor_rows(), table, expected_temperature_k=300.0)
+
+
+@pytest.mark.parametrize("unit,scale", [("m", 1.0), ("um", 1e-6), ("nm", 1e-9)])
+def test_tensor_rows_accept_exact_material_range_endpoints_in_source_units(unit, scale):
+    raw = _condition_table()
+    for state in raw["material_states"]:
+        state["optical_property_mapping"]["independent_variable"].update(
+            source_unit=unit, valid_min=8e-6 / scale, valid_max=10e-6 / scale
+        )
+    table = normalize_optimization_condition_table(raw)
+    binding = bind_robust_material_tensor_rows(_tensor_rows(), table, expected_temperature_k=300.0)
+    assert binding["active_wavelengths_m"]["OX"] == [8e-6, 9e-6, 10e-6]
+
+
+def test_tensor_rows_refuse_unknown_material_wavelength_unit():
+    raw = _condition_table()
+    raw["material_states"][0]["optical_property_mapping"]["independent_variable"].update(
+        source_unit="unknown_length"
+    )
+    table = normalize_optimization_condition_table(raw)
+    with pytest.raises(ValueError, match="wavelength unit"):
+        bind_robust_material_tensor_rows(_tensor_rows(), table, expected_temperature_k=300.0)
