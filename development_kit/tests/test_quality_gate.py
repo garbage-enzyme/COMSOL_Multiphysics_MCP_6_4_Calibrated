@@ -337,3 +337,30 @@ def test_hosted_shard_failure_retains_full_log_and_bounds_console(tmp_path, monk
     assert "FAILED explicit-assertion" in output
     assert "private-prefix-marker" not in output
     assert len(output) < 65700
+
+
+def test_hosted_shards_isolate_default_coverage_files(tmp_path, monkeypatch):
+    from development_kit.scripts import serial_test_shards as runner
+
+    launched = []
+
+    class CompletedProcess:
+        def __init__(self, command, **kwargs):
+            launched.append((command, kwargs["env"]))
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setenv("COVERAGE_FILE", str(tmp_path / "shared-coverage"))
+    monkeypatch.setattr(runner, "test_files", lambda **_kwargs: ["test_a.py", "test_b.py"])
+    monkeypatch.setattr(runner.subprocess, "Popen", CompletedProcess)
+    root = tmp_path / "shards"
+    runner.run_shards(basetemp_root=root, shard_count=2)
+    paths = [Path(environment["COVERAGE_FILE"]) for _, environment in launched]
+    assert len(set(paths)) == 2
+    assert all(path.parent == root / "coverage" for path in paths)
+    assert all(path.parent.is_dir() for path in paths)
+    assert all("--cov=comsol_mcp" in command for command, _ in launched)
