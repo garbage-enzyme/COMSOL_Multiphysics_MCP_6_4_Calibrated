@@ -383,6 +383,14 @@ def completed_point_fingerprints(
             if snapshot["sha256"] != summary["manifest_sha256"]:
                 raise ValueError("validation manifest hash differs from the durable row")
             _validate_nested_manifest_snapshot(candidate, snapshot["payload"], root=root)
+        if any(
+            summary["collector"] == "wave_optics_field_evidence"
+            for summary in row["collector_summaries"]
+        ):
+            # Reuse the same immutable point and NPZ checks as field review.
+            from .field_review import _load_point_field
+
+            _load_point_field(root, spec, row)
         completed.add(row["point_fingerprint"])
     return completed
 

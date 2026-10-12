@@ -323,16 +323,20 @@ class ThermoOptomechanicalComsolExecutor:
         self._apply_thermal_load_features()
 
     @staticmethod
-    def _feature_by_type(physics: Any, feature_type: str) -> Any:
+    def _feature_by_type(
+        physics: Any, feature_type: str, subtype: tuple[str, str] | None = None
+    ) -> Any:
         features = physics.feature()
         matches = [
             physics.feature(tag)
             for tag in list(features.tags())
             if str(physics.feature(tag).getType()) == feature_type
+            and (subtype is None or str(physics.feature(tag).getString(subtype[0])) == subtype[1])
         ]
         if len(matches) != 1:
             raise RuntimeError(
-                f"thermo-optomechanical model must contain exactly one {feature_type} feature"
+                "thermo-optomechanical model must contain exactly one "
+                f"{subtype[1] if subtype else feature_type} feature"
             )
         return matches[0]
 
@@ -364,7 +368,9 @@ class ThermoOptomechanicalComsolExecutor:
             "Q0",
             f"{load['volumetric_heat_source_W_per_m3']:.17g}[{load['heat_source_unit']}]",
         )
-        convection = self._feature_by_type(heat, "ConvectiveHeatFlux")
+        convection = self._feature_by_type(
+            heat, "HeatFluxBoundary", ("HeatFluxType", "ConvectiveHeatFlux")
+        )
         self._bind_feature_selection(convection, component, contract["thermal_boundary_selection"])
         self._set_feature_value(
             convection,
@@ -487,7 +493,12 @@ class ThermoOptomechanicalComsolExecutor:
         self._study("transfer_study_tag")
         # _study() already binds the transfer study's own solution dataset;
         # measuring through that binding is what observes the Transfer output.
-        displacement = abs(self._evaluate("displacement_max"))
+        displacement_key = (
+            "transfer_displacement_max"
+            if self.spec["model_contract"]["expressions"].get("transfer_displacement_max")
+            else "displacement_max"
+        )
+        displacement = abs(self._evaluate(displacement_key))
         deformed_geometry = _fingerprint(
             {
                 "source_model_sha256": self.spec["source_model_sha256"],
@@ -498,7 +509,7 @@ class ThermoOptomechanicalComsolExecutor:
         self._save(self.derived_path)
         self._load_derived()
         self._bind_study_dataset(self.spec["model_contract"]["transfer_study_tag"])
-        displacement_readback = abs(self._evaluate("displacement_max"))
+        displacement_readback = abs(self._evaluate(displacement_key))
         return {
             "method": self.spec["deformation_transfer"]["method"],
             "material_frame_semantics": "spatial_deformation_preserves_material",

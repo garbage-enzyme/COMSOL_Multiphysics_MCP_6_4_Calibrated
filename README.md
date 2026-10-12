@@ -409,6 +409,9 @@ existing output unless `--overwrite-output` is explicit.
 
 Durable sweep controls are `job_submit`, `job_status`, `job_tail`, `job_cancel`, and `job_resume`. Each job has its own ASCII-only runtime directory containing its immutable specification, state, CSV journal, checkpoint, and log. Resume accepts only matching, finite, successful rows. Cancellation reaches a terminal cancelled state only after worker/process cleanup and lease release are verified. This coordination is for a shared runtime directory on one host. It is not distributed execution.
 
+An owned staged sweep reports `completed` only after its client and lease cleanup succeeds.
+A cleanup failure preserves result rows and reports `failed`, `cleanup_pending`, and `owned_cleanup` details.
+
 The interactive `mesh_convergence_study` helper also writes a manifest beside
 its CSV. Any resume or append to an existing journal requires
 `source_model_path`. The source hash, study, expressions, parameter setting,
@@ -507,6 +510,10 @@ mesh, wavelength, zero-CTE, zero-temperature-rise, rollback, source-integrity,
 and cleanup evidence separate from execution completion. The minimal supported
 route forbids topology change and requires a licensed COMSOL 6.4 synthetic
 fixture gate before use with research models.
+
+Set `model_contract.expressions.transfer_displacement_max` to measure transferred mesh displacement in the transfer study dataset.
+If omitted, the transfer stage uses the declared `displacement_max` expression in that same dataset.
+An unavailable expression fails the stage. The executor does not substitute a prior structural result.
 
 A durable convergence campaign uses `job_type: "convergence_campaign"` and an
 immutable ordered ladder of two to eight exact source or prebuilt derived model

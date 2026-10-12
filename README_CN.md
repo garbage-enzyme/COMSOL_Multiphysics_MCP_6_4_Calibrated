@@ -340,6 +340,9 @@ python -m recipes.acoustic_duct_2d `
 
 持久化扫描控制工具为 `job_submit`、`job_status`、`job_tail`、`job_cancel` 和 `job_resume`。每个任务在 ASCII-only runtime 目录中保存不可变规格、状态、CSV 日志、检查点和日志文件。恢复时只接受规格一致、数值有限且成功完成的行。只有 worker/相关进程清理和租约释放都得到验证后，取消才会进入终态。此协调机制仅适用于同一台主机上共享 runtime 目录的任务，不是分布式或跨主机取消。
 
+拥有求解器的 staged sweep 仅在 client 和租约清理成功后报告 `completed`。
+清理失败时保留结果行，并报告 `failed`、`cleanup_pending` 和 `owned_cleanup` 详情。
+
 交互式 `mesh_convergence_study` 也会在 CSV 旁写入 manifest。对已有日志执行
 resume 或 append 时必须提供 `source_model_path`。只有源文件哈希、study、表达式、
 参数设置、mesh identity 以及每个 level 的精确 properties 全部一致，已完成 level
@@ -417,6 +420,10 @@ frame 形变传递和精确光学重放。resume 会先验证孤立 evidence，�
 zero-CTE、zero-temperature-rise、rollback、源完整性与 cleanup 证据，不把执行完成等同
 于科学通过。最小支持路径禁止拓扑变化，并要求先通过 COMSOL 6.4 synthetic fixture 的
 licensed gate，之后才可用于研究模型。
+
+用 `model_contract.expressions.transfer_displacement_max` 声明传递 study 数据集中的网格传递位移表达式。
+省略时，传递 stage 在同一数据集中读取已声明的 `displacement_max`。
+表达式无法计算时，该 stage 失败。执行器不会用旧结构解代替传递结果。
 
 持久化收敛任务使用 `job_type: "convergence_campaign"`，并声明 2–8 个严格排序的
 exact source 或预先构建并验证的 derived model identity。每个 level 都复用已验收的

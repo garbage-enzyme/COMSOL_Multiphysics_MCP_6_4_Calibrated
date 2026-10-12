@@ -64,6 +64,26 @@ def _wait_for_launched_identity(process: subprocess.Popen, command: list[str]) -
 
 logger = logging.getLogger(__name__)
 
+
+def _verify_source_identities(spec: dict[str, Any]) -> None:
+    if spec["job_type"] in {"test_sequence", "surrogate_training"}:
+        return
+    sources = (
+        [item["spectral_job"] for item in spec["levels"]]
+        if spec["job_type"] == "convergence_campaign"
+        else [item["spectral_job"] for item in spec["states"]]
+        if spec["job_type"] == "branch_continuation_campaign"
+        else [spec]
+    )
+    for source in sources:
+        digest = hashlib.sha256()
+        with Path(source["source_model_path"]).open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != source["source_model_sha256"]:
+            raise ValueError("Refusing resume because immutable source SHA-256 changed")
+
+
 _DETACHED_PROCESS_LOCK = threading.Lock()
 _DETACHED_PROCESS_WAKE = threading.Event()
 _DETACHED_PROCESSES: set[_PollableProcess] = set()
@@ -1115,6 +1135,7 @@ class JobManager:
         # Ownership status merges durable-job summaries, so preflight must run
         # outside this job's lock.  The second locked validation below prevents
         # two concurrent resume callers from both transitioning and launching.
+        _verify_source_identities(spec)
         if spec["job_type"] in {
             "staged_sweep",
             "validation_matrix",
@@ -1157,6 +1178,7 @@ class JobManager:
             )
             if current_expected != expected or current_actual != expected:
                 raise ValueError("Refusing resume because immutable spec changed during preflight")
+            _verify_source_identities(current_spec)
             state["status"] = "starting"
             state["attempt"] = int(state.get("attempt", 1)) + 1
             state["worker_pid"] = None

@@ -350,7 +350,8 @@ def build_fixture(client: Any, source_path: Path) -> dict[str, Any]:
     source = heat.feature().create("hs1", "HeatSource", 3)
     source.selection().set(_jint([1]))
     source.set("Q0", "Qvol")
-    convection = heat.feature().create("hf1", "ConvectiveHeatFlux", 2)
+    convection = heat.feature().create("hf1", "HeatFluxBoundary", 2)
+    convection.set("HeatFluxType", "ConvectiveHeatFlux")
     convection.selection().set(_jint(all_boundaries))
     convection.set("h", "hconv")
     convection.set("Text", "Tamb")
@@ -439,6 +440,7 @@ def build_fixture(client: Any, source_path: Path) -> dict[str, Any]:
         "TminH1": "minDom(T)",
         "TmaxH1": "maxDom(T)",
         "umaxH1": "maxDom(sqrt(usolid^2+vsolid^2+wsolid^2))",
+        "dmeshH1": "maxDom(sqrt((x-X)^2+(y-Y)^2+(z-Z)^2))",
         "smaxH1": "maxDom(solid.mises)",
         "QinH1": "intDom(Qvol)",
         "QoutH1": "0[W]",
@@ -555,7 +557,10 @@ def _ledger() -> dict[str, Any]:
                 "source": {
                     "source_kind": "citation",
                     "citation": "Generated analytic thermo-optomechanical material fixture",
-                    "source_state_description": "lossless isotropic synthetic solid",
+                    "source_state_description": (
+                        "lossless isotropic synthetic solid; assumed 1% relative uncertainty, "
+                        "not measured material data"
+                    ),
                 },
                 "validity": {
                     "wavelength_min_m": 1.0e-6,
@@ -563,7 +568,7 @@ def _ledger() -> dict[str, Any]:
                     "temperature_min_K": 250.0,
                     "temperature_max_K": 500.0,
                 },
-                "uncertainty": {"kind": "relative", "relative_fraction": 0.0},
+                "uncertainty": {"kind": "relative", "relative_fraction": 0.01},
                 "measurement_conditions": {"method": "analytic", "ambient": "vacuum"},
                 "optical_model": {
                     "model_kind": "thermo_optic",
@@ -655,6 +660,7 @@ def _raw_spec(source_path: Path, specification_path: Path, *, cores: int = 2) ->
                 "temperature_min": "TminH1",
                 "temperature_max": "TmaxH1",
                 "displacement_max": "umaxH1",
+                "transfer_displacement_max": "dmeshH1",
                 "stress_max": "smaxH1",
                 "heat_source_integral": "QinH1",
                 "boundary_loss_integral": "QoutH1",

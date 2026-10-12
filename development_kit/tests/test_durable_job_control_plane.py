@@ -1370,14 +1370,167 @@ def test_resume_preflight_can_read_job_summaries_without_self_lock_delay(jobs_ro
     assert result["attempt"] == 2
 
 
+@pytest.mark.parametrize("during_preflight", [False, True])
+@pytest.mark.parametrize(
+    "job_type", ["staged_sweep", "convergence_campaign", "branch_continuation_campaign"]
+)
+def test_resume_rejects_changed_source_without_launch_or_attempt_change(
+    jobs_root, monkeypatch, during_preflight, job_type
+):
+    source = jobs_root / "baseline.mph"
+    source.write_bytes(b"model")
+    child = validate_staged_sweep_spec(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "wl",
+            "parameter_values": [4.25],
+            "expressions": ["A"],
+        }
+    )
+    spec = child
+    if job_type != "staged_sweep":
+        from comsol_mcp.jobs.manager import _fingerprint
+
+        key = "levels" if job_type == "convergence_campaign" else "states"
+        first = jobs_root / "first.mph"
+        first.write_bytes(b"model")
+        spec = {
+            "job_type": job_type,
+            key: [
+                {"spectral_job": {**child, "source_model_path": str(first)}},
+                {"spectral_job": child},
+            ],
+        }
+        spec["spec_fingerprint"] = _fingerprint(spec)
+    calls = []
+
+    def preflight(**_kwargs):
+        calls.append("preflight")
+        if during_preflight:
+            source.write_bytes(b"changed")
+        return {"ready": True}
+
+    manager = JobManager(jobs_root, preflight=preflight)
+    job_id = manager.store.create(
+        spec,
+        {
+            "schema_version": "1",
+            "status": "interrupted",
+            "attempt": 1,
+            "progress": {"completed": 0, "total": 1},
+        },
+    )
+    before = manager.store.read_state(job_id)
+    monkeypatch.setattr(manager, "_launch_worker", lambda *_args: calls.append("launch"))
+    if not during_preflight:
+        source.write_bytes(b"changed")
+    with pytest.raises(ValueError, match="source SHA-256"):
+        manager.resume(job_id)
+    assert calls == (["preflight"] if during_preflight else [])
+    assert manager.store.read_state(job_id) == before
+
+
+@pytest.mark.parametrize("mutation_stage", ["preflight", "client_startup", "model_load"])
+def test_owned_worker_rechecks_source_after_mutating_startup(
+    jobs_root, monkeypatch, mutation_stage
+):
+    from contextlib import nullcontext
+
+    import src.tools.ownership as ownership_module
+
+    source = jobs_root / "baseline.mph"
+    source.write_bytes(b"model")
+    spec = validate_staged_sweep_spec(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "wl",
+            "parameter_values": [4.25],
+            "expressions": ["A"],
+        }
+    )
+    store = JobStore(jobs_root)
+    job_id = store.create(
+        spec,
+        {
+            "schema_version": "1",
+            "status": "submitted",
+            "attempt": 1,
+            "progress": {"completed": 0, "total": 1},
+        },
+    )
+    calls = []
+
+    class Ownership:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            if mutation_stage == "preflight":
+                source.write_bytes(b"changed")
+            return {"ready": True}
+
+        def acquire(self, **_kwargs):
+            calls.append("acquire")
+            return {"success": True}
+
+        def heartbeat(self, **_kwargs):
+            return True
+
+        def release(self):
+            return {"success": True}
+
+    class Client:
+        port = None
+
+        def __init__(self, **_kwargs):
+            calls.append("client")
+            if mutation_stage == "client_startup":
+                source.write_bytes(b"changed")
+
+        def load(self, _path):
+            calls.append("load")
+            if mutation_stage == "model_load":
+                source.write_bytes(b"changed")
+                assert Path(_path) != source
+                assert Path(_path).read_bytes() == b"model"
+                raise RuntimeError("verified snapshot load")
+            raise AssertionError("Changed source must never load")
+
+        def clear(self):
+            pass
+
+    # Model a platform where read pins detect writes but cannot exclude them.
+    monkeypatch.setattr(production_worker, "pin_validated_reads", lambda *_args: nullcontext())
+    monkeypatch.setattr(ownership_module, "SolverOwnership", Ownership)
+    monkeypatch.setitem(sys.modules, "mph", types.SimpleNamespace(Client=Client))
+    assert production_worker.run(str(jobs_root), job_id) == 1
+    assert calls == (
+        []
+        if mutation_stage == "preflight"
+        else ["acquire", "client", "load"]
+        if mutation_stage == "model_load"
+        else ["acquire", "client"]
+    )
+    state = store.read_state(job_id)
+    assert state["status"] == "failed"
+    assert (
+        "verified snapshot load" if mutation_stage == "model_load" else "source SHA-256 changed"
+    ) in state["last_error"]["message"]
+    assert list(store.job_dir(job_id).glob("worker-source-*")) == []
+
+
 def test_test_jobs_require_explicit_injection(jobs_root):
     with pytest.raises(ValueError, match="disabled"):
         JobManager(jobs_root).submit({"job_type": "test_sequence", "delays": [0.01]})
 
 
-@pytest.mark.parametrize("release_raises", [False, True])
+@pytest.mark.parametrize(
+    "cleanup_failure", [None, "release_raises", "release_refuses", "clear", "disconnect"]
+)
 def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(
-    jobs_root, monkeypatch, release_raises
+    jobs_root, monkeypatch, cleanup_failure
 ):
     import src.tools.ownership as ownership_module
     import src.tools.workflow as workflow_module
@@ -1425,23 +1578,30 @@ def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(
 
         def release(self):
             lease_events.append("released")
-            if release_raises:
+            assert store.read_state(job_id)["status"] != "completed"
+            if cleanup_failure == "release_raises":
                 raise RuntimeError("injected ownership release failure")
+            if cleanup_failure == "release_refuses":
+                return {"success": False}
             return {"success": True}
 
     class FakeClient:
         def __init__(self, **_kwargs):
             self.disconnected = False
             self.cleared = False
-            self.port = None
+            self.port = 2030 if cleanup_failure == "disconnect" else None
 
         def load(self, _path):
             return object()
 
         def disconnect(self):
+            if cleanup_failure == "disconnect":
+                raise RuntimeError("injected disconnect failure")
             self.disconnected = True
 
         def clear(self):
+            if cleanup_failure == "clear":
+                raise RuntimeError("injected clear failure")
             self.cleared = True
 
     def fake_runner(_model, _parameter, values, _expressions, **kwargs):
@@ -1479,9 +1639,33 @@ def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(
 
     code = production_worker.run(str(jobs_root), job_id)
 
-    assert code == 0
-    assert store.read_state(job_id)["status"] == "completed"
+    assert code == (0 if cleanup_failure is None else 1)
+    state = store.read_state(job_id)
+    assert state["status"] == ("completed" if cleanup_failure is None else "failed")
+    assert state["owned_cleanup"]["success"] is (cleanup_failure is None)
+    expected_errors = {
+        None: [],
+        "release_raises": ["lease_release:RuntimeError"],
+        "release_refuses": ["lease_release_refused"],
+        "clear": ["client_clear:RuntimeError"],
+        "disconnect": ["client_disconnect:RuntimeError"],
+    }
+    assert state["owned_cleanup"]["errors"] == expected_errors[cleanup_failure]
+    assert state["cleanup_pending"] is (cleanup_failure is not None)
+    if cleanup_failure is not None:
+        assert state["last_error"]["type"] == "OwnedCleanupUnverified"
+    events = [
+        json.loads(line)
+        for line in (store.job_dir(job_id) / "events.jsonl").read_text().splitlines()
+    ]
+    assert any(event["event"] == "completed" for event in events) is (cleanup_failure is None)
     assert store.read_state(job_id)["progress"] == {"completed": 2, "total": 2}
+    with (store.job_dir(job_id) / "results.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert [(row["parameter_value"], row["status"]) for row in rows] == [
+        ("1.0", "ok"),
+        ("2.0", "ok"),
+    ]
     assert lease_events[0] == "acquired"
     assert lease_events[-1] == "released"
 

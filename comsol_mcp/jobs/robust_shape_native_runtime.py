@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import os
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
@@ -1110,8 +1112,40 @@ def execute_lin2025_conditions(
     cancel_requested: Callable[[], bool],
     include_gradients: bool = True,
 ) -> dict[str, Any]:
+    """Verify and freeze source bytes before acquiring a licensed client."""
+    with tempfile.TemporaryDirectory(prefix="native-source-", dir=directory) as private:
+        snapshot = Path(private) / "source.mph"
+        digest = hashlib.sha256()
+        with Path(spec["source_model_path"]).open("rb") as original, snapshot.open("xb") as copy:
+            for chunk in iter(lambda: original.read(1024 * 1024), b""):
+                digest.update(chunk)
+                copy.write(chunk)
+        if digest.hexdigest() != spec["source_model_sha256"]:
+            raise ValueError("Immutable source SHA-256 changed before native startup")
+        return _execute_lin2025_snapshot(
+            spec,
+            directory,
+            source=snapshot,
+            attempt=attempt,
+            client_factory=client_factory,
+            java_environment_reader=java_environment_reader,
+            cancel_requested=cancel_requested,
+            include_gradients=include_gradients,
+        )
+
+
+def _execute_lin2025_snapshot(
+    spec: Mapping[str, Any],
+    directory: Path,
+    *,
+    source: Path,
+    attempt: int,
+    client_factory: Callable[..., Any] | None,
+    java_environment_reader: Callable[[str], str | None] | None,
+    cancel_requested: Callable[[], bool],
+    include_gradients: bool,
+) -> dict[str, Any]:
     """Load one derived copy, configure controls, and execute durable conditions."""
-    source = Path(spec["source_model_path"])
     configured = directory / "robust-working.mph"
     cleanup_path = directory / "native-cleanup.json"
     client = None

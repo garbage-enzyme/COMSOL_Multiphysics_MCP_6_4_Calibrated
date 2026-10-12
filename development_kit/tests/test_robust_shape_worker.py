@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -359,6 +360,7 @@ def test_native_runtime_records_observed_client_cleanup_on_startup_failure(
         robust_shape_native_runtime.execute_lin2025_conditions(
             {
                 "source_model_path": str(source),
+                "source_model_sha256": hashlib.sha256(b"fixture").hexdigest(),
                 "cores": 2,
                 "version": "6.4",
                 "comsol_temporary_directory": str(ascii_tmp_path),
@@ -385,6 +387,55 @@ def test_native_runtime_records_observed_client_cleanup_on_startup_failure(
         "requested_path": str(ascii_tmp_path),
     }
     assert os.environ.get("COMSOL_TMPDIR") == prior_temporary_directory
+
+
+@pytest.mark.parametrize("change_before_entry", [False, True])
+def test_native_entry_binds_loaded_bytes_before_client_start(ascii_tmp_path, change_before_entry):
+    source = ascii_tmp_path / "source.mph"
+    source.write_bytes(b"fixture")
+    calls = []
+    loaded_paths = []
+
+    class Client:
+        port = None
+
+        def load(self, path):
+            loaded_paths.append(Path(path))
+            assert Path(path) != source
+            assert Path(path).read_bytes() == b"fixture"
+            raise RuntimeError("stop after verified load")
+
+        def clear(self):
+            calls.append("clear")
+
+    def factory(**_kwargs):
+        calls.append("client")
+        source.write_bytes(b"changed during startup")
+        return Client()
+
+    if change_before_entry:
+        source.write_bytes(b"changed before entry")
+    previous = os.environ.get("COMSOL_TMPDIR")
+    message = "source SHA-256" if change_before_entry else "stop after verified load"
+    with pytest.raises((ValueError, RuntimeError), match=message):
+        robust_shape_native_runtime.execute_lin2025_conditions(
+            {
+                "source_model_path": str(source),
+                "source_model_sha256": hashlib.sha256(b"fixture").hexdigest(),
+                "cores": 1,
+                "version": "6.4",
+                "comsol_temporary_directory": str(ascii_tmp_path),
+            },
+            ascii_tmp_path,
+            attempt=1,
+            client_factory=factory,
+            java_environment_reader=os.environ.get,
+            cancel_requested=lambda: False,
+        )
+    assert calls == ([] if change_before_entry else ["client", "clear"])
+    assert os.environ.get("COMSOL_TMPDIR") == previous
+    assert all(not path.exists() for path in loaded_paths)
+    assert list(ascii_tmp_path.glob("native-source-*")) == []
 
 
 class _CleanupOwnership:
@@ -2117,6 +2168,7 @@ def test_native_runtime_persists_controls_before_condition_failure(ascii_tmp_pat
         robust_shape_native_runtime.execute_lin2025_conditions(
             {
                 "source_model_path": str(source),
+                "source_model_sha256": hashlib.sha256(b"fixture").hexdigest(),
                 "cores": 2,
                 "version": "6.4",
                 "comsol_temporary_directory": str(ascii_tmp_path),

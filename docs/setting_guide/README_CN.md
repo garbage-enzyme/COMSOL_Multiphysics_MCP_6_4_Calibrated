@@ -310,7 +310,7 @@ PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数�
 | `mph_diff` | 双归档的元数据/标签/参数/条目差异对比，并证明输入未被修改。零差异不是科学等价性证明。 |
 | `model_identity` | 源/派生文件的只读身份与检查点就绪状态。活动会话身份默认返回结构化"不可用"，仅在显式请求且会话已连接时读取。 |
 | `runtime_compatibility_status` | 当前 Python/MPh/JPype 身份、支持范围、profile 与技能层哈希。仅显式请求时读取已绑定 COMSOL 身份。绝不选择回退运行时。 |
-| `offline_export_validate` | 完全离线地校验导出清单及其 VTU/CSV/TXT 文件（路径、ID、顺序、单位、字节数、哈希）。 |
+| `offline_export_validate` | 离线检查清单一致性、路径、ID、字节数、哈希和 CSV 实际列。CSV 单位仅为声明，未从文件验证。 |
 
 `comsolless_read_only` profile 只暴露这五个工具，因此未安装 COMSOL 的轻量
 计算机也可以探查模型与离线证据。`electro_chemistry` profile 的电化学工具

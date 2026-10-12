@@ -345,7 +345,7 @@ start COMSOL, Java, MPh, or JPype:
 | `mph_diff` | Two-archive metadata/tag/parameter/entry diff with input-immutability proof. A zero diff is not a scientific equivalence proof. |
 | `model_identity` | Read-only identity for source/derived files with checkpoint readiness. Live session identity is structured-unavailable unless explicitly requested from an already-connected session. |
 | `runtime_compatibility_status` | Active Python/MPh/JPype identities, supported ranges, profile, and skill-layer hashes. Bound COMSOL identity only on explicit request. No fallback runtime is ever selected. |
-| `offline_export_validate` | Validates an export manifest plus its VTU/CSV/TXT files (paths, IDs, ordering, units, byte counts, hashes) entirely offline. |
+| `offline_export_validate` | Checks manifest consistency, paths, IDs, byte counts, hashes, and actual CSV columns offline. CSV units remain declared, not verified. |
 
 The `comsolless_read_only` profile exposes exactly these five tools and
 nothing else, so lightweight computers without COMSOL can probe models and

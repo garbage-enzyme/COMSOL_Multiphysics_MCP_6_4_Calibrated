@@ -5,14 +5,18 @@ identity, dataset/solution provenance, ordered expressions with units,
 parameter/time values, fidelity, producer identity, byte counts, and SHA-256
 hashes. The validator works with COMSOL closed: it re-derives every checkable
 fact from the artifact bytes and rejects missing files, duplicate IDs,
-ordering or unit drift, stale manifest hashes, path escapes, unsupported
-readers, and unbounded artifact counts. A validated export is integrity
+CSV column drift, inconsistent declared units, stale manifest hashes, path escapes,
+unsupported readers, and unbounded artifact counts. CSV headers must contain the
+declared expressions in order. Each nonempty data row must have that column count.
+CSV units remain declared, not verified from file bytes. A validated export is integrity
 evidence only and is never promoted to FEM validation.
 """
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import math
 from pathlib import Path, PurePosixPath
@@ -474,7 +478,7 @@ def validate_offline_export_manifest(
                     candidate = Path.cwd() / candidate
                 resolved = candidate.resolve(strict=False)
                 under_root = resolved == root or root in resolved.parents
-            except (OSError, RuntimeError, ValueError):
+            except OSError, RuntimeError, ValueError:
                 under_root = False
             code = "manifest_unavailable" if under_root else "manifest_outside_allowed_root"
             rejected = _invalid_verdict([code])
@@ -490,7 +494,7 @@ def validate_offline_export_manifest(
                     raw = read_file_bytes_bounded(path, max_bytes=max_manifest_bytes)
             else:
                 raw = read_file_bytes_bounded(path, max_bytes=max_manifest_bytes)
-        except (OSError, ReadPinError, RuntimeError, ValueError):
+        except OSError, ReadPinError, RuntimeError, ValueError:
             rejected = _invalid_verdict(["manifest_unavailable"])
             rejected["path_evidence"] = path_evidence
             return _seal_verdict(rejected)
@@ -501,7 +505,7 @@ def validate_offline_export_manifest(
             return _seal_verdict(rejected)
         try:
             payload = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except UnicodeDecodeError, json.JSONDecodeError:
             rejected = _invalid_verdict(["manifest_not_valid_json"])
             rejected["path_evidence"] = path_evidence
             return _seal_verdict(rejected)
@@ -513,7 +517,7 @@ def validate_offline_export_manifest(
             return _seal_verdict(rejected)
         try:
             payload = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except UnicodeDecodeError, json.JSONDecodeError:
             rejected = _invalid_verdict(["manifest_not_valid_json"])
             rejected["path_evidence"] = path_evidence
             return _seal_verdict(rejected)
@@ -620,7 +624,7 @@ def validate_offline_export_manifest(
             try:
                 resolved = candidate.resolve(strict=False)
                 under_base = resolved == base or base in resolved.parents
-            except (OSError, RuntimeError, ValueError):
+            except OSError, RuntimeError, ValueError:
                 under_base = False
             if under_base and not candidate.exists():
                 reasons.append("missing_file")
@@ -646,12 +650,18 @@ def validate_offline_export_manifest(
                     try:
                         if pin is not None:
                             with pin_validated_reads((pin,)):
-                                digest = hashlib.sha256(target.read_bytes()).hexdigest()
+                                artifact_bytes = read_file_bytes_bounded(
+                                    target, max_bytes=max_artifact_bytes
+                                )
+                                digest = hashlib.sha256(artifact_bytes).hexdigest()
                                 size_after = target.stat().st_size
                         else:
-                            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+                            artifact_bytes = read_file_bytes_bounded(
+                                target, max_bytes=max_artifact_bytes
+                            )
+                            digest = hashlib.sha256(artifact_bytes).hexdigest()
                             size_after = size
-                    except (OSError, RuntimeError, ValueError):
+                    except OSError, RuntimeError, ValueError:
                         reasons.append("artifact_unreadable")
                         failures.append(
                             {"artifact_id": artifact["artifact_id"], "reason_codes": reasons}
@@ -665,9 +675,30 @@ def validate_offline_export_manifest(
                         reasons.append("artifact_hash_mismatch")
                     elif artifact["format"] in OFFLINE_READABLE_FORMATS:
                         try:
-                            text = target.read_text(encoding="utf-8")
+                            text = artifact_bytes.decode("utf-8-sig")
                             if not text.strip():
                                 reasons.append("empty_text_export")
+                            elif artifact["format"] == "csv":
+                                check_record["csv_columns_verified"] = False
+                                check_record["units_status"] = "declared_not_verified"
+                                warnings.append(
+                                    f"{artifact['artifact_id']}:csv_units_declared_not_verified"
+                                )
+                                try:
+                                    reader = csv.reader(io.StringIO(text, newline=""), strict=True)
+                                    expected_header = [
+                                        column["expression"] for column in artifact["columns"]
+                                    ]
+                                    if next(reader, None) != expected_header:
+                                        reasons.append("csv_column_order_mismatch")
+                                    elif any(
+                                        row and len(row) != len(expected_header) for row in reader
+                                    ):
+                                        reasons.append("csv_row_width_mismatch")
+                                    else:
+                                        check_record["csv_columns_verified"] = True
+                                except csv.Error:
+                                    reasons.append("csv_parse_error")
                         except UnicodeDecodeError:
                             reasons.append("text_export_not_utf8")
         if reasons:

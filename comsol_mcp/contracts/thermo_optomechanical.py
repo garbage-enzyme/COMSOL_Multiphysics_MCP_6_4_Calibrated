@@ -21,6 +21,7 @@ class ThermoOpticalEvidenceExpressions(_ClosedModel):
     temperature_min: _Text
     temperature_max: _Text
     displacement_max: _Text
+    transfer_displacement_max: _Text | None = None
     stress_max: _Text
     heat_source_integral: _Text
     boundary_loss_integral: _Text

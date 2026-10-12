@@ -92,6 +92,23 @@ def test_material_validity_rejects_inverted_ranges(overrides):
         ThermoOpticalMaterialValidity.model_validate(value)
 
 
+def test_licensed_fixture_manifest_is_valid_before_comsol_start(ascii_tmp_path):
+    source = ascii_tmp_path / "source.mph"
+    source.write_bytes(b"synthetic model stand-in")
+    manifest = ascii_tmp_path / "submission.json"
+    raw = licensed_gate._raw_spec(source, manifest, cores=1)
+    spec = normalize_thermo_optomechanical_replay_spec(raw)
+    ledger = licensed_gate.normalize_thermal_material_ledger(licensed_gate._ledger())
+    state = ledger["states"][0]
+    assert state["classification"] == "assumed"
+    assert state["uncertainty"]["relative_fraction"] == 0.01
+    assert "not measured" in state["source"]["source_state_description"]
+    assert spec["cores"] == 1
+    assert spec["source_model_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+    assert spec["model_contract"]["expressions"]["transfer_displacement_max"] == "dmeshH1"
+    assert spec["model_contract"]["expressions"]["displacement_max"] == "umaxH1"
+
+
 def test_licensed_gate_cleanup_failure_preserves_verdict_and_writes_fallback(tmp_path, monkeypatch):
     class BrokenOwner:
         def status(self, *, require_fresh_inventory):
@@ -822,6 +839,40 @@ def test_deformation_transfer_readback_is_observed_twice_not_tautological(ascii_
     assert executor._deformation_transfer()["readback_exact"] is False
 
 
+@pytest.mark.parametrize("evaluation_fails", [False, True])
+def test_transfer_uses_declared_mesh_displacement_without_structural_fallback(
+    ascii_tmp_path, evaluation_fails
+):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "mesh-readback"))
+    spec["model_contract"]["expressions"]["transfer_displacement_max"] = "mesh_displacement"
+    executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
+    executor._load_derived = lambda: None
+    executor._set_moving_mesh_active = lambda _enabled: None
+    executor._study = lambda _key: None
+    executor._bind_study_dataset = lambda _tag: None
+    calls = []
+
+    def evaluate(key):
+        calls.append(key)
+        if evaluation_fails:
+            raise RuntimeError("mesh readback unavailable")
+        return 1.7e-9
+
+    def save(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"model")
+
+    executor._evaluate = evaluate
+    executor._save = save
+    if evaluation_fails:
+        with pytest.raises(RuntimeError, match="mesh readback unavailable"):
+            executor._deformation_transfer()
+        assert calls == ["transfer_displacement_max"]
+    else:
+        assert executor._deformation_transfer()["readback_exact"] is True
+        assert calls == ["transfer_displacement_max", "transfer_displacement_max"]
+
+
 def test_displacement_readback_tolerates_last_ulp_but_not_material_drift():
     value = 1.2345678901234e-6
     assert replay_execution_module._displacement_readback_matches(
@@ -1087,7 +1138,8 @@ def _thermal_executor_fixture(ascii_tmp_path):
     spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "load-readback"))
     selections = {"sel_heat": [3, 7], "sel_temp": [2, 4, 6]}
     source = _ThermalFeature("HeatSource", selections)
-    convection = _ThermalFeature("ConvectiveHeatFlux", selections)
+    convection = _ThermalFeature("HeatFluxBoundary", selections)
+    convection.values["HeatFluxType"] = "ConvectiveHeatFlux"
     features = {"custom_source": source, "custom_flux": convection}
     physics = SimpleNamespace(
         feature=lambda tag=None: (
@@ -1109,7 +1161,11 @@ def test_thermal_load_applies_values_units_and_named_selections(ascii_tmp_path):
     executor.spec["thermal_load"]["convection_coefficient_W_per_m2_K"] = 12.5
     executor._apply_thermal_load_features()
     assert source.values == {"Q0": "25[W/m^3]"}
-    assert convection.values == {"h": "12.5[W/(m^2*K)]", "Text": "300[K]"}
+    assert convection.values == {
+        "HeatFluxType": "ConvectiveHeatFlux",
+        "h": "12.5[W/(m^2*K)]",
+        "Text": "300[K]",
+    }
     assert source.selection_tag == "sel_heat"
     assert convection.selection_tag == "sel_temp"
     assert source.entities() == [3, 7]
@@ -1122,6 +1178,26 @@ def test_thermal_load_rejects_silent_parameter_set(ascii_tmp_path, feature):
     (source if feature == "source" else convection).ignore_set = True
     with pytest.raises(RuntimeError, match="did not read back exactly"):
         executor._apply_thermal_load_features()
+
+
+def test_thermal_load_does_not_treat_general_flux_as_convection(ascii_tmp_path):
+    executor, _source, convection, _selections, _features = _thermal_executor_fixture(
+        ascii_tmp_path
+    )
+    convection.values["HeatFluxType"] = "GeneralInwardHeatFlux"
+    with pytest.raises(RuntimeError, match="exactly one ConvectiveHeatFlux"):
+        executor._apply_thermal_load_features()
+    assert convection.values == {"HeatFluxType": "GeneralInwardHeatFlux"}
+
+
+def test_thermal_load_ignores_other_heat_flux_subtypes(ascii_tmp_path):
+    executor, _source, convection, selections, features = _thermal_executor_fixture(ascii_tmp_path)
+    other = _ThermalFeature("HeatFluxBoundary", selections)
+    other.values["HeatFluxType"] = "GeneralInwardHeatFlux"
+    features["other_flux"] = other
+    executor._apply_thermal_load_features()
+    assert convection.values["h"] == "10[W/(m^2*K)]"
+    assert other.values == {"HeatFluxType": "GeneralInwardHeatFlux"}
 
 
 @pytest.mark.parametrize("feature", ["source", "convection"])

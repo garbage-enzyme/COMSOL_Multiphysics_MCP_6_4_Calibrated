@@ -130,6 +130,33 @@ def test_builder_rejects_duplicate_ids_and_path_escapes():
         )
 
 
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        (b"T,wl\n300,1\n", "csv_column_order_mismatch"),
+        (b"wl,wrong\n1,300\n", "csv_column_order_mismatch"),
+        (b"wl,T,T\n1,300,300\n", "csv_column_order_mismatch"),
+        (b"wl,T\n1\n", "csv_row_width_mismatch"),
+        (b"wl,T\n1,300,extra\n", "csv_row_width_mismatch"),
+        (b'wl,T\n"unclosed,300\n', "csv_parse_error"),
+    ],
+)
+def test_sealed_csv_with_invalid_actual_columns_is_rejected(tmp_path, payload, reason):
+    _, manifest = _write_export(tmp_path, [_artifact(payload=payload)])
+    verdict = validate_offline_export_manifest(manifest, tmp_path)
+    assert verdict["valid"] is False
+    assert verdict["failures"][0]["reason_codes"] == [reason]
+
+
+def test_csv_units_remain_explicitly_unverified_even_with_valid_header(tmp_path):
+    _, manifest = _write_export(tmp_path, [_artifact(payload=b'\xef\xbb\xbf"wl","T"\r\n1,300\r\n')])
+    verdict = validate_offline_export_manifest(manifest, tmp_path)
+    assert verdict["valid"] is True
+    assert verdict["input_binding"]["artifact_checks"][0]["csv_columns_verified"] is True
+    assert verdict["input_binding"]["artifact_checks"][0]["units_status"] == "declared_not_verified"
+    assert "csv-1:csv_units_declared_not_verified" in verdict["warnings"]
+
+
 def test_ordering_fingerprint_detects_unit_and_order_drift(tmp_path):
     """Tampering with column order or units breaks the sealed fingerprint."""
     payload = b"wl,T\n1.0,300.0\n"
