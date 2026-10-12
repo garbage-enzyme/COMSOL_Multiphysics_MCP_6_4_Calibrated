@@ -402,7 +402,7 @@ def test_model_load_removes_native_model_when_registration_does_not_complete(
         def add_model(self, *_args, **_kwargs):
             raise RuntimeError("registration failed")
 
-    hashes = iter(["a" * 64, "b" * 64] if failure_stage == "post_load_hash" else ["a" * 64])
+    hashes = iter(["a" * 64, "b" * 64] if failure_stage == "post_load_hash" else ["a" * 64] * 2)
     monkeypatch.setattr(model_module, "session_manager", Session())
     monkeypatch.setattr(model_module, "_sha256_file", lambda _path: next(hashes))
     server = MCPServer("model-load-cleanup-test")
@@ -411,6 +411,10 @@ def test_model_load_removes_native_model_when_registration_does_not_complete(
     result = server._tool_manager._tools["model_load"].fn(file_path=str(source))
 
     assert result["success"] is False
+    expected_error = (
+        "Model source changed" if failure_stage == "post_load_hash" else "registration failed"
+    )
+    assert expected_error in result["error"]
     assert client.removed == [loaded]
 
 
