@@ -766,17 +766,23 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
                     geom.feature().remove(tag)
                 except Exception as rollback_exc:
                     rollback_errors.append(f"{tag}: {type(rollback_exc).__name__}")
+            for node, kind, previous in reversed(rollback_actions):
+                if kind == "selection":
+                    continue
+                try:
+                    node.set(kind, previous)
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"{kind}: {type(rollback_exc).__name__}")
             if created_features and geom is not None and not rollback_errors:
                 try:
                     geom.run()
                 except Exception:
                     rollback_errors.append("geometry rerun after feature removal failed")
             for node, kind, previous in reversed(rollback_actions):
+                if kind != "selection":
+                    continue
                 try:
-                    if kind == "selection":
-                        _restore_selection(node, previous)
-                    else:
-                        node.set(kind, previous)
+                    _restore_selection(node, previous)
                 except Exception as rollback_exc:
                     rollback_errors.append(f"{kind}: {type(rollback_exc).__name__}")
             result = {"success": False, "error": f"mim_patch_build failed: {e}"}

@@ -646,9 +646,16 @@ def test_mim_build_failure_restores_existing_physics_material_and_fin_state(monk
 
     component = Component()
     fin = BuildBlock("0, 0, 0", "1, 1, 1")
-    fin.getString = lambda _name: "assembly"
+    fin.getString = lambda _name: fin.props.get("action", "assembly")
     features = BuildFeatures({"air": BuildBlock("0, 0, 0", "1, 1, 1"), "fin": fin})
     geom = BuildGeom(features)
+    built_actions = []
+
+    def run_geometry():
+        built_actions.append(fin.getString("action"))
+        geom.runs += 1
+
+    geom.run = run_geometry
 
     class Java:
         def component(self, _tag):
@@ -665,10 +672,15 @@ def test_mim_build_failure_restores_existing_physics_material_and_fin_state(monk
         mim_patch_module,
         "_identify_side_pairs",
         lambda **_kwargs: {
-            "bottom": [14], "top": [15], "x_src": [1], "x_dst": [2],
-            "y_src": [3], "y_dst": [4],
+            "bottom": [14],
+            "top": [15],
+            "x_src": [1],
+            "x_dst": [2],
+            "y_src": [3],
+            "y_dst": [4],
         },
     )
+
     def fail_mesh(*_args):
         raise RuntimeError("mesh fail")
 
@@ -687,6 +699,7 @@ def test_mim_build_failure_restores_existing_physics_material_and_fin_state(monk
     assert physics_features.nodes["ps1"].selection("excitedPortSelection").entities() == [13]
     assert material.selection().entities() == [21]
     assert fin.props["action"] == "assembly"
+    assert built_actions == ["union", "assembly"]
     assert set(features.nodes) == {"air", "fin"}
 
 

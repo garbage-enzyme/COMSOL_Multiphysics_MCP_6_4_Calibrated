@@ -1,13 +1,13 @@
 # COMSOL MCP Server for COMSOL 6.4
 
-Version 0.7.7 adds [experimental solver-free Ubuntu support](docs/experimental_linux/README.md) and [explicit strict wavelength validation](docs/strict_wavelength/README.md). Windows remains the native solver platform. Read the platform limits before invoking a tool.
+Version 0.7.8 contains the bug-sweep repairs. It retains [experimental solver-free Ubuntu support](docs/experimental_linux/README.md) and [explicit strict wavelength validation](docs/strict_wavelength/README.md). Windows remains the native solver platform. Read the platform limits before invoking a tool.
 
 English | [中文](README_CN.md)
 
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.7](https://img.shields.io/badge/release-0.7.7-blue)
+![Release: 0.7.8](https://img.shields.io/badge/release-0.7.8-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
