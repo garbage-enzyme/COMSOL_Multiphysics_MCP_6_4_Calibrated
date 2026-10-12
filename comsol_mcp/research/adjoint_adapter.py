@@ -462,6 +462,11 @@ def configure_native_adjoint(
             "constraintU": _array(optimization, "constraintUbound", constraints["upper"])
             if constraints["expressions"]
             else {"requested": [], "readback": []},
+            "constraintActive": _array(
+                optimization, "constraintActive", ["on"] * len(constraints["expressions"])
+            )
+            if constraints["expressions"]
+            else {"requested": [], "readback": []},
             "nsolvemax": _scalar(
                 optimization,
                 "nsolvemax",
