@@ -571,14 +571,15 @@ def main() -> int:
         return 0
 
     result = _run(args)
-    args.receipt.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_json(args.receipt, result)
+    receipt_path = args.receipt.expanduser().resolve(strict=False)
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(receipt_path, result)
     print(
         json.dumps(
             {
                 "success": result["success"],
-        "receipt": str(receipt_path),
-                "receipt_sha256": _sha256(args.receipt),
+                "receipt": str(receipt_path),
+                "receipt_sha256": _sha256(receipt_path),
                 "error": result.get("error"),
             },
             ensure_ascii=False,

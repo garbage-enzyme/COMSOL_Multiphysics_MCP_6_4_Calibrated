@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -41,6 +42,51 @@ def _ascii_source() -> str:
 
 def _ascii_working_model() -> str:
     return str(_ASCII_ROOT / "working.mph")
+
+
+@pytest.mark.parametrize("success", [True, False])
+def test_gate_main_publishes_completed_worker_receipt(monkeypatch, capsys, success):
+    receipt = _ASCII_ROOT / "completed" / str(success) / "receipt.json"
+    result = {"success": success, "cleanup": {"passed": True}}
+    if not success:
+        result["error"] = "injected worker failure"
+    calls = []
+
+    def worker(args):
+        calls.append(args.mode)
+        return result
+
+    monkeypatch.setattr(gate, "_run", worker)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(SCRIPT),
+            "--mode",
+            "prepare",
+            "--model-tag",
+            "Model1",
+            "--expected-label",
+            "Untitled.mph",
+            "--receipt",
+            str(receipt),
+        ],
+    )
+
+    exit_code = gate.main()
+
+    output = capsys.readouterr()
+    summary = json.loads(output.out)
+    assert output.err == ""
+    assert calls == ["prepare"]
+    assert exit_code == (0 if success else 1)
+    assert json.loads(receipt.read_text(encoding="utf-8")) == result
+    assert summary == {
+        "success": success,
+        "receipt": str(receipt.resolve()),
+        "receipt_sha256": hashlib.sha256(receipt.read_bytes()).hexdigest(),
+        "error": result.get("error"),
+    }
 
 
 def test_shared_interactive_gate_dry_run_is_solver_free():
@@ -243,11 +289,25 @@ def test_saved_mode_rejects_receipt_collision(collision):
     source = Path(_ascii_source())
     working = Path(_ascii_working_model())
     receipt = source if collision == "source" else working
-    args = gate._parser().parse_args([
-        "--mode", "saved", "--model-tag", "Model1", "--expected-label", "source.mph",
-        "--expected-desktop-value", "29[mm]", "--expected-file-path", str(working),
-        "--immutable-source-path", str(source), "--receipt", str(receipt), "--dry-run",
-    ])
+    args = gate._parser().parse_args(
+        [
+            "--mode",
+            "saved",
+            "--model-tag",
+            "Model1",
+            "--expected-label",
+            "source.mph",
+            "--expected-desktop-value",
+            "29[mm]",
+            "--expected-file-path",
+            str(working),
+            "--immutable-source-path",
+            str(source),
+            "--receipt",
+            str(receipt),
+            "--dry-run",
+        ]
+    )
     with pytest.raises(ValueError, match="receipt must be distinct"):
         gate._spec(args)
 
