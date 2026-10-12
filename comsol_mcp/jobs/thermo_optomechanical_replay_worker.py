@@ -176,7 +176,12 @@ def _run(
                 from comsol_mcp.tools.mesh import get_mesh_info
 
                 try:
-                    mesh = get_mesh_info(model)
+                    contract = spec["model_contract"]
+                    mesh = get_mesh_info(
+                        model,
+                        component_name=contract["component_tag"],
+                        mesh_name=contract["mesh_tag"],
+                    )
                     if mesh.get("success"):
                         mesh_elements = mesh.get("mesh", {}).get("num_elements")
                 except Exception:  # noqa: S110 - missing telemetry remains unavailable

@@ -976,6 +976,68 @@ def test_worker_publishes_completion_only_after_client_and_lease_cleanup(ascii_t
     assert {entry["stage"] for entry in resource_entries} >= {"pre_mesh", "pre_solve", "post_solve"}
 
 
+@pytest.mark.parametrize("mesh_state", ["available", "failed", "absent"])
+def test_worker_default_mesh_telemetry_refuses_without_stage_execution(
+    ascii_tmp_path, monkeypatch, mesh_state
+):
+    from comsol_mcp.jobs.resource_admission import normalize_resource_policy
+    from comsol_mcp.tools import mesh as mesh_module
+
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "mesh-budget"))
+    spec["resource_policy"] = normalize_resource_policy({"max_mesh_elements": 100})
+    store = JobStore(ascii_tmp_path / "mesh-runtime" / "jobs")
+    job_id = store.create(
+        spec,
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "progress": {"completed": 0, "total": 5},
+        },
+    )
+    model = object()
+    calls = []
+
+    class Executor:
+        def __init__(self):
+            self.model = None if mesh_state == "absent" else model
+
+        def __call__(self, *_args):
+            pytest.fail("resource refusal must precede stage execution")
+
+    def mesh_info(current, *, component_name, mesh_name):
+        assert current is model
+        assert component_name == spec["model_contract"]["component_tag"]
+        assert mesh_name == spec["model_contract"]["mesh_tag"]
+        calls.append(current)
+        if mesh_state == "failed":
+            raise RuntimeError("mesh telemetry unavailable")
+        return {"success": True, "mesh": {"num_elements": 101}}
+
+    monkeypatch.setattr(mesh_module, "get_mesh_info", mesh_info)
+    owner, client = _Ownership(), _Client()
+    assert (
+        run_worker(
+            str(store.root),
+            job_id,
+            ownership_factory=lambda *_args: owner,
+            client_factory=lambda _spec: client,
+            stage_executor_factory=lambda *_args: Executor(),
+            native_cancel_enabled=False,
+        )
+        == 0
+    )
+    state = store.read_state(job_id)
+    assert state["status"] == "interrupted"
+    assert state["resource_gate"]["decision"] == "refuse"
+    assert calls == ([] if mesh_state == "absent" else [model])
+    entries = store.read_resource_journal(job_id)
+    assert entries[-1]["start_authorized"] is False
+    assert not (store.job_dir(job_id) / "thermo_optomechanical_stages.jsonl").exists()
+    assert owner.released is True
+    assert client.clear_count == 1
+
+
 def test_worker_refuses_thermo_stage_when_resource_budget_is_exceeded(ascii_tmp_path):
     spec = normalize_thermo_optomechanical_replay_spec(
         _raw_spec(ascii_tmp_path / "resource-refusal")
