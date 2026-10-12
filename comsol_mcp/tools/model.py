@@ -63,20 +63,36 @@ def _save_model_file(
     staging_suffix = extension_by_format.get(normalized_format)
     if staging_suffix is None:
         raise ValueError(f"Unsupported save format: {format!r}")
-    staging = path.with_name(f".{path.stem}.{uuid.uuid4().hex}.stage{staging_suffix}")
+    staging_directory = None
+    if normalized_format not in {"comsol", "mph"}:
+        # COMSOL derives source identifiers from the filename. Keep that name
+        # intact while isolating incomplete output in a private sibling folder.
+        staging_directory = Path(mkdtemp(prefix=".comsol_export_", dir=path.parent))
+        staging = staging_directory / path.with_suffix(staging_suffix).name
+    else:
+        staging = path.with_name(f".{path.stem}.{uuid.uuid4().hex}.stage{staging_suffix}")
     try:
         if normalized_format not in {"comsol", "mph"}:
-            model.save(path=str(staging), format=format)
+            native_format = {"java": "Java", "matlab": "Matlab", "vba": "VBA"}[normalized_format]
+            model.save(path=str(staging), format=native_format)
         else:
             model.java.save(str(staging), True)
         if not staging.is_file():
             raise RuntimeError("model save did not create the staging artifact")
+        if staging_directory is not None:
+            publication_staging = path.with_name(
+                f".{path.stem}.{uuid.uuid4().hex}.stage{staging_suffix}"
+            )
+            os.replace(staging, publication_staging)
+            staging = publication_staging
         if overwrite:
             os.replace(staging, path)
         else:
             publish_file_exclusive(staging, path)
     finally:
         staging.unlink(missing_ok=True)
+        if staging_directory is not None:
+            staging_directory.rmdir()
     return str(path)
 
 

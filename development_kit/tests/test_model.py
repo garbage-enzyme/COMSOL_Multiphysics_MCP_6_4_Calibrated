@@ -78,7 +78,7 @@ def test_save_source_export_keeps_mph_format_api(tmp_path):
 
 @pytest.mark.parametrize(
     ("format_name", "suffix"),
-    [("Java", ".java"), ("Matlab", ".m"), ("VBA", ".vba")],
+    [("Java", ".java"), ("Matlab", ".m"), ("VBA", ".vba"), ("matlab", ".m")],
 )
 def test_source_export_staging_keeps_format_suffix(tmp_path, format_name, suffix):
     class FormatAwareModel(FakeModel):
@@ -96,6 +96,31 @@ def test_source_export_staging_keeps_format_suffix(tmp_path, format_name, suffix
     assert saved == str(requested.resolve())
     assert requested.read_bytes() == b"saved-export"
     assert model.high_level_saves[0][0].endswith(suffix)
+    assert list(tmp_path.iterdir()) == [requested]
+
+
+@pytest.mark.parametrize("fail_export", [False, True])
+def test_java_export_preserves_public_class_name_and_cleans_staging(tmp_path, fail_export):
+    requested = tmp_path / "PublicModel.java"
+    requested.write_bytes(b"previous export")
+
+    class JavaClassExporter(FakeModel):
+        def save(self, path=None, format=None):
+            staging = Path(path)
+            assert staging.stem.isidentifier(), "Java export requires a valid class name"
+            assert staging.name == requested.name
+            assert staging.parent != requested.parent
+            staging.write_text(f"public class {staging.stem} {{}}", encoding="utf-8")
+            if fail_export:
+                raise RuntimeError("injected native export failure")
+
+    if fail_export:
+        with pytest.raises(RuntimeError, match="injected native export failure"):
+            _save_model_file(JavaClassExporter(), str(requested), "java")
+        assert requested.read_bytes() == b"previous export"
+    else:
+        assert _save_model_file(JavaClassExporter(), str(requested), "java") == str(requested)
+        assert requested.read_text() == "public class PublicModel {}"
     assert list(tmp_path.iterdir()) == [requested]
 
 
