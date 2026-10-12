@@ -222,7 +222,7 @@ def test_matrix_resume_checks_the_complete_field_evidence_chain(tmp_path, damage
     from src.jobs.validation_rows import completed_point_fingerprints
 
     directory = _create_job(tmp_path)
-    spec = json.loads((directory / "spec.json").read_text())
+    spec = json.loads((directory / "spec.json").read_text(encoding="utf-8"))
     rows = read_validation_rows(directory / "matrix_rows.jsonl", spec)
     assert (
         len(
@@ -239,7 +239,7 @@ def test_matrix_resume_checks_the_complete_field_evidence_chain(tmp_path, damage
         if item["collector"] == "wave_optics_field_evidence"
     )
     wrapper_path = directory / summary["manifest_relative_path"]
-    wrapper = json.loads(wrapper_path.read_text())
+    wrapper = json.loads(wrapper_path.read_text(encoding="utf-8"))
     array = wrapper_path.parent / wrapper["array_artifact"]["relative_path"]
     manifest = wrapper_path.parent / wrapper["field_manifest"]["relative_path"]
     if damage == "missing_array":
