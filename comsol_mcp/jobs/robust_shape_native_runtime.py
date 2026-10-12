@@ -1097,7 +1097,9 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             "variable_ids": list(variable_ids),
             "raw_gradients": raw_gradients,
             "accepted_real_gradients": accepted_gradients,
-            "gradient_unit": self.support["result_identity"]["derivative_units"],
+            # Native sensitivity controls use metres regardless of caller units.
+            # The optimizer converts the aggregate once into its variable units.
+            "gradient_unit": "1/m",
             "identity_fingerprints": identities,
         }
 

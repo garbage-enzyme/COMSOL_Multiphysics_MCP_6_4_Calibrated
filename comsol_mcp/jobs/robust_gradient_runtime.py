@@ -120,7 +120,9 @@ def _normalize_backend_result(
             raise ValueError("accepted native gradient component differs from the raw real part")
         normalized_raw.append({"real": real, "imaginary": imaginary})
         normalized_accepted.append(real_accepted)
-    expected_unit = spec["support"]["result_identity"]["derivative_units"]
+    # The native controls and raw fsens values are SI. Preserve that basis in
+    # durable receipts, including when optimizer variables are declared in nm.
+    expected_unit = "1/m"
     if raw["gradient_unit"] != expected_unit:
         raise ValueError("native condition gradient unit changed")
     requested = _finite(raw["requested_wavelength_m"], "requested_wavelength_m")

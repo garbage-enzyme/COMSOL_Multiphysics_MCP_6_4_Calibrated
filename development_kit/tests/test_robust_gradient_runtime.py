@@ -58,7 +58,7 @@ class _Backend:
                 {"real": 2.0 * value, "imaginary": -0.02},
             ],
             "accepted_real_gradients": [value, 2.0 * value],
-            "gradient_unit": "1/nm",
+            "gradient_unit": "1/m",
             "identity_fingerprints": {
                 "primal": "1" * 64,
                 "adjoint": "2" * 64,
@@ -128,6 +128,88 @@ def test_complete_native_condition_gradients_are_durable_and_aggregate(ascii_tmp
         cancel_requested=lambda: False,
     )
     assert second == receipt
+    assert replay.calls == []
+
+
+def test_si_gradients_keep_si_receipt_units_and_convert_once_for_optimizer(ascii_tmp_path):
+    from comsol_mcp.jobs.robust_shape_worker import _gradient_in_declared_units
+
+    spec = _spec(ascii_tmp_path)
+    observations = _observations(spec)
+
+    class SIBackend(_Backend):
+        def evaluate_condition_gradient(self, condition, tensor_expressions, variable_ids):
+            result = super().evaluate_condition_gradient(
+                condition, tensor_expressions, variable_ids
+            )
+            result["gradient_unit"] = "1/m"
+            return result
+
+    aggregate = execute_native_condition_gradients(
+        spec,
+        ascii_tmp_path,
+        backend=SIBackend(observations),
+        observations=observations,
+        cancel_requested=lambda: False,
+    )
+    for path in ascii_tmp_path.glob("condition-gradient-*.json"):
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        assert receipt["gradient_unit"] == "1/m"
+    assert _gradient_in_declared_units(spec, aggregate["aggregate_gradient"]) == pytest.approx(
+        [value * 1e-9 for value in aggregate["aggregate_gradient"]]
+    )
+
+
+def test_native_gradient_refuses_declared_units_on_unconverted_si_values(ascii_tmp_path):
+    spec = _spec(ascii_tmp_path)
+    observations = _observations(spec)
+
+    class MislabeledBackend(_Backend):
+        def evaluate_condition_gradient(self, condition, tensor_expressions, variable_ids):
+            result = super().evaluate_condition_gradient(
+                condition, tensor_expressions, variable_ids
+            )
+            result["gradient_unit"] = "1/nm"
+            return result
+
+    with pytest.raises(ValueError, match="gradient unit"):
+        execute_native_condition_gradients(
+            spec,
+            ascii_tmp_path,
+            backend=MislabeledBackend(observations),
+            observations=observations,
+            cancel_requested=lambda: False,
+        )
+    assert not list(ascii_tmp_path.glob("condition-gradient-*.json"))
+
+
+def test_native_gradient_replay_refuses_rehashed_non_si_receipt(ascii_tmp_path):
+    spec = _spec(ascii_tmp_path)
+    observations = _observations(spec)
+    execute_native_condition_gradients(
+        spec,
+        ascii_tmp_path,
+        backend=_Backend(observations),
+        observations=observations,
+        cancel_requested=lambda: False,
+    )
+    path = ascii_tmp_path / "condition-gradient-0000.json"
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    receipt["gradient_unit"] = "1/nm"
+    receipt["receipt_fingerprint"] = domain_sha256_v2(
+        "comsol_mcp.robust_condition_gradient_receipt",
+        {key: value for key, value in receipt.items() if key != "receipt_fingerprint"},
+    )
+    path.write_text(json.dumps(receipt), encoding="utf-8")
+    replay = _Backend(observations)
+    with pytest.raises(ValueError, match="gradient unit"):
+        execute_native_condition_gradients(
+            spec,
+            ascii_tmp_path,
+            backend=replay,
+            observations=observations,
+            cancel_requested=lambda: False,
+        )
     assert replay.calls == []
 
 
