@@ -24,6 +24,8 @@ class _Node:
         return self.node_type
 
     def set(self, name, value):
+        if name in {"constraint", "constraintL", "constraintU"}:
+            raise ValueError("Unknown COMSOL Optimization property")
         self.values[name] = list(value) if isinstance(value, list) else value
 
     def getString(self, name):
@@ -194,10 +196,12 @@ def test_adapter_binds_differentiable_scalar_constraints_with_units_and_bounds()
     backend = _Backend()
     receipt = configure_native_adjoint(backend, support, _optimizer())
     node = backend.studies["std2"]._features.nodes["opt_a71"]
-    assert node.values["constraint"] == ["ewfd.loss", "ewfd.Tport1"]
-    assert node.values["constraintL"] == ["", "0[1]"]
-    assert node.values["constraintU"] == ["2.5[W]", "0.10000000000000001[1]"]
-    assert receipt["optimization"]["constraint"]["readback"] == node.values["constraint"]
+    assert node.values["constraintExpression"] == ["ewfd.loss", "ewfd.Tport1"]
+    assert node.values["constraintLbound"] == ["", "0[1]"]
+    assert node.values["constraintUbound"] == ["2.5[W]", "0.10000000000000001[1]"]
+    assert receipt["optimization"]["constraint"]["readback"] == node.values["constraintExpression"]
+    assert receipt["optimization"]["constraintL"]["readback"] == node.values["constraintLbound"]
+    assert receipt["optimization"]["constraintU"]["readback"] == node.values["constraintUbound"]
 
 
 def test_adapter_rejects_forward_only_constraint_before_backend_mutation():

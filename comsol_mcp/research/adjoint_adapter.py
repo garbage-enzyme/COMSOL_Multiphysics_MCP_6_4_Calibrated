@@ -451,13 +451,15 @@ def configure_native_adjoint(
             "lbound": _array(optimization, "lbound", values["lower"]),
             "ubound": _array(optimization, "ubound", values["upper"]),
             "optobj": _array(optimization, "optobj", [objective_expression]),
-            "constraint": _array(optimization, "constraint", constraints["expressions"])
+            # COMSOL 6.4 uses these native Optimization property names.
+            # Keep the logical receipt keys stable for existing evidence readers.
+            "constraint": _array(optimization, "constraintExpression", constraints["expressions"])
             if constraints["expressions"]
             else {"requested": [], "readback": []},
-            "constraintL": _array(optimization, "constraintL", constraints["lower"])
+            "constraintL": _array(optimization, "constraintLbound", constraints["lower"])
             if constraints["expressions"]
             else {"requested": [], "readback": []},
-            "constraintU": _array(optimization, "constraintU", constraints["upper"])
+            "constraintU": _array(optimization, "constraintUbound", constraints["upper"])
             if constraints["expressions"]
             else {"requested": [], "readback": []},
             "nsolvemax": _scalar(
