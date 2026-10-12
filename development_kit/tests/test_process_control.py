@@ -121,12 +121,23 @@ def test_exact_termination_refuses_a_reused_identity():
             child.wait(timeout=5)
 
 
-def test_capture_and_terminate_only_owned_child_process():
+def test_capture_and_terminate_only_owned_child_process(tmp_path):
+    ready = tmp_path / "child-ready"
     child = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"],
+        [
+            sys.executable,
+            "-c",
+            "import pathlib,sys,time; "
+            "pathlib.Path(sys.argv[1]).write_text('ready'); time.sleep(30)",
+            str(ready),
+        ],
         creationflags=_HIDDEN_PROCESS_FLAGS,
     )
     try:
+        deadline = time.monotonic() + 5.0
+        while not ready.exists() and child.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.025)
+        assert ready.exists(), "child did not reach its Python readiness marker"
         identity = process_identity(child.pid)
         captured = capture_owned_descendants(identity)
         assert captured["worker"]["state"] == "active"
