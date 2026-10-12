@@ -654,6 +654,11 @@ def test_mim_build_failure_restores_existing_physics_material_and_fin_state(monk
     def run_geometry():
         built_actions.append(fin.getString("action"))
         geom.runs += 1
+        if geom.runs == 1:
+            physics_features.nodes["ltr1"].selection().set([101])
+            physics_features.nodes["lib1"].selection().set([102])
+            physics_features.nodes["ps1"].selection("excitedPortSelection").set([103])
+            material.selection().set([121])
 
     geom.run = run_geometry
 
@@ -732,12 +737,23 @@ def test_air_block_auto_detection_must_contain_the_patch_footprint():
 
 
 def test_failed_build_rolls_back_created_geometry_features(monkeypatch):
+    from types import SimpleNamespace
+
     features = BuildFeatures({"air": BuildBlock("0, 0, 0", "1e-6, 1e-6, 4e-6")})
     geom = BuildGeom(features)
+    selection = SimpleNamespace(entities=lambda: [], set=lambda _entities: None)
+    feature = SimpleNamespace(selection=lambda *_args: selection)
+    physics = SimpleNamespace(feature=lambda: SimpleNamespace(get=lambda _tag: feature))
 
     class Component:
         def geom(self, _name):
             return geom
+
+        def physics(self):
+            return SimpleNamespace(get=lambda _tag: physics)
+
+        def material(self):
+            return SimpleNamespace(get=lambda _tag: feature)
 
     class Java:
         def component(self, _name):

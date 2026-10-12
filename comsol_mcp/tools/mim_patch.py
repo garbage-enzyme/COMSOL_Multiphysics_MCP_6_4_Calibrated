@@ -619,6 +619,26 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
                 _require_air_block_contains_patch(geom, air_block_tag, patch_pos, patch_size)
             report["air_block_tag"] = air_block_tag
 
+            ewfd = comp.physics().get(ewfd_tag)
+            if ewfd is None:
+                raise ValueError(f"EWFD physics not found: {ewfd_tag}")
+            for tag in (layered_transition_tag, layered_impedance_tag, "ps1"):
+                feature = ewfd.feature().get(tag)
+                if feature is None:
+                    raise ValueError(f"Required physics feature not found: {tag}")
+                selection = (
+                    feature.selection("excitedPortSelection")
+                    if tag == "ps1"
+                    else feature.selection()
+                )
+                rollback_actions.append((selection, "selection", list(selection.entities())))
+            air_mat = comp.material().get(air_material_tag)
+            if air_mat is None:
+                raise ValueError(f"Air material not found: {air_material_tag}")
+            rollback_actions.append(
+                (air_mat.selection(), "selection", list(air_mat.selection().entities()))
+            )
+
             # ---- Step 2: add patch block ----
             b_pat = geom.feature().create(patch_tag, "Block")
             created_features.append(str(patch_tag))
@@ -706,7 +726,6 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
             if ltr is None:
                 raise ValueError(f"LayeredTransition feature not found: {layered_transition_tag}")
             ltr_selection = ltr.selection()
-            rollback_actions.append((ltr_selection, "selection", list(ltr_selection.entities())))
             ltr_selection.set(patch_footprint)
             report["steps"].append(
                 f"LayeredTransition {layered_transition_tag} → boundaries {patch_footprint}"
@@ -716,7 +735,6 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
             if lib is None:
                 raise ValueError(f"LayeredImpedance feature not found: {layered_impedance_tag}")
             lib_selection = lib.selection()
-            rollback_actions.append((lib_selection, "selection", list(lib_selection.entities())))
             lib_selection.set(bottom)
             report["steps"].append(
                 f"LayeredImpedance {layered_impedance_tag} → boundaries {bottom}"
@@ -726,7 +744,6 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
             if ps is None:
                 raise ValueError("PeriodicStructure feature not found: ps1")
             ps_selection = ps.selection("excitedPortSelection")
-            rollback_actions.append((ps_selection, "selection", list(ps_selection.entities())))
             ps_selection.set(top)
             report["steps"].append(f"PeriodicStructure excitedPort → boundaries {top}")
 
@@ -737,7 +754,6 @@ def register_mim_patch_tools(mcp: MCPServer) -> None:
                 raise ValueError(f"Air material not found: {air_material_tag}")
             cur = list(air_mat.selection().entities())
             if patch_dom not in cur:
-                rollback_actions.append((air_mat.selection(), "selection", cur))
                 air_mat.selection().set(cur + [patch_dom])
             report["steps"].append(f"Air material {air_material_tag} → domains {cur + [patch_dom]}")
 
