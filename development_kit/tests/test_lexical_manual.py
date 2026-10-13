@@ -454,3 +454,26 @@ def test_protocol_errors_map_to_request_invalid_before_configuration():
 
     configuration = _error_payload(ValueError("pdf root missing"))
     assert configuration["reason_code"] == "index_configuration_invalid"
+
+
+@pytest.mark.parametrize("operation", ["search", "read"])
+def test_real_worker_bounds_serialized_metadata(ascii_tmp_path, operation):
+    from comsol_mcp.knowledge.lexical_manual import MAX_READ_RESPONSE_BYTES
+
+    source = "s" * (MAX_READ_RESPONSE_BYTES + 1)
+    index = ascii_tmp_path / "metadata.sqlite3"
+    build_index_from_records(
+        [{"source": source, "module": "test", "page": 1, "heading": "test", "text": "needle"}],
+        index,
+    )
+    arguments = {"index_path": str(index)}
+    if operation == "read":
+        arguments.update(source=source, pages=[1])
+    else:
+        arguments.update(query="needle")
+    result = run_bounded(operation, arguments, timeout=5)
+    assert result == {
+        "success": False,
+        "error_type": "ResponseLimitError",
+        "error": "manual worker response exceeds the byte limit",
+    }

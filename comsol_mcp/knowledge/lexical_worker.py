@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 
-from .lexical_manual import read_index_pages, search_index
+from .lexical_manual import MAX_READ_RESPONSE_BYTES, read_index_pages, search_index
 
 
 def main() -> None:
@@ -35,6 +35,14 @@ def main() -> None:
                 "error": "worker result is not JSON-serializable",
             },
             ensure_ascii=False,
+        ).encode("utf-8")
+    if len(encoded) > MAX_READ_RESPONSE_BYTES:
+        encoded = json.dumps(
+            {
+                "success": False,
+                "error_type": "ResponseLimitError",
+                "error": "manual worker response exceeds the byte limit",
+            }
         ).encode("utf-8")
     sys.stdout.buffer.write(encoded)
 

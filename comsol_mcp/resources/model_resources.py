@@ -31,7 +31,10 @@ def _bounded_resource(lines: list[str]) -> str:
         output.append(line)
         used += len(encoded)
     if truncated or len(lines) > _MAX_RESOURCE_ITEMS:
-        output.append("\n[resource output truncated by the response bound]")
+        marker = "\n[resource output truncated by the response bound]"
+        while output and used + len(marker.encode("utf-8")) > _MAX_RESOURCE_BYTES:
+            used -= len((output.pop() + "\n").encode("utf-8"))
+        output.append(marker)
     return "\n".join(output)
 
 
