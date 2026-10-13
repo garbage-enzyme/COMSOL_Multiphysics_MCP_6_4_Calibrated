@@ -679,3 +679,20 @@ def test_b13_probe_cache_hit_and_invalidation_on_file_change(tmp_path):
     forced = probe_mph_artifacts(tmp_path, refresh=True)
     assert forced["cache"]["refreshed"] is True
     assert forced["cache"]["status"] == "miss"
+
+
+def test_oversized_probe_cache_remains_warning_only(tmp_path):
+    from comsol_mcp.evidence.inspection.probe import (
+        _MPH_PROBE_CACHE_BYTES,
+        MPH_ARTIFACT_PROBE_CACHE_FILENAME,
+        probe_mph_artifacts,
+    )
+
+    _write_valid_mph(tmp_path / "good.mph")
+    cache = tmp_path / MPH_ARTIFACT_PROBE_CACHE_FILENAME
+    cache.write_bytes(b"x" * (_MPH_PROBE_CACHE_BYTES + 1))
+    report = probe_mph_artifacts(tmp_path)
+    assert report["available"] is True
+    assert report["cache"]["status"] == "miss"
+    assert report["probes"][0]["available"] is True
+    assert cache.stat().st_size <= _MPH_PROBE_CACHE_BYTES
