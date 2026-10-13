@@ -79,7 +79,9 @@ def _parse_xml(payload: bytes, member: str) -> ElementTree.Element:
     # The stdlib parser cannot resolve external entities, and internal entity
     # expansion is refused below before parsing: bounded marker bytes cannot
     # grow into unbounded memory through a DTD.
-    folded = payload.lower()
+    # UTF-16 without a BOM is also valid XML. Its ASCII markup bytes contain
+    # NUL padding, so a UTF-8 decode alone does not expose the declarations.
+    folded = payload.lower().replace(b"\x00", b"")
     try:
         decoded = payload.decode("utf-8")
     except UnicodeDecodeError:

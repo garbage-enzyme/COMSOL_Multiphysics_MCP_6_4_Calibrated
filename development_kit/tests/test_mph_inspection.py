@@ -390,6 +390,32 @@ def test_dtd_or_entity_markers_are_refused(tmp_path, member, payload):
     _refuse(fixture, "mph_marker_dtd_rejected")
 
 
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16", "utf-16-le", "utf-16-be"])
+def test_encoded_dtd_marker_is_refused_before_entity_expansion(encoding):
+    from comsol_mcp.evidence.inspection.summary import _parse_xml
+
+    marker = '<!DOCTYPE modelInfo [<!ENTITY x "expanded">]><modelInfo>&x;</modelInfo>'
+    with pytest.raises(MphInspectionError) as excinfo:
+        _parse_xml(marker.encode(encoding), "modelinfo.xml")
+    assert excinfo.value.reason_code == "mph_marker_dtd_rejected"
+    assert (
+        _parse_xml("<modelInfo>safe</modelInfo>".encode(encoding), "modelinfo.xml").text == "safe"
+    )
+
+
+@pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16-be"])
+def test_bomless_utf16_archive_dtd_is_refused(tmp_path, encoding):
+    fixture = _write_valid_mph(tmp_path / f"dtd-{encoding}.mph")
+    marker = '<!DOCTYPE Model [<!ENTITY x "expanded">]><Model>&x;</Model>'
+    with zipfile.ZipFile(fixture) as archive:
+        entries = {item.filename: archive.read(item) for item in archive.infolist()}
+    entries["dmodel.xml"] = marker.encode(encoding)
+    with zipfile.ZipFile(fixture, "w") as archive:
+        for name, value in entries.items():
+            archive.writestr(name, value)
+    _refuse(fixture, "mph_marker_dtd_rejected")
+
+
 def test_unknown_runnable_state_is_refused(tmp_path):
     fixture = _write_valid_mph(tmp_path / "runnable.mph", runnable="maybe")
     _refuse(fixture, "mph_runnable_state_ambiguous")

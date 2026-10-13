@@ -2134,15 +2134,26 @@ def test_default_reconciliation_includes_an_older_accepted_cancellation(jobs_roo
 
 
 def test_fixture_cleanup_terminates_an_exact_detached_worker(jobs_root):
+    child_code = (
+        "import pathlib, sys, time; "
+        "pathlib.Path(sys.argv[1]).write_text('ready', encoding='ascii'); time.sleep(30)"
+    )
+    worker_ready = jobs_root / "worker.ready"
+    coordinator_ready = jobs_root / "coordinator.ready"
     worker = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"],
+        [sys.executable, "-c", child_code, str(worker_ready)],
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     coordinator = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"],
+        [sys.executable, "-c", child_code, str(coordinator_ready)],
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     try:
+        deadline = time.monotonic() + 5.0
+        while not (worker_ready.exists() and coordinator_ready.exists()):
+            assert worker.poll() is None and coordinator.poll() is None
+            assert time.monotonic() < deadline, "fixture children did not become ready"
+            time.sleep(0.025)
         identity = process_identity(worker.pid)
         coordinator_identity = process_identity(coordinator.pid)
         JobStore(jobs_root).create(
