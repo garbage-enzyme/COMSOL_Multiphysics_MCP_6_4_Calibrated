@@ -304,6 +304,18 @@ def warning_fields(status: Mapping[str, Any]) -> dict[str, Any]:
 
 def annotate_tool_response(tool_name: str, result: Any) -> Any:
     """Propagate opt-out or invalid-settings warnings without upgrading results."""
+    if tool_name == "evidence_integrity_verify" and isinstance(result, dict):
+        # The verifier owns its settings snapshot and warning fields. Seal the
+        # complete public receipt after the tool wrapper adds path metadata.
+        if result.get("schema_name") == EVIDENCE_VERIFICATION_SCHEMA and "verification_sha256" in result:
+            from comsol_mcp.evidence.contracts import canonical_sha256
+
+            sealed = dict(result)
+            sealed["verification_sha256"] = canonical_sha256(
+                {key: value for key, value in sealed.items() if key != "verification_sha256"}
+            )
+            return sealed
+        return result
     if not isinstance(result, dict) or tool_name in {
         "capabilities",
         "evidence_integrity_status",

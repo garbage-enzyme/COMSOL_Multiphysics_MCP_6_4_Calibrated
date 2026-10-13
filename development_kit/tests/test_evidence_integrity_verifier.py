@@ -79,6 +79,39 @@ def test_all_default_checks_produce_one_strictly_verified_receipt(tmp_path):
     assert len(result["verification_sha256"]) == 64
 
 
+@pytest.mark.parametrize("profile", ["core", "full"])
+@pytest.mark.parametrize("degraded", [False, True])
+def test_registered_verifier_seals_wrapper_metadata_with_one_settings_snapshot(
+    ascii_artifact_root, monkeypatch, profile, degraded
+):
+    from comsol_mcp.evidence.contracts import canonical_sha256
+    from comsol_mcp.server import create_server
+
+    request, _, _ = _fixture(ascii_artifact_root)
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(ascii_artifact_root))
+    server = create_server("registered-evidence-verifier", profile=profile)
+    status = load_evidence_integrity_status({})
+    if degraded:
+        status["configuration_state"] = "degraded"
+    calls = []
+
+    def settings_snapshot():
+        calls.append(True)
+        return status
+
+    monkeypatch.setattr(integrity_controls_module, "load_evidence_integrity_status", settings_snapshot)
+    result = server._tool_manager._tools["evidence_integrity_verify"].fn(
+        request, {"case-one": str(ascii_artifact_root)}
+    )
+
+    assert "path_policy" in result
+    assert "artifact_root_validation" in result
+    body = {key: value for key, value in result.items() if key != "verification_sha256"}
+    assert result["verification_sha256"] == canonical_sha256(body)
+    assert calls == [True]
+    assert result["strictly_verified"] is not degraded
+
+
 def test_default_checks_enforce_cross_contract_outcome_chain_binding(tmp_path):
     request, _raw, _fit = _fixture(tmp_path)
     outcome = request["cases"][0]["outcome"]
