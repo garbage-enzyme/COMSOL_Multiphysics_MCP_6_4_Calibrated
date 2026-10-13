@@ -288,9 +288,10 @@ class JobLock:
                     time.sleep(self.poll_interval)
                     continue
                 except FileExistsError:
+                    if not self.path.is_file() or self.path.is_symlink():
+                        raise TimeoutError("durable job lock path is not a regular file")
+                    observed = None
                     try:
-                        if not self.path.is_file() or self.path.is_symlink():
-                            raise TimeoutError("durable job lock path is not a regular file")
                         observed = self.path.read_bytes()
                         existing = json.loads(observed.decode("utf-8"))
                         state, _ = process_identity_state(existing)
@@ -314,7 +315,7 @@ class JobLock:
                             age_exceeded = (
                                 time.time() - stat.st_mtime >= LOCK_RECOVERY_GRACE_SECONDS
                             )
-                            if age_exceeded and observed_again == observed:
+                            if observed is not None and age_exceeded and observed_again == observed:
                                 self._unlink_with_retry(expected=observed)
                                 continue
                     if time.monotonic() >= deadline:

@@ -1261,6 +1261,55 @@ def test_live_pid_lock_with_malformed_creation_time_stays_bounded(jobs_root):
     assert lock_path.exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX FIFO lock boundary")
+def test_job_lock_refuses_fifo_without_read_and_releases_guard(tmp_path, monkeypatch):
+    lock_path = tmp_path / "job.lock"
+    os.mkfifo(lock_path)
+    lock = JobLock(lock_path, timeout=0.08)
+    original_read = Path.read_bytes
+
+    def guarded_read(path):
+        assert path != lock_path, "A FIFO must not be read during lock recovery"
+        return original_read(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_bytes", guarded_read)
+        with pytest.raises(TimeoutError, match="not a regular file"):
+            lock.acquire()
+
+    assert lock_path.exists()
+    assert lock._posix_guard is None
+    assert not lock._process_guard_owned
+    lock_path.unlink()
+    with JobLock(lock_path, timeout=0.08):
+        assert lock_path.is_file()
+    assert not lock_path.exists()
+
+
+def test_job_lock_read_failure_does_not_reclaim_unobserved_lock(jobs_root, monkeypatch):
+    lock_path = jobs_root / "job.lock"
+    lock_path.write_bytes(b"partial identity")
+    os.utime(lock_path, (0, 0))
+    lock = JobLock(lock_path, timeout=0.08, poll_interval=0.005)
+    original_read = Path.read_bytes
+
+    def interrupted_read(path):
+        if path == lock_path:
+            raise OSError("lock snapshot unavailable")
+        return original_read(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_bytes", interrupted_read)
+        with pytest.raises(TimeoutError, match="Timed out waiting"):
+            lock.acquire()
+
+    assert lock_path.read_bytes() == b"partial identity"
+    assert not lock._process_guard_owned
+    lock_path.unlink()
+    with JobLock(lock_path, timeout=0.08):
+        assert lock_path.exists()
+
+
 def test_tail_is_bounded(jobs_root):
     store = JobStore(jobs_root)
     job_id = store.create(
