@@ -13,6 +13,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  dsh-bridge:
+    name: DSH bridge regression (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    defaults:
+      run:
+        working-directory: dsh_bridge
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      # actions/setup-node v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Syntax check
+        shell: bash
+        run: |
+          for f in lib/index.js lib/*.mjs fixtures/*.mjs tests/*.mjs scripts/*.mjs; do
+            node --check "$f" || exit 1
+          done
+      - name: Bridge regression tests
+        run: node --test --test-reporter=spec
+      - name: Bridge smoke test
+        run: node scripts/smoke.mjs
+
+  dsh-bridge-install:
+    name: DSH bridge Windows junction smoke
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Install bridge into an isolated profile
+        shell: pwsh
+        run: |
+          $bridgeTarget = Join-Path $env:RUNNER_TEMP bridge-profile-target\@local\dsh-comsol-bridge
+          & .\dsh_bridge\install.ps1 -Target $bridgeTarget
+          $bridgeLink = Get-Item -LiteralPath $bridgeTarget -Force
+          if ($bridgeLink.LinkType -ne 'Junction') { throw 'Expected bridge junction' }
+          if (!(Test-Path -LiteralPath (Join-Path $bridgeTarget 'package.json'))) { throw 'Missing bridge package' }
+
   compatibility-py315:
     name: Python 3.15 preview compatibility (not production)
     runs-on: windows-2025

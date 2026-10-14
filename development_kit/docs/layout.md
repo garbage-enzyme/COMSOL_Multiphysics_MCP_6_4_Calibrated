@@ -10,7 +10,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `AGENTS.md` — The file provides repository development, testing, and safety guidance for coding agents.
 - `CLAUDE.md` — The file provides repository development, testing, and safety guidance for Claude Code.
 - `CITATION.cff` — The file provides machine-readable software and preferred-paper citation metadata.
-- `.github/workflows/ci.yml` — This unified workflow runs the blocking backend, dependency, security, package, Windows GUI, and experimental Ubuntu backend and GUI jobs under one solver-free run.
+- `.github/workflows/ci.yml` — This unified workflow runs backend, dependency, security, package, GUI, and DSH bridge checks on Windows and Ubuntu.
 - `.github/workflows/dependency_report.yml` — The workflow produces the scheduled information-only dependency report.
 - `LICENSE` — The file contains the repository MIT license.
 - `Open_Settings_GUI.ps1` — The script opens or validates the Settings GUI through the bounded Python launcher.
@@ -78,7 +78,6 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `dsh_bridge/DEEPSEEK_COMPATIBILITY.md` — The file defines the DSH compatibility contract, version boundary, installation, verification, recovery, and evidence limits.
 - `dsh_bridge/package.json` — The file declares the zero-dependency `@local/dsh-comsol-bridge` package metadata and engines.
 - `dsh_bridge/install.ps1` — The script links the bridge package root into a DSH profile node_modules as a junction.
-- `dsh_bridge/.github/workflows/ci.yml` — The workflow runs the bridge regression tests on Windows and Ubuntu.
 - `dsh_bridge/fixtures/fake-comsol-server.mjs` — This fixture provides the solver-free fake comsol-mcp server with ten failure modes.
 - `dsh_bridge/lib/index.js` — The module is the cordis plugin entry that registers native tool names and wires the job mirror.
 - `dsh_bridge/lib/mcp-client-core.mjs` — The module implements the ctx-independent MCP stdio client with single-flight serialization and reconnect.

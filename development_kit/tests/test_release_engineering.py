@@ -1006,7 +1006,16 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         for step in job["steps"]
         if "uses" in step
     ]
-    assert len(action_references) == 30
+    assert len(action_references) == 33
+    bridge = jobs["dsh-bridge"]
+    assert bridge["strategy"]["matrix"]["os"] == ["windows-latest", "ubuntu-latest"]
+    assert bridge["defaults"]["run"]["working-directory"] == "dsh_bridge"
+    assert {step.get("run") for step in bridge["steps"]} >= {
+        "node --test --test-reporter=spec",
+        "node scripts/smoke.mjs",
+    }
+    assert jobs["dsh-bridge-install"]["runs-on"] == "windows-latest"
+    assert not (ROOT / "dsh_bridge/.github/workflows/ci.yml").exists()
     paired_job = jobs["paired-platform-coverage"]
     assert paired_job["needs"] == ["unit-and-package-py314", "experimental-ubuntu-backend"]
     paired_commands = "\n".join(str(step.get("run", "")) for step in paired_job["steps"])

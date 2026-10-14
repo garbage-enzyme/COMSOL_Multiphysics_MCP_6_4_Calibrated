@@ -65,6 +65,10 @@ def test_writer_creates_compressed_arrays_and_hash_bound_manifest(tmp_path):
             "quantity_magnetic_norm",
         }
         assert archive["quantity_electric_norm"].shape == tuple(request["grid"]["shape"])
+        for axis, values in kwargs["axis_coordinates"].items():
+            np.testing.assert_array_equal(archive[f"coordinate_{axis}"], values)
+        for name, values in kwargs["quantity_grids"].items():
+            np.testing.assert_array_equal(archive[f"quantity_{name}"], values)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     array_bytes = array_path.read_bytes()
     assert manifest["artifacts"]["array"] == result["array_artifact"]

@@ -743,13 +743,53 @@ def test_retrieval_acceptance_rejects_dirty_initial_ownership_before_worker_star
     assert "not clean before" in result["error"]["message"]
 
 
-def test_retrieval_acceptance_compares_before_and_after_ownership_snapshots():
+def test_retrieval_acceptance_compares_before_and_after_ownership_snapshots(tmp_path):
     before = _absent_ownership()
     after = _absent_ownership()
     after["lease"]["state"] = "present"
 
     assert retrieval_module._ownership_summary(before) == retrieval_module.CLEAN_OWNERSHIP
     assert retrieval_module._ownership_summary(after) != retrieval_module._ownership_summary(before)
+    expected = {query: citation for _label, query, _mode, citation in retrieval_module.QUERIES}
+
+    class Manager:
+        query_count = 0
+
+        def start(self):
+            return {"success": True}
+
+        def query(self, query, **_kwargs):
+            self.query_count += 1
+            source, page = expected[query]
+            return {
+                "success": True,
+                "count": 1,
+                "results": [{"source": source, "page": page}],
+                "ranker": {"mode": "hybrid"},
+                "load_count": 1,
+                "query_count": self.query_count,
+            }
+
+        def health(self):
+            return {"success": True, "status": {"load_count": 1, "query_count": self.query_count}}
+
+        def reset(self):
+            return {"success": True, "reset": {"absent": True}}
+
+    output = tmp_path / "changed-ownership.json"
+    result, code = retrieval_module.run_acceptance(
+        manager=Manager(),
+        index_path=tmp_path / "index",
+        before={"sha256": SHA_A},
+        ownership_before=before,
+        output_path=output,
+        snapshot=lambda _path: {"sha256": SHA_A},
+        ownership_status=lambda: after,
+    )
+    assert code == 1
+    assert result["success"] is False
+    assert "solver ownership changed" in result["error"]["message"]
+    assert json.loads(output.read_text(encoding="utf-8"))["success"] is False
 
 
 @pytest.mark.parametrize("character", ["\u0085", "\u009f", "\u2028", "\u2029"])

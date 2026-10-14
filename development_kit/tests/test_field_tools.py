@@ -205,8 +205,8 @@ def test_public_field_extract_returns_existing_artifact_without_evaluating(
     model.file = lambda: str(source)
     runtime = ascii_tmp_path / "runtime"
     relative_root = Path("field_evidence") / canonical_request["request_fingerprint"]
-    (runtime / relative_root / canonical_request["views"][0]["view_fingerprint"]).mkdir(
-        parents=True
+    field_evidence.collect_existing_dataset_field_evidence(
+        model=model, request=canonical_request, view_id="on", artifact_root=runtime / relative_root
     )
     monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda name: model)
     monkeypatch.setattr(
@@ -229,6 +229,65 @@ def test_public_field_extract_returns_existing_artifact_without_evaluating(
     assert result["already_present"] is True
     assert result["evaluation_skipped"] is True
     assert result["artifact_root_id"] == relative_root.as_posix()
+
+
+@pytest.mark.parametrize(
+    "damage", ["empty", "missing_array", "tampered_array", "oversized_manifest", "wrong_view"]
+)
+def test_public_field_extract_refuses_incomplete_or_modified_cache(
+    tmp_path, ascii_tmp_path, monkeypatch, damage
+):
+    import json
+
+    from src.tools import field_evidence
+
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"immutable-mph-fixture")
+    request = normalize_field_evidence_request(_extraction_request(source))
+    model = _DatasetModel()
+    model.file = lambda: str(source)
+    runtime = ascii_tmp_path / "runtime"
+    root = runtime / "field_evidence" / request["request_fingerprint"]
+    view_root = root / request["views"][0]["view_fingerprint"]
+    if damage == "empty":
+        view_root.mkdir(parents=True)
+    else:
+        field_evidence.collect_existing_dataset_field_evidence(
+            model=model, request=request, view_id="on", artifact_root=root
+        )
+        if damage == "missing_array":
+            (view_root / "field_arrays.npz").unlink()
+        elif damage == "tampered_array":
+            path = view_root / "field_arrays.npz"
+            payload = path.read_bytes()
+            path.write_bytes(bytes([payload[0] ^ 1]) + payload[1:])
+        elif damage == "oversized_manifest":
+            (view_root / "field_manifest.json").write_bytes(b" " * (256 * 1024 + 1))
+        else:
+            from src.evidence.field_manifest import _fingerprint
+
+            path = view_root / "field_manifest.json"
+            manifest = json.loads(path.read_bytes())
+            manifest["view_id"] = "wrong-view"
+            manifest.pop("manifest_sha256")
+            manifest["manifest_sha256"] = _fingerprint(manifest)
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+    before = {p.name: p.read_bytes() for p in view_root.iterdir()}
+    monkeypatch.setattr(field_evidence.session_manager, "get_model", lambda _name: model)
+    monkeypatch.setattr(
+        field_evidence.session_manager, "preflight_long_operation", lambda: {"ready": True}
+    )
+    monkeypatch.setattr(field_evidence.ownership_manager, "runtime_dir", runtime)
+    monkeypatch.setattr(
+        field_evidence,
+        "collect_existing_dataset_field_evidence",
+        lambda **_kwargs: pytest.fail("invalid cache must not evaluate or overwrite"),
+    )
+    result = _tool("wave_optics_field_extract")(model_name="fixture", request=request, view_id="on")
+    assert result["success"] is False, result
+    assert result.get("evaluation_skipped") is not True
+    assert {p.name: p.read_bytes() for p in view_root.iterdir()} == before
+    assert source.read_bytes() == b"immutable-mph-fixture"
 
 
 def test_public_field_extract_publishes_both_views_and_reuses_only_matching_view(

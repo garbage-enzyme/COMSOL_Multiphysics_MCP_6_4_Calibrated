@@ -37,9 +37,12 @@ test("serialization: never more than one in-flight request", async () => {
 });
 
 test("aborted signal rejects the call", async () => {
+	const before = JSON.parse((await conn.callTool("stats", {})).text).submitCount;
 	const ac = new AbortController();
 	ac.abort();
-	await assert.rejects(conn.callTool("capabilities", {}, { signal: ac.signal }), /aborted/);
+	await assert.rejects(conn.callTool("job_submit", { spec: { job_type: "staged_sweep" } }, { signal: ac.signal }), /aborted/);
+	const after = JSON.parse((await conn.callTool("stats", {})).text).submitCount;
+	assert.equal(after, before, "a pre-aborted request must not create a server job");
 	const res = await conn.callTool("capabilities", {});
 	assert.ok(res.text.includes("package_version"));
 });

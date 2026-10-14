@@ -349,6 +349,7 @@ test("B02a: submit persists owner identity for rehydrate", { timeout: 20000 }, a
 
 test("B02a: rehydrate restores owner and does not resubmit", { timeout: 25000 }, async () => {
 	const stateDir = mkdtempSync(join(TEST_ROOT, "b02areh"));
+	let ctx;
 	try {
 		const stateFile = join(stateDir, "jobs.json");
 		// Simulate a prior boot that submitted a job owned by agent-1.
@@ -370,7 +371,7 @@ test("B02a: rehydrate restores owner and does not resubmit", { timeout: 25000 },
 		// DSH requires the live registered Agent instance for jobs.start owner.
 		const liveAgent = { id: "agent-1", sessionId: "session-1" };
 		const agents = { get: (id) => (id === "session-1" ? liveAgent : undefined) };
-		const ctx = makeCtx({ jobs, agents });
+		ctx = makeCtx({ jobs, agents });
 		await apply(ctx, {
 			command: process.execPath,
 			args: [FIXTURE],
@@ -396,14 +397,16 @@ test("B02a: rehydrate restores owner and does not resubmit", { timeout: 25000 },
 		assert.equal(rows[0].unconfirmed ?? false, false);
 
 		// job_submit must not have been invoked during rehydrate.
-		const submit = ctx.registered.find((d) => d.name === "job_submit");
-		assert.ok(submit);
+		const stats = ctx.registered.find((d) => d.name === "stats");
+		assert.ok(stats);
+		const response = await stats.execute({}, { signal: new AbortController().signal });
+		assert.equal(JSON.parse(extractText(response.content, "stats")).submitCount, 0, "rehydrate must not submit a server job");
 		// No new submit happened: state still has only the original job-1 row.
 		assert.deepEqual(JSON.parse(readFileSync(stateFile, "utf8")).map((r) => r.jobId), ["job-1"]);
 
 		ctx.dispose();
 		await Promise.race([jobs.started[0].done, sleep(2000)]);
-	} finally { rmSync(stateDir, { recursive: true, force: true }); }
+	} finally { ctx?.dispose(); rmSync(stateDir, { recursive: true, force: true }); }
 });
 
 test("B02a: rehydrate with missing owner keeps the row and blocks recovery", { timeout: 25000 }, async () => {

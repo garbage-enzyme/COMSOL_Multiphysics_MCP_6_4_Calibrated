@@ -57,15 +57,36 @@ def _response_payload(result: dict[str, Any]) -> dict[str, Any]:
     return candidates[0]
 
 
-async def _read_response(process: asyncio.subprocess.Process, request_id: int) -> dict[str, Any]:
+async def _read_response(
+    process: asyncio.subprocess.Process, request_id: int, *, timeout_seconds: float = 15
+) -> dict[str, Any]:
     assert process.stdout is not None
-    while True:
-        raw = await asyncio.wait_for(process.stdout.readline(), timeout=15)
-        if not raw:
-            raise AssertionError(f"MCP server closed before response {request_id}")
-        message = json.loads(raw)
-        if message.get("id") == request_id:
-            return message
+    async with asyncio.timeout(timeout_seconds):
+        while True:
+            raw = await process.stdout.readline()
+            if not raw:
+                raise AssertionError(f"MCP server closed before response {request_id}")
+            message = json.loads(raw)
+            if message.get("id") == request_id:
+                return message
+
+
+def test_response_budget_does_not_restart_for_notifications():
+    from types import SimpleNamespace
+
+    class Notifications:
+        async def readline(self):
+            await asyncio.sleep(0.01)
+            return b'{"jsonrpc":"2.0","method":"notifications/message"}\n'
+
+    async def run():
+        with pytest.raises(TimeoutError):
+            await _read_response(SimpleNamespace(stdout=Notifications()), 777, timeout_seconds=0.05)
+
+    async def bounded():
+        await asyncio.wait_for(run(), timeout=2)
+
+    asyncio.run(bounded())
 
 
 async def _write_message(process: asyncio.subprocess.Process, message: dict[str, Any]) -> None:

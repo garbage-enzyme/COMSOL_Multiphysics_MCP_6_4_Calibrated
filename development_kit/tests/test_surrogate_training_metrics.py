@@ -58,6 +58,12 @@ def test_metrics_are_computed_in_physical_units() -> None:
     assert metrics["failed_prediction_count"] == 0
 
 
+def test_unequal_errors_distinguish_rmse_from_mae():
+    metrics = compute_metrics(predicted=[[0.0], [0.0]], actual=[[0.0], [2.0]])
+    assert metrics["mae"] == 1.0
+    assert metrics["rmse"] == pytest.approx(math.sqrt(2))
+
+
 def test_perfect_prediction_scores_zero_and_r2_one() -> None:
     metrics = compute_metrics(
         predicted=[[1.0], [2.0], [3.0], [4.0]],

@@ -1045,7 +1045,15 @@ def test_worker_prepares_resource_model_before_mesh_admission(
     from comsol_mcp.jobs.resource_admission import normalize_resource_policy
     from comsol_mcp.tools import mesh as mesh_module
 
-    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "prepare"))
+    raw = _raw_spec(ascii_tmp_path / "prepare")
+    path = Path(raw["specification_path"])
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["model_contract"]["component_tag"] = "thermal_component"
+    manifest["material_state"]["target"]["component_tag"] = "thermal_component"
+    manifest["model_contract"]["mesh_tag"] = "thermal_mesh"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    raw["specification_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    spec = normalize_thermo_optomechanical_replay_spec(raw)
     spec["resource_policy"] = normalize_resource_policy({"max_mesh_elements": 100})
     store = JobStore(ascii_tmp_path / "prepare-runtime" / "jobs")
     job_id = store.create(

@@ -83,6 +83,15 @@ def test_gp_selector_rejects_duplicate_out_of_domain_and_nonfinite_inputs(
 
 
 def test_ordinary_research_import_does_not_load_numpy_or_scipy(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        assert name.split(".")[0] not in {"numpy", "scipy"}, name
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
     for name in list(sys.modules):
         if name == "comsol_mcp.research" or name.startswith("comsol_mcp.research."):
             monkeypatch.delitem(sys.modules, name, raising=False)

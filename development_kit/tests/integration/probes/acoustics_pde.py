@@ -46,6 +46,8 @@ def _field_columns(model: mph.Model) -> tuple[np.ndarray, np.ndarray, np.ndarray
         x, y, value = raw.T
     else:
         raise RuntimeError(f"unexpected PDE field shape: {raw.shape}")
+    if raw.size == 0 or not np.all(np.isfinite(raw)):
+        raise RuntimeError("PDE field samples must be nonempty and finite")
     return np.real(x), np.real(y), value
 
 
@@ -119,10 +121,14 @@ def _build_and_validate_poisson(client: mph.Client) -> dict:
     study.run()
 
     x, y, values = _field_columns(model)
+    if not all(array.size and np.all(np.isfinite(array)) for array in (x, y, values)):
+        raise RuntimeError("PDE field samples must be nonempty and finite")
     index = int(np.argmin(np.hypot(x - 0.5, y - 0.5)))
     measured = complex(values[index])
     analytical = math.sin(math.pi * float(x[index])) * math.sin(math.pi * float(y[index]))
     relative_error = abs(measured - analytical) / max(abs(analytical), 1e-12)
+    if not all(math.isfinite(value) for value in (analytical, relative_error)):
+        raise RuntimeError("Poisson analytical value and relative error must be finite")
     if relative_error > 0.02:
         raise AssertionError(
             f"Poisson mismatch: measured={measured}, analytical={analytical}, "

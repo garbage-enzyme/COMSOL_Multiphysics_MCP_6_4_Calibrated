@@ -262,7 +262,7 @@ def test_renderer_rejects_hash_policy_and_log_failures_without_residue(tmp_path)
             shared_color_limits=False,
             output_root=output,
         )
-    assert not list(output.glob("*.png"))
+    assert not list(output.rglob("*.png"))
 
 
 def test_worker_output_is_redirected_and_read_with_a_hard_bound(tmp_path, monkeypatch):
@@ -452,7 +452,7 @@ def test_worker_failure_removes_every_owned_partial_png(tmp_path, monkeypatch):
             output_root=output,
         )
 
-    assert not list(output.glob("*.png"))
+    assert not list(output.rglob("*.png"))
 
 
 def test_worker_timeout_stays_bounded_and_removes_partial_png(tmp_path, monkeypatch):
@@ -494,7 +494,7 @@ def test_worker_timeout_stays_bounded_and_removes_partial_png(tmp_path, monkeypa
 
     assert process.killed is True
     assert process.waited is True
-    assert not list(output.glob("*.png"))
+    assert not list(output.rglob("*.png"))
 
 
 @pytest.mark.parametrize(

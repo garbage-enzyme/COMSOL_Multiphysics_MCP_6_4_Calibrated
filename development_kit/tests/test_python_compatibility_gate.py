@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import inspect
 
@@ -13,7 +14,22 @@ from development_kit.scripts import python_compatibility_licensed_gate as gate
 
 def test_worker_poll_loops_are_rate_limited():
     source = inspect.getsource(gate._run_parent)
-    assert source.count("time.sleep(0.25)") >= 2
+    calls = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "time"
+        and node.func.attr == "sleep"
+    ]
+    assert len(calls) >= 2
+    assert all(
+        len(node.args) == 1
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == 0.25
+        for node in calls
+    )
 
 
 class _FakeProcess:

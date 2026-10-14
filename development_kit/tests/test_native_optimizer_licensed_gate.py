@@ -240,7 +240,12 @@ def test_every_model_evaluation_pins_one_sweep_point():
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "evaluate"
-            and not any(keyword.arg == "outer" for keyword in node.keywords)
+            and not any(
+                keyword.arg == "outer"
+                and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value == 1
+                for keyword in node.keywords
+            )
         ):
             offenders.append(node.lineno)
 

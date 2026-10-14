@@ -2,6 +2,7 @@
 
 import ast
 import asyncio
+import contextlib
 import inspect
 import json
 import runpy
@@ -23,6 +24,144 @@ from development_kit.tests.integration import wave_optics_point_audit_acceptance
 from development_kit.tests.integration import wave_optics_preflight_acceptance as preflight_gate
 
 ROOT = Path(__file__).parents[2]
+
+
+@pytest.mark.parametrize(
+    "sample",
+    [
+        [],
+        [[float("nan"), 0.5, 1]],
+        [[0.5, 0.5, float("nan")]],
+        [[0.5, float("inf"), 1]],
+        [[0.5, 0.5, complex(1, float("inf"))]],
+    ],
+)
+def test_poisson_probe_refuses_empty_or_nonfinite_fields(sample):
+    from development_kit.tests.integration.probes import acoustics_pde as probe
+
+    with pytest.raises(RuntimeError, match="field"):
+        probe._field_columns(SimpleNamespace(evaluate=lambda _expressions: sample))
+
+
+@pytest.mark.parametrize("value", [complex(float("nan"), 0), complex(0, float("inf")), 1.0])
+def test_poisson_probe_validates_before_publishing_verified(monkeypatch, value):
+    import numpy as np
+
+    from development_kit.tests.integration.probes import acoustics_pde as probe
+
+    class Node:
+        def __getattr__(self, _name):
+            return lambda *_args, **_kwargs: self
+
+    client = SimpleNamespace(create=lambda _name: SimpleNamespace(java=Node()))
+    monkeypatch.setattr(probe.jpype, "JArray", lambda *_args: lambda values: values)
+    monkeypatch.setattr(
+        probe,
+        "create_side_selections",
+        lambda *_args, **_kwargs: {
+            "success": True,
+            "selections": {
+                side: {"entities": [i]}
+                for i, side in enumerate(("left", "right", "bottom", "top"), 1)
+            },
+        },
+    )
+    monkeypatch.setattr(
+        probe,
+        "add_pde_interface",
+        lambda *_args, **_kwargs: {"success": True, "physics": "fixture"},
+    )
+    monkeypatch.setattr(
+        probe,
+        "configure_boundaries",
+        lambda *_args, **_kwargs: {"success": True, "configured_count": 4},
+    )
+    monkeypatch.setattr(probe, "create_mesh_sequence", lambda *_args, **_kwargs: {"success": True})
+    monkeypatch.setattr(
+        probe,
+        "_field_columns",
+        lambda _model: (np.array([0.5]), np.array([0.5]), np.array([value])),
+    )
+    if not np.isfinite(value):
+        with pytest.raises(RuntimeError, match="finite"):
+            probe._build_and_validate_poisson(client)
+    else:
+        receipt = probe._build_and_validate_poisson(client)
+        assert receipt["status"] == "verified"
+        assert receipt["sample"]["relative_error"] == 0
+
+
+def test_live_three_call_matrix_executes_point_audit_with_shared_budget(tmp_path, monkeypatch):
+    @contextlib.asynccontextmanager
+    async def stdio(_parameters):
+        yield None, None
+
+    calls = []
+    budgeted = []
+
+    class Session:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def initialize(self):
+            pass
+
+    async def call(_session, name, arguments):
+        calls.append((name, arguments))
+        if name == "model_load":
+            return {"success": True, "model": {"name": "fixture"}}, {}
+        return {"success": True}, {}
+
+    async def before(session, name, arguments, *, deadline):
+        budgeted.append((name, deadline))
+        return await call(session, name, arguments)
+
+    async def revision(_session, _name, *, deadline=None):
+        budgeted.append(("revision", deadline))
+        return "a" * 64
+
+    async def setup(*_args):
+        pass
+
+    async def cleanup(*_args):
+        return {"passed": True}
+
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"solver-free fixture")
+    case = {
+        "source": source,
+        "name": "fixture",
+        "wavelength_um": 0.8,
+        "top_air_domain_ids": [1],
+        "top_air_coordinate_range": {},
+        "validation_policy": {},
+    }
+    monkeypatch.setattr(live_profile_gate, "stdio_client", stdio)
+    monkeypatch.setattr(live_profile_gate, "ClientSession", Session)
+    monkeypatch.setattr(live_profile_gate, "_controlled_cases", lambda: (case,))
+    monkeypatch.setattr(live_profile_gate, "_setup_live_session", setup)
+    monkeypatch.setattr(live_profile_gate, "_cleanup_live_session", cleanup)
+    monkeypatch.setattr(live_profile_gate, "_call", call)
+    monkeypatch.setattr(live_profile_gate, "_call_before", before)
+    monkeypatch.setattr(live_profile_gate, "_model_revision", revision)
+    monkeypatch.setattr(live_profile_gate, "_agent_reasoning", lambda *_args: {})
+    result = asyncio.run(live_profile_gate._live_three_call_matrix())
+    assert len(result["cases"][0]["exact_three_calls"]) == 3
+    point_budget = next(
+        deadline for name, deadline in budgeted if name == "wave_optics_point_audit"
+    )
+    assert point_budget is not None
+    assert budgeted[0] == ("revision", point_budget)
+    audit = next(arguments for name, arguments in calls if name == "wave_optics_point_audit")
+    assert audit["expected_model_revision"] == "a" * 64
+
+
 STANDALONE_PROBES = tuple(
     path.relative_to(ROOT).as_posix()
     for path in sorted((ROOT / "development_kit/tests/integration/probes").glob("*.py"))

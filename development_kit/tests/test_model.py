@@ -140,7 +140,7 @@ def test_save_never_overwrites_a_target_created_during_native_staging(tmp_path):
         _save_model_file(model, str(requested))
 
     assert requested.read_bytes() == b"competitor"
-    assert not list(tmp_path.glob(".*.save"))
+    assert set(tmp_path.iterdir()) == {requested}
 
 
 class CloneJava:

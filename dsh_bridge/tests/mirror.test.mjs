@@ -11,6 +11,18 @@ after(() => server.close());
 
 const MIRROR_OPTS = { pollIntervalMs: 30, tailLines: 20, outputLimitBytes: 4096, cancelConfirmTimeoutMs: 5000 };
 
+async function withDeadline(promise, message) {
+	let timer;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), 8000); }),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 // ---- pure helper branches (deterministic, no timers) ----
 
 test("isTerminal recognizes terminal states and rejects running", () => {
@@ -73,10 +85,7 @@ test("mirror completes when the server reaches a terminal state", { timeout: 100
 		assert.equal(rec.spec.kind, "comsol");
 		assert.equal(rec.spec.label, "comsol job job-1 (staged_sweep)");
 		assert.equal(rec.spec.owner, undefined); // unowned mirror
-		const outcome = await Promise.race([
-			rec.done,
-			new Promise((_, rej) => setTimeout(() => rej(new Error("mirror never settled")), 8000)),
-		]);
+		const outcome = await withDeadline(rec.done, "mirror never settled");
 		assert.equal(outcome.status, "completed");
 		assert.match(outcome.detail ?? "", /state=/);
 	} finally { conn.dispose(); }
@@ -105,10 +114,7 @@ test("cancel settles the mirror as killed", { timeout: 10000 }, async () => {
 		createJobMirror({ jobs, core: conn, jobId: "job-1", opts: MIRROR_OPTS, logger: quietLogger() });
 		const rec = jobs.started[0];
 		rec.hooks.cancel("caller cancelled");
-		const outcome = await Promise.race([
-			rec.done,
-			new Promise((_, rej) => setTimeout(() => rej(new Error("cancel never settled")), 8000)),
-		]);
+		const outcome = await withDeadline(rec.done, "cancel never settled");
 		assert.equal(outcome.status, "killed");
 	} finally { conn.dispose(); }
 });
@@ -122,10 +128,7 @@ test("disposed bridge settles the mirror as failed", { timeout: 10000 }, async (
 		createJobMirror({ jobs, core: conn, jobId: "job-1", opts: MIRROR_OPTS, logger: quietLogger(), isDisposed: () => disposed.value });
 		const rec = jobs.started[0];
 		disposed.value = true;
-		const outcome = await Promise.race([
-			rec.done,
-			new Promise((_, rej) => setTimeout(() => rej(new Error("dispose never settled")), 8000)),
-		]);
+		const outcome = await withDeadline(rec.done, "dispose never settled");
 		assert.equal(outcome.status, "failed");
 	} finally { conn.dispose(); }
 });
@@ -158,8 +161,8 @@ test("two mirrors on independent jobs both complete", { timeout: 10000 }, async 
 		createJobMirror({ jobs, core: conn, jobId: j2, opts: MIRROR_OPTS, logger: quietLogger() });
 		assert.equal(jobs.started.length, 2);
 		const outcomes = await Promise.all([
-			Promise.race([jobs.started[0].done, new Promise((_, rej) => setTimeout(() => rej(new Error("mirror 1 never settled")), 8000))]),
-			Promise.race([jobs.started[1].done, new Promise((_, rej) => setTimeout(() => rej(new Error("mirror 2 never settled")), 8000))]),
+			withDeadline(jobs.started[0].done, "mirror 1 never settled"),
+			withDeadline(jobs.started[1].done, "mirror 2 never settled"),
 		]);
 		assert.deepEqual(outcomes.map((o) => o.status), ["completed", "completed"]);
 		const stats = await conn.callTool("stats", {});

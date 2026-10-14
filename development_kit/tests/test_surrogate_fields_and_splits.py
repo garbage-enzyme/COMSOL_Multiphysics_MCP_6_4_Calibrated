@@ -62,6 +62,21 @@ def _schema() -> dict:
     )
 
 
+def test_transforms_match_independent_nonidentity_values():
+    fitted = fit_transforms(
+        transform_id="golden",
+        schema=_schema(),
+        train_rows=[{"w": 100.0, "h": 50.0, "R": 0.1}, {"w": 300.0, "h": 150.0, "R": 0.9}],
+        kinds={"w": "standardize", "R": "minmax"},
+    )
+    assert apply_transforms(fitted, {"w": 250.0, "h": 75.0, "R": 0.3}) == pytest.approx(
+        {"w": 0.5, "h": 75.0, "R": 0.25}
+    )
+    assert invert_transforms(fitted, {"w": -0.5, "h": 75.0, "R": 0.75}) == pytest.approx(
+        {"w": 150.0, "h": 75.0, "R": 0.7}
+    )
+
+
 # --------------------------------------------------------------------------
 # Field schema
 # --------------------------------------------------------------------------
@@ -247,9 +262,7 @@ def test_split_changes_with_seed_and_holdout_is_excluded_from_fit() -> None:
     seed29 = assign_group_disjoint_split(group_ids=groups, seed=29)
     assert seed17["manifest_sha256"] != seed29["manifest_sha256"]
 
-    plan = assign_group_disjoint_split(
-        group_ids=groups, seed=17, holdout_group_ids=["g0", "g1"]
-    )
+    plan = assign_group_disjoint_split(group_ids=groups, seed=17, holdout_group_ids=["g0", "g1"])
     holdout = {
         item["group_id"] for item in plan["assignments"] if item["split"] == "scientific_holdout"
     }

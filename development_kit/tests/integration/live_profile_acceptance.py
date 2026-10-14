@@ -40,6 +40,7 @@ PROFILE_COUNTS = {
 COLD_START_RESPONSE_LIMIT_SECONDS = 5.0
 CONTROL_PLANE_READ_LIMIT_SECONDS = 15.0
 LIVE_CLEANUP_LIMIT_SECONDS = 30.0
+POINT_AUDIT_LIMIT_SECONDS = 300.0
 #: Hard stop so a server that keeps handing back a cursor cannot loop forever.
 MAX_DISCOVERY_PAGES = 40
 
@@ -411,7 +412,8 @@ async def _live_three_call_matrix() -> dict[str, Any]:
                     )
                     _require(preflight.get("success"), preflight)
 
-                    audit, timing = await _call(
+                    deadline = time.monotonic() + POINT_AUDIT_LIMIT_SECONDS
+                    audit, timing = await _call_before(
                         session,
                         "wave_optics_point_audit",
                         {
@@ -425,15 +427,16 @@ async def _live_three_call_matrix() -> dict[str, Any]:
                             "study_step_tag": "wl_step",
                             "study_step_property": "plist",
                             "expected_source_sha256": source_hash,
-                    "expected_model_revision": await _model_revision(
-                        session, model_name, deadline=deadline
-                    ),
+                            "expected_model_revision": await _model_revision(
+                                session, model_name, deadline=deadline
+                            ),
                             "config_id": f"live-profile-{case['name']}",
                             "artifact_dir": str(ARTIFACT_DIR / "audits"),
                             "top_air_domain_ids": case["top_air_domain_ids"],
                             "top_air_coordinate_range": case["top_air_coordinate_range"],
                             "validation_policy": case["validation_policy"],
                         },
+                        deadline=deadline,
                     )
                     calls.append(
                         {

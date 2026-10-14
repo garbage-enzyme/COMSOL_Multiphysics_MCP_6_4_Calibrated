@@ -592,3 +592,17 @@ def test_graph_with_no_nodes_is_refused_instead_of_crashing(tmp_path) -> None:
     assert model["nodes"] == []
     with pytest.raises(OnnxDecodeError, match="produced no output"):
         evaluate_onnx_model(model, input_names=["a1"], points=[[1.0]])
+
+
+def test_declared_graph_output_differs_from_final_node(tmp_path):
+    payload = _onnx(
+        [
+            _node("Identity", ["input"], ["declared"]),
+            _node("Relu", ["input"], ["other"]),
+        ],
+        [],
+        ["input"],
+        output="declared",
+    )
+    model = load_onnx_model(_write(tmp_path, "different.onnx", payload))
+    assert evaluate_onnx_model(model, input_names=["x"], points=[[-7.0]]) == [[-7.0]]
