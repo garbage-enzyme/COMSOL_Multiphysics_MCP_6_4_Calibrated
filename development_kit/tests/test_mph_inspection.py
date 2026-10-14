@@ -696,3 +696,54 @@ def test_oversized_probe_cache_remains_warning_only(tmp_path):
     assert report["cache"]["status"] == "miss"
     assert report["probes"][0]["available"] is True
     assert cache.stat().st_size <= _MPH_PROBE_CACHE_BYTES
+
+
+def test_probe_cache_preserves_linked_caller_staging_file(tmp_path):
+    import os
+
+    from comsol_mcp.evidence.inspection.probe import (
+        MPH_ARTIFACT_PROBE_CACHE_FILENAME,
+        probe_mph_artifacts,
+    )
+
+    job = tmp_path / "job"
+    job.mkdir()
+    caller = tmp_path / "caller.bin"
+    caller.write_bytes(b"caller-owned bytes")
+    staging = job / f".{MPH_ARTIFACT_PROBE_CACHE_FILENAME}.tmp-{os.getpid()}"
+    os.link(caller, staging)
+
+    report = probe_mph_artifacts(job)
+
+    assert caller.read_bytes() == b"caller-owned bytes"
+    assert staging.read_bytes() == b"caller-owned bytes"
+    assert report["cache"]["status"] == "miss"
+    assert probe_mph_artifacts(job)["cache"]["status"] == "hit"
+
+
+def test_probe_cache_removes_owned_staging_on_publication_failure(tmp_path, monkeypatch):
+    from comsol_mcp.evidence.inspection import probe
+
+    def fail_replace(_source, _destination):
+        raise OSError("injected cache publication failure")
+
+    monkeypatch.setattr(probe.os, "replace", fail_replace)
+
+    report = probe.probe_mph_artifacts(tmp_path)
+
+    assert report["cache"]["status"] == "unavailable"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_probe_cache_removes_owned_staging_on_write_failure(tmp_path, monkeypatch):
+    from comsol_mcp.evidence.inspection import probe
+
+    def fail_encode(*_args, **_kwargs):
+        raise OSError("injected cache encoding failure")
+
+    monkeypatch.setattr(probe.json, "dumps", fail_encode)
+
+    report = probe.probe_mph_artifacts(tmp_path)
+
+    assert report["cache"]["status"] == "unavailable"
+    assert list(tmp_path.iterdir()) == []

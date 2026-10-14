@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -182,11 +183,16 @@ def probe_mph_artifacts(directory: str | Path, *, refresh: bool = False) -> dict
         }
         if cache_path.is_symlink() or (cache_path.exists() and not cache_path.is_file()):
             raise OSError("probe cache path is not a regular file")
-        temporary = cache_path.with_name(f".{cache_path.name}.tmp-{os.getpid()}")
-        temporary.write_text(
-            json.dumps(cache_payload, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{cache_path.name}.", suffix=".tmp", dir=root
         )
-        os.replace(temporary, cache_path)
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(cache_payload, ensure_ascii=False, sort_keys=True))
+            os.replace(temporary, cache_path)
+        finally:
+            temporary.unlink(missing_ok=True)
     except OSError:
         # Cache write failure must not affect the probe result.
         probe["cache"] = {"status": "unavailable", "refreshed": bool(refresh)}
