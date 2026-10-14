@@ -199,6 +199,25 @@ def test_non_object_startup_handshake_is_contained_and_reaped(monkeypatch):
     assert result["cleanup"]["absent"] is True
 
 
+@pytest.mark.parametrize("size", [65_535, 65_536, 65_537])
+def test_startup_handshake_line_byte_limit_includes_newline(size):
+    payload = b'{"event":"ready"}'
+    line = payload + b" " * (size - len(payload) - 1) + b"\n"
+    assert json.loads(line) == {"event": "ready"}
+    if size > 65_536:
+        with pytest.raises(ValueError, match="exceeds the byte limit"):
+            SemanticWorkerManager._read_startup_line(BytesIO(line))
+    else:
+        assert SemanticWorkerManager._read_startup_line(BytesIO(line)) == line
+
+
+def test_startup_handshake_limit_excludes_bytes_after_first_newline():
+    line = b'{"event":"ready"}\n'
+    assert SemanticWorkerManager._read_startup_line(
+        BytesIO(line + b"x" * 4096), maximum=len(line)
+    ) == line
+
+
 def test_oversized_startup_handshake_is_rejected_before_json_decode(monkeypatch):
     manager = SemanticWorkerManager(startup_deadline=2.0)
     command = [

@@ -233,7 +233,10 @@ class SemanticWorkerManager:
             observed += len(chunk)
             if b"\n" in chunk:
                 line = b"".join(chunks)
-                return line[: line.index(b"\n") + 1]
+                end = line.index(b"\n") + 1
+                if end <= maximum:
+                    return line[:end]
+                break
         raise ValueError("worker startup handshake exceeds the byte limit")
 
     def _terminate_posix_group(self) -> tuple[bool, bool, list[str]]:
