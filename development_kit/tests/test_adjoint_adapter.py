@@ -197,8 +197,10 @@ def test_adapter_binds_differentiable_scalar_constraints_with_units_and_bounds()
     receipt = configure_native_adjoint(backend, support, _optimizer())
     node = backend.studies["std2"]._features.nodes["opt_a71"]
     assert node.values["constraintExpression"] == ["ewfd.loss", "ewfd.Tport1"]
-    assert node.values["constraintActive"] == ["on", "on"]
-    assert receipt["optimization"]["constraintActive"]["readback"] == ["on", "on"]
+    # Explicit activation rows can pass readback but fail native equation compilation.
+    # Keep the native default while retaining every constraint expression and bound.
+    assert node.values["constraintActive"] == []
+    assert receipt["optimization"]["constraintActive"] == {"requested": [], "readback": []}
     assert node.values["constraintLbound"] == ["", "0[1]"]
     assert node.values["constraintUbound"] == ["2.5[W]", "0.10000000000000001[1]"]
     assert receipt["optimization"]["constraint"]["readback"] == node.values["constraintExpression"]

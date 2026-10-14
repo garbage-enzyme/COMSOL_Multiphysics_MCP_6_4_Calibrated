@@ -462,9 +462,9 @@ def configure_native_adjoint(
             "constraintU": _array(optimization, "constraintUbound", constraints["upper"])
             if constraints["expressions"]
             else {"requested": [], "readback": []},
-            "constraintActive": _array(
-                optimization, "constraintActive", ["on"] * len(constraints["expressions"])
-            )
+            # COMSOL 6.4 can accept explicit "on" rows but fail equation compilation.
+            # Use native default activation; preserve its empty readback in the receipt.
+            "constraintActive": _array(optimization, "constraintActive", [])
             if constraints["expressions"]
             else {"requested": [], "readback": []},
             "nsolvemax": _scalar(
