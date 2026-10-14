@@ -101,12 +101,23 @@ def test_exact_termination_rejects_invalid_identity_before_opening_process(
     assert terminate_exact(identity)["acted"] is False
 
 
-def test_exact_termination_refuses_a_reused_identity():
+def test_exact_termination_refuses_a_reused_identity(tmp_path):
+    ready = tmp_path / "reused-child-ready"
     child = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"],
+        [
+            sys.executable,
+            "-c",
+            "import pathlib,sys,time; "
+            "pathlib.Path(sys.argv[1]).write_text('ready'); time.sleep(30)",
+            str(ready),
+        ],
         creationflags=_HIDDEN_PROCESS_FLAGS,
     )
     try:
+        deadline = time.monotonic() + 5.0
+        while not ready.exists() and child.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.025)
+        assert ready.exists(), "child did not reach its Python readiness marker"
         identity = process_identity(child.pid)
         identity["process_create_time"] -= 10
 
