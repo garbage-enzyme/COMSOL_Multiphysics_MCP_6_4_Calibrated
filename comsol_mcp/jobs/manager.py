@@ -46,13 +46,52 @@ class _PollableProcess(Protocol):
     def poll(self) -> int | None: ...
 
 
+def _uses_windows_venv_redirector(command: list[str]) -> bool:
+    executable = Path(command[0])
+    return (
+        sys.platform == "win32"
+        and executable.parent.name.casefold() == "scripts"
+        and (executable.parent.parent / "pyvenv.cfg").is_file()
+    )
+
+
+def _launched_process_identity(process: subprocess.Popen, command: list[str]) -> dict[str, Any]:
+    """Identify the executing child when a Windows venv launcher redirects."""
+    if not _uses_windows_venv_redirector(command):
+        return process_identity(process.pid)
+    expected = hashlib.sha256("\0".join(command).encode("utf-8", errors="replace")).hexdigest()
+    launcher = process_identity(process.pid)
+    if launcher["command_signature"] != expected:
+        raise OSError("Python venv launcher command does not match")
+    matches = []
+    for child in psutil.Process(process.pid).children():
+        with child.oneshot():
+            if child.ppid() != process.pid:
+                continue
+            created = child.create_time()
+            observed = process_identity(child.pid)
+        if (
+            observed["pid"] == child.pid
+            and observed["process_create_time"] == created
+            and created >= launcher["process_create_time"]
+            and observed["command_signature"] == expected
+        ):
+            matches.append(observed)
+    if len(matches) != 1:
+        raise OSError("Python venv executing child identity is not uniquely verified")
+    # Recheck the launcher after enumeration so PID reuse cannot supply children.
+    if process_identity(process.pid) != launcher:
+        raise OSError("Python venv launcher identity changed")
+    return matches[0]
+
+
 def _wait_for_launched_identity(process: subprocess.Popen, command: list[str]) -> dict[str, Any]:
     expected = hashlib.sha256("\0".join(command).encode("utf-8", errors="replace")).hexdigest()
     deadline = time.monotonic() + 2.0
     while process.poll() is None:
         try:
-            observed = process_identity(process.pid)
-            if observed["pid"] == process.pid and observed["command_signature"] == expected:
+            observed = _launched_process_identity(process, command)
+            if observed["command_signature"] == expected:
                 return observed
         except psutil.NoSuchProcess, psutil.ZombieProcess, OSError:
             pass
@@ -740,7 +779,7 @@ class JobManager:
         deadline = time.monotonic() + 2.0
         while True:
             try:
-                observed = process_identity(process.pid)
+                observed = _launched_process_identity(process, command)
                 if os.name == "nt" or observed["command_signature"] == expected_signature:
                     return observed
             except psutil.NoSuchProcess, psutil.ZombieProcess, OSError:

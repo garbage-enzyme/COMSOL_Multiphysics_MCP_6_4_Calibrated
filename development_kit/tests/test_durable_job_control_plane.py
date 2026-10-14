@@ -2360,3 +2360,90 @@ def test_job_tail_window_is_clamped_to_the_documented_bound():
     for bad in (True, "20", 2.5, None):
         with pytest.raises(ValueError, match="n must be an integer between 1 and 200"):
             _clamp_tail_n(bad)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows venv executable redirector")
+@pytest.mark.parametrize("cancel_resume", [False, True])
+def test_windows_venv_worker_binds_executing_process(ascii_tmp_path, monkeypatch, cancel_resume):
+    import venv
+
+    environment = ascii_tmp_path / "venv space"
+    venv.EnvBuilder(with_pip=False, system_site_packages=True).create(environment)
+    monkeypatch.setattr(sys, "executable", str(environment / "Scripts" / "python.exe"))
+    manager = JobManager(ascii_tmp_path / "jobs", allow_test_jobs=True)
+    delays = [0.05, 1.0] if cancel_resume else [0.05]
+    submitted = manager.submit({"job_type": "test_sequence", "delays": delays})
+    if cancel_resume:
+        wait_for(manager, submitted["job_id"], {"running"})
+        assert manager.cancel(submitted["job_id"])["success"] is True
+        wait_for(manager, submitted["job_id"], {"cancelled"})
+        assert manager.resume(submitted["job_id"])["attempt"] == 2
+    terminal = wait_for(
+        manager, submitted["job_id"], {"completed", "interrupted", "failed"}, timeout=10
+    )
+    assert terminal["status"] == "completed", manager.tail(submitted["job_id"], 20)
+    assert terminal["progress"] == {"completed": len(delays), "total": len(delays)}
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        None,
+        "command",
+        "pid",
+        "created",
+        "older",
+        "foreign",
+        "multiple",
+        "reused_launcher",
+        "missing",
+    ],
+)
+def test_venv_redirector_identity_requires_one_exact_child(monkeypatch, failure):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from comsol_mcp.jobs import manager as module
+
+    command = ["python", "-m", "owned-worker"]
+    signature = hashlib.sha256("\0".join(command).encode()).hexdigest()
+    launcher = {"pid": 41, "process_create_time": 1.0, "command_signature": signature}
+    child_identity = {"pid": 42, "process_create_time": 2.0, "command_signature": signature}
+    if failure == "command":
+        child_identity["command_signature"] = "0" * 64
+    elif failure == "pid":
+        child_identity["pid"] = 99
+    elif failure == "created":
+        child_identity["process_create_time"] = 3.0
+    elif failure == "older":
+        child_identity["process_create_time"] = 0.5
+    child = SimpleNamespace(
+        pid=42,
+        ppid=lambda: 99 if failure == "foreign" else 41,
+        create_time=lambda: 0.5 if failure == "older" else 2.0,
+        oneshot=nullcontext,
+    )
+    children = [] if failure == "missing" else [child, child] if failure == "multiple" else [child]
+    root = SimpleNamespace(children=lambda: children)
+    root_reads = []
+
+    def identify(pid):
+        if pid == 41:
+            root_reads.append(pid)
+            if failure == "reused_launcher" and len(root_reads) > 1:
+                return {**launcher, "process_create_time": 9.0}
+            return dict(launcher)
+        assert pid == 42
+        return dict(child_identity)
+
+    monkeypatch.setattr(module, "_uses_windows_venv_redirector", lambda _command: True)
+    monkeypatch.setattr(module, "process_identity", identify)
+    monkeypatch.setattr(
+        module.psutil, "Process", lambda pid: root if pid == 41 else pytest.fail("foreign root")
+    )
+    process = SimpleNamespace(pid=41)
+    if failure is None:
+        assert module._launched_process_identity(process, command) == child_identity
+    else:
+        with pytest.raises(OSError, match="identity"):
+            module._launched_process_identity(process, command)
