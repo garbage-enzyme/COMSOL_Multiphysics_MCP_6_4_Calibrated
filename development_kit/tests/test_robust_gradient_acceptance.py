@@ -126,15 +126,23 @@ def test_tampered_component_or_policy_fingerprint_is_rejected():
 
 
 def _licensed_fd_row(variable_id: str, error: float) -> dict:
+    native = 2.0 if variable_id == "patch_length_x" else -1.0
     steps = [
         {
             "relative_step": step,
             "relative_error": error + index * 0.001,
+            "central_derivative_1_per_m": native * (1.0 - error - index * 0.001),
+            "absolute_error_1_per_m": abs(native) * (error + index * 0.001),
             "sign_agreement": True,
         }
         for index, step in enumerate((0.01, 0.003, 0.001))
     ]
-    return {"variable_id": variable_id, "steps": steps, "selected": steps[0]}
+    return {
+        "variable_id": variable_id,
+        "native_1_per_m": native,
+        "steps": steps,
+        "selected": steps[0],
+    }
 
 
 def _licensed_receipts():
@@ -148,15 +156,27 @@ def _licensed_receipts():
     }
     finite_difference = {
         **source,
-        "cosine_similarity": 0.9996,
+        "native_receipt_sha256": "c" * 64,
         "derivatives": [
             _licensed_fd_row("patch_length_x", 0.002),
             _licensed_fd_row("patch_length_y", 0.08),
         ],
     }
+    values = [
+        row["selected"]["central_derivative_1_per_m"] for row in finite_difference["derivatives"]
+    ]
+    finite_difference["finite_difference_vector"] = values
+    finite_difference["cosine_similarity"] = (2.0 * values[0] - values[1]) / (
+        5.0**0.5 * sum(v * v for v in values) ** 0.5
+    )
     directional = {
         **source,
+        "native_receipt_sha256": "c" * 64,
         "variables": ["patch_length_x", "patch_length_y"],
+        "direction": [0.6, 0.8],
+        "native_prediction_1_per_m": 0.4,
+        "observed_1_per_m": 0.4 * (1.0 - 0.039),
+        "absolute_error_1_per_m": 0.4 * 0.039,
         "relative_error": 0.039,
         "sign_agreement": True,
     }
@@ -176,7 +196,7 @@ def test_licensed_ladder_receipts_produce_canonical_robust_acceptance():
     )
     assert receipt["schema_name"] == "comsol_mcp.robust_gradient_acceptance_receipt"
     assert receipt["passed"] is True
-    assert receipt["component_relative_errors"] == [0.002, 0.08]
+    assert receipt["component_relative_errors"] == pytest.approx([0.002, 0.08])
     assert len(receipt["gradient_fingerprint"]) == 64
     assert len(receipt["receipt_fingerprint"]) == 64
 
@@ -225,6 +245,99 @@ def test_licensed_ladder_acceptance_rejects_malformed_receipt_digest():
             finite_difference_receipt_sha256="d" * 64,
             directional_receipt_sha256="e" * 64,
         )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "fd_native_hash",
+        "directional_native_hash",
+        "fd_raw_sign",
+        "fd_native_value",
+        "directional_raw_sign",
+        "directional_prediction",
+        "fd_missing_raw",
+        "fd_cosine",
+        "fd_vector",
+        "direction_length",
+        "direction_zero",
+        "selected_not_best",
+        "unselected_false_error",
+    ],
+)
+def test_licensed_ladder_rejects_contradictory_raw_evidence(mutation):
+    native, fd, directional = _licensed_receipts()
+    row = fd["derivatives"][0]
+    if mutation == "fd_native_hash":
+        fd["native_receipt_sha256"] = "f" * 64
+    elif mutation == "directional_native_hash":
+        directional["native_receipt_sha256"] = "f" * 64
+    elif mutation == "fd_raw_sign":
+        row["steps"][0]["central_derivative_1_per_m"] *= -1
+    elif mutation == "fd_native_value":
+        row["native_1_per_m"] *= -1
+    elif mutation == "directional_raw_sign":
+        directional["observed_1_per_m"] *= -1
+    elif mutation == "directional_prediction":
+        directional["native_prediction_1_per_m"] *= -1
+    elif mutation == "fd_missing_raw":
+        row["steps"][0].pop("central_derivative_1_per_m")
+    elif mutation == "fd_cosine":
+        fd["cosine_similarity"] = 1.0
+    elif mutation == "fd_vector":
+        fd["finite_difference_vector"][0] *= -1
+    elif mutation == "direction_length":
+        directional["direction"].pop()
+    elif mutation == "direction_zero":
+        directional["direction"] = [0.0, 0.0]
+    elif mutation == "selected_not_best":
+        row["selected"] = row["steps"][-1]
+    else:
+        row["steps"][-1]["relative_error"] = 0.0
+    with pytest.raises(ValueError):
+        assess_licensed_gradient_ladder(
+            _policy(),
+            native,
+            fd,
+            directional,
+            native_receipt_sha256="c" * 64,
+            finite_difference_receipt_sha256="d" * 64,
+            directional_receipt_sha256="e" * 64,
+        )
+
+
+def test_licensed_ladder_preserves_nearly_cancelled_directional_projection():
+    native, fd, directional = _licensed_receipts()
+    values = [9.256165991096857, 9.491197202132454]
+    direction = [0.7159153517455646, -0.6981870874880345]
+    projection = sum(a * b for a, b in zip(values, direction, strict=True))
+    assert projection == -8.881784197001252e-16
+    for row, fd_row, value in zip(native["derivatives"], fd["derivatives"], values, strict=True):
+        row["accepted_real"] = value
+        fd_row["native_1_per_m"] = value
+        for step in fd_row["steps"]:
+            step.update(
+                central_derivative_1_per_m=value, absolute_error_1_per_m=0.0, relative_error=0.0
+            )
+    fd.update(finite_difference_vector=values, cosine_similarity=1.0)
+    directional.update(
+        direction=direction,
+        native_prediction_1_per_m=projection,
+        observed_1_per_m=projection,
+        absolute_error_1_per_m=0.0,
+        relative_error=0.0,
+    )
+    result = assess_licensed_gradient_ladder(
+        _policy(),
+        native,
+        fd,
+        directional,
+        native_receipt_sha256="c" * 64,
+        finite_difference_receipt_sha256="d" * 64,
+        directional_receipt_sha256="e" * 64,
+    )
+    assert result["passed"] is True
+    assert result["directional_relative_error"] == 0.0
 
 
 def _resigned(receipt: dict, fingerprint_field: str, domain: str) -> dict:

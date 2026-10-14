@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import shutil
 import sys
 import uuid
@@ -255,25 +256,44 @@ def _result(stage: str, revision: str, source_sha256: str, spec: dict | None = N
     elif stage == "finite_difference":
         derivatives = []
         for name, error in (("patch_length_x", 0.002), ("patch_length_y", 0.082)):
+            native = 2.0 if name == "patch_length_x" else -1.0
             steps = [
                 {
                     "relative_step": step,
                     "relative_error": error + index * 0.001,
+                    "central_derivative_1_per_m": native * (1.0 - error - index * 0.001),
+                    "absolute_error_1_per_m": abs(native) * (error + index * 0.001),
                     "sign_agreement": True,
                 }
                 for index, step in enumerate((0.01, 0.003, 0.001))
             ]
-            derivatives.append({"variable_id": name, "selected": steps[0], "steps": steps})
+            derivatives.append(
+                {
+                    "variable_id": name,
+                    "native_1_per_m": native,
+                    "selected": steps[0],
+                    "steps": steps,
+                }
+            )
+        values = [row["selected"]["central_derivative_1_per_m"] for row in derivatives]
         receipt.update(
             {
-                "cosine_similarity": 0.9996,
+                "native_receipt_sha256": "a" * 64,
+                "finite_difference_vector": values,
+                "cosine_similarity": (2.0 * values[0] - values[1])
+                / (math.sqrt(5.0) * math.hypot(*values)),
                 "derivatives": derivatives,
             }
         )
     elif stage == "directional":
         receipt.update(
             {
+                "native_receipt_sha256": "a" * 64,
                 "variables": ["patch_length_x", "patch_length_y"],
+                "direction": [0.6, 0.8],
+                "native_prediction_1_per_m": 0.4,
+                "observed_1_per_m": 0.4 * (1.0 - 0.039),
+                "absolute_error_1_per_m": 0.4 * 0.039,
                 "relative_error": 0.039,
                 "sign_agreement": True,
             }
@@ -568,6 +588,8 @@ def test_gradient_threshold_failure_prevents_ladder_success(tmp_path, gate_root,
         result = _result(stage, revision, current["source_sha256"], current)
         if stage == "directional":
             result["receipt"]["relative_error"] = 0.051
+            result["receipt"]["observed_1_per_m"] = 0.4 * (1.0 - 0.051)
+            result["receipt"]["absolute_error_1_per_m"] = 0.4 * 0.051
         return result
 
     monkeypatch.setattr(gate, "_git_identity", lambda: {"revision": revision, "clean": True})
@@ -940,6 +962,9 @@ def _write_verifiable_ladder(tmp_path, gate_root, monkeypatch):
     def runner(current, stage):
         result = _result(stage, revision, current["source_sha256"], current)
         stage_root = current["child_roots"][stage]
+        if stage in {"finite_difference", "directional"}:
+            native_path = current["child_roots"]["native"] / gate._RECEIPT_NAMES["native"]
+            result["receipt"]["native_receipt_sha256"] = gate._sha(native_path)
         stage_root.mkdir(parents=False, exist_ok=False)
         receipt_path = stage_root / gate._RECEIPT_NAMES[stage]
         gate.atomic_write_json(receipt_path, result["receipt"])
@@ -986,6 +1011,43 @@ def test_independent_ladder_verifier_reopens_all_receipts_and_logs(
     ]
     assert verification["automatic_fallback_used"] is False
     assert verification["budget_usage"]["review_items"] == 7
+
+
+@pytest.mark.parametrize(
+    "stage,field",
+    [
+        ("finite_difference", "native_receipt_sha256"),
+        ("directional", "native_receipt_sha256"),
+        ("finite_difference", "raw_derivative"),
+        ("directional", "observed_1_per_m"),
+    ],
+)
+def test_independent_verifier_refuses_resealed_raw_contradictions(
+    tmp_path, gate_root, monkeypatch, stage, field
+):
+    expected, ladder = _write_verifiable_ladder(tmp_path, gate_root, monkeypatch)
+    path = expected["roots"][stage] / gate._RECEIPT_NAMES[stage]
+    value = verifier._json(path)
+    if field == "native_receipt_sha256":
+        value[field] = "f" * 64
+    elif field == "raw_derivative":
+        value["derivatives"][0]["steps"][0]["central_derivative_1_per_m"] *= -1
+        value["derivatives"][0]["selected"]["central_derivative_1_per_m"] *= -1
+    else:
+        value[field] *= -1
+    gate.atomic_write_json(path, value)
+    summary = ladder["stage_receipts"][stage]
+    previous_bytes = summary["artifact_bytes"]
+    summary["receipt_sha256"] = gate._sha(path)
+    summary["artifact_bytes"] = (
+        gate._bounded_tree_bytes(expected["roots"][stage])
+        + (gate_root / f"{stage}.stdout.log").stat().st_size
+        + (gate_root / f"{stage}.stderr.log").stat().st_size
+    )
+    ladder["budget_usage"]["artifact_bytes"] += summary["artifact_bytes"] - previous_bytes
+    gate.atomic_write_json(gate_root / "ladder-receipt.json", ladder)
+    with pytest.raises(ValueError, match="different native receipt|raw derivative"):
+        verifier.verify(expected)
 
 
 @pytest.mark.parametrize(

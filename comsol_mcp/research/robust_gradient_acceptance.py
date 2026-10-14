@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
@@ -189,6 +190,27 @@ def _licensed_receipt(value: object, name: str) -> dict[str, Any]:
     return receipt
 
 
+def _licensed_number(raw: object, expected: float, name: str, *, absolute: float = 0.0) -> float:
+    observed = _finite(raw, name)
+    if not math.isfinite(expected) or not math.isclose(
+        observed, expected, rel_tol=1.0e-12, abs_tol=absolute
+    ):
+        raise ValueError(f"{name} does not match the raw derivative evidence")
+    return expected
+
+
+def _licensed_comparison(predicted: float, observed: float) -> tuple[float, float, bool]:
+    scale = max(abs(predicted), abs(observed))
+    absolute_error = abs(predicted - observed)
+    error = absolute_error / scale if scale else 0.0
+    sign = (predicted == 0.0 and observed == 0.0) or (
+        predicted != 0.0
+        and observed != 0.0
+        and math.copysign(1.0, predicted) == math.copysign(1.0, observed)
+    )
+    return error, absolute_error, sign
+
+
 def assess_licensed_gradient_ladder(
     policy: object,
     native_receipt: object,
@@ -215,6 +237,12 @@ def assess_licensed_gradient_ladder(
         finite_difference_receipt_sha256, "finite_difference_receipt_sha256"
     )
     directional_sha = _sha256(directional_receipt_sha256, "directional_receipt_sha256")
+    for name, receipt in (("finite-difference", finite_difference), ("directional", directional)):
+        if (
+            _sha256(receipt.get("native_receipt_sha256"), f"{name}.native_receipt_sha256")
+            != native_sha
+        ):
+            raise ValueError(f"{name} receipt binds a different native receipt")
     native_rows = native.get("derivatives")
     if not isinstance(native_rows, list) or not native_rows:
         raise ValueError("native gradient receipt has no derivative rows")
@@ -236,6 +264,7 @@ def assess_licensed_gradient_ladder(
         raise ValueError("finite-difference receipt must cover every native variable")
     component_errors: list[float] = []
     component_signs: list[bool] = []
+    selected_values: list[float] = []
     step_match = True
     for index, (row, variable_id) in enumerate(zip(fd_rows, variable_order, strict=True)):
         if not isinstance(row, dict) or row.get("variable_id") != variable_id:
@@ -245,32 +274,83 @@ def assess_licensed_gradient_ladder(
         if not isinstance(steps, list) or not isinstance(selected, dict) or selected not in steps:
             raise ValueError(f"finite-difference derivative row {index} is invalid")
         relative_steps: list[float] = []
+        errors: list[float] = []
+        _licensed_number(row.get("native_1_per_m"), native_values[index], "native_1_per_m")
         for step in steps:
             if not isinstance(step, dict):
                 raise ValueError("finite-difference step is invalid")
             relative_steps.append(
                 _finite(step.get("relative_step"), "relative_step", positive=True)
             )
+            observed = _finite(step.get("central_derivative_1_per_m"), "central_derivative_1_per_m")
+            error, absolute_error, sign = _licensed_comparison(native_values[index], observed)
+            _licensed_number(step.get("relative_error"), error, "relative_error", absolute=1.0e-15)
+            _licensed_number(
+                step.get("absolute_error_1_per_m"), absolute_error, "absolute_error_1_per_m"
+            )
+            if not isinstance(step.get("sign_agreement"), bool) or step["sign_agreement"] != sign:
+                raise ValueError("finite-difference sign evidence contradicts the raw derivatives")
+            errors.append(error)
         step_match = step_match and relative_steps == normalized_policy["required_relative_steps"]
-        error = _finite(selected.get("relative_error"), "selected.relative_error")
-        if error < 0.0:
-            raise ValueError("finite-difference relative error must be nonnegative")
-        sign = selected.get("sign_agreement")
-        if not isinstance(sign, bool):
-            raise ValueError("finite-difference sign evidence is invalid")
-        component_errors.append(error)
-        component_signs.append(sign)
+        best = min(range(len(errors)), key=errors.__getitem__)
+        if selected != steps[best]:
+            raise ValueError("finite-difference selected step does not minimize raw relative error")
+        component_errors.append(errors[best])
+        component_signs.append(steps[best]["sign_agreement"])
+        selected_values.append(
+            _finite(selected["central_derivative_1_per_m"], "selected derivative")
+        )
+    vector = finite_difference.get("finite_difference_vector")
+    if not isinstance(vector, list) or len(vector) != len(selected_values):
+        raise ValueError("finite-difference vector is missing or has the wrong length")
+    for observed, expected in zip(vector, selected_values, strict=True):
+        _licensed_number(observed, expected, "finite-difference vector component")
+    native_scale = max(abs(value) for value in native_values)
+    fd_scale = max(abs(value) for value in selected_values)
+    if not native_scale or not fd_scale:
+        raise ValueError("gradient cosine is undefined for a zero vector")
+    scaled_native = [value / native_scale for value in native_values]
+    scaled_fd = [value / fd_scale for value in selected_values]
+    raw_cosine = math.fsum(a * b for a, b in zip(scaled_native, scaled_fd, strict=True)) / (
+        math.hypot(*scaled_native) * math.hypot(*scaled_fd)
+    )
     cosine = _finite(finite_difference.get("cosine_similarity"), "cosine_similarity")
     if not -1.0 <= cosine <= 1.0:
         raise ValueError("finite-difference cosine similarity is outside [-1, 1]")
+    cosine = _licensed_number(
+        cosine, max(-1.0, min(1.0, raw_cosine)), "cosine_similarity", absolute=1.0e-15
+    )
     if directional.get("variables") != variable_order:
         raise ValueError("directional receipt variable order differs from native gradient")
-    directional_error = _finite(directional.get("relative_error"), "directional.relative_error")
-    if directional_error < 0.0:
-        raise ValueError("directional relative error must be nonnegative")
-    directional_sign = directional.get("sign_agreement")
-    if not isinstance(directional_sign, bool):
-        raise ValueError("directional sign evidence is invalid")
+    direction = directional.get("direction")
+    if not isinstance(direction, list) or len(direction) != len(native_values):
+        raise ValueError("directional vector is missing or has the wrong length")
+    direction = [_finite(value, "direction component") for value in direction]
+    if not any(direction):
+        raise ValueError("directional vector must be nonzero")
+    # Preserve the producer's ordered dot product near cancellation.
+    prediction = sum(a * b for a, b in zip(native_values, direction, strict=True))
+    _licensed_number(
+        directional.get("native_prediction_1_per_m"), prediction, "native_prediction_1_per_m"
+    )
+    observed = _finite(directional.get("observed_1_per_m"), "observed_1_per_m")
+    directional_error, absolute_error, directional_sign = _licensed_comparison(prediction, observed)
+    _licensed_number(
+        directional.get("relative_error"),
+        directional_error,
+        "directional.relative_error",
+        absolute=1.0e-15,
+    )
+    _licensed_number(
+        directional.get("absolute_error_1_per_m"),
+        absolute_error,
+        "directional.absolute_error_1_per_m",
+    )
+    if (
+        not isinstance(directional.get("sign_agreement"), bool)
+        or directional["sign_agreement"] != directional_sign
+    ):
+        raise ValueError("directional sign evidence contradicts the raw derivatives")
     checks = {
         "three_step_policy_matches": step_match,
         "component_relative_errors_within_limit": all(
