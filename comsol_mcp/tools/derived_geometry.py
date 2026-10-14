@@ -74,6 +74,7 @@ def _feature_type(feature: Any) -> str:
 
 
 def _feature_snapshot(feature: Any, tag: str) -> dict[str, Any]:
+    kind = _feature_type(feature)
     try:
         property_names = sorted({str(name) for name in feature.properties()})
     except Exception as exc:
@@ -82,6 +83,10 @@ def _feature_snapshot(feature: Any, tag: str) -> dict[str, Any]:
     for name in property_names:
         try:
             value, value_type = _read_property(feature, name)
+            if kind.casefold() == "block" and name in {"size", "pos"}:
+                # Numeric readback uses the geometry length unit. Preserve the
+                # expressions for exact edit verification and unit-safe rollback.
+                value = [str(item) for item in feature.getStringArray(name)]
         except Exception as exc:
             raise ValueError(
                 f"cannot snapshot geometry feature {tag!r} property {name!r}: {exc}"
@@ -93,7 +98,7 @@ def _feature_snapshot(feature: Any, tag: str) -> dict[str, Any]:
         raise ValueError(f"cannot snapshot geometry feature {tag!r} label: {exc}") from exc
     return {
         "tag": tag,
-        "type": _feature_type(feature),
+        "type": kind,
         "label": label,
         "properties": properties,
     }
@@ -548,7 +553,8 @@ def apply_blocks(
             for key in ("size", "pos"):
                 if observed.get(key) != edit[key]:
                     mismatches.append(
-                        f"{edit['block_tag']}.{key}: requested={edit[key]!r}, observed={observed.get(key)!r}"
+                        f"{edit['block_tag']}.{key}: requested={edit[key]!r}, "
+                        f"observed={observed.get(key)!r}"
                     )
         if mismatches:
             raise ValueError("derived geometry readback mismatch: " + "; ".join(mismatches))

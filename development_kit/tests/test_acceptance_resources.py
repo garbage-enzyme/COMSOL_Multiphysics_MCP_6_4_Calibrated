@@ -1,7 +1,9 @@
 """Host-neutral licensed acceptance resource contracts."""
 
 import re
+from importlib import import_module
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -39,8 +41,9 @@ def test_acceptance_cores_fail_closed_without_live_capacity(monkeypatch):
 
 
 def test_durable_cancel_entrypoint_uses_caller_cores_before_submit(monkeypatch, tmp_path):
-    from development_kit.tests.integration import durable_cancel_acceptance as gate
     from src.evidence import real_fixture
+
+    from development_kit.tests.integration import durable_cancel_acceptance as gate
 
     monkeypatch.setenv("COMSOL_MCP_ACCEPTANCE_CORES", "1")
     monkeypatch.setenv("COMSOL_MCP_RUNTIME_DIR", str(tmp_path))
@@ -103,3 +106,32 @@ def test_caller_acceptance_values_do_not_enter_tracked_product_text():
         "caller-owned workstation acceptance values entered tracked product text: "
         + ", ".join(violations)
     )
+
+
+@pytest.mark.parametrize("name", ["acoustics_pde", "capacitor", "unicode_save"])
+def test_standalone_probe_forwards_declared_cores(monkeypatch, tmp_path, name):
+    probe = import_module(f"development_kit.tests.integration.probes.{name}")
+    monkeypatch.setenv("COMSOL_MCP_ACCEPTANCE_CORES", "1")
+    monkeypatch.setattr(acceptance_resources.os, "cpu_count", lambda: 4)
+
+    class ConstructionBoundary(Exception):
+        pass
+
+    def construct(**kwargs):
+        assert kwargs == {"cores": 1, "version": "6.4"}
+        raise ConstructionBoundary
+
+    if name == "acoustics_pde":
+        owner = SimpleNamespace(
+            preflight=lambda **_kwargs: {"ready": True},
+            acquire=lambda **_kwargs: {"success": True},
+            release=lambda: {"success": True},
+        )
+        monkeypatch.setattr(probe, "SolverOwnership", lambda **_kwargs: owner)
+    if name == "unicode_save":
+        output = tmp_path / "unicode"
+        output.mkdir()
+        monkeypatch.setattr(probe, "mkdtemp", lambda **_kwargs: str(output))
+    monkeypatch.setattr(probe.mph, "Client", construct)
+    with pytest.raises(ConstructionBoundary):
+        probe.main()

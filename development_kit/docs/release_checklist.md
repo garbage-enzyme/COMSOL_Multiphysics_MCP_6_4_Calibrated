@@ -44,6 +44,12 @@ Before a release:
 
 5. On a free, licensed, version-pinned host, run the serial real gate explicitly:
 
+   Use an isolated interpreter with the exact accepted wheel installed non-editably.
+   This interpreter also needs the declared development dependencies for pytest.
+   The live-profile probe clears `PYTHONPATH` and starts the installed server outside the checkout.
+   A source-only interpreter cannot satisfy that installed-package check.
+   Set `COMSOL_MCP_ACCEPTANCE_CORES` explicitly for all licensed probes.
+
    ```powershell
    python development_kit/scripts/run_real_release_gate.py --confirm RUN_REAL_COMSOL `
      --fixture-spec D:\path\to\controlled_fixture_spec.json `

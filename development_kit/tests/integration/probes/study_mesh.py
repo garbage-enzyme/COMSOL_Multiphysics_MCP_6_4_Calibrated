@@ -1,9 +1,16 @@
 """Standalone clientapi study and mesh integration probe for COMSOL 6.4."""
 
 import sys
+from pathlib import Path
 
 import jpype
 import mph
+
+ROOT = Path(__file__).parents[4]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 
 
 def main() -> None:
@@ -11,7 +18,7 @@ def main() -> None:
     client = None
     cleanup_errors = []
     try:
-        client = mph.Client(version="6.4")
+        client = mph.Client(cores=required_acceptance_cores(), version="6.4")
         model = client.create("StudyMeshProbe")
         jm = model.java
 
@@ -49,15 +56,14 @@ def main() -> None:
             except Exception as exc:
                 print(f"study+mesh cleanup warning: clear failed: {exc}", file=sys.stderr)
                 cleanup_errors.append("clear")
-            try:
-                client.disconnect()
-            except Exception as exc:
-                print(f"study+mesh cleanup warning: disconnect failed: {exc}", file=sys.stderr)
-                cleanup_errors.append("disconnect")
+            if getattr(client, "port", None):
+                try:
+                    client.disconnect()
+                except Exception as exc:
+                    print(f"study+mesh cleanup warning: disconnect failed: {exc}", file=sys.stderr)
+                    cleanup_errors.append("disconnect")
         if cleanup_errors:
-            raise RuntimeError(
-                "study+mesh cleanup failed: " + ", ".join(cleanup_errors)
-            )
+            raise RuntimeError("study+mesh cleanup failed: " + ", ".join(cleanup_errors))
 
 
 if __name__ == "__main__":

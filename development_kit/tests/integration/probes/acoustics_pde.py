@@ -29,6 +29,8 @@ from recipes.acoustic_duct_2d import (  # noqa
     validate_solution,
 )
 
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
+
 
 def _require_success(result: dict, operation: str) -> dict:
     if not result.get("success"):
@@ -190,7 +192,7 @@ def main() -> None:
     output = None
     cleanup_errors = []
     try:
-        client = mph.Client(version="6.4")
+        client = mph.Client(cores=required_acceptance_cores(), version="6.4")
         ownership.heartbeat(refresh_server_processes=True)
         acoustic_model = client.create("AnalyticalAcousticDuctAcceptance")
         acoustic_build = build_acoustic_duct(acoustic_model, DEFAULT_FREQUENCY_HZ)

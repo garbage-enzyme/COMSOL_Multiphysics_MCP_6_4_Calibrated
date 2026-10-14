@@ -215,7 +215,11 @@ def test_modern_probe_uses_a_fresh_temporary_root_on_repeated_runs(tmp_path, mon
 
 
 def test_study_mesh_probe_fails_when_both_client_cleanup_steps_fail(monkeypatch):
+    monkeypatch.setenv("COMSOL_MCP_ACCEPTANCE_CORES", "1")
+
     class Client:
+        port = 2036
+
         def create(self, _name):
             java = MagicMock()
             component = java.component.return_value.create.return_value
@@ -235,9 +239,7 @@ def test_study_mesh_probe_fails_when_both_client_cleanup_steps_fail(monkeypatch)
     monkeypatch.setitem(sys.modules, "mph", SimpleNamespace(Client=lambda **_kwargs: Client()))
     monkeypatch.setitem(sys.modules, "jpype", SimpleNamespace())
 
-    probe_path = (
-        Path(__file__).parent / "integration" / "probes" / "study_mesh.py"
-    )
+    probe_path = Path(__file__).parent / "integration" / "probes" / "study_mesh.py"
     spec = importlib.util.spec_from_file_location("study_mesh_cleanup_probe", probe_path)
     assert spec is not None and spec.loader is not None
     study_mesh = importlib.util.module_from_spec(spec)

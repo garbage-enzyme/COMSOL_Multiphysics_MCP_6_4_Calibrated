@@ -951,3 +951,64 @@ def test_preflight_fixture_prerequisites_fail_with_explicit_errors():
     assert preflight_gate._select_preflight_tags(
         ["other", "comp1"], ["emw", "ewfd"], ["other", "std1"]
     ) == ("comp1", "ewfd", "std1")
+
+
+@pytest.mark.parametrize("port", [None, 2036])
+@pytest.mark.parametrize("clear_fails", [False, True])
+def test_study_mesh_cleanup_matches_client_mode(monkeypatch, port, clear_fails):
+    from development_kit.tests.integration.probes import study_mesh as probe
+
+    calls = []
+
+    class Node:
+        def __getattr__(self, name):
+            if name in {"getSDim", "getNumElem", "getNDomains", "getNBoundaries"}:
+                return lambda: 3
+            return lambda *_args: self
+
+    def clear():
+        calls.append("clear")
+        if clear_fails:
+            raise OSError("injected clear failure")
+
+    client = SimpleNamespace(
+        port=port,
+        create=lambda _name: SimpleNamespace(java=Node()),
+        clear=clear,
+        disconnect=lambda: calls.append("disconnect"),
+    )
+
+    def factory(**kwargs):
+        assert kwargs == {"cores": 1, "version": "6.4"}
+        return client
+
+    monkeypatch.setattr(probe.mph, "Client", factory)
+    monkeypatch.setattr(probe.jpype, "JArray", lambda *_args: lambda values: values)
+    monkeypatch.setattr(probe, "required_acceptance_cores", lambda: 1)
+    if clear_fails:
+        with pytest.raises(RuntimeError, match="cleanup failed: clear"):
+            probe.main()
+    else:
+        probe.main()
+    assert calls == (["clear", "disconnect"] if port else ["clear"])
+
+
+@pytest.mark.parametrize("cores", [1, 2])
+def test_live_profile_reuses_declared_cores_for_both_starts(monkeypatch, cores):
+    calls = []
+
+    async def call(_session, name, arguments, **_kwargs):
+        calls.append((name, arguments))
+        return {"success": True, "client_reusable": True, "lease": {"state": "absent"}}, {
+            "elapsed_seconds": 0.1
+        }
+
+    async def wait(_session):
+        return []
+
+    monkeypatch.setattr(live_profile_gate, "required_acceptance_cores", lambda: cores)
+    monkeypatch.setattr(live_profile_gate, "_call_before", call)
+    monkeypatch.setattr(live_profile_gate, "_wait_for_comsol", wait)
+    asyncio.run(live_profile_gate._setup_live_session(object(), {"setup": {}}))
+    starts = [arguments for name, arguments in calls if name == "comsol_start"]
+    assert starts == [{"cores": cores, "version": "6.4"}] * 2

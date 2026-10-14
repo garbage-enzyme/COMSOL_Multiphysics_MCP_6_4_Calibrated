@@ -21,6 +21,8 @@ if str(ROOT) not in sys.path:
 
 from src.evidence.real_fixture import controlled_fixture_from_environment
 
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
+
 PYTHON = Path(sys.executable)
 RUNTIME = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
 ARTIFACT_DIR = RUNTIME / "live_profile"
@@ -215,10 +217,11 @@ async def _wait_for_comsol(session: ClientSession) -> list[dict[str, Any]]:
 
 
 async def _setup_live_session(session: ClientSession, output: dict[str, Any]) -> None:
+    cores = required_acceptance_cores()
     start_result, start_timing = await _call_before(
         session,
         "comsol_start",
-        {"cores": 8, "version": "6.4"},
+        {"cores": cores, "version": "6.4"},
         deadline=time.monotonic() + COLD_START_RESPONSE_LIMIT_SECONDS,
     )
     _require(start_result.get("success"), start_result)
@@ -244,7 +247,7 @@ async def _setup_live_session(session: ClientSession, output: dict[str, Any]) ->
     restart_result, restart_timing = await _call_before(
         session,
         "comsol_start",
-        {"cores": 8, "version": "6.4"},
+        {"cores": cores, "version": "6.4"},
         deadline=time.monotonic() + COLD_START_RESPONSE_LIMIT_SECONDS,
     )
     _require(restart_result.get("success"), restart_result)
