@@ -116,6 +116,12 @@ def _inputs() -> tuple[dict, dict, dict, dict]:
         "off_design_rows": rows,
         "external_validation_receipt": _external_receipt(),
     }
+    evidence["external_validation_receipt"]["comparison_metrics"] = {
+        "maximum_absolute_condition_delta": 5e-7
+    }
+    evidence["external_validation_receipt"]["comparison_tolerances"] = {
+        "maximum_absolute_condition_delta": 1e-6
+    }
     return policy, conditions, shape, evidence
 
 
@@ -180,6 +186,71 @@ def test_missing_required_external_receipt_is_an_honest_rejection():
     receipt = assess_robust_finalist_validation(policy, conditions, shape, evidence)
     assert receipt["checks"]["external_fidelity"] is False
     assert receipt["external_validation_receipt_fingerprint"] is None
+
+
+@pytest.mark.parametrize("metric,tolerance", [(0.03, 0.02), (-0.01, 0.02), (0.01, -0.02)])
+def test_validated_external_label_cannot_override_declared_error_bounds(metric, tolerance):
+    policy, conditions, shape, evidence = _inputs()
+    external = evidence["external_validation_receipt"]
+    external.pop("receipt_fingerprint", None)
+    external["comparison_metrics"] = {"maximum_absolute_condition_delta": metric}
+    external["comparison_tolerances"] = {"maximum_absolute_condition_delta": tolerance}
+    receipt = assess_robust_finalist_validation(policy, conditions, shape, evidence)
+    assert receipt["accepted"] is False
+    assert receipt["checks"]["external_fidelity"] is False
+    assert "external_fidelity_failed" in receipt["reason_codes"]
+
+
+@pytest.mark.parametrize("metric,tolerance", [(2e-6, 3e-6), (5e-7, 4e-7)])
+def test_external_error_must_meet_both_policy_and_receipt_limits(metric, tolerance):
+    policy, conditions, shape, evidence = _inputs()
+    external = evidence["external_validation_receipt"]
+    external.pop("receipt_fingerprint", None)
+    external["comparison_metrics"] = {"maximum_absolute_condition_delta": metric}
+    external["comparison_tolerances"] = {"maximum_absolute_condition_delta": tolerance}
+    receipt = assess_robust_finalist_validation(policy, conditions, shape, evidence)
+    assert receipt["accepted"] is False
+    assert receipt["checks"]["external_fidelity"] is False
+
+
+@pytest.mark.parametrize("missing", ["metric", "tolerance"])
+def test_external_condition_error_requires_matching_metric_and_tolerance(missing):
+    policy, conditions, shape, evidence = _inputs()
+    external = evidence["external_validation_receipt"]
+    external.pop("receipt_fingerprint", None)
+    external["comparison_metrics"] = {"maximum_absolute_condition_delta": 5e-7}
+    external["comparison_tolerances"] = {"maximum_absolute_condition_delta": 1e-6}
+    external["comparison_metrics" if missing == "metric" else "comparison_tolerances"] = {
+        "unrelated_error": 5e-7
+    }
+    receipt = assess_robust_finalist_validation(policy, conditions, shape, evidence)
+    assert receipt["accepted"] is False
+    assert receipt["checks"]["external_fidelity"] is False
+
+
+def test_external_condition_error_accepts_exact_declared_limit():
+    policy, conditions, shape, evidence = _inputs()
+    external = evidence["external_validation_receipt"]
+    external.pop("receipt_fingerprint", None)
+    external["comparison_metrics"] = {"maximum_absolute_condition_delta": 1e-6}
+    external["comparison_tolerances"] = {"maximum_absolute_condition_delta": 1e-6}
+    receipt = assess_robust_finalist_validation(policy, conditions, shape, evidence)
+    assert receipt["accepted"] is True
+
+
+@pytest.mark.parametrize("metric,accepted", [(0.02, True), (0.03, False)])
+def test_legacy_policy_still_checks_its_external_receipt_tolerance(metric, accepted):
+    policy, conditions, shape, evidence = _inputs()
+    policy["schema_version"] = "1.0.0"
+    policy["mesh_convergence"].pop("baseline_mesh_reference_value")
+    policy["mesh_convergence"].pop("finer_mesh_reference_value")
+    policy["external_fidelity"].pop("maximum_absolute_condition_delta")
+    external = _external_receipt()
+    external["comparison_metrics"]["maximum_absolute_delta"] = metric
+    evidence["external_validation_receipt"] = external
+    receipt = assess_robust_finalist_validation(policy, conditions, shape, evidence)
+    assert receipt["accepted"] is accepted
+    assert receipt["checks"]["external_fidelity"] is accepted
 
 
 def test_identity_drift_duplicate_rows_and_receipt_tampering_fail_closed():

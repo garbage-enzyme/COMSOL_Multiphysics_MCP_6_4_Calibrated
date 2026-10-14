@@ -70,6 +70,11 @@ def _candidate_values(value: object, space: Mapping[str, Any]) -> dict[str, Any]
             continue
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):
             raise ValueError(f"candidate.{variable_id} must be numeric")
+        if kind == "integer" and isinstance(raw, int):
+            if not variable["lower"] <= raw <= variable["upper"]:
+                raise ValueError(f"candidate.{variable_id} is outside the frozen bounds")
+            normalized[variable_id] = raw
+            continue
         try:
             number = float(raw)
         except OverflowError as exc:
