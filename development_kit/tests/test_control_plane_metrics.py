@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import inspect
 import json
+import os
 import subprocess
 import threading
 import time
@@ -24,6 +24,67 @@ from src.tools.profiles import register_profiled, resolve_profile
 from src.utils.control_plane import ControlPlaneMetrics, control_plane_metrics, measured_call
 
 from development_kit.tests.mcp_test_support import decode_tool_result
+
+
+@pytest.mark.parametrize("expected_attempt", [None, 1, 2])
+def test_public_cancel_atomically_binds_attempt(runtime_root, monkeypatch, expected_attempt):
+    manager = jobs_module.JobManager(runtime_root / "attempt-jobs", reconcile_on_start=False)
+    job_id = manager.store.create(
+        {"schema_version": "2", "job_type": "test"},
+        {"schema_version": "2", "status": "running", "attempt": 2},
+    )
+    launches = []
+    monkeypatch.setattr(manager, "_launch_cancel_coordinator", lambda *args: launches.append(args))
+    monkeypatch.setattr(jobs_module, "job_manager", manager)
+    server = MCPServer("attempt-cancel")
+    jobs_module.register_job_tools(server)
+    arguments = {"job_id": job_id}
+    if expected_attempt is not None:
+        arguments["expected_attempt"] = expected_attempt
+    result = decode_tool_result(asyncio.run(server.call_tool("job_cancel", arguments)))
+    assert result["success"] is (expected_attempt != 1)
+    if expected_attempt == 1:
+        assert launches == []
+        assert manager.store.read_state(job_id)["status"] == "running"
+        assert manager.store.read_control(job_id).get("request") != "cancel_requested"
+    else:
+        assert result["target_attempt"] == 2
+        assert len(launches) == 1
+
+
+def test_public_cancel_cannot_override_task_attempt(runtime_root, monkeypatch):
+    calls = []
+    manager = type("Manager", (), {"cancel": lambda *args, **kwargs: calls.append(kwargs)})()
+    monkeypatch.setattr(jobs_module, "job_manager", manager)
+    server = MCPServer("task-attempt-cancel")
+    jobs_module.register_job_tools(server)
+    token = jobs_module._TASK_CANCEL_EXPECTED_ATTEMPT.set(1)
+    try:
+        result = decode_tool_result(
+            asyncio.run(
+                server.call_tool("job_cancel", {"job_id": "job-example", "expected_attempt": 2})
+            )
+        )
+    finally:
+        jobs_module._TASK_CANCEL_EXPECTED_ATTEMPT.reset(token)
+    assert result["success"] is False
+    assert calls == []
+
+
+@pytest.mark.parametrize("expected_attempt", [True, 0, -1, 1.5, "1"])
+def test_public_cancel_refuses_invalid_attempt_before_manager(monkeypatch, expected_attempt):
+    calls = []
+    manager = type("Manager", (), {"cancel": lambda *args, **kwargs: calls.append(kwargs)})()
+    monkeypatch.setattr(jobs_module, "job_manager", manager)
+    server = MCPServer("invalid-attempt-cancel")
+    jobs_module.register_job_tools(server)
+    with pytest.raises(ToolError):
+        asyncio.run(
+            server.call_tool(
+                "job_cancel", {"job_id": "job-example", "expected_attempt": expected_attempt}
+            )
+        )
+    assert calls == []
 
 
 @pytest.fixture(autouse=True)

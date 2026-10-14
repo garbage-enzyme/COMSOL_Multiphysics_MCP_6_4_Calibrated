@@ -236,6 +236,10 @@ COMSOL 6.4 的 Save Copy 只能按路径写文件，无法在写入过程中强�
 端口、租约和外部资源保护结果均已记录。取消任务不得终止用户的 Server、Desktop、
 监听器或模型。
 
+取消指定 attempt 时，将 `expected_attempt` 设置为已观察到的正整数 attempt。
+服务端在作业锁内检查该身份；若已切换为替代 attempt，则拒绝取消。
+省略此参数表示取消当前 attempt。Tasks 请求不能覆盖其绑定的 attempt。
+
 ## COMSOL 的模型占用提示
 
 较长操作期间，Desktop 可能暂时不能编辑，并显示模型占用或忙碌提示。此时应等待智能

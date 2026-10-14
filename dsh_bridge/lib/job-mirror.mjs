@@ -177,7 +177,10 @@ export function createJobMirror({ jobs, core, jobId, jobType, agent, attempt = n
 			const sendCancel = () => {
 				if (settled || cancelSent || !cancelRequested || !attemptVerified) return;
 				cancelSent = true;
-				void core.callTool("job_cancel", { job_id: jobId }, { timeoutMs: 30000 }).catch(() => {});
+				void core.callTool("job_cancel", {
+					job_id: jobId,
+					...(attempt != null ? { expected_attempt: attempt } : {}),
+				}, { timeoutMs: 30000 }).catch(() => {});
 			};
 
 			const poll = async () => {

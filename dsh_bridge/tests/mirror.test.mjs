@@ -439,6 +439,32 @@ test("cancel waits for the stored attempt identity before contacting the server"
 	await jobs.started[0].done;
 });
 
+test("cancel binds the verified attempt when replacement starts after status", { timeout: 3000 }, async () => {
+	const jobs = createFakeJobs();
+	const cancellations = [];
+	let currentAttempt = 1;
+	createJobMirror({ jobs, jobId: "reused-job", attempt: 1, logger: quietLogger(),
+		core: { callTool: async (name, args) => {
+			if (name === "job_status") return { structuredContent: { state: "running", attempt: 1 } };
+			if (name === "job_cancel") {
+				const accepted = args.expected_attempt == null || args.expected_attempt === currentAttempt;
+				cancellations.push({ args, accepted });
+				return { structuredContent: { success: accepted } };
+			}
+			return { text: "" };
+		} },
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+	currentAttempt = 2;
+	jobs.started[0].hooks.cancel("user cancel");
+	await new Promise((resolve) => setImmediate(resolve));
+	jobs.started[0].hooks.cancel("owner disposed");
+	await jobs.started[0].done;
+	assert.equal(cancellations.length, 1);
+	assert.deepEqual(cancellations[0].args, { job_id: "reused-job", expected_attempt: 1 });
+	assert.equal(cancellations[0].accepted, false);
+});
+
 test("controller loss retains an unconfirmed observer outcome", { timeout: 3000 }, async () => {
 	const jobs = createFakeJobs();
 	createJobMirror({ jobs, jobId: "orphan-controller", logger: quietLogger(),

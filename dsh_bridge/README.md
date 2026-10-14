@@ -79,6 +79,7 @@
   在途请求（comsol skill 强制规则）。
 - **作业镜像**：`job_submit` 成功返回 `job_id` 后自动 `ctx.jobs.start({kind:"comsol", ...})`，
   模型获得完成通知。`job_output` 输出 job_tail 进度流。`job_kill` 走 job_cancel。
+  镜像在确认 attempt 后传入 `expected_attempt`，由服务端在作业锁内拒绝替代 attempt。
 - **中途读点**：模型随时调 `job_status` / `job_tail`（原生工具名，跨回合可用），
   判定以 append-only 日志为准，不以 CPU/磁盘活动推断。
 - **两层持久化**：DSH 镜像跨回合存活、跨宿主消亡（进程内注册表）。comsol worker + SQLite

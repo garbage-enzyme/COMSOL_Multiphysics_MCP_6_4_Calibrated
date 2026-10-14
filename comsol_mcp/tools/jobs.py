@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from mcp.server.mcpserver import MCPServer
+from pydantic import Field
 
 from comsol_mcp.contracts import JobSubmissionSpec, validate_job_submission
 from comsol_mcp.durable import domain_sha256_v2
@@ -373,14 +374,29 @@ def register_job_tools(mcp: MCPServer) -> None:
         )
 
     @mcp.tool()
-    def job_cancel(job_id: str) -> dict[str, Any]:
-        """Cancel one owned job; terminal cancellation requires verified cleanup."""
+    def job_cancel(
+        job_id: str, expected_attempt: Annotated[int, Field(strict=True, ge=1)] | None = None
+    ) -> dict[str, Any]:
+        """Request owned cancellation. Use expected_attempt to atomically refuse a replacement.
+
+        Terminal cancellation requires verified cleanup.
+        """
+
+        def cancel_attempt() -> dict[str, Any]:
+            task_attempt = _TASK_CANCEL_EXPECTED_ATTEMPT.get()
+            if expected_attempt is not None:
+                if type(expected_attempt) is not int or expected_attempt < 1:
+                    raise ValueError("expected_attempt must be a positive integer")
+                if task_attempt is not None and expected_attempt != task_attempt:
+                    raise ValueError("expected_attempt differs from the bound task attempt")
+            target = task_attempt if task_attempt is not None else expected_attempt
+            return job_manager.cancel(
+                job_id, **({"expected_attempt": target} if target is not None else {})
+            )
+
         return _job_call(
             "job_cancel",
-            lambda: job_manager.cancel(
-                job_id, **({"expected_attempt": _TASK_CANCEL_EXPECTED_ATTEMPT.get()}
-                           if _TASK_CANCEL_EXPECTED_ATTEMPT.get() is not None else {})
-            ),
+            cancel_attempt,
             job_id=job_id,
         )
 

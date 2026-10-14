@@ -2251,6 +2251,20 @@
     "additionalProperties": false,
     "maxProperties": 256,
     "properties": {
+      "expected_attempt": {
+        "anyOf": [
+          {
+            "maximum": 1e+308,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Attempt"
+      },
       "job_id": {
         "maxLength": 16384,
         "title": "Job Id",

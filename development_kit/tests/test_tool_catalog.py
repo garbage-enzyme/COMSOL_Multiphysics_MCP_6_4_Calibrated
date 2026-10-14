@@ -95,6 +95,18 @@ def test_pre_h3_compatibility_snapshot_is_preserved():
             assert migrated_spec["oneOf"]
             assert observed.pop("$defs")
             observed["properties"]["spec"] = expected["properties"]["spec"]
+        if name == "job_cancel":
+            attempt = observed["properties"]["expected_attempt"]
+            assert attempt == {
+                "anyOf": [
+                    {"maximum": 1e308, "minimum": 1, "type": "integer"},
+                    {"type": "null"},
+                ],
+                "default": None,
+                "title": "Expected Attempt",
+            }
+            assert "expected_attempt" not in observed["required"]
+            allowed_additions.add("expected_attempt")
 
         actual_additions = set(observed["properties"]) - set(expected["properties"])
         assert actual_additions == allowed_additions, name
