@@ -136,6 +136,17 @@ The new durable path requires separate native acceptance before release.
 Fixed loading does not establish adaptive continuation, mesh convergence or physical acceptance.
 Review raw reflectance, transmittance and absorption separately from their algebraic sum.
 
+Standalone MIM recipes check each power component and the requested, evaluated and solved wavelengths.
+The dispersive recipes solve one requested wavelength at a time.
+The continuous-film Drude example uses the linked global material loss convention verified for that formulation.
+Use the partitioned-patch example for patterned films.
+Its fallback mesh copies every exterior periodic source face to its paired destination face.
+The partitioned-patch example declares an opaque impedance termination and checks R+A closure.
+Its reported zero transmission is a boundary assumption, not a port measurement.
+The continuous dielectric example retains its measured transmission.
+All examples publish a completed Save Copy without moving a model file that COMSOL still owns.
+These checks do not establish mesh convergence or research-device acceptance.
+
 For the experimental `electro_chemistry` profile, retain the solver-free
 registry/schema/profile tests and a separate exact-version COMSOL 6.4 probe
 receipt. The probe may create and inspect bounded derived objects, but must not
