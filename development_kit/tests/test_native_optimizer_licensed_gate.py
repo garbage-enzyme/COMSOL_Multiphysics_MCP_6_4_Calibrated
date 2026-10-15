@@ -309,3 +309,42 @@ def test_unconstrained_evidence_does_not_evaluate_model():
         "passed": True,
         "constraints": [],
     }
+
+
+def test_constraint_tolerance_preserves_frozen_policy_and_boundary():
+    support = {
+        "constraints": [
+            {"constraint_id": "cap", "expression": "x", "unit": "1", "lower": None, "upper": 0.0}
+        ]
+    }
+
+    class Model:
+        def __init__(self, value):
+            self.value = value
+
+        def evaluate(self, expression, **kwargs):
+            return np.array([self.value])
+
+    assert not gate._constraint_evidence(Model(6.1176046417513215e-6), support, "d")["passed"]
+    for value, expected in [(6.1176046417513215e-6, True), (1e-4, True), (1.00001e-4, False)]:
+        evidence = gate._constraint_evidence(Model(value), support, "d", {"cap": 1e-4})
+        assert evidence["passed"] is expected
+        assert evidence["constraints"][0]["absolute_tolerance"] == 1e-4
+        assert evidence["constraints"][0]["violation"] == value
+
+
+@pytest.mark.parametrize(
+    "supplied",
+    [
+        {},
+        {"wrong": 0.0},
+        {"cap": -1},
+        {"cap": True},
+        {"cap": float("nan")},
+        {"cap": float("inf")},
+        {"cap": "0.1"},
+    ],
+)
+def test_constraint_tolerances_refuse_incomplete_or_invalid_policy(supplied):
+    with pytest.raises(ValueError, match="constraint tolerances"):
+        gate._constraint_tolerances({"constraints": [{"constraint_id": "cap"}]}, supplied)

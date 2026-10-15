@@ -51,6 +51,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--minimum-element-quality", type=float, required=True)
     parser.add_argument("--deformation-jacobian-expression", required=True)
     parser.add_argument("--minimum-relative-jacobian", type=float, required=True)
+    parser.add_argument("--constraint-absolute-tolerances", type=json.loads)
     return parser
 
 
@@ -109,7 +110,27 @@ def _forward_sweep_dataset(model):
     return matches[0]
 
 
-def _constraint_evidence(model, support: dict, dataset) -> dict:
+def _constraint_tolerances(support: dict, supplied: object) -> dict:
+    names = {item["constraint_id"] for item in support["constraints"]}
+    if supplied is None:
+        return dict.fromkeys(names, 0.0)
+    if not isinstance(supplied, dict) or set(supplied) != names:
+        raise ValueError("constraint tolerances must match every declared constraint")
+    result = {}
+    for name, value in supplied.items():
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise ValueError("constraint tolerances must be finite nonnegative numbers")
+        result[name] = float(value)
+    return result
+
+
+def _constraint_evidence(model, support: dict, dataset, tolerances=None) -> dict:
+    tolerances = _constraint_tolerances(support, tolerances)
     rows = []
     for constraint in support["constraints"]:
         values = _numeric_series(
@@ -125,7 +146,11 @@ def _constraint_evidence(model, support: dict, dataset) -> dict:
             raise ValueError("native constraint evaluation must return one scalar")
         value = values[0]
         lower, upper = constraint["lower"], constraint["upper"]
-        passed = (lower is None or value >= lower) and (upper is None or value <= upper)
+        tolerance = tolerances[constraint["constraint_id"]]
+        violation = max(
+            0.0, 0.0 if lower is None else lower - value, 0.0 if upper is None else value - upper
+        )
+        passed = violation <= tolerance
         rows.append(
             {
                 "constraint_id": constraint["constraint_id"],
@@ -134,6 +159,8 @@ def _constraint_evidence(model, support: dict, dataset) -> dict:
                 "value": value,
                 "lower": lower,
                 "upper": upper,
+                "absolute_tolerance": tolerance,
+                "violation": violation,
                 "passed": passed,
             }
         )
@@ -319,6 +346,9 @@ def run(args: argparse.Namespace) -> dict:
     for path in (spec["base_copy"], spec["configured_copy"]):
         path.unlink(missing_ok=True)
     support = structural._support(spec)
+    constraint_tolerances = _constraint_tolerances(
+        support, getattr(args, "constraint_absolute_tolerances", None)
+    )
     receipt = {
         "schema_name": SCHEMA_NAME,
         "schema_version": SCHEMA_VERSION,
@@ -434,7 +464,9 @@ def run(args: argparse.Namespace) -> dict:
             for name, values in zip(variables, evaluated[1:], strict=True)
         }
         phase = "optimizer_constraints"
-        receipt["optimizer_constraints"] = _constraint_evidence(model, support, optimizer_dataset)
+        receipt["optimizer_constraints"] = _constraint_evidence(
+            model, support, optimizer_dataset, constraint_tolerances
+        )
         if not receipt["optimizer_constraints"]["passed"]:
             raise ValueError("native optimizer result violates a declared constraint")
         global_parameter_readback = {name: str(model.parameters()[name]) for name in variables}
@@ -471,7 +503,7 @@ def run(args: argparse.Namespace) -> dict:
         fresh_final = fresh_series[-1]
         phase = "fresh_forward_constraints"
         receipt["fresh_forward_constraints"] = _constraint_evidence(
-            finalist, support, finalist_dataset
+            finalist, support, finalist_dataset, constraint_tolerances
         )
         if not receipt["fresh_forward_constraints"]["passed"]:
             raise ValueError("fresh forward result violates a declared constraint")
