@@ -73,7 +73,11 @@ def _write_inputs(root):
                         "zz_real": 3.0 + sample_index * 0.1,
                         "zz_imag": -0.2,
                     }
-                    for sample_index, wavelength in enumerate((8e-7, 1e-6, 1.2e-6))
+                    for sample_index, wavelength in enumerate(sorted({
+                        base * (1.0 + offset)
+                        for base in (8e-7, 1e-6, 1.2e-6)
+                        for offset in (-0.01, 0, 0.01)
+                    }))
                 ],
             }
             for index, state in enumerate(("OX", "MR"))

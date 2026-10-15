@@ -82,7 +82,11 @@ def normalize_robust_material_tensor_rows(value: object) -> dict[str, Any]:
 
 
 def bind_robust_material_tensor_rows(
-    value: object, condition_table: object, *, expected_temperature_k: object
+    value: object,
+    condition_table: object,
+    *,
+    expected_temperature_k: object,
+    finalist_wavelength_relative_offsets: tuple[float, ...] = (),
 ) -> dict[str, Any]:
     """Bind exact tensor samples to all active condition wavelengths and state sources."""
     rows = normalize_robust_material_tensor_rows(value)
@@ -107,6 +111,14 @@ def bind_robust_material_tensor_rows(
             raise ValueError("condition table row is invalid for tensor-row binding")
         if condition.get("active"):
             required_wavelengths[condition["material_state_id"]].add(condition["wavelength_m"])
+            if condition.get("objective_role") == "objective":
+                for offset in finalist_wavelength_relative_offsets:
+                    wavelength = _finite(
+                        condition["wavelength_m"] * (1.0 + _finite(offset, "finalist offset")),
+                        "finalist wavelength",
+                        positive=True,
+                    )
+                    required_wavelengths[condition["material_state_id"]].add(wavelength)
     for state_id, state in states_by_id.items():
         tensor_state = tensor_by_id[state_id]
         if tensor_state["source_sha256"] != state.get("optical_property_source_sha256"):

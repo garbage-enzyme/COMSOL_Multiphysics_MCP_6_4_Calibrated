@@ -137,6 +137,8 @@ Fixed loading does not establish adaptive continuation, mesh convergence or phys
 Review raw reflectance, transmittance and absorption separately from their algebraic sum.
 The native optimizer development gate checks passive bounds for each component before testing closure.
 A failed power check retains the raw values and refuses successful acceptance.
+For exact-sample material adapters, manifest expansion checks declared finalist wavelength offsets before licensed startup.
+These samples must also lie within the declared material range.
 
 Standalone MIM recipes check each power component and the requested, evaluated and solved wavelengths.
 The dispersive recipes solve one requested wavelength at a time.

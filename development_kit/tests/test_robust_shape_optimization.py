@@ -300,14 +300,25 @@ def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
     payload = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
     manifest.write_bytes(payload)
     envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+    with pytest.raises(ValueError, match="exactly cover active wavelengths"):
+        expand_robust_shape_manifest(envelope)
+    wavelengths = sorted(
+        {base * (1.0 + offset) for base in (8e-7, 1e-6, 1.2e-6) for offset in (-0.01, 0, 0.01)}
+    )
+    for state in raw["adapter_configuration"]["configuration"]["material_tensor_rows"]["states"]:
+        sample = state["rows"][0]
+        state["rows"] = [{**sample, "wavelength_m": wavelength} for wavelength in wavelengths]
+    payload = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    manifest.write_bytes(payload)
+    envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
     spec = expand_robust_shape_manifest(envelope)
     assert spec["schema_version"] == "1.1.0"
     assert spec["adapter_binding"]["pedot_domain"] == 5
     assert spec["material_tensor_binding"]["active_wavelengths_m"]["OX"] == pytest.approx(
-        [8e-7, 1e-6, 1.2e-6]
+        wavelengths
     )
     assert spec["material_tensor_binding"]["active_wavelengths_m"]["MR"] == pytest.approx(
-        [8e-7, 1e-6, 1.2e-6]
+        wavelengths
     )
     raw["adapter_configuration"]["configuration"]["condition_controls"]["observable_expression"] = (
         "ewfd.Ttotal"

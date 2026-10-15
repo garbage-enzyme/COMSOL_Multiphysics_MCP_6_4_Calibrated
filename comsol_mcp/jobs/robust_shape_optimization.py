@@ -218,6 +218,11 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
             adapter_configuration["configuration"]["material_tensor_rows"],
             conditions,
             expected_temperature_k=adapter_binding["temperature_k"],
+            finalist_wavelength_relative_offsets=(
+                tuple(finalist_validation_policy["off_design"]["wavelength_relative_offsets"])
+                if finalist_validation_policy["off_design"]["mode"] != "not_requested"
+                else ()
+            ),
         )
         condition_controls = adapter_configuration["configuration"]["condition_controls"]
         if condition_controls["observable_expression"] != support["objective"]["expression"]:
