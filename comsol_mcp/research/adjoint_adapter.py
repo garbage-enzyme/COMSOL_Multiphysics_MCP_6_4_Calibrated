@@ -237,8 +237,8 @@ class ClientapiAdjointStudyBackend:
         center_x = position[0] + size[0] / 2.0
         center_y = position[1] + size[1] / 2.0
         displacement = [
-            f"(patch_length_x-{size[0]:.17g}[m])*(x-{center_x:.17g}[m])/{size[0]:.17g}[m]",
-            f"(patch_length_y-{size[1]:.17g}[m])*(y-{center_y:.17g}[m])/{size[1]:.17g}[m]",
+            f"(patch_length_x-{size[0]:.17g}[m])*(x-material.u-{center_x:.17g}[m])/{size[0]:.17g}[m]",
+            f"(patch_length_y-{size[1]:.17g}[m])*(y-material.v-{center_y:.17g}[m])/{size[1]:.17g}[m]",
             "0",
         ]
         physics = component.physics()

@@ -587,3 +587,28 @@ def test_clientapi_prepare_controls_builds_exact_deformed_geometry(monkeypatch):
     assert "patch_length_x" in receipt["deformed_geometry"]["patch_displacement"][0]
     assert "patch_length_y" in receipt["deformed_geometry"]["patch_displacement"][1]
     assert receipt["deformed_geometry"]["patch_displacement"][2] == "0"
+
+    # Solve the implicit boundary equation at both reference endpoints.
+    # COMSOL evaluates x/y in the deformed frame; material.u/v are displacement.
+    for axis, displacement_name, expression in zip(
+        ("x", "y"), ("u", "v"), receipt["deformed_geometry"]["patch_displacement"][:2], strict=True
+    ):
+        for requested in (642e-9, 802.5e-9, 856e-9, 909.5e-9, 1070e-9):
+            numeric = expression.replace("[m]", "").replace(f"patch_length_{axis}", "requested")
+            numeric = numeric.replace(f"material.{displacement_name}", "displacement")
+            endpoints = []
+            for reference in (247e-9, 1103e-9):
+
+                def residual(displacement):
+                    coordinate = reference + displacement
+                    values = {
+                        "requested": requested,
+                        axis: coordinate,
+                        "displacement": displacement,
+                    }
+                    return displacement - eval(numeric, {"__builtins__": {}}, values)  # noqa: S307
+
+                offset = residual(0.0)
+                slope = (residual(1e-7) - offset) / 1e-7
+                endpoints.append(reference - offset / slope)
+            assert endpoints[1] - endpoints[0] == pytest.approx(requested, rel=1e-12, abs=1e-18)
