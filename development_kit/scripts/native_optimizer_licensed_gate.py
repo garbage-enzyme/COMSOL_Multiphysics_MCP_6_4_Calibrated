@@ -8,6 +8,7 @@ import math
 import time
 from pathlib import Path
 
+from comsol_mcp.jobs.native_adjoint_runtime import _optimizer_solve_budget
 from development_kit.scripts import native_adjoint_licensed_gate as structural
 from development_kit.scripts import native_gradient_licensed_gate as gradient
 
@@ -203,13 +204,6 @@ def _requested_optimizer_iterations(args: argparse.Namespace, budget: dict) -> i
     if requested > budget["max_iterations"]:
         raise ValueError("optimizer_iterations exceeds the caller iteration budget")
     return requested
-
-
-def _optimizer_solve_budget(total_solves: object) -> int:
-    """Reserve one solve for baseline and one for the fresh finalist."""
-    if isinstance(total_solves, bool) or not isinstance(total_solves, int) or total_solves < 3:
-        raise ValueError("max_solves must cover baseline, optimization, and finalist solves")
-    return total_solves - 2
 
 
 def _disk_usage(root: Path) -> int:

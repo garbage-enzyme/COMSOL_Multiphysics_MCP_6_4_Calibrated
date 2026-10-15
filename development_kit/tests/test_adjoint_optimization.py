@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -486,6 +487,59 @@ def _minimal_adjoint_runtime_spec(tmp_path):
         "cores": 1,
         "version": "6.4",
     }
+
+
+@pytest.mark.parametrize("total", [True, False, 0, 1, 2, 3.0, None])
+def test_native_runtime_refuses_insufficient_solve_budget_before_client(ascii_tmp_path, total):
+    spec = _minimal_adjoint_runtime_spec(ascii_tmp_path)
+    spec["optimizer"]["budget"]["max_solves"] = total
+    root = ascii_tmp_path / "refused-budget"
+
+    def unexpected_client(**kwargs):
+        pytest.fail("insufficient budget must not construct a native client")
+
+    with pytest.raises(ValueError, match="baseline.*optimization.*finalist"):
+        native_adjoint_runtime.execute_native_adjoint_optimization(
+            spec, root, client_factory=unexpected_client
+        )
+    assert not root.exists()
+
+
+def test_native_runtime_reserves_non_optimizer_solves():
+    assert native_adjoint_runtime._optimizer_solve_budget(3) == 1
+    assert native_adjoint_runtime._optimizer_solve_budget(25) == 23
+
+
+def test_native_runtime_applies_remaining_budget_to_actual_optimizer(ascii_tmp_path, monkeypatch):
+    spec = _minimal_adjoint_runtime_spec(ascii_tmp_path)
+    spec["initial_values"] = [856.0]
+    spec["support"]["objective"]["expression"] = "objective"
+    seen = {}
+    feature = SimpleNamespace(set=lambda key, value: seen.__setitem__(key, value))
+    features = SimpleNamespace(remove=lambda tag: None)
+    study = SimpleNamespace(feature=lambda tag=None: features if tag is None else feature)
+    model = SimpleNamespace(
+        java=SimpleNamespace(
+            save=lambda path, copy: Path(path).write_bytes(b"configured"),
+            study=lambda tag: study,
+        ),
+        evaluate=lambda *args, **kwargs: [0.5],
+    )
+    study.run = lambda: None
+    client = SimpleNamespace(load=lambda path: model, remove=lambda model: None, clear=lambda: None)
+    monkeypatch.setattr(native_adjoint_runtime, "configure_native_adjoint", lambda *a, **kw: None)
+    monkeypatch.setattr(native_adjoint_runtime, "_freeze_wavelength", lambda *a: None)
+    monkeypatch.setattr(native_adjoint_runtime, "_forward_sweep_dataset", lambda model: object())
+
+    def stop_before_optimizer(*args):
+        assert seen["nsolvemax"] == "3"
+        raise RuntimeError("verified optimizer budget")
+
+    monkeypatch.setattr(native_adjoint_runtime, "_configure_solver", stop_before_optimizer)
+    with pytest.raises(RuntimeError, match="verified optimizer budget"):
+        native_adjoint_runtime.execute_native_adjoint_optimization(
+            spec, ascii_tmp_path / "budget-runtime", client_factory=lambda **kwargs: client
+        )
 
 
 def test_native_runtime_passes_manifest_initial_values_to_adapter(ascii_tmp_path, monkeypatch):

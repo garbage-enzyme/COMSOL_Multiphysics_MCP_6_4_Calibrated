@@ -152,6 +152,13 @@ def _mesh_statistics(model: Any) -> dict[str, Any]:
     }
 
 
+def _optimizer_solve_budget(total_solves: object) -> int:
+    """Reserve one solve for baseline and one for the fresh finalist."""
+    if isinstance(total_solves, bool) or not isinstance(total_solves, int) or total_solves < 3:
+        raise ValueError("max_solves must cover baseline, optimization, and finalist solves")
+    return total_solves - 2
+
+
 def execute_native_adjoint_optimization(
     spec: Mapping[str, Any],
     workdir: Path,
@@ -170,6 +177,7 @@ def execute_native_adjoint_optimization(
         raise ValueError("licensed product runtime accepts only validated gcmma")
     if spec["cores"] != optimizer["budget"]["cores"]:
         raise ValueError("submission cores differ from optimizer budget")
+    optimizer_solves = _optimizer_solve_budget(optimizer["budget"]["max_solves"])
     workdir.mkdir(parents=True, exist_ok=True)
     configured = workdir / "configured.mph"
     receipt_path = workdir / "native-optimizer-receipt.json"
@@ -216,7 +224,7 @@ def execute_native_adjoint_optimization(
 
         model = client.load(str(configured))
         study = model.java.study("std2")
-        study.feature("opt_a71").set("nsolvemax", str(optimizer["budget"]["max_solves"]))
+        study.feature("opt_a71").set("nsolvemax", str(optimizer_solves))
         solver = _configure_solver(model, study, optimizer)
         study.run()
         dataset = _dataset_for_solution(model, solver["solution_tag"])
