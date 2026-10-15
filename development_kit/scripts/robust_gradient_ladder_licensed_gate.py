@@ -444,13 +444,14 @@ def _run_child(spec: dict[str, Any], stage: str) -> dict[str, Any]:
     stdout_path = spec["root"] / f"{stage}.stdout.log"
     stderr_path = spec["root"] / f"{stage}.stderr.log"
     command = _stage_command(spec, stage)
-    stage_wall_time = {
-        "native": spec["validation_max_wall_time_seconds"],
-        "finite_difference": spec["validation_max_wall_time_seconds"],
-        "directional": spec["validation_max_wall_time_seconds"],
-        "gcmma": spec["optimizer_max_wall_time_seconds"],
-        "mma": spec["mma_max_wall_time_seconds"],
+    budget_key = {
+        "native": "validation_max_wall_time_seconds",
+        "finite_difference": "validation_max_wall_time_seconds",
+        "directional": "validation_max_wall_time_seconds",
+        "gcmma": "optimizer_max_wall_time_seconds",
+        "mma": "mma_max_wall_time_seconds",
     }[stage]
+    stage_wall_time = spec[budget_key]
     creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
         completed = subprocess.run(  # noqa: S603

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import shutil
 import sys
@@ -137,6 +138,38 @@ def test_parser_has_no_caller_budget_or_resource_defaults():
         "mma_max_wall_time_seconds",
     ):
         assert actions[name] is None
+
+
+@pytest.mark.parametrize("stage", ["native", "finite_difference", "directional", "gcmma", "mma"])
+def test_child_launch_uses_only_selected_stage_budget(tmp_path, gate_root, monkeypatch, stage):
+    monkeypatch.setattr(gate.os, "cpu_count", lambda: 4)
+    spec = gate._spec(_args(gate_root, tmp_path, run_mma=stage == "mma"))
+    root = spec["child_roots"][stage]
+    receipt = root / gate._RECEIPT_NAMES[stage]
+    payload = {"derivatives": [], "optimizer_method": stage, "relative_error": 0.0}
+    command = [
+        sys.executable,
+        "-c",
+        "from pathlib import Path; Path("
+        + repr(str(receipt))
+        + ").write_text("
+        + repr(json.dumps(payload))
+        + ', encoding="utf-8")',
+    ]
+    monkeypatch.setattr(gate, "_stage_command", lambda current, selected: command)
+    original_run = gate.subprocess.run
+    observed = []
+
+    def capture_run(*args, **kwargs):
+        observed.append(kwargs["timeout"])
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(gate.subprocess, "run", capture_run)
+    result = gate._run_child(spec, stage)
+    expected = 14400 if stage == "mma" else 9000 if stage == "gcmma" else 1800
+    assert observed == [expected + 300]
+    assert result["returncode"] == 0
+    assert result["receipt"] == payload
 
 
 def test_mma_requires_its_own_explicit_budget(tmp_path, gate_root, monkeypatch):
