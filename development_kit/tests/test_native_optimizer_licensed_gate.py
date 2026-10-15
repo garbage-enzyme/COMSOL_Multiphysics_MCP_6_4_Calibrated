@@ -1,5 +1,7 @@
 """Solver-free contracts for the bounded native optimizer licensed gate."""
 
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -472,3 +474,115 @@ def test_constraint_tolerance_preserves_frozen_policy_and_boundary():
 def test_constraint_tolerances_refuse_incomplete_or_invalid_policy(supplied):
     with pytest.raises(ValueError, match="constraint tolerances"):
         gate._constraint_tolerances({"constraints": [{"constraint_id": "cap"}]}, supplied)
+
+@pytest.mark.parametrize(
+    "power,expected",
+    [
+        ((0.17265013379749078, 0.8322170340521131, -0.004867167849601107), False),
+        ((-0.01, 0.91, 0.1), False),
+        ((0.1, -0.01, 0.91), False),
+        ((1.01, 0.01, -0.02), False),
+        ((0.2, 0.7, 0.1), True),
+        ((0.2, 0.8000005, -0.0000005), True),
+        ((0.2, 0.7, 0.2), False),
+    ],
+)
+def test_actual_optimizer_gate_rejects_nonpassive_finalist(tmp_path, monkeypatch, power, expected):
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"fixture")
+    calls = []
+
+    class Node:
+        def feature(self, *args):
+            return self
+        def remove(self, *args):
+            pass
+        def set(self, *args):
+            pass
+        def run(self):
+            pass
+
+    node = Node()
+
+    class Model:
+        def __init__(self, index):
+            self.index = index
+            self.java = SimpleNamespace(
+                save=lambda path, *args: Path(path).write_bytes(b"derived"),
+                study=lambda tag: node,
+                param=lambda: node,
+                component=lambda tag: SimpleNamespace(mesh=lambda tag: node),
+            )
+        def parameters(self):
+            return {"x": "1.5[m]"}
+        def evaluate(self, expression, **kwargs):
+            calls.append((self.index, expression, kwargs))
+            if isinstance(expression, list):
+                return [[0.6], [1.5]]
+            values = dict(zip(("ewfd.Rtotal", "ewfd.Ttotal", "ewfd.Atotal"), power))
+            values.update({"wl": 1e-6, "c_const/freq": 1e-6, "reldetjac": 1.0,
+                           "objective": 0.5 if self.index == 2 else 0.6})
+            return [values[expression]]
+
+    class Client:
+        def __init__(self):
+            self.loaded = []
+            self.cleared = False
+        def load(self, path):
+            model = Model(len(self.loaded))
+            self.loaded.append(model)
+            return model
+        def remove(self, model):
+            pass
+        def clear(self):
+            self.cleared = True
+
+    client = Client()
+    monkeypatch.setitem(sys.modules, "mph", SimpleNamespace(Client=lambda **kwargs: client))
+    optimizer = gate.structural.normalize_native_optimizer_configuration({
+        "schema_name": "comsol_mcp.native_optimizer_configuration", "schema_version": "1.0.0",
+        "optimizer_id": "passivity-fixture", "backend": "comsol_native", "method": "gcmma",
+        "move_limit": 0.1, "optimality_tolerance": 0.001, "constraint_tolerance": 0.001,
+        "budget": {"cores": 1, "max_solves": 25, "max_iterations": 20,
+                   "max_wall_time_seconds": 900, "max_disk_bytes": 2147483648,
+                   "max_review_items": 20, "max_commit_fraction": 0.75},
+        "checkpoint_policy": {
+            "every_accepted_iteration": True,
+            "exact_native_resume_required": False,
+            "save_copy": True,
+        },
+        "deterministic_seed": 71004,
+    })
+    support = {"objective": {"expression": "objective", "wavelength_um": 1.0},
+               "variables": [{"variable_id": "x", "unit": "m", "baseline": 1.0}], "constraints": []}
+    spec = {"root": tmp_path, "source": source, "cores": 1,
+            "base_copy": tmp_path / "base.mph", "configured_copy": tmp_path / "configured.mph",
+            "optimizer": optimizer}
+    monkeypatch.setattr(gate.structural, "_spec", lambda args: spec)
+    monkeypatch.setattr(gate.structural, "_support", lambda spec: support)
+    monkeypatch.setattr(gate.structural, "configure_native_adjoint", lambda *args: {})
+    monkeypatch.setattr(gate.gradient, "_configure_selected_sensitivity", lambda *args: None)
+    dataset = SimpleNamespace(tag=lambda: "dset1")
+    monkeypatch.setattr(gate, "_forward_sweep_dataset", lambda model: dataset)
+    monkeypatch.setattr(gate, "_dataset_for_solution", lambda *args: dataset)
+    monkeypatch.setattr(gate, "_mesh_statistics", lambda model: {"element_count": 10,
+        "minimum_quality": 0.5, "mean_quality": 0.6, "quality_measure": "volcircum"})
+    monkeypatch.setattr(gate, "_check_optimizer_deformation", lambda *args: None)
+    monkeypatch.setattr(
+        gate,
+        "_configure_solver_move_limit",
+        lambda *args, **kwargs: {
+            "solution_tag": "sol2",
+            "movelimit": "0.1",
+            "mmamaxiter": "20",
+        },
+    )
+    args = SimpleNamespace(optimizer_iterations=20, move_limit=0.1, max_elements_per_model=100,
+        minimum_element_quality=0.1, deformation_jacobian_expression="reldetjac",
+        minimum_relative_jacobian=0.0, max_disk_bytes=2147483648)
+    receipt = gate.run(args)
+    assert receipt["success"] is expected
+    assert receipt["physical_values"]["ewfd.Atotal"] == power[2]
+    assert client.cleared and receipt["cleanup"]["source_unchanged"]
+    assert [row[1] for row in calls if row[1] in ("ewfd.Rtotal", "ewfd.Ttotal", "ewfd.Atotal")] == [
+        "ewfd.Rtotal", "ewfd.Ttotal", "ewfd.Atotal"]

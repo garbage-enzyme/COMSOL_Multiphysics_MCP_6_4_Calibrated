@@ -135,6 +135,8 @@ The runtime reserves every finalist solve and checks each solved dimension and m
 The new durable path requires separate native acceptance before release.
 Fixed loading does not establish adaptive continuation, mesh convergence or physical acceptance.
 Review raw reflectance, transmittance and absorption separately from their algebraic sum.
+The native optimizer development gate checks passive bounds for each component before testing closure.
+A failed power check retains the raw values and refuses successful acceptance.
 
 Standalone MIM recipes check each power component and the requested, evaluated and solved wavelengths.
 The dispersive recipes solve one requested wavelength at a time.

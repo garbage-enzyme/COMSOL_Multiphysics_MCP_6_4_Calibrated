@@ -711,6 +711,11 @@ def run(args: argparse.Namespace) -> dict:
                 finalist.evaluate(expression, dataset=finalist_dataset, outer=1)
             )[-1]
         receipt.pop("physical_expression_in_progress", None)
+        if any(
+            physical[expression] < -1e-6 or physical[expression] > 1.0 + 1e-6
+            for expression in ("ewfd.Rtotal", "ewfd.Ttotal", "ewfd.Atotal")
+        ):
+            raise ValueError("remeshed finalist R/T/A lies outside the passive power range")
         closure = physical["ewfd.Rtotal"] + physical["ewfd.Ttotal"] + physical["ewfd.Atotal"]
         if not math.isclose(closure, 1.0, rel_tol=0.0, abs_tol=1e-6):
             raise ValueError("remeshed finalist R/T/A closure is outside tolerance")
