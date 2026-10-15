@@ -171,6 +171,49 @@ def test_optimizer_error_classifies_only_proven_deformation_signatures():
     assert unrelated == ("native_optimizer_failed", None)
 
 
+@pytest.mark.parametrize("minimum", [-21.20224015044302, 0.0, 0.1])
+def test_native_optimizer_geometry_guard_retains_invalid_evidence(minimum):
+    calls = []
+    dataset = type("Dataset", (), {"tag": lambda self: "native-result"})()
+
+    class Model:
+        def evaluate(self, expression, **kwargs):
+            calls.append((expression, kwargs))
+            return np.array([minimum, 1.7])
+
+    policy = {"jacobian_expression": "reldetjac", "minimum_relative_jacobian": 0.1}
+    receipt = {}
+    with pytest.raises(gate.DeformationFeasibilityError, match="native optimizer") as error:
+        gate._check_optimizer_deformation(Model(), dataset, policy, receipt)
+    assert calls == [("reldetjac", {"dataset": dataset, "outer": 1})]
+    assert receipt["optimizer_deformation_feasibility"] == {
+        "sample_count": 2,
+        "minimum_relative_jacobian": minimum,
+        "maximum_relative_jacobian": 1.7,
+        "threshold": 0.1,
+        "passed": False,
+        "dataset_tag": "native-result",
+        "jacobian_expression": "reldetjac",
+    }
+    assert gate._optimizer_error_code(error.value, "optimizer_deformation_feasibility") == (
+        "deformation_feasibility_failed",
+        "optimizer_jacobian_guard",
+    )
+
+
+def test_native_optimizer_geometry_guard_accepts_above_caller_threshold():
+    dataset = type("Dataset", (), {"tag": lambda self: "native-result"})()
+    model = type("Model", (), {"evaluate": lambda self, *args, **kwargs: [0.2, 1.7]})()
+    receipt = {}
+    gate._check_optimizer_deformation(
+        model,
+        dataset,
+        {"jacobian_expression": "reldetjac", "minimum_relative_jacobian": 0.1},
+        receipt,
+    )
+    assert receipt["optimizer_deformation_feasibility"]["passed"] is True
+
+
 def test_gate_parser_has_no_host_resource_defaults():
     parser = gate._parser()
     actions = {action.dest: action.default for action in parser._actions}

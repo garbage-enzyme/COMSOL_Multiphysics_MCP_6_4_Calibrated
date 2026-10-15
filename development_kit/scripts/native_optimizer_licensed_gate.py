@@ -21,6 +21,8 @@ class DeformationFeasibilityError(RuntimeError):
 
 
 def _optimizer_error_code(exc: Exception, phase: str) -> tuple[str, str | None]:
+    if phase == "optimizer_deformation_feasibility":
+        return "deformation_feasibility_failed", "optimizer_jacobian_guard"
     if isinstance(exc, DeformationFeasibilityError) or phase == "deformation_feasibility":
         return "deformation_feasibility_failed", "fresh_forward_jacobian_guard"
     signature = f"{type(exc).__module__}.{type(exc).__name__}: {exc}".casefold()
@@ -297,6 +299,22 @@ def _assert_meter_variables(support: dict, names: list[str]) -> None:
         raise ValueError(f"optimizer finalist parameters do not declare meter units: {offending}")
 
 
+def _check_optimizer_deformation(model, dataset, policy: dict, receipt: dict) -> None:
+    """Retain native geometry evidence before removing the optimizer model."""
+    evidence = _deformation_feasibility_evidence(
+        model.evaluate(policy["jacobian_expression"], dataset=dataset, outer=1), policy
+    )
+    receipt["optimizer_deformation_feasibility"] = {
+        **evidence,
+        "dataset_tag": str(dataset.tag()),
+        "jacobian_expression": policy["jacobian_expression"],
+    }
+    if evidence["passed"] is not True:
+        raise DeformationFeasibilityError(
+            "native optimizer deformation feasibility is below the caller threshold"
+        )
+
+
 def _configure_solver_move_limit(
     model, study, move_limit: float, optimizer_iterations: int, *, method: str
 ) -> dict:
@@ -463,6 +481,8 @@ def run(args: argparse.Namespace) -> dict:
             name: _numeric_series(values)[-1]
             for name, values in zip(variables, evaluated[1:], strict=True)
         }
+        phase = "optimizer_deformation_feasibility"
+        _check_optimizer_deformation(model, optimizer_dataset, deformation_policy, receipt)
         phase = "optimizer_constraints"
         receipt["optimizer_constraints"] = _constraint_evidence(
             model, support, optimizer_dataset, constraint_tolerances
