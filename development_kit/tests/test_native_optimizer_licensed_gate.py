@@ -1,5 +1,7 @@
 """Solver-free contracts for the bounded native optimizer licensed gate."""
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -113,6 +115,85 @@ def test_total_solve_budget_reserves_baseline_and_fresh_finalist():
     assert gate._optimizer_solve_budget(150) == 148
     with pytest.raises(ValueError, match="baseline"):
         gate._optimizer_solve_budget(2)
+
+
+def test_continuation_reserves_every_declared_finalist_solve():
+    assert gate._optimizer_solve_budget(25, finalist_solves=4) == 20
+    with pytest.raises(ValueError, match="baseline"):
+        gate._optimizer_solve_budget(5, finalist_solves=4)
+
+
+@pytest.mark.parametrize(
+    "value", [[], [0, 1], [0.5, 0.5, 1], [1, 0.5], [0.9], [True], [float("nan"), 1], [1] * 33]
+)
+def test_continuation_rejects_invalid_fixed_paths(value):
+    with pytest.raises(ValueError, match="continuation"):
+        gate._finalist_fractions(value)
+
+
+def test_continuation_preserves_explicit_path_and_direct_default():
+    assert gate._finalist_fractions(None) is None
+    assert gate._finalist_fractions([0.25, 0.5, 0.75, 1]) == [0.25, 0.5, 0.75, 1.0]
+
+
+@pytest.mark.parametrize("width", [2.0, 2.2])
+def test_patch_dimension_probe_checks_solved_shape_and_removes_nodes(monkeypatch, width):
+    active = {}
+    removed = []
+
+    def create(tag, kind):
+        node = SimpleNamespace(
+            selection=lambda: SimpleNamespace(set=lambda domains: None),
+            set=lambda *args: None,
+            getReal=lambda: [[width, 3.0]] if kind == "MaxVolume" else [[0.0, 0.0]],
+        )
+        active[tag] = node
+        return node
+
+    numerical = SimpleNamespace(
+        tags=lambda: list(active),
+        create=create,
+        remove=lambda tag: (removed.append(tag), active.pop(tag)),
+    )
+    model = SimpleNamespace(
+        java=SimpleNamespace(result=lambda: SimpleNamespace(numerical=lambda: numerical))
+    )
+    dataset = SimpleNamespace(tag=lambda: "solved_dataset")
+    monkeypatch.setattr(gate, "_set_vector", lambda *args: None)
+    controls = {"patch_length_x": 2.0, "patch_length_y": 3.0}
+    if width == 2.0:
+        assert gate._patch_dimensions(model, dataset, 9, controls)["measured_si"] == controls
+    else:
+        with pytest.raises(ValueError, match="dimensions differ"):
+            gate._patch_dimensions(model, dataset, 9, controls)
+    assert len(removed) == 2
+    assert active == {}
+
+
+@pytest.mark.parametrize("drift", [False, True])
+def test_continuation_runs_solution_only_after_initialization_readback(drift):
+    values = {}
+    calls = []
+    node = SimpleNamespace(
+        set=lambda key, value: values.__setitem__(key, value),
+        getString=lambda key: "wrong" if drift else values[key],
+    )
+    solution = SimpleNamespace(feature=lambda tag: node, runAll=lambda: calls.append("solve"))
+    model = SimpleNamespace(java=SimpleNamespace(sol=lambda tag: solution))
+    study = SimpleNamespace(
+        createAutoSequences=lambda kind: calls.append(kind),
+        getSolverSequences=lambda kind: ["actual_solution"],
+        run=lambda: pytest.fail("study.run would regenerate initialization"),
+    )
+    if drift:
+        with pytest.raises(ValueError, match="readback drifted"):
+            gate._run_continuation_solution(model, study)
+        assert calls == ["all"]
+    else:
+        tag, initialization = gate._run_continuation_solution(model, study)
+        assert tag == "actual_solution"
+        assert initialization["initsol"] == tag
+        assert calls == ["all", "solve"]
 
 
 def test_runtime_budget_checks_wall_clock_and_disk_usage(tmp_path, monkeypatch):

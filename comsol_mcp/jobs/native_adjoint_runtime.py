@@ -167,17 +167,25 @@ def _validate_wavelengths(
         evaluated_wavelength_m, requested_wavelength_m, rel_tol=1e-12, abs_tol=1e-15
     ):
         raise ValueError("remeshed finalist evaluated wavelength changed")
-    if not math.isclose(
-        solved_wavelength_m, requested_wavelength_m, rel_tol=1e-12, abs_tol=1e-15
-    ):
+    if not math.isclose(solved_wavelength_m, requested_wavelength_m, rel_tol=1e-12, abs_tol=1e-15):
         raise ValueError("remeshed finalist solved wavelength changed")
 
 
-def _optimizer_solve_budget(total_solves: object) -> int:
-    """Reserve one solve for baseline and one for the fresh finalist."""
-    if isinstance(total_solves, bool) or not isinstance(total_solves, int) or total_solves < 3:
+def _optimizer_solve_budget(total_solves: object, *, finalist_solves: int = 1) -> int:
+    """Reserve the baseline and every explicitly declared finalist solve."""
+    if (
+        isinstance(finalist_solves, bool)
+        or not isinstance(finalist_solves, int)
+        or not 1 <= finalist_solves <= 32
+    ):
+        raise ValueError("finalist_solves must be an integer in [1, 32]")
+    if (
+        isinstance(total_solves, bool)
+        or not isinstance(total_solves, int)
+        or total_solves < finalist_solves + 2
+    ):
         raise ValueError("max_solves must cover baseline, optimization, and finalist solves")
-    return total_solves - 2
+    return total_solves - 1 - finalist_solves
 
 
 def execute_native_adjoint_optimization(

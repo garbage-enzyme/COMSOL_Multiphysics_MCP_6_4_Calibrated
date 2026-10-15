@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 from comsol_mcp.jobs.native_adjoint_runtime import _optimizer_solve_budget, _validate_wavelengths
+from comsol_mcp.tools.derived_geometry import _set_vector
 from development_kit.scripts import native_adjoint_licensed_gate as structural
 from development_kit.scripts import native_gradient_licensed_gate as gradient
 
@@ -55,6 +56,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--deformation-jacobian-expression", required=True)
     parser.add_argument("--minimum-relative-jacobian", type=float, required=True)
     parser.add_argument("--constraint-absolute-tolerances", type=json.loads)
+    parser.add_argument("--finalist-continuation-fractions", type=json.loads)
+    parser.add_argument("--material-jacobian-expression")
+    parser.add_argument("--minimum-material-jacobian", type=float)
     return parser
 
 
@@ -206,6 +210,77 @@ def _requested_optimizer_iterations(args: argparse.Namespace, budget: dict) -> i
     return requested
 
 
+def _finalist_fractions(value: object) -> list[float] | None:
+    """Validate explicit fixed loading without adding an automatic fallback."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or not 1 <= len(value) <= 32:
+        raise ValueError("finalist continuation requires between 1 and 32 fractions")
+    fractions = []
+    previous = 0.0
+    for item in value:
+        if (
+            isinstance(item, bool)
+            or not isinstance(item, (int, float))
+            or not math.isfinite(item)
+            or not previous < item <= 1.0
+        ):
+            raise ValueError("finalist continuation fractions must strictly increase in (0, 1]")
+        previous = float(item)
+        fractions.append(previous)
+    if fractions[-1] != 1.0:
+        raise ValueError("finalist continuation must end at exactly 1.0")
+    return fractions
+
+
+def _run_continuation_solution(model, study) -> tuple[str, dict]:
+    """Run the generated solution without regenerating its initialization."""
+    study.createAutoSequences("all")
+    tags = [str(tag) for tag in study.getSolverSequences("all")]
+    if len(tags) != 1:
+        raise ValueError("finalist continuation solver identity is ambiguous")
+    solution = model.java.sol(tags[0])
+    variables_node = solution.feature("v1")
+    expected = {"initmethod": "sol", "initsol": tags[0], "solnum": "last"}
+    for key, value in expected.items():
+        variables_node.set(key, value)
+    initialization = {key: str(variables_node.getString(key)) for key in expected}
+    if initialization != expected:
+        raise ValueError("finalist continuation initialization readback drifted")
+    solution.runAll()
+    return tags[0], initialization
+
+
+def _patch_dimensions(model, dataset, domain: int, controls: dict) -> dict:
+    """Measure solved patch dimensions independently of parameter readback."""
+    extrema = {}
+    numerical = model.java.result().numerical()
+    for kind in ("MaxVolume", "MinVolume"):
+        tag = "finalist_" + kind
+        if tag in [str(item) for item in numerical.tags()]:
+            raise ValueError("finalist dimension probe tag already exists")
+        node = numerical.create(tag, kind)
+        try:
+            node.selection().set([domain])
+            node.set("data", str(dataset.tag()))
+            _set_vector(node, "expr", ["x", "y"])
+            extrema[kind] = _numeric_series([list(row) for row in node.getReal()])
+        finally:
+            numerical.remove(tag)
+    if any(len(value) != 2 for value in extrema.values()):
+        raise ValueError("finalist dimension probe is not a single solved state")
+    measured = {
+        name: extrema["MaxVolume"][index] - extrema["MinVolume"][index]
+        for index, name in enumerate(("patch_length_x", "patch_length_y"))
+    }
+    if any(
+        not math.isclose(measured[name], controls[name], rel_tol=1e-10, abs_tol=1e-18)
+        for name in measured
+    ):
+        raise ValueError("finalist solved patch dimensions differ from requested controls")
+    return {"domain": domain, "measured_si": measured, "extrema_si": extrema}
+
+
 def _disk_usage(root: Path) -> int:
     return sum(
         path.stat().st_size for path in root.rglob("*") if path.is_file() and not path.is_symlink()
@@ -346,7 +421,30 @@ def _configure_solver_move_limit(
 
 def run(args: argparse.Namespace) -> dict:
     spec = structural._spec(args)
-    optimization_solve_budget = _optimizer_solve_budget(spec["optimizer"]["budget"]["max_solves"])
+    fractions = _finalist_fractions(getattr(args, "finalist_continuation_fractions", None))
+    material_policy = None
+    if fractions is not None:
+        expression = getattr(args, "material_jacobian_expression", None)
+        threshold = getattr(args, "minimum_material_jacobian", None)
+        if (
+            not isinstance(expression, str)
+            or not expression.strip()
+            or len(expression) > 256
+            or isinstance(threshold, bool)
+            or not isinstance(threshold, (int, float))
+            or not math.isfinite(threshold)
+        ):
+            raise ValueError(
+                "continuation requires an explicit material Jacobian expression and threshold"
+            )
+        material_policy = {
+            "jacobian_expression": expression,
+            "minimum_relative_jacobian": threshold,
+        }
+    optimization_solve_budget = _optimizer_solve_budget(
+        spec["optimizer"]["budget"]["max_solves"],
+        finalist_solves=len(fractions) if fractions is not None else 1,
+    )
     requested_iterations = _requested_optimizer_iterations(args, spec["optimizer"]["budget"])
     requested_move_limit = _requested_move_limit(args)
     deformation_policy = _deformation_feasibility_policy(args)
@@ -393,7 +491,7 @@ def run(args: argparse.Namespace) -> dict:
         source_model.java.save(str(spec["base_copy"]), True)
         client.remove(source_model)
         model = client.load(str(spec["base_copy"]))
-        structural.configure_native_adjoint(
+        adapter_receipt = structural.configure_native_adjoint(
             structural.ClientapiAdjointStudyBackend(model), support, structural._optimizer(spec)
         )
         gradient._configure_selected_sensitivity(
@@ -489,8 +587,9 @@ def run(args: argparse.Namespace) -> dict:
         phase = "final_fresh_forward"
         finalist = client.load(str(spec["configured_copy"]))
         _assert_meter_variables(support, list(final_variables))
-        for name, value in final_variables.items():
-            finalist.java.param().set(name, f"{value:.17g}[m]")
+        if fractions is None:
+            for name, value in final_variables.items():
+                finalist.java.param().set(name, f"{value:.17g}[m]")
         finalist_study = finalist.java.study("std1")
         finalist_study.feature().remove("sens_a71")
         mesh = finalist.java.component("comp1").mesh("mesh1")
@@ -502,19 +601,78 @@ def run(args: argparse.Namespace) -> dict:
             max_elements=args.max_elements_per_model,
             minimum_quality=args.minimum_element_quality,
         )
-        finalist_study.run()
+        if fractions is None:
+            finalist_study.run()
+            finalist_dataset = _forward_sweep_dataset(finalist)
+        else:
+            initial = {item["variable_id"]: item["baseline"] for item in support["variables"]}
+            steps = []
+            receipt["finalist_continuation"] = {"fractions": fractions, "steps": steps}
+            receipt["finalist_continuation"]["material_policy"] = material_policy
+            for fraction in fractions:
+                _check_runtime_budget(
+                    started,
+                    max_wall_time_seconds=spec["optimizer"]["budget"]["max_wall_time_seconds"],
+                    root=spec["root"],
+                    max_disk_bytes=args.max_disk_bytes,
+                )
+                controls = {
+                    name: value
+                    if fraction == 1.0
+                    else initial[name] + fraction * (value - initial[name])
+                    for name, value in final_variables.items()
+                }
+                for name, value in controls.items():
+                    finalist.java.param().set(name, f"{value:.17g}[m]")
+                solution_tag, initialization = _run_continuation_solution(finalist, finalist_study)
+                finalist_dataset = _dataset_for_solution(finalist, solution_tag)
+                evidence = _deformation_feasibility_evidence(
+                    finalist.evaluate(
+                        deformation_policy["jacobian_expression"], dataset=finalist_dataset, outer=1
+                    ),
+                    deformation_policy,
+                )
+                material_evidence = _deformation_feasibility_evidence(
+                    finalist.evaluate(
+                        material_policy["jacobian_expression"],
+                        dataset=finalist_dataset,
+                        outer=1,
+                        inner="last",
+                    ),
+                    material_policy,
+                )
+                steps.append(
+                    {
+                        "fraction": fraction,
+                        "controls_si": controls,
+                        "geometry": evidence,
+                        "material_mapping": material_evidence,
+                        "initialization": initialization,
+                        "solution_tag": solution_tag,
+                        "dataset_tag": str(finalist_dataset.tag()),
+                        "dimensions": _patch_dimensions(
+                            finalist,
+                            finalist_dataset,
+                            adapter_receipt["controls"]["deformed_geometry"]["patch_domain"],
+                            controls,
+                        ),
+                    }
+                )
+                if not evidence["passed"] or not material_evidence["passed"]:
+                    raise DeformationFeasibilityError("finalist continuation geometry is invalid")
         _check_runtime_budget(
             started,
             max_wall_time_seconds=spec["optimizer"]["budget"]["max_wall_time_seconds"],
             root=spec["root"],
             max_disk_bytes=args.max_disk_bytes,
         )
-        finalist_dataset = _forward_sweep_dataset(finalist)
         finalist_dataset_tag = str(finalist_dataset.tag())
         fresh_series = _numeric_series(
             finalist.evaluate(receipt["objective_expression"], dataset=finalist_dataset, outer=1)
         )
         fresh_final = fresh_series[-1]
+        receipt["fresh_forward_objective"] = fresh_final
+        receipt["final_objective"] = final
         phase = "fresh_forward_constraints"
         receipt["fresh_forward_constraints"] = _constraint_evidence(
             finalist, support, finalist_dataset, constraint_tolerances
@@ -543,11 +701,16 @@ def run(args: argparse.Namespace) -> dict:
             "wl",
             "c_const/freq",
         ]
-        physical_values = finalist.evaluate(physical_expressions, dataset=finalist_dataset, outer=1)
-        physical = {
-            name: _numeric_series(value)[-1]
-            for name, value in zip(physical_expressions, physical_values, strict=True)
-        }
+        if fractions is not None:
+            finalist.java.save(str(spec["root"] / "finalist.mph"), True)
+        physical = {}
+        receipt["physical_values"] = physical
+        for expression in physical_expressions:
+            receipt["physical_expression_in_progress"] = expression
+            physical[expression] = _numeric_series(
+                finalist.evaluate(expression, dataset=finalist_dataset, outer=1)
+            )[-1]
+        receipt.pop("physical_expression_in_progress", None)
         closure = physical["ewfd.Rtotal"] + physical["ewfd.Ttotal"] + physical["ewfd.Atotal"]
         if not math.isclose(closure, 1.0, rel_tol=0.0, abs_tol=1e-6):
             raise ValueError("remeshed finalist R/T/A closure is outside tolerance")
@@ -579,7 +742,9 @@ def run(args: argparse.Namespace) -> dict:
                     "requested_wavelength_m": requested_wavelength,
                     "evaluated_wavelength_m": physical["wl"],
                     "solved_wavelength_m": physical["c_const/freq"],
-                    "branch_disposition": "single_fixed_state_no_continuation_claim",
+                    "branch_disposition": "explicit_fixed_loading_path"
+                    if fractions is not None
+                    else "single_fixed_state_no_continuation_claim",
                     "robustness_disposition": "multi_state_deferred_to_alpha7_2",
                 },
                 "global_parameter_readback": global_parameter_readback,

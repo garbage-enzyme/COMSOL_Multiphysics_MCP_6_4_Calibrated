@@ -91,6 +91,18 @@ Before a release:
 Hosted CI never runs licensed COMSOL integration tests. They remain explicit,
 serial, and unavailable by default.
 
+The native optimizer development gate accepts an explicit fixed loading path for its fresh finalist.
+Use `--finalist-continuation-fractions` with a JSON list of at most 32 strictly increasing fractions.
+The final fraction must equal `1.0`.
+Also supply `--material-jacobian-expression` and `--minimum-material-jacobian`.
+The gate reserves one solve for every fraction, plus the baseline, before allocating optimizer solves.
+Each step checks initialization readback, solved patch dimensions, geometry mapping and material mapping.
+The gate stops on failure without automatic path refinement or a direct-solve fallback.
+Without this option, the gate retains its direct finalist solve.
+This development option does not extend the durable optimizer submission contract.
+Fixed loading does not establish adaptive continuation, mesh convergence or physical acceptance.
+Review raw reflectance, transmittance and absorption separately from their algebraic sum.
+
 For the experimental `electro_chemistry` profile, retain the solver-free
 registry/schema/profile tests and a separate exact-version COMSOL 6.4 probe
 receipt. The probe may create and inspect bounded derived objects, but must not
