@@ -109,6 +109,37 @@ def _forward_sweep_dataset(model):
     return matches[0]
 
 
+def _constraint_evidence(model, support: dict, dataset) -> dict:
+    rows = []
+    for constraint in support["constraints"]:
+        values = _numeric_series(
+            model.evaluate(
+                constraint["expression"],
+                unit=constraint["unit"],
+                dataset=dataset,
+                inner="last",
+                outer=1,
+            )
+        )
+        if len(values) != 1:
+            raise ValueError("native constraint evaluation must return one scalar")
+        value = values[0]
+        lower, upper = constraint["lower"], constraint["upper"]
+        passed = (lower is None or value >= lower) and (upper is None or value <= upper)
+        rows.append(
+            {
+                "constraint_id": constraint["constraint_id"],
+                "expression": constraint["expression"],
+                "unit": constraint["unit"],
+                "value": value,
+                "lower": lower,
+                "upper": upper,
+                "passed": passed,
+            }
+        )
+    return {"passed": all(row["passed"] for row in rows), "constraints": rows}
+
+
 def _mesh_statistics(model) -> dict:
     statistics = model.java.component("comp1").mesh("mesh1").stat()
     return {
@@ -154,9 +185,7 @@ def _optimizer_solve_budget(total_solves: object) -> int:
 
 def _disk_usage(root: Path) -> int:
     return sum(
-        path.stat().st_size
-        for path in root.rglob("*")
-        if path.is_file() and not path.is_symlink()
+        path.stat().st_size for path in root.rglob("*") if path.is_file() and not path.is_symlink()
     )
 
 
@@ -404,6 +433,10 @@ def run(args: argparse.Namespace) -> dict:
             name: _numeric_series(values)[-1]
             for name, values in zip(variables, evaluated[1:], strict=True)
         }
+        phase = "optimizer_constraints"
+        receipt["optimizer_constraints"] = _constraint_evidence(model, support, optimizer_dataset)
+        if not receipt["optimizer_constraints"]["passed"]:
+            raise ValueError("native optimizer result violates a declared constraint")
         global_parameter_readback = {name: str(model.parameters()[name]) for name in variables}
         optimizer_dataset_tag = str(optimizer_dataset.tag())
         client.remove(model)
@@ -436,6 +469,12 @@ def run(args: argparse.Namespace) -> dict:
             finalist.evaluate(receipt["objective_expression"], dataset=finalist_dataset, outer=1)
         )
         fresh_final = fresh_series[-1]
+        phase = "fresh_forward_constraints"
+        receipt["fresh_forward_constraints"] = _constraint_evidence(
+            finalist, support, finalist_dataset
+        )
+        if not receipt["fresh_forward_constraints"]["passed"]:
+            raise ValueError("fresh forward result violates a declared constraint")
         phase = "deformation_feasibility"
         deformation_evidence = _deformation_feasibility_evidence(
             finalist.evaluate(

@@ -250,3 +250,62 @@ def test_every_model_evaluation_pins_one_sweep_point():
             offenders.append(node.lineno)
 
     assert offenders == []
+
+
+@pytest.mark.parametrize(
+    ("value", "lower", "upper", "passed"),
+    [
+        (8.730985132293282e-7, None, 8.6028e-7, False),
+        (8.6028e-7, None, 8.6028e-7, True),
+        (0.9, 1.0, None, False),
+        (1.0, 1.0, None, True),
+        (1.5, 1.0, 2.0, True),
+    ],
+)
+def test_native_constraints_check_declared_bounds_and_units(value, lower, upper, passed):
+    calls = []
+
+    class Model:
+        def evaluate(self, expression, **kwargs):
+            calls.append((expression, kwargs))
+            return np.array([value])
+
+    support = {
+        "constraints": [
+            {
+                "constraint_id": "active_cap",
+                "expression": "patch_length_x",
+                "unit": "m",
+                "lower": lower,
+                "upper": upper,
+            }
+        ]
+    }
+    evidence = gate._constraint_evidence(Model(), support, "chosen-dataset")
+    assert evidence["passed"] is passed
+    assert evidence["constraints"][0]["value"] == value
+    assert calls == [
+        ("patch_length_x", {"unit": "m", "dataset": "chosen-dataset", "inner": "last", "outer": 1})
+    ]
+
+
+@pytest.mark.parametrize("values", [[float("nan")], [float("inf")], [1 + 1j], [1.0, 2.0], []])
+def test_native_constraints_refuse_invalid_or_ambiguous_values(values):
+    class Model:
+        def evaluate(self, expression, **kwargs):
+            return np.array(values)
+
+    support = {
+        "constraints": [
+            {"constraint_id": "cap", "expression": "x", "unit": "m", "lower": None, "upper": 2.0}
+        ]
+    }
+    with pytest.raises(ValueError):
+        gate._constraint_evidence(Model(), support, "chosen-dataset")
+
+
+def test_unconstrained_evidence_does_not_evaluate_model():
+    assert gate._constraint_evidence(object(), {"constraints": []}, "unused") == {
+        "passed": True,
+        "constraints": [],
+    }
