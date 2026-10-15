@@ -10,14 +10,81 @@ from typing import Any
 from comsol_mcp.durable import validate_finite_json
 from comsol_mcp.jobs.resource_admission import normalize_resource_policy
 from comsol_mcp.research.adjoint_adapter import _native_objective_type
-from comsol_mcp.research.derivative_support import normalize_derivative_support
+from comsol_mcp.research.derivative_support import (
+    _finite,
+    _object,
+    _text,
+    normalize_derivative_support,
+)
 from comsol_mcp.research.gradient_contracts import normalize_native_optimizer_configuration
 
 ADJOINT_MANIFEST_SCHEMA_NAME = "comsol_mcp.adjoint_optimization_manifest"
-ADJOINT_MANIFEST_SCHEMA_VERSION = "1.0.0"
+ADJOINT_MANIFEST_SCHEMA_VERSION = "1.1.0"
+ADJOINT_MANIFEST_READABLE_VERSIONS = ("1.0.0", "1.1.0")
 ADJOINT_SUBMISSION_SCHEMA_NAME = "comsol_mcp.adjoint_optimization_submission"
 ADJOINT_SUBMISSION_SCHEMA_VERSION = "1.0.0"
 MAX_MANIFEST_BYTES = 512 * 1024
+
+
+def normalize_native_execution_policy(value: object) -> dict[str, Any]:
+    """Validate explicit solver settings and fixed finalist loading."""
+    raw = _object(
+        value,
+        {
+            "smoothing_type",
+            "geometry_shape_order",
+            "gradient_method",
+            "finalist_fractions",
+            "geometry_jacobian_expression",
+            "minimum_geometry_jacobian",
+            "material_jacobian_expression",
+            "minimum_material_jacobian",
+            "minimum_element_quality",
+            "passivity_absolute_tolerance",
+            "closure_absolute_tolerance",
+        },
+        "native execution policy",
+    )
+    for name, allowed in {
+        "smoothing_type": {"laplace", "winslow", "hyperelastic"},
+        "geometry_shape_order": {"1", "2"},
+        "gradient_method": {"adjoint"},
+    }.items():
+        if not isinstance(raw[name], str) or raw[name] not in allowed:
+            raise ValueError(f"native execution policy {name} is unsupported")
+    fractions = raw["finalist_fractions"]
+    if not isinstance(fractions, list) or not 1 <= len(fractions) <= 32:
+        raise ValueError("finalist_fractions requires between 1 and 32 points")
+    normalized = []
+    previous = 0.0
+    for item in fractions:
+        number = _finite(item, "finalist fraction")
+        if not previous < number <= 1.0:
+            raise ValueError("finalist fractions must strictly increase in (0, 1]")
+        normalized.append(number)
+        previous = number
+    if previous != 1.0:
+        raise ValueError("finalist fractions must end at exactly 1.0")
+    result = dict(raw)
+    result["finalist_fractions"] = normalized
+    for name in ("geometry_jacobian_expression", "material_jacobian_expression"):
+        result[name] = _text(raw[name], name, maximum=256)
+    for name in (
+        "minimum_geometry_jacobian",
+        "minimum_material_jacobian",
+        "passivity_absolute_tolerance",
+        "closure_absolute_tolerance",
+    ):
+        number = _finite(raw[name], name)
+        if number < 0 or (name.endswith("tolerance") and number > 1):
+            raise ValueError(f"{name} is outside the allowed range")
+        result[name] = number
+    quality = _finite(raw["minimum_element_quality"], "minimum_element_quality")
+    if not 0 < quality <= 1:
+        raise ValueError("minimum_element_quality must be in (0, 1]")
+    result["minimum_element_quality"] = quality
+    validate_finite_json(result)
+    return result
 
 
 def _digest(value: object, name: str) -> str:
@@ -114,11 +181,15 @@ def expand_adjoint_optimization_manifest(submission: object) -> dict[str, Any]:
         "initial_values",
         "synthetic_mode",
     }
+    manifest_version = raw.get("schema_version")
+    if manifest_version == ADJOINT_MANIFEST_SCHEMA_VERSION:
+        fields.add("execution_policy")
     if set(raw) != fields:
         raise ValueError("adjoint optimization manifest fields are invalid")
     if (
         raw["schema_name"] != ADJOINT_MANIFEST_SCHEMA_NAME
-        or raw["schema_version"] != ADJOINT_MANIFEST_SCHEMA_VERSION
+        or not isinstance(manifest_version, str)
+        or manifest_version not in ADJOINT_MANIFEST_READABLE_VERSIONS
     ):
         raise ValueError("adjoint optimization manifest schema is unsupported")
     source_text = raw["source_model_path"]
@@ -146,6 +217,15 @@ def expand_adjoint_optimization_manifest(submission: object) -> dict[str, Any]:
     if support["source_identity"] != source_hash:
         raise ValueError("adjoint support source identity differs from manifest source")
     optimizer = normalize_native_optimizer_configuration(raw["optimizer"])
+    execution_policy = None
+    if manifest_version == ADJOINT_MANIFEST_SCHEMA_VERSION:
+        execution_policy = normalize_native_execution_policy(raw["execution_policy"])
+        if optimizer["budget"]["max_solves"] < len(execution_policy["finalist_fractions"]) + 2:
+            raise ValueError(
+                "solve budget must reserve baseline, optimizer and every finalist point"
+            )
+        if envelope["resource_policy"]["rules"].get("max_mesh_elements") is None:
+            raise ValueError("explicit execution policy requires max_mesh_elements")
     if optimizer["method"] != "gcmma":
         raise ValueError("alpha7.1 durable native optimizer accepts only validated gcmma")
     if optimizer["budget"]["cores"] != envelope["cores"]:
@@ -168,7 +248,7 @@ def expand_adjoint_optimization_manifest(submission: object) -> dict[str, Any]:
     body = {
         **envelope,
         "schema_name": ADJOINT_MANIFEST_SCHEMA_NAME,
-        "schema_version": ADJOINT_MANIFEST_SCHEMA_VERSION,
+        "schema_version": manifest_version,
         "source_model_path": str(source),
         "source_model_sha256": source_hash,
         "support": support,
@@ -176,6 +256,8 @@ def expand_adjoint_optimization_manifest(submission: object) -> dict[str, Any]:
         "initial_values": normalized_values,
         "synthetic_mode": raw["synthetic_mode"],
     }
+    if execution_policy is not None:
+        body["execution_policy"] = execution_policy
     validate_finite_json(body)
     body["spec_fingerprint"] = hashlib.sha256(
         json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")

@@ -99,7 +99,40 @@ The gate reserves one solve for every fraction, plus the baseline, before alloca
 Each step checks initialization readback, solved patch dimensions, geometry mapping and material mapping.
 The gate stops on failure without automatic path refinement or a direct-solve fallback.
 Without this option, the gate retains its direct finalist solve.
-This development option does not extend the durable optimizer submission contract.
+These CLI options apply to the development gate.
+Durable adjoint manifests at version `1.1.0` require an explicit `execution_policy`.
+Version `1.0.0` retains its direct finalist path.
+The execution policy declares smoothing, geometry order, adjoint gradients and fixed finalist fractions.
+It also declares geometry and material Jacobian expressions, minimum values and minimum mesh quality.
+Caller passivity and closure tolerances remain explicit.
+For example, a caller can declare this fixed loading policy:
+
+```json
+{
+  "smoothing_type": "hyperelastic",
+  "geometry_shape_order": "1",
+  "gradient_method": "adjoint",
+  "finalist_fractions": [0.25, 0.5, 0.75, 1.0],
+  "geometry_jacobian_expression": "reldetjac",
+  "minimum_geometry_jacobian": 0.0,
+  "material_jacobian_expression": "comp1.material.detF",
+  "minimum_material_jacobian": 0.0,
+  "minimum_element_quality": 0.1,
+  "passivity_absolute_tolerance": 0.000001,
+  "closure_absolute_tolerance": 0.000001
+}
+```
+
+These values are an example, not universal solver or scientific defaults.
+Jacobian minima must strictly exceed their declared limits.
+Mesh quality must meet its declared minimum under the recorded native quality measure.
+The passivity tolerance applies separately to dimensionless R, T and A.
+The closure tolerance applies to the absolute difference between their sum and one.
+Constraint residuals use each declared expression unit and the optimizer configuration tolerance.
+Failed mapping and constraint checks retain their measured values in the runtime receipt.
+The submission resource policy must declare `max_mesh_elements`.
+The runtime reserves every finalist solve and checks each solved dimension and mapping.
+The new durable path requires separate native acceptance before release.
 Fixed loading does not establish adaptive continuation, mesh convergence or physical acceptance.
 Review raw reflectance, transmittance and absorption separately from their algebraic sum.
 

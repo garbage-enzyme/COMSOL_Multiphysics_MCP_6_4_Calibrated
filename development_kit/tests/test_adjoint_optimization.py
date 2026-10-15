@@ -13,6 +13,7 @@ from comsol_mcp.jobs import native_adjoint_runtime
 from comsol_mcp.jobs.adjoint_optimization import (
     expand_adjoint_optimization_manifest,
     normalize_adjoint_optimization_submission,
+    normalize_native_execution_policy,
 )
 from comsol_mcp.jobs.adjoint_optimization_worker import run as run_adjoint_worker
 from comsol_mcp.jobs.adjoint_rows import read_adjoint_rows
@@ -20,6 +21,87 @@ from comsol_mcp.jobs.manager import JobManager
 from comsol_mcp.jobs.store import JobStore, process_identity, read_json
 from development_kit.tests.test_derivative_support import _support
 from development_kit.tests.test_gradient_contracts import _optimizer
+
+
+def _execution_policy():
+    return {
+        "smoothing_type": "hyperelastic",
+        "geometry_shape_order": "1",
+        "gradient_method": "adjoint",
+        "finalist_fractions": [0.25, 0.5, 0.75, 1.0],
+        "geometry_jacobian_expression": "reldetjac",
+        "minimum_geometry_jacobian": 0.0,
+        "material_jacobian_expression": "comp1.material.detF",
+        "minimum_material_jacobian": 0.0,
+        "minimum_element_quality": 0.1,
+        "passivity_absolute_tolerance": 1e-6,
+        "closure_absolute_tolerance": 1e-6,
+    }
+
+
+@pytest.mark.parametrize("fractions", [[], [0, 1], [True, 1], [0.5, 0.5, 1], [0.9], [1] * 33])
+def test_execution_policy_refuses_incomplete_or_invalid_loading(fractions):
+    policy = _execution_policy()
+    policy["finalist_fractions"] = fractions
+    with pytest.raises(ValueError):
+        normalize_native_execution_policy(policy)
+
+
+def test_execution_policy_preserves_explicit_configuration():
+    policy = _execution_policy()
+    assert normalize_native_execution_policy(policy) == policy
+    policy["automatic_fallback"] = True
+    with pytest.raises(ValueError, match="fields mismatch"):
+        normalize_native_execution_policy(policy)
+
+
+def test_versioned_execution_policy_is_hash_bound_and_reserves_solves(ascii_tmp_path):
+    envelope, _, manifest = _write_manifest(ascii_tmp_path)
+    raw = json.loads(manifest.read_text())
+    raw["schema_version"] = "1.1.0"
+    raw["execution_policy"] = _execution_policy()
+    raw["optimizer"]["budget"]["max_solves"] = 5
+
+    def publish():
+        payload = json.dumps(raw).encode()
+        manifest.write_bytes(payload)
+        envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+
+    publish()
+    with pytest.raises(ValueError, match="reserve"):
+        expand_adjoint_optimization_manifest(envelope)
+    raw["optimizer"]["budget"]["max_solves"] = 6
+    publish()
+    spec = expand_adjoint_optimization_manifest(envelope)
+    assert spec["execution_policy"] == _execution_policy()
+    assert spec["schema_version"] == "1.1.0"
+
+
+def test_loading_uses_actual_solver_and_preserves_initialization():
+    values = {}
+    calls = []
+    node = SimpleNamespace(set=lambda k, v: values.__setitem__(k, v), getString=lambda k: values[k])
+    solution = SimpleNamespace(feature=lambda tag: node, runAll=lambda: calls.append("solve"))
+    model = SimpleNamespace(java=SimpleNamespace(sol=lambda tag: solution))
+    study = SimpleNamespace(
+        createAutoSequences=lambda kind: calls.append(kind),
+        getSolverSequences=lambda kind: ["actual_solver"],
+    )
+    tag, observed = native_adjoint_runtime._run_loading_solution(model, study)
+    assert tag == "actual_solver"
+    assert observed == {"initmethod": "sol", "initsol": tag, "solnum": "last"}
+    assert calls == ["all", "solve"]
+
+
+def test_loading_initial_vector_converts_declared_units():
+    support = {
+        "variables": [
+            {"variable_id": "patch_length_x", "unit": "nm"},
+            {"variable_id": "patch_length_y", "unit": "um"},
+        ]
+    }
+    result = native_adjoint_runtime._initial_values_si(support, [800.0, 0.9])
+    assert result == pytest.approx({"patch_length_x": 8e-7, "patch_length_y": 9e-7})
 
 
 def _resource_policy() -> dict:
@@ -653,4 +735,136 @@ def test_clean_failure_receipt_omits_empty_cleanup_errors(ascii_tmp_path):
     receipt = json.loads((workdir / "native-optimizer-receipt.json").read_text(encoding="utf-8"))
     assert receipt["success"] is False
     assert receipt["cleanup"] == {"client_clear": True, "source_unchanged": True}
-    assert "cleanup_errors" not in receipt["cleanup"]
+
+
+def test_mapping_refusal_retains_failed_extrema():
+    evidence = {}
+    model = SimpleNamespace(evaluate=lambda *a, **kw: [1.0, -0.25])
+    with pytest.raises(ValueError, match="geometry mapping"):
+        native_adjoint_runtime._mapping_evidence(
+            model, object(), _execution_policy(), evidence=evidence
+        )
+    assert evidence["geometry"]["minimum"] == -0.25
+    assert evidence["geometry"]["maximum"] == 1.0
+    assert evidence["geometry"]["sample_count"] == 2
+
+
+def test_constraint_refusal_retains_raw_residual():
+    evidence = []
+    model = SimpleNamespace(evaluate=lambda *a, **kw: 1.2)
+    support = {
+        "constraints": [
+            {"constraint_id": "bound", "expression": "x", "unit": "m", "lower": None, "upper": 1.0}
+        ]
+    }
+    with pytest.raises(ValueError, match="constraint violates"):
+        native_adjoint_runtime._constraint_evidence(
+            model, object(), support, 0.01, evidence=evidence
+        )
+    assert evidence[0]["value"] == 1.2
+    assert evidence[0]["violation"] == pytest.approx(0.2)
+    assert evidence[0]["unit"] == "m"
+    assert evidence[0]["tolerance"] == 0.01
+
+
+@pytest.mark.parametrize("absorption", [0.1, -0.004867])
+def test_explicit_runtime_loading_checks_physics_and_actual_solve_budget(
+    ascii_tmp_path, monkeypatch, absorption
+):
+    spec = _minimal_adjoint_runtime_spec(ascii_tmp_path)
+    spec["execution_policy"] = _execution_policy()
+    spec["resource_policy"] = {"rules": {"max_mesh_elements": 1000}}
+    spec["initial_values"] = [800.0, 900.0]
+    spec["support"].update(
+        variables=[
+            {"variable_id": "patch_length_x", "unit": "nm"},
+            {"variable_id": "patch_length_y", "unit": "nm"},
+        ],
+        constraints=[],
+    )
+    spec["support"]["objective"].update(expression="objective", wavelength_um=1.0)
+    spec["optimizer"].update(constraint_tolerance=0.0)
+    spec["optimizer"]["budget"].update(max_solves=25, max_disk_bytes=100000)
+    values = {}
+    calls = []
+    node = SimpleNamespace(set=lambda k, v: values.__setitem__(k, v), getString=lambda k: values[k])
+    study = SimpleNamespace(
+        feature=lambda tag=None: SimpleNamespace(remove=lambda tag: None) if tag is None else node,
+        run=lambda: calls.append("study"),
+    )
+    solution = SimpleNamespace(feature=lambda tag: node)
+    deformation = SimpleNamespace(prop=lambda tag: node)
+    mesh = SimpleNamespace(run=lambda: calls.append("mesh"))
+    component = SimpleNamespace(physics=lambda tag: deformation, mesh=lambda tag: mesh)
+    java = SimpleNamespace(
+        component=lambda tag: component,
+        study=lambda tag: study,
+        sol=lambda tag: solution,
+        param=lambda: node,
+        save=lambda path, copy: Path(path).write_bytes(b"configured"),
+    )
+
+    def evaluate(expression, **kwargs):
+        if isinstance(expression, list):
+            if len(expression) == 3:
+                return [0.6, 800.0, 900.0]
+            return [0.6, 0.3, 0.7 - absorption, absorption, 1e-6, 1e-6]
+        return {
+            "objective": 0.6,
+            "patch_length_x": 8e-7,
+            "patch_length_y": 9e-7,
+            "reldetjac": 1.0,
+            "comp1.material.detF": 0.5,
+        }[expression]
+
+    model = SimpleNamespace(java=java, evaluate=evaluate)
+    client = SimpleNamespace(load=lambda path: model, remove=lambda model: None, clear=lambda: None)
+    dataset = SimpleNamespace(tag=lambda: "bound_dataset")
+    monkeypatch.setattr(
+        native_adjoint_runtime,
+        "configure_native_adjoint",
+        lambda *a, **kw: {"controls": {"deformed_geometry": {"patch_domain": 3}}},
+    )
+    monkeypatch.setattr(native_adjoint_runtime, "_freeze_wavelength", lambda *a: None)
+    monkeypatch.setattr(
+        native_adjoint_runtime,
+        "_configure_solver",
+        lambda *a: {"solution_tag": "actual_solver", "feature_tag": "o1"},
+    )
+    monkeypatch.setattr(native_adjoint_runtime, "_dataset_for_solution", lambda *a: dataset)
+    monkeypatch.setattr(native_adjoint_runtime, "_forward_sweep_dataset", lambda *a: dataset)
+    monkeypatch.setattr(
+        native_adjoint_runtime,
+        "_mesh_statistics",
+        lambda *a: {"element_count": 100, "minimum_quality": 0.5},
+    )
+    monkeypatch.setattr(native_adjoint_runtime, "_admit_policy_mesh", lambda *a: None)
+    monkeypatch.setattr(
+        native_adjoint_runtime,
+        "_solved_dimensions",
+        lambda model, dataset, domain, controls: dict(controls),
+    )
+
+    def load_step(*args):
+        calls.append("loading")
+        return "actual_solver", {"initmethod": "sol"}
+
+    monkeypatch.setattr(native_adjoint_runtime, "_run_loading_solution", load_step)
+    root = ascii_tmp_path / "explicit-runtime"
+    if absorption < 0:
+        with pytest.raises(ValueError, match="passivity"):
+            native_adjoint_runtime.execute_native_adjoint_optimization(
+                spec, root, client_factory=lambda **kw: client
+            )
+    else:
+        result = native_adjoint_runtime.execute_native_adjoint_optimization(
+            spec, root, client_factory=lambda **kw: client
+        )
+        assert result["success"]
+        assert result["final_variables_si"] == {"patch_length_x": 8e-7, "patch_length_y": 9e-7}
+    receipt = json.loads((root / "native-optimizer-receipt.json").read_text())
+    assert receipt["success"] == (absorption >= 0)
+    assert receipt["physical_values"]["ewfd.Atotal"] == absorption
+    assert values["nsolvemax"] == "20"
+    assert calls.count("loading") == 4
+    assert receipt["cleanup"] == {"client_clear": True, "source_unchanged": True}

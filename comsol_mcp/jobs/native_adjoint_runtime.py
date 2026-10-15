@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from comsol_mcp.durable import atomic_write_json
+from comsol_mcp.jobs.adjoint_optimization import normalize_native_execution_policy
 from comsol_mcp.research.adjoint_adapter import (
     ClientapiAdjointStudyBackend,
     _native_objective_type,
@@ -188,6 +189,143 @@ def _optimizer_solve_budget(total_solves: object, *, finalist_solves: int = 1) -
     return total_solves - 1 - finalist_solves
 
 
+def _initial_values_si(support: Mapping[str, Any], values: list[float]) -> dict[str, float]:
+    scales = {"m": 1.0, "um": 1e-6, "nm": 1e-9}
+    return {
+        item["variable_id"]: value * scales[item["unit"]]
+        for item, value in zip(support["variables"], values, strict=True)
+    }
+
+
+def _check_execution_budget(started: float, root: Path, budget: Mapping[str, Any]) -> None:
+    if time.monotonic() - started > budget["max_wall_time_seconds"]:
+        raise TimeoutError("native optimization exceeded its caller wall budget")
+    size = sum(
+        path.stat().st_size for path in root.rglob("*") if path.is_file() and not path.is_symlink()
+    )
+    if size > budget["max_disk_bytes"]:
+        raise ValueError("native optimization exceeded its caller disk budget")
+
+
+def _run_loading_solution(model: Any, study: Any) -> tuple[str, dict[str, str]]:
+    study.createAutoSequences("all")
+    tags = [str(tag) for tag in study.getSolverSequences("all")]
+    if len(tags) != 1:
+        raise ValueError("finalist loading solver identity is ambiguous")
+    solution = model.java.sol(tags[0])
+    node = solution.feature("v1")
+    expected = {"initmethod": "sol", "initsol": tags[0], "solnum": "last"}
+    for key, value in expected.items():
+        node.set(key, value)
+    observed = {key: str(node.getString(key)) for key in expected}
+    if observed != expected:
+        raise ValueError("finalist initialization readback differs")
+    solution.runAll()
+    return tags[0], observed
+
+
+def _admit_policy_mesh(model: Any, spec: Mapping[str, Any], policy: Mapping[str, Any]) -> None:
+    mesh = model.java.component("comp1").mesh("mesh1")
+    mesh.run()
+    evidence = _mesh_statistics(model)
+    if evidence["element_count"] > spec["resource_policy"]["rules"]["max_mesh_elements"]:
+        raise ValueError("native mesh exceeds caller element limit")
+    quality = evidence["minimum_quality"]
+    if not math.isfinite(quality) or quality < policy["minimum_element_quality"]:
+        raise ValueError("native mesh violates caller quality limit")
+
+
+def _mapping_evidence(
+    model: Any,
+    dataset: Any,
+    policy: Mapping[str, Any],
+    *,
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result = evidence if evidence is not None else {}
+    for kind in ("geometry", "material"):
+        expression = policy[f"{kind}_jacobian_expression"]
+        values = _numeric_series(model.evaluate(expression, dataset=dataset, outer=1, inner="last"))
+        minimum = min(values)
+        result[kind] = {
+            "expression": expression,
+            "minimum": minimum,
+            "maximum": max(values),
+            "sample_count": len(values),
+        }
+        if minimum <= policy[f"minimum_{kind}_jacobian"]:
+            raise ValueError(f"native {kind} mapping violates caller limits")
+    return result
+
+
+def _constraint_evidence(
+    model: Any,
+    dataset: Any,
+    support: Mapping[str, Any],
+    tolerance: float,
+    *,
+    evidence: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    rows = evidence if evidence is not None else []
+    for item in support["constraints"]:
+        values = _numeric_series(
+            model.evaluate(
+                item["expression"], unit=item["unit"], dataset=dataset, outer=1, inner="last"
+            )
+        )
+        if len(values) != 1:
+            raise ValueError("native constraint must return one scalar")
+        value = values[0]
+        violation = max(
+            0.0,
+            0.0 if item["lower"] is None else item["lower"] - value,
+            0.0 if item["upper"] is None else value - item["upper"],
+        )
+        rows.append(
+            {
+                "constraint_id": item["constraint_id"],
+                "value": value,
+                "unit": item["unit"],
+                "violation": violation,
+                "tolerance": tolerance,
+            }
+        )
+        if violation > tolerance:
+            raise ValueError("native constraint violates caller tolerance")
+    return rows
+
+
+def _solved_dimensions(
+    model: Any, dataset: Any, domain: int, controls: Mapping[str, float]
+) -> dict[str, float]:
+    numerical = model.java.result().numerical()
+    extrema = {}
+    for kind in ("MaxVolume", "MinVolume"):
+        tag = "finalist_" + kind
+        if tag in [str(value) for value in numerical.tags()]:
+            raise ValueError("finalist dimension probe tag already exists")
+        node = numerical.create(tag, kind)
+        try:
+            node.selection().set([domain])
+            node.set("data", str(dataset.tag()))
+            _set_vector(node, "expr", ["x", "y"])
+            extrema[kind] = _numeric_series([list(row) for row in node.getReal()])
+        finally:
+            numerical.remove(tag)
+    if any(len(value) != 2 for value in extrema.values()):
+        raise ValueError("finalist dimensions are not a single solved state")
+    measured = {
+        name: extrema["MaxVolume"][index] - extrema["MinVolume"][index]
+        for index, name in enumerate(("patch_length_x", "patch_length_y"))
+    }
+    if any(
+        not math.isclose(value, controls[name], rel_tol=1e-10, abs_tol=1e-18)
+        for name, value in measured.items()
+    ):
+        raise ValueError("finalist solved dimensions differ from controls")
+    return measured
+
+
 def execute_native_adjoint_optimization(
     spec: Mapping[str, Any],
     workdir: Path,
@@ -206,7 +344,15 @@ def execute_native_adjoint_optimization(
         raise ValueError("licensed product runtime accepts only validated gcmma")
     if spec["cores"] != optimizer["budget"]["cores"]:
         raise ValueError("submission cores differ from optimizer budget")
-    optimizer_solves = _optimizer_solve_budget(optimizer["budget"]["max_solves"])
+    policy = (
+        normalize_native_execution_policy(spec["execution_policy"])
+        if "execution_policy" in spec
+        else None
+    )
+    optimizer_solves = _optimizer_solve_budget(
+        optimizer["budget"]["max_solves"],
+        finalist_solves=len(policy["finalist_fractions"]) if policy else 1,
+    )
     workdir.mkdir(parents=True, exist_ok=True)
     configured = workdir / "configured.mph"
     receipt_path = workdir / "native-optimizer-receipt.json"
@@ -229,12 +375,23 @@ def execute_native_adjoint_optimization(
             client_factory = mph.Client
         client = client_factory(cores=spec["cores"], version=spec["version"])
         model = client.load(str(source))
-        configure_native_adjoint(
+        adapter_receipt = configure_native_adjoint(
             ClientapiAdjointStudyBackend(model),
             support,
             optimizer,
             initial_values=spec["initial_values"],
         )
+        if policy is not None:
+            deformation = model.java.component("comp1").physics("dg_a71")
+            for group, key, expected in (
+                ("FreeDeformationSettings", "smoothingType", policy["smoothing_type"]),
+                ("FrameSettings", "geometryShapeOrder", policy["geometry_shape_order"]),
+            ):
+                node = deformation.prop(group)
+                node.set(key, expected)
+                if str(node.getString(key)) != expected:
+                    raise ValueError("native deformation policy readback differs")
+            receipt["execution_policy"] = policy
         _freeze_wavelength(model, support, spec["initial_values"])
         model.java.save(str(configured), True)
         client.remove(model)
@@ -242,6 +399,9 @@ def execute_native_adjoint_optimization(
         baseline_model = client.load(str(configured))
         baseline_study = baseline_model.java.study("std1")
         baseline_study.feature().remove("sens_a71")
+        if policy is not None:
+            _check_execution_budget(started, workdir, optimizer["budget"])
+            _admit_policy_mesh(baseline_model, spec, policy)
         baseline_study.run()
         baseline_dataset = _forward_sweep_dataset(baseline_model)
         baseline = _numeric_series(
@@ -255,6 +415,14 @@ def execute_native_adjoint_optimization(
         study = model.java.study("std2")
         study.feature("opt_a71").set("nsolvemax", str(optimizer_solves))
         solver = _configure_solver(model, study, optimizer)
+        if policy is not None:
+            feature = model.java.sol(solver["solution_tag"]).feature(solver["feature_tag"])
+            feature.set("gradientmma", policy["gradient_method"])
+            if str(feature.getString("gradientmma")) != policy["gradient_method"]:
+                raise ValueError("native optimizer gradient readback differs")
+        if policy is not None:
+            _check_execution_budget(started, workdir, optimizer["budget"])
+            _admit_policy_mesh(model, spec, policy)
         study.run()
         dataset = _dataset_for_solution(model, solver["solution_tag"])
         variables = [item["variable_id"] for item in support["variables"]]
@@ -266,20 +434,88 @@ def execute_native_adjoint_optimization(
             name: _numeric_series(value)[-1]
             for name, value in zip(variables, evaluated[1:], strict=True)
         }
+        if policy is not None:
+            final_variables = {
+                name: _numeric_series(
+                    model.evaluate(name, unit="m", dataset=dataset, outer=1, inner="last")
+                )[-1]
+                for name in variables
+            }
+            receipt["optimizer_constraints"] = []
+            _constraint_evidence(
+                model,
+                dataset,
+                support,
+                optimizer["constraint_tolerance"],
+                evidence=receipt["optimizer_constraints"],
+            )
+            receipt["optimizer_geometry"] = {}
+            _mapping_evidence(model, dataset, policy, evidence=receipt["optimizer_geometry"])
         client.remove(model)
 
         finalist = client.load(str(configured))
-        for name, value in final_variables.items():
-            finalist.java.param().set(name, f"{value:.17g}[m]")
+        if policy is None:
+            for name, value in final_variables.items():
+                finalist.java.param().set(name, f"{value:.17g}[m]")
         finalist_study = finalist.java.study("std1")
         finalist_study.feature().remove("sens_a71")
         mesh = finalist.java.component("comp1").mesh("mesh1")
         mesh.run()
         mesh_evidence = _mesh_statistics(finalist)
-        if mesh_evidence["minimum_quality"] <= 0.1:
+        if not math.isfinite(mesh_evidence["minimum_quality"]) or (
+            mesh_evidence["minimum_quality"] < policy["minimum_element_quality"]
+            if policy
+            else mesh_evidence["minimum_quality"] <= 0.1
+        ):
             raise ValueError("remeshed finalist minimum quality is not acceptable")
-        finalist_study.run()
-        finalist_dataset = _forward_sweep_dataset(finalist)
+        if policy is None:
+            finalist_study.run()
+            finalist_dataset = _forward_sweep_dataset(finalist)
+        else:
+            maximum = spec["resource_policy"]["rules"]["max_mesh_elements"]
+            if mesh_evidence["element_count"] > maximum:
+                raise ValueError("finalist mesh exceeds the caller element limit")
+            steps: list[dict[str, Any]] = []
+            receipt["finalist_continuation"] = steps
+            initial = _initial_values_si(support, spec["initial_values"])
+            for fraction in policy["finalist_fractions"]:
+                _check_execution_budget(started, workdir, optimizer["budget"])
+                controls = {
+                    name: value
+                    if fraction == 1.0
+                    else initial[name] + fraction * (value - initial[name])
+                    for name, value in final_variables.items()
+                }
+                for name, value in controls.items():
+                    finalist.java.param().set(name, f"{value:.17g}[m]")
+                solution_tag, initialization = _run_loading_solution(finalist, finalist_study)
+                finalist_dataset = _dataset_for_solution(finalist, solution_tag)
+                step = {
+                    "fraction": fraction,
+                    "controls_si": controls,
+                    "initialization": initialization,
+                    "solution_tag": solution_tag,
+                    "dataset_tag": str(finalist_dataset.tag()),
+                }
+                steps.append(step)
+                step["geometry"] = {}
+                _mapping_evidence(finalist, finalist_dataset, policy, evidence=step["geometry"])
+                step["dimensions"] = _solved_dimensions(
+                    finalist,
+                    finalist_dataset,
+                    adapter_receipt["controls"]["deformed_geometry"]["patch_domain"],
+                    controls,
+                )
+                atomic_write_json(receipt_path, receipt)
+            receipt["finalist_constraints"] = []
+            _constraint_evidence(
+                finalist,
+                finalist_dataset,
+                support,
+                optimizer["constraint_tolerance"],
+                evidence=receipt["finalist_constraints"],
+            )
+            _check_execution_budget(started, workdir, optimizer["budget"])
         expressions = [
             support["objective"]["expression"],
             "ewfd.Rtotal",
@@ -293,6 +529,14 @@ def execute_native_adjoint_optimization(
             name: _numeric_series(value)[-1]
             for name, value in zip(expressions, values, strict=True)
         }
+        receipt["physical_values"] = physical
+        if policy is not None:
+            tolerance = policy["passivity_absolute_tolerance"]
+            if any(
+                not -tolerance <= physical[name] <= 1 + tolerance
+                for name in ("ewfd.Rtotal", "ewfd.Ttotal", "ewfd.Atotal")
+            ):
+                raise ValueError("finalist violates caller passivity limits")
         fresh = physical[support["objective"]["expression"]]
         _validate_wavelengths(
             support["objective"]["wavelength_um"] * 1e-6,
@@ -302,7 +546,12 @@ def execute_native_adjoint_optimization(
         closure = physical["ewfd.Rtotal"] + physical["ewfd.Ttotal"] + physical["ewfd.Atotal"]
         if not math.isclose(fresh, final, rel_tol=1e-6, abs_tol=1e-9):
             raise ValueError("fresh forward objective differs from native optimizer result")
-        if not math.isclose(closure, 1.0, rel_tol=0.0, abs_tol=1e-6):
+        if not math.isclose(
+            closure,
+            1.0,
+            rel_tol=0.0,
+            abs_tol=policy["closure_absolute_tolerance"] if policy else 1e-6,
+        ):
             raise ValueError("remeshed finalist R/T/A closure is outside tolerance")
         client.remove(finalist)
         elapsed = time.monotonic() - started
