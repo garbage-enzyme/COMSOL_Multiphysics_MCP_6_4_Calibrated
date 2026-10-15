@@ -152,6 +152,27 @@ def _mesh_statistics(model: Any) -> dict[str, Any]:
     }
 
 
+def _validate_wavelengths(
+    requested_wavelength_m: float, evaluated_wavelength_m: float, solved_wavelength_m: float
+) -> None:
+    """Reject finalist evidence when either wavelength identity drifts."""
+    for name, value in (
+        ("requested", requested_wavelength_m),
+        ("evaluated", evaluated_wavelength_m),
+        ("solved", solved_wavelength_m),
+    ):
+        if not math.isfinite(value):
+            raise ValueError(f"{name} wavelength is nonfinite")
+    if not math.isclose(
+        evaluated_wavelength_m, requested_wavelength_m, rel_tol=1e-12, abs_tol=1e-15
+    ):
+        raise ValueError("remeshed finalist evaluated wavelength changed")
+    if not math.isclose(
+        solved_wavelength_m, requested_wavelength_m, rel_tol=1e-12, abs_tol=1e-15
+    ):
+        raise ValueError("remeshed finalist solved wavelength changed")
+
+
 def _optimizer_solve_budget(total_solves: object) -> int:
     """Reserve one solve for baseline and one for the fresh finalist."""
     if isinstance(total_solves, bool) or not isinstance(total_solves, int) or total_solves < 3:
@@ -265,6 +286,11 @@ def execute_native_adjoint_optimization(
             for name, value in zip(expressions, values, strict=True)
         }
         fresh = physical[support["objective"]["expression"]]
+        _validate_wavelengths(
+            support["objective"]["wavelength_um"] * 1e-6,
+            physical["wl"],
+            physical["c_const/freq"],
+        )
         closure = physical["ewfd.Rtotal"] + physical["ewfd.Ttotal"] + physical["ewfd.Atotal"]
         if not math.isclose(fresh, final, rel_tol=1e-6, abs_tol=1e-9):
             raise ValueError("fresh forward objective differs from native optimizer result")

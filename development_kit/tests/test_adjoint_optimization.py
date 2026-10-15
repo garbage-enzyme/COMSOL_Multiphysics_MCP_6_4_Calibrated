@@ -510,6 +510,25 @@ def test_native_runtime_reserves_non_optimizer_solves():
     assert native_adjoint_runtime._optimizer_solve_budget(25) == 23
 
 
+@pytest.mark.parametrize(
+    ("evaluated", "solved", "error"),
+    [
+        (1.1e-6, 1e-6, "evaluated wavelength changed"),
+        (1e-6, 1.1e-6, "solved wavelength changed"),
+        (1.1e-6, 1.1e-6, "evaluated wavelength changed"),
+        (float("nan"), 1e-6, "nonfinite"),
+        (1e-6, float("inf"), "nonfinite"),
+    ],
+)
+def test_finalist_wavelength_checks_bind_both_values_to_request(evaluated, solved, error):
+    with pytest.raises(ValueError, match=error):
+        native_adjoint_runtime._validate_wavelengths(1e-6, evaluated, solved)
+
+
+def test_finalist_wavelength_checks_accept_matching_values():
+    native_adjoint_runtime._validate_wavelengths(1e-6, 1e-6, 1e-6)
+
+
 def test_native_runtime_applies_remaining_budget_to_actual_optimizer(ascii_tmp_path, monkeypatch):
     spec = _minimal_adjoint_runtime_spec(ascii_tmp_path)
     spec["initial_values"] = [856.0]

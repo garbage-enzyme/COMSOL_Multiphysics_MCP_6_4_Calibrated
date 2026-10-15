@@ -8,7 +8,7 @@ import math
 import time
 from pathlib import Path
 
-from comsol_mcp.jobs.native_adjoint_runtime import _optimizer_solve_budget
+from comsol_mcp.jobs.native_adjoint_runtime import _optimizer_solve_budget, _validate_wavelengths
 from development_kit.scripts import native_adjoint_licensed_gate as structural
 from development_kit.scripts import native_gradient_licensed_gate as gradient
 
@@ -552,12 +552,7 @@ def run(args: argparse.Namespace) -> dict:
         if not math.isclose(closure, 1.0, rel_tol=0.0, abs_tol=1e-6):
             raise ValueError("remeshed finalist R/T/A closure is outside tolerance")
         requested_wavelength = support["objective"]["wavelength_um"] * 1e-6
-        if not math.isclose(physical["wl"], requested_wavelength, rel_tol=1e-12, abs_tol=1e-15):
-            raise ValueError("remeshed finalist evaluated wavelength changed")
-        if not math.isclose(
-            physical["c_const/freq"], requested_wavelength, rel_tol=1e-12, abs_tol=1e-15
-        ):
-            raise ValueError("remeshed finalist solved wavelength changed")
+        _validate_wavelengths(requested_wavelength, physical["wl"], physical["c_const/freq"])
         receipt.update(
             {
                 "baseline_objective": baseline,
