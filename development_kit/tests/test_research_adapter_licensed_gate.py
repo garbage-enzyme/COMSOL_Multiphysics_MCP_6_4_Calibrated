@@ -16,7 +16,6 @@ from mcp.server.mcpserver import MCPServer
 
 from development_kit.scripts import research_adapter_gate_server as server_gate
 from development_kit.scripts import research_adapter_licensed_gate as gate
-from development_kit.scripts import research_campaign_licensed_gate as campaign_gate
 
 
 @pytest.fixture
@@ -132,19 +131,6 @@ def test_gate_requires_requested_evaluated_and_solved_wavelength_identity(
     assert gate._wavelength_synchronized({"wavelength": wavelength}) is expected
 
 
-def test_impossible_mode_requires_full_budget_of_successful_measurements():
-    passed = campaign_gate._impossible_mode_passed
-
-    assert passed(stop_reason="budget_exhausted", completed=8, successful=8, budget=8)
-    # Failed evaluations must not count as evidence: zero or partial valid
-    # measurements can never prove the impossible-target outcome.
-    for kwargs in (
-        dict(stop_reason="budget_exhausted", completed=8, successful=0, budget=8),
-        dict(stop_reason="budget_exhausted", completed=8, successful=7, budget=8),
-        dict(stop_reason="budget_exhausted", completed=7, successful=7, budget=8),
-        dict(stop_reason="target_met", completed=3, successful=3, budget=8),
-    ):
-        assert not passed(**kwargs)
 
 
 def test_spectrum_rows_keep_request_readback_and_solved_provenance_distinct():
@@ -183,56 +169,3 @@ def test_spectrum_tool_reports_structured_errors_for_study_contract_gaps(monkeyp
     result = spectrum("model", [1.5e-6, 1.6e-6, 1.7e-6])
     assert result["success"] is False
     assert result["error_type"] == "AttributeError"
-
-
-def test_campaign_gate_dry_run_freezes_budget_grid_and_tolerances(tmp_path: Path, gate_root: Path):
-    source = tmp_path / "source.mph"
-    source.write_bytes(b"source")
-    manifest = gate_root / "manifest.json"
-    audit = gate_root / "tree-audit.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "structure_family": "periodic_mim_patch_v1",
-                "source_identity": {"source_sha256": "a" * 64},
-                "mutable_dimensions": [
-                    {
-                        "variable_id": "patch_length_x",
-                        "baseline": 8.56e-7,
-                        "lower": 6.42e-7,
-                        "upper": 1.07e-6,
-                    },
-                    {
-                        "variable_id": "patch_length_y",
-                        "baseline": 8.56e-7,
-                        "lower": 6.42e-7,
-                        "upper": 1.07e-6,
-                    },
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    audit.write_text(json.dumps({"audit": 1}), encoding="utf-8")
-    args = argparse.Namespace(
-        test_root=gate_root,
-        source_model=source,
-        manifest=manifest,
-        tree_audit=audit,
-        mode="impossible",
-        budget=32,
-        cores=4,
-        dry_run=True,
-    )
-
-    result = campaign_gate._dry_run(campaign_gate._spec(args))
-
-    assert result["success"] is True
-    assert result["candidate_evaluation_budget"] == 32
-    assert result["wavelength_solve_count_per_candidate"] == 17
-    assert result["objective_tolerances"] == {
-        "peak_wavelength_m": campaign_gate.PEAK_TOLERANCE_M,
-        "quality_factor": campaign_gate.Q_TOLERANCE,
-    }
-    assert result["solver_started"] is False
-    assert result["filesystem_modified"] is False

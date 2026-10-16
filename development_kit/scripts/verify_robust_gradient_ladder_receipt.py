@@ -11,10 +11,10 @@ import stat
 from pathlib import Path
 from typing import Any
 
+from comsol_mcp.contracts.gradient_contracts import normalize_native_optimizer_configuration
 from comsol_mcp.durable import atomic_write_json
-from comsol_mcp.research.gradient_contracts import normalize_native_optimizer_configuration
-from comsol_mcp.research.robust_gradient_acceptance import assess_licensed_gradient_ladder
-from comsol_mcp.research.robust_optimizer_policy import assess_robust_optimizer_execution
+from development_kit.scripts.native_gradient_gate_checks import assess_licensed_gradient_ladder
+from development_kit.scripts.native_optimizer_gate_checks import assess_robust_optimizer_execution
 
 SCHEMA_NAME = "comsol_mcp.robust_gradient_ladder_verification"
 SCHEMA_VERSION = "1.0.0"

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from comsol_mcp.research.adapters import (
+from comsol_mcp.adapter.structure import (
     STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME,
     STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION,
     STRUCTURE_TREE_AUDIT_SCHEMA_NAME,

@@ -152,11 +152,11 @@ Profile 只控制 COMSOL 自动化仿真及未来自主探索工具的可见性�
 `semantic_docs.enabled=true`。两个开关默认均为 false。旧 `comsol_connect` 仍是
 experimental 兼容工具，不能替代该生命周期。
 
-alpha7.2 鲁棒形状工具只在 `experimental` 和 `full` 中提供。
-`robust_shape_plan_preview` 不启动求解器。`robust_shape_job_submit` 通过 durable job
-authority 提交，并可能启动 licensed solver。证据检查/验证工具有界、隐藏路径且只读。
-这些工具不会出现在 `core`、`basic_fem` 或 `wave_optics` 中，也不提供通用 Java/属性
-修改 escape hatch。
+0.8.0 从所有 profile 移除研究策略和鲁棒形状工具。
+仍需这些工具的工作流可使用 0.7.8；不提供兼容包装。
+README 列出完整移除清单和保留的执行接口。
+原生 forward 和 gradient 收集通过 `job_submit` 的 `validation_matrix` 执行。
+原生优化和训练仍按各自声明的接口保留。
 
 `basic_fem` 中的独立启动器工具仍运行在普通 Python MCP host 中。它们负责构建和控制另一个原生
 EXE。目标机只需 Windows 10/11 x64 与已安装并授权的 COMSOL 6.4。EXE 不打包 COMSOL，

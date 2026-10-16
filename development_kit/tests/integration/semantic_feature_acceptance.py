@@ -26,13 +26,13 @@ OUTPUT = DEFAULT_OUTPUT_ROOT / "semantic_feature" / "live_feature.json"
 RUN_LOCK = OUTPUT.parent / "acceptance.lock"
 MODEL_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 PROFILE_COUNTS = {
-    "core": 56,
-    "basic_fem": 118,
-    "wave_optics": 85,
-    "experimental": 110,
-    "full": 166,
+    "core": 52,
+    "basic_fem": 110,
+    "wave_optics": 77,
+    "experimental": 98,
+    "full": 151,
 }
-SEMANTIC_CORE_COUNT = 64
+SEMANTIC_CORE_COUNT = 60
 
 
 def _decode(result: Any) -> dict[str, Any]:

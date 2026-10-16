@@ -4,11 +4,11 @@ import copy
 
 import pytest
 
-from comsol_mcp.research.lin2025_pedot_backend import (
+from comsol_mcp.adapter.optical_cylinder import (
     ClientapiLin2025PedotControlBackend,
     prepare_lin2025_pedot_shape_controls,
 )
-from comsol_mcp.research.lin2025_pedot_cylinder import SCHEMA_NAME
+from comsol_mcp.contracts.optical_cylinder_fixture import SCHEMA_NAME
 from development_kit.tests.test_derivative_support import _support as base_support
 
 

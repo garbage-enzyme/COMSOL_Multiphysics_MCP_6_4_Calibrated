@@ -1,0 +1,204 @@
+"""Synthetic finite-difference gradient evidence tests."""
+
+import copy
+import math
+
+import pytest
+
+from comsol_mcp.contracts.gradient_contracts import normalize_gradient_record
+from development_kit.scripts.native_gradient_comparison import (
+    compare_directional_gradient,
+    compare_gradient,
+)
+from development_kit.tests.test_gradient_contracts import _gradient, normalize_gradient_support
+
+
+def _finite_difference() -> list[dict]:
+    return [
+        {
+            "variable_id": "patch_length_x",
+            "steps": [
+                {
+                    "relative_step": 0.01,
+                    "mode": "central",
+                    "plus_objective": 0.8000201,
+                    "minus_objective": 0.7999799,
+                    "base_objective": None,
+                },
+                {
+                    "relative_step": 0.003,
+                    "mode": "central",
+                    "plus_objective": 0.800006003,
+                    "minus_objective": 0.799993997,
+                    "base_objective": None,
+                },
+                {
+                    "relative_step": 0.001,
+                    "mode": "central",
+                    "plus_objective": 0.8000020001,
+                    "minus_objective": 0.7999979999,
+                    "base_objective": None,
+                },
+            ],
+        }
+    ]
+
+
+def _policy() -> dict:
+    return {
+        "relative_error_limit": 0.1,
+        "absolute_error_floor": 1e-12,
+        "cosine_floor": 0.9,
+        "require_sign": True,
+    }
+
+
+def test_gradient_check_records_step_rows_and_passes_synthetic_derivative():
+    receipt = compare_gradient(
+        _gradient(), normalize_gradient_support(), _finite_difference(), _policy()
+    )
+    assert receipt["passed"] is True
+    assert receipt["variable_order"] == ["patch_length_x"]
+    assert receipt["checks"]["cosine_above_floor"] is True
+    assert len(receipt["check_fingerprint"]) == 64
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda rows: rows[0]["steps"][0].update({"plus_objective": 0.79998}),
+        lambda rows: rows[0]["steps"][0].update({"plus_objective": 0.805}),
+    ],
+)
+def test_gradient_check_rejects_sign_order_or_error_failures(mutation):
+    rows = copy.deepcopy(_finite_difference())
+    mutation(rows)
+    receipt = compare_gradient(_gradient(), normalize_gradient_support(), rows, _policy())
+    assert receipt["passed"] is False or receipt["checks"]["signs_agree"] is False
+
+
+def test_gradient_check_require_sign_false_tolerates_reported_sign_mismatch():
+    checks = {
+        "all_relative_errors_within_limit": True,
+        "cosine_above_floor": True,
+        "signs_agree": False,
+        "step_sensitivity_bounded": True,
+    }
+    from development_kit.scripts.native_gradient_comparison import _gradient_check_passed
+
+    assert _gradient_check_passed(checks, require_sign=False) is True
+    assert _gradient_check_passed(checks, require_sign=True) is False
+    assert (
+        _gradient_check_passed({**checks, "cosine_above_floor": False}, require_sign=False) is False
+    )
+
+
+def test_gradient_check_rejects_permuted_finite_difference_rows():
+    rows = copy.deepcopy(_finite_difference())
+    rows[0]["variable_id"] = "patch_length_y"
+    with pytest.raises(ValueError, match="variable order"):
+        compare_gradient(_gradient(), normalize_gradient_support(), rows, _policy())
+
+
+def test_gradient_record_rejects_tampered_check_input_identity():
+    row = _gradient()
+    normalized = normalize_gradient_record(row, normalize_gradient_support())
+    row["gradient_fingerprint"] = normalized["gradient_fingerprint"]
+    row["native_gradient"] = [0.003]
+    with pytest.raises(ValueError, match="fingerprint"):
+        normalize_gradient_record(row, normalize_gradient_support())
+
+
+def test_directional_gradient_check_records_central_prediction():
+    receipt = compare_directional_gradient(
+        _gradient(),
+        normalize_gradient_support(),
+        [1.0],
+        step=0.01,
+        plus_objective=0.80002,
+        minus_objective=0.79998,
+        policy=_policy(),
+    )
+    assert receipt["mode"] == "central"
+    assert receipt["passed"] is True
+    assert len(receipt["directional_check_fingerprint"]) == 64
+
+
+@pytest.mark.parametrize("scale", [1e308, 1e-300])
+def test_directional_gradient_preserves_finite_nonzero_direction_at_extreme_scale(scale):
+    receipt = compare_directional_gradient(
+        _gradient(),
+        normalize_gradient_support(),
+        [scale],
+        step=0.01,
+        plus_objective=0.8,
+        minus_objective=0.8,
+        policy=_policy(),
+    )
+    assert receipt["direction"] == [1.0]
+    assert receipt["predicted"] == pytest.approx(0.002)
+    assert receipt["passed"] is False
+
+
+@pytest.mark.parametrize("scale", [1e308, 1e-300])
+def test_directional_gradient_accepts_correct_derivative_at_extreme_scale(scale):
+    receipt = compare_directional_gradient(
+        _gradient(),
+        normalize_gradient_support(),
+        [scale],
+        step=0.01,
+        plus_objective=0.80002,
+        minus_objective=0.79998,
+        policy=_policy(),
+    )
+    assert receipt["direction"] == [1.0]
+    assert receipt["passed"] is True
+    assert math.isfinite(receipt["relative_error"])
+
+
+@pytest.mark.parametrize("scale", [1e308, 1e-300])
+def test_gradient_cosine_preserves_direction_at_extreme_scale(scale):
+    from development_kit.scripts.native_gradient_comparison import _cosine
+
+    assert _cosine([scale, scale], [scale, scale]) == pytest.approx(1.0)
+    assert _cosine([scale, -scale], [-scale, scale]) == pytest.approx(-1.0)
+
+
+def test_unit_direction_handles_norm_larger_than_float_range_and_zero_vector():
+    from development_kit.scripts.native_gradient_comparison import _unit_vector
+
+    direction = _unit_vector([1.7e308, -1.7e308])
+    assert direction == pytest.approx([1 / math.sqrt(2), -1 / math.sqrt(2)])
+    assert math.hypot(*direction) == pytest.approx(1.0)
+    assert _unit_vector([0.0, 0.0]) is None
+
+
+def test_directional_gradient_check_requires_a_base_for_one_sided_evidence():
+    with pytest.raises(ValueError, match="one-sided"):
+        compare_directional_gradient(
+            _gradient(),
+            normalize_gradient_support(),
+            [1.0],
+            step=0.01,
+            plus_objective=0.80002,
+            minus_objective=None,
+            policy=_policy(),
+        )
+
+
+@pytest.mark.parametrize("bad_sign", [1, 0, "yes", None])
+def test_directional_gradient_check_requires_boolean_require_sign(bad_sign):
+    # compare_gradient rejects non-boolean sign policies; the directional
+    # path must enforce the identical contract instead of truthiness.
+    policy = _policy()
+    policy["require_sign"] = bad_sign
+    with pytest.raises(ValueError, match="require_sign must be boolean"):
+        compare_directional_gradient(
+            _gradient(),
+            normalize_gradient_support(),
+            [1.0],
+            step=0.01,
+            plus_objective=0.80002,
+            minus_objective=0.79998,
+            policy=policy,
+        )

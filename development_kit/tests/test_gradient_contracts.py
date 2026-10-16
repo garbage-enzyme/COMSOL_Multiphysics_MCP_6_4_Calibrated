@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from comsol_mcp.research.gradient_contracts import (
+from comsol_mcp.contracts.gradient_contracts import (
     normalize_gradient_record,
     normalize_native_optimizer_configuration,
 )
@@ -45,7 +45,7 @@ def _gradient() -> dict:
 
 
 def normalize_gradient_support():
-    from comsol_mcp.research.derivative_support import normalize_derivative_support
+    from comsol_mcp.contracts.derivative_support import normalize_derivative_support
 
     return normalize_derivative_support(_support())
 
@@ -109,7 +109,7 @@ def test_gradient_row_binds_order_sign_scale_and_all_native_identities():
 
 
 def test_gradient_row_constraint_values_must_reference_support_constraints():
-    from comsol_mcp.research.derivative_support import normalize_derivative_support
+    from comsol_mcp.contracts.derivative_support import normalize_derivative_support
 
     # The base fixture declares no constraints: any reported value is foreign.
     row = _gradient()
@@ -198,12 +198,10 @@ def test_untrusted_json_leaves_reject_unhashable_values_as_value_errors():
         normalize_native_optimizer_configuration(value)
 
 
-def test_outer_gcmma_binds_reviewed_dependency_and_native_condition_solver():
-    first = normalize_native_optimizer_configuration(_outer_optimizer())
-    assert first["backend"] == "mmapy_outer_comsol_conditions"
-    assert first["backend_configuration"]["condition_solver_backend"] == "comsol_native"
-    assert normalize_native_optimizer_configuration(first) == first
-    changed = _outer_optimizer()
-    changed["backend_configuration"]["package_version"] = "0.3.0"
-    with pytest.raises(ValueError, match="mmapy 0.3.1"):
-        normalize_native_optimizer_configuration(changed)
+def test_external_optimizer_backend_is_refused():
+    with pytest.raises(ValueError):
+        normalize_native_optimizer_configuration(_outer_optimizer())
+    native_schema = _optimizer()
+    native_schema["backend"] = "mmapy_outer_comsol_conditions"
+    with pytest.raises(ValueError, match="comsol_native"):
+        normalize_native_optimizer_configuration(native_schema)

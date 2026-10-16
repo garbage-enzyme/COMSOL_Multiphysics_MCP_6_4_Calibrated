@@ -8,6 +8,13 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp.contracts.native_condition import (
+    NATIVE_CONDITION_COLLECTOR,
+    NATIVE_CONDITION_COLLECTORS,
+    NATIVE_FORWARD_COLLECTOR,
+    normalize_native_condition_request,
+)
+from comsol_mcp.contracts.startup_admission import normalize_robust_startup_policy
 from comsol_mcp.evidence.field_matrix import (
     MATRIX_FIELD_COLLECTOR,
     normalize_validation_matrix_field_inputs,
@@ -29,6 +36,8 @@ SUPPORTED_VALIDATION_COLLECTORS = frozenset(
         "wave_optics_point_audit",
         "wave_optics_reference_audit",
         MATRIX_FIELD_COLLECTOR,
+        NATIVE_CONDITION_COLLECTOR,
+        NATIVE_FORWARD_COLLECTOR,
     }
 )
 
@@ -181,6 +190,10 @@ def _normalize_collectors(value: object, point_name: str) -> list[dict[str, Any]
         inputs = _normalize_json_object(raw["inputs"], f"{name}.inputs")
         if collector_name == MATRIX_FIELD_COLLECTOR:
             inputs = normalize_validation_matrix_field_inputs(inputs)
+        elif collector_name in NATIVE_CONDITION_COLLECTORS:
+            inputs = normalize_native_condition_request(
+                inputs, gradients=collector_name == NATIVE_CONDITION_COLLECTOR
+            )
         normalized.append(
             {
                 "name": collector_name,
@@ -257,6 +270,16 @@ def _normalize_point(value: object, index: int, source_sha256: str) -> dict[str,
         "collectors": collectors,
         "expected_artifact_ids": artifact_ids,
     }
+    for collector in collectors:
+        if collector["name"] in NATIVE_CONDITION_COLLECTORS:
+            from comsol_mcp.contracts.native_condition import bind_native_condition_point
+
+            bind_native_condition_point(
+                collector["inputs"],
+                point,
+                source_sha256,
+                gradients=collector["name"] == NATIVE_CONDITION_COLLECTOR,
+            )
     point["point_fingerprint"] = _fingerprint(
         {
             "source_model_sha256": source_sha256,
@@ -282,6 +305,8 @@ def normalize_validation_matrix_spec(raw_spec: object) -> dict[str, Any]:
         "version",
         "max_retries",
         "continue_on_error",
+        "startup_admission",
+        "comsol_temporary_directory",
     }
     unknown = sorted(set(raw) - allowed)
     if unknown:
@@ -365,6 +390,55 @@ def normalize_validation_matrix_spec(raw_spec: object) -> dict[str, Any]:
         "max_retries": max_retries,
         "continue_on_error": continue_on_error,
     }
+    native_requests = [
+        collector["inputs"]
+        for point in normalized_points
+        for collector in point["collectors"]
+        if collector["name"] in NATIVE_CONDITION_COLLECTORS
+    ]
+    if "startup_admission" in raw:
+        spec["startup_admission"] = normalize_robust_startup_policy(raw["startup_admission"])
+    if "comsol_temporary_directory" in raw:
+        if (
+            not isinstance(raw["comsol_temporary_directory"], str)
+            or not raw["comsol_temporary_directory"].strip()
+        ):
+            raise ValueError("COMSOL temporary directory must be a nonempty path string")
+        temporary = Path(raw["comsol_temporary_directory"])
+        if (
+            not temporary.is_absolute()
+            or temporary.is_symlink()
+            or not temporary.is_dir()
+            or not str(temporary).isascii()
+            or any(character.isspace() for character in str(temporary))
+        ):
+            raise ValueError(
+                "COMSOL temporary directory must be an existing absolute ASCII directory "
+                "without whitespace"
+            )
+        spec["comsol_temporary_directory"] = str(temporary.resolve())
+    if native_requests:
+        if "startup_admission" not in spec:
+            raise ValueError("native condition matrix requires explicit startup admission")
+        if any(
+            request["support"]["comsol_version"] != spec["version"] for request in native_requests
+        ):
+            raise ValueError("native condition COMSOL version differs from the matrix version")
+        for request in native_requests:
+            controls = request["adapter_configuration"]["configuration"]["condition_controls"]
+            if (
+                controls.get("out_of_core_value", "off").casefold() == "on"
+                and "comsol_temporary_directory" not in spec
+            ):
+                raise ValueError(
+                    "out-of-core native collection requires an explicit COMSOL temporary directory"
+                )
+            if (
+                spec["resource_policy"]["rules"].get("max_mesh_elements")
+                != request["shape_policy"]["mesh_admission"]["max_elements_per_model"]
+            ):
+                raise ValueError("native mesh cap differs from the matrix resource policy")
+        spec["synthetic_mode"] = False
     spec["spec_fingerprint"] = _fingerprint(spec)
     encoded = json.dumps(
         spec,

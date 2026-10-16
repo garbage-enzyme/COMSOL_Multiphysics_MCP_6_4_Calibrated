@@ -427,9 +427,6 @@ def test_metadata_keeps_required_tools_outside_comsol_mutex():
         "job_cancel",
         "manual_search",
         "manual_read_pages",
-        "spectral_characterize",
-        "convergence_evaluate",
-        "branch_continuation_plan",
     ):
         assert TOOL_METADATA[name].concurrency_class != "comsol_bound"
     assert TOOL_METADATA["study_solve"].concurrency_class == "comsol_bound"

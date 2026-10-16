@@ -7,7 +7,7 @@ import itertools
 
 import pytest
 
-from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
+from comsol_mcp.contracts.condition_table import normalize_optimization_condition_table
 from development_kit.tests.test_robust_material_mapping import _mapping
 
 

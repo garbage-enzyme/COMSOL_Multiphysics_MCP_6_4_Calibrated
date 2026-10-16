@@ -151,9 +151,15 @@ def _emitted_schemas_in_source() -> set[str]:
                     if keyword.arg in _SCHEMA_IDENTITY_KEYS
                 )
             for candidate in candidates:
-                value = _resolve_string(candidate, constants)
-                if value is not None and value.startswith("comsol_mcp."):
-                    names.add(value)
+                choices = (
+                    [candidate.body, candidate.orelse]
+                    if isinstance(candidate, ast.IfExp)
+                    else [candidate]
+                )
+                for choice in choices:
+                    value = _resolve_string(choice, constants)
+                    if value is not None and value.startswith("comsol_mcp."):
+                        names.add(value)
     return names
 
 
@@ -176,7 +182,7 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
     assert registry["producer"] == {"package": "comsol-mcp", "version": __version__}
     # These are deliberate public release snapshots. A registry change updates
     # both literals and development_kit/release/release_facts.json together.
-    assert registry["entry_count"] == len(entries) == 193
+    assert registry["entry_count"] == len(entries) == 139
     assert names == sorted(names)
     assert len(names) == len(set(names))
     emitted = _emitted_schemas_in_source()
@@ -191,7 +197,6 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
         "comsol_mcp.robust_forward_shape_stage",
         "comsol_mcp.lin2025_pedot_cylinder_fixture",
         "comsol_mcp.lin2025_pedot_cylinder_fixture.binding",
-        "comsol_mcp.lin2025_robust_campaign_inputs",
         "comsol_mcp.simulation_configuration",
         "comsol_mcp.standalone_driver_event",
         "comsol_mcp.standalone_licensed_acceptance",
@@ -200,15 +205,13 @@ def test_registry_is_complete_sorted_and_snapshot_stable():
         "comsol_mcp.standalone_pause_request",
         "comsol_mcp.standalone_status",
         "comsol_mcp.standalone_terminal",
-        "comsol_mcp.thermal_material_ledger",
-        "comsol_mcp.thermal_radiation_request",
         "comsol_mcp.thermo_optomechanical_replay_manifest",
         "comsol_mcp.wave_optics_point_audit",
     }
     assert set(names) == emitted | registry_only
     assert re.fullmatch(r"[0-9a-f]{64}", registry["registry_sha256"])
     assert registry["registry_sha256"] == (
-        "e1f53009aab790e9feffcbea00de1809b483be6279d2b460d7b2356853ac99f7"
+        "2297a1b8a4de38b92dd1a61a79733e09ee8cc497190ac787f4c01f4413b1430a"
     )
     assert registry["registry_sha256"] == get_schema_registry()["registry_sha256"]
     assert check_schema_support("comsol_mcp.session_startup_state", "1.0.0")["supported"] is True
@@ -303,13 +306,9 @@ def test_every_entry_declares_read_write_and_non_mutating_migration_policy():
     )
     assert physical["readable_versions"] == ["1.0.0", "1.1.0"]
     assert physical["writable_version"] == "1.1.0"
-    robust_manifest = next(
-        item
-        for item in get_schema_registry()["entries"]
-        if item["schema_name"] == "comsol_mcp.robust_shape_optimization_manifest"
-    )
-    assert robust_manifest["readable_versions"] == ["1.0.0", "1.1.0"]
-    assert robust_manifest["writable_version"] == "1.1.0"
+    assert not check_schema_support("comsol_mcp.robust_shape_optimization_manifest", "1.1.0")[
+        "supported"
+    ]
     robust_controls = next(
         item
         for item in get_schema_registry()["entries"]

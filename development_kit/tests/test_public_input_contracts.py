@@ -39,12 +39,10 @@ def test_job_submit_discovery_is_a_closed_finite_discriminated_union():
     assert set(spec["discriminator"]["mapping"]) == {
         "staged_sweep",
         "validation_matrix",
-        "spectral_characterization",
-        "convergence_campaign",
-        "branch_continuation_campaign",
+        "adjoint_optimization",
         "thermo_optomechanical_replay",
     }
-    assert len(spec["oneOf"]) == 6
+    assert len(spec["oneOf"]) == 4
     assert all(
         definition["additionalProperties"] is False for definition in schema["$defs"].values()
     )

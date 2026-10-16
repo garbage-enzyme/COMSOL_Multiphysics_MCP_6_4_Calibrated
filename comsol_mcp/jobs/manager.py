@@ -18,12 +18,8 @@ import psutil
 
 from .adjoint_optimization import expand_adjoint_optimization_manifest
 from .attached_backend import normalize_attached_execution_backend
-from .branch_continuation_campaign import normalize_branch_continuation_campaign_spec
-from .convergence_campaign import normalize_convergence_campaign_spec
 from .process_control import inspect_identity
 from .resource_admission import normalize_resource_policy
-from .robust_shape_optimization import expand_robust_shape_manifest
-from .spectral_characterization import normalize_spectral_characterization_job_spec
 from .store import (
     ACTIVE_STATES,
     JOB_SCHEMA_VERSION,
@@ -103,17 +99,22 @@ def _wait_for_launched_identity(process: subprocess.Popen, command: list[str]) -
 
 logger = logging.getLogger(__name__)
 
+REMOVED_RESEARCH_JOB_TYPES = frozenset({
+    "spectral_characterization", "convergence_campaign", "branch_continuation_campaign",
+    "robust_shape_optimization",
+})
+
+
+def _refuse_removed_job(job_type: object) -> None:
+    if isinstance(job_type, str) and job_type in REMOVED_RESEARCH_JOB_TYPES:
+        raise ValueError("Research job type removed in 0.8.0; use 0.7.8 for legacy execution")
+
 
 def _verify_source_identities(spec: dict[str, Any]) -> None:
     if spec["job_type"] in {"test_sequence", "surrogate_training"}:
         return
-    sources = (
-        [item["spectral_job"] for item in spec["levels"]]
-        if spec["job_type"] == "convergence_campaign"
-        else [item["spectral_job"] for item in spec["states"]]
-        if spec["job_type"] == "branch_continuation_campaign"
-        else [spec]
-    )
+    _refuse_removed_job(spec.get("job_type"))
+    sources = [spec]
     for source in sources:
         digest = hashlib.sha256()
         with Path(source["source_model_path"]).open("rb") as stream:
@@ -381,12 +382,8 @@ def _worker_module(job_type: str) -> str:
         "test_sequence": "comsol_mcp.jobs.sequence_worker",
         "staged_sweep": "comsol_mcp.jobs.worker",
         "validation_matrix": "comsol_mcp.jobs.validation_worker",
-        "spectral_characterization": "comsol_mcp.jobs.spectral_worker",
-        "convergence_campaign": "comsol_mcp.jobs.convergence_campaign_worker",
-        "branch_continuation_campaign": "comsol_mcp.jobs.branch_continuation_campaign_worker",
         "thermo_optomechanical_replay": "comsol_mcp.jobs.thermo_optomechanical_replay_worker",
         "adjoint_optimization": "comsol_mcp.jobs.adjoint_optimization_worker",
-        "robust_shape_optimization": "comsol_mcp.jobs.robust_shape_worker",
         "surrogate_training": "comsol_mcp.jobs.surrogate_training_worker",
     }
     try:
@@ -400,24 +397,10 @@ def _point_count(spec: dict[str, Any]) -> int:
         return len(spec["delays"])
     if spec["job_type"] == "validation_matrix":
         return len(spec["points"])
-    if spec["job_type"] == "spectral_characterization":
-        return int(spec["maximum_points"])
-    if spec["job_type"] == "convergence_campaign":
-        return int(spec["maximum_total_points"])
-    if spec["job_type"] == "branch_continuation_campaign":
-        return int(spec["maximum_total_points"])
     if spec["job_type"] == "thermo_optomechanical_replay":
         return int(spec["declared_stage_count"])
     if spec["job_type"] == "adjoint_optimization":
         return int(spec["optimizer"]["budget"]["max_iterations"])
-    if spec["job_type"] == "robust_shape_optimization":
-        return len(
-            [
-                row
-                for row in spec["condition_table"]["conditions"]
-                if row["active"] and row["objective_role"] == "objective"
-            ]
-        )
     if spec["job_type"] == "surrogate_training":
         return int(spec["maximum_epochs"])
     return len(spec["parameter_values"])
@@ -446,24 +429,17 @@ class JobManager:
 
     def submit(self, raw_spec: dict[str, Any]) -> dict[str, Any]:
         job_type = raw_spec.get("job_type") if isinstance(raw_spec, dict) else None
+        _refuse_removed_job(job_type)
         if job_type == "test_sequence":
             if not self.allow_test_jobs:
                 raise ValueError("test_sequence jobs are disabled")
             spec = _validate_test_spec(raw_spec)
         elif job_type == "validation_matrix":
             spec = normalize_validation_matrix_spec(raw_spec)
-        elif job_type == "spectral_characterization":
-            spec = normalize_spectral_characterization_job_spec(raw_spec)
-        elif job_type == "convergence_campaign":
-            spec = normalize_convergence_campaign_spec(raw_spec)
-        elif job_type == "branch_continuation_campaign":
-            spec = normalize_branch_continuation_campaign_spec(raw_spec)
         elif job_type == "thermo_optomechanical_replay":
             spec = normalize_thermo_optomechanical_replay_spec(raw_spec)
         elif job_type == "adjoint_optimization":
             spec = expand_adjoint_optimization_manifest(raw_spec)
-        elif job_type == "robust_shape_optimization":
-            spec = expand_robust_shape_manifest(raw_spec)
         elif job_type == "surrogate_training":
             spec = normalize_surrogate_training_spec(raw_spec)
         else:
@@ -471,12 +447,8 @@ class JobManager:
         worker_module = _worker_module(spec["job_type"])
         duplicate_job_types = {
             "validation_matrix",
-            "spectral_characterization",
-            "convergence_campaign",
-            "branch_continuation_campaign",
             "thermo_optomechanical_replay",
             "adjoint_optimization",
-            "robust_shape_optimization",
             "surrogate_training",
         }
         if spec["job_type"] in duplicate_job_types:
@@ -564,7 +536,7 @@ class JobManager:
                 state_record_error=state_record_error,
             ) from exc
         try:
-            self._arm_robust_wall_watchdog_if_required(
+            self._arm_native_wall_watchdog_if_required(
                 job_id,
                 spec,
                 attempt=1,
@@ -615,20 +587,9 @@ class JobManager:
                     execution_backend=None,
                 )
             return self._preflight_surrogate_training(spec)
-        model_path = (
-            spec["levels"][0]["spectral_job"]["source_model_path"]
-            if spec.get("job_type") == "convergence_campaign"
-            else spec["states"][0]["spectral_job"]["source_model_path"]
-            if spec.get("job_type") == "branch_continuation_campaign"
-            else spec["source_model_path"]
-        )
-        requested_version = (
-            spec["levels"][0]["spectral_job"].get("version")
-            if spec.get("job_type") == "convergence_campaign"
-            else spec["states"][0]["spectral_job"].get("version")
-            if spec.get("job_type") == "branch_continuation_campaign"
-            else spec.get("version")
-        )
+        _refuse_removed_job(spec.get("job_type"))
+        model_path = spec["source_model_path"]
+        requested_version = spec.get("version")
         execution_backend = spec.get("execution_backend")
         if self._preflight is not None:
             return self._preflight(
@@ -808,7 +769,7 @@ class JobManager:
                 )
             time.sleep(0.01)
 
-    def _arm_robust_wall_watchdog_if_required(
+    def _arm_native_wall_watchdog_if_required(
         self,
         job_id: str,
         spec: dict[str, Any],
@@ -818,14 +779,12 @@ class JobManager:
     ) -> dict[str, Any] | None:
         if spec.get("synthetic_mode") is not False:
             return None
-        if spec.get("job_type") == "robust_shape_optimization":
-            budget_seconds = int(spec["native_optimizer"]["budget"]["max_wall_time_seconds"])
-            budget_source = "native_optimizer.budget.max_wall_time_seconds"
-        elif spec.get("job_type") == "adjoint_optimization":
-            budget_seconds = int(spec["optimizer"]["budget"]["max_wall_time_seconds"])
-            budget_source = "optimizer.budget.max_wall_time_seconds"
-        else:
+        from .native_wall_watchdog import native_wall_budget
+
+        budget = native_wall_budget(spec)
+        if budget is None:
             return None
+        budget_source, budget_seconds = budget
         started_at = float(worker_identity["process_create_time"])
         deadline = started_at + budget_seconds
         directory = self.store.job_dir(job_id)
@@ -847,7 +806,7 @@ class JobManager:
         command = [
             sys.executable,
             "-m",
-            "comsol_mcp.jobs.robust_wall_watchdog",
+            "comsol_mcp.jobs.native_wall_watchdog",
             str(self.store.root),
             job_id,
             str(attempt),
@@ -1162,6 +1121,7 @@ class JobManager:
             if state["status"] not in {"failed", "interrupted", "cancelled"}:
                 raise ValueError("Only failed, interrupted, or cancelled jobs may be resumed")
             spec = self.store.read_spec(job_id)
+            _refuse_removed_job(spec.get("job_type"))
             if spec["job_type"] == "test_sequence" and not self.allow_test_jobs:
                 raise ValueError("test_sequence jobs are disabled")
             expected = spec.get("spec_fingerprint")
@@ -1175,35 +1135,12 @@ class JobManager:
         # outside this job's lock.  The second locked validation below prevents
         # two concurrent resume callers from both transitioning and launching.
         _verify_source_identities(spec)
-        if spec["job_type"] in {
-            "staged_sweep",
-            "validation_matrix",
-            "spectral_characterization",
-            "convergence_campaign",
-            "branch_continuation_campaign",
-            "thermo_optomechanical_replay",
-            "adjoint_optimization",
-            "robust_shape_optimization",
-            "surrogate_training",
-        }:
-            if self._preflight is None and spec.get("execution_backend") is None:
-                from comsol_mcp.tools.ownership import SolverOwnership
 
-                ownership = SolverOwnership(self.store.root.parent)
-                lease = ownership.status()["lease"]
-                if lease["state"] == "stale":
-                    payload = lease.get("lease") or {}
-                    if payload.get("owner") != f"job:{job_id}":
-                        raise RuntimeError(
-                            "Refusing to recover a stale lease that does not belong to this job"
-                        )
-                    recovered = ownership.recover_stale()
-                    if not recovered.get("success"):
-                        raise RuntimeError(f"Cannot recover this job's stale lease: {recovered}")
+        if spec["job_type"] != "test_sequence":
             preflight = self._run_preflight(spec)
             if not preflight.get("ready", preflight.get("success", False)):
-                raise RuntimeError(
-                    f"Resume preflight failed: {preflight.get('blockers') or preflight}"
+                raise ValueError(
+                    f"Job preflight failed: {preflight.get('blockers') or preflight}"
                 )
 
         with self.store.lock(job_id):
@@ -1252,7 +1189,7 @@ class JobManager:
             )
             raise
         try:
-            self._arm_robust_wall_watchdog_if_required(
+            self._arm_native_wall_watchdog_if_required(
                 job_id,
                 current_spec,
                 attempt=int(state["attempt"]),
@@ -1275,6 +1212,14 @@ class JobManager:
         }
 
     def status(self, job_id: str, *, refresh_probe: bool = False) -> dict[str, Any]:
+        legacy_spec = self.store.read_spec(job_id)
+        if legacy_spec.get("job_type") in REMOVED_RESEARCH_JOB_TYPES:
+            state = self.store.read_state(job_id)
+            return {
+                **state, "success": True, "job_id": job_id,
+                "legacy_execution": {"supported": False, "reason_code": "research_job_removed",
+                                     "legacy_version": "0.7.8", "analysis_replayed": False},
+            }
         # A cancellation coordinator must be able to acquire the durable lock
         # promptly.  Atomic state replacement makes this terminal observation
         # safe without taking the polling lock, and it avoids status callers
@@ -1335,63 +1280,6 @@ class JobManager:
                     "last_row_sha256": rows[-1]["row_sha256"] if rows else None,
                     "last_error_type": errors[-1]["error"]["type"] if errors else None,
                 }
-            elif spec.get("job_type") == "spectral_characterization":
-                from .spectral_rows import read_spectral_rows
-                from .spectral_stages import read_spectral_stage_plans
-
-                directory = self.store.job_dir(job_id)
-                rows = read_spectral_rows(
-                    directory / "spectral_rows.jsonl",
-                    spec,
-                    artifact_root=directory,
-                )
-                stages = read_spectral_stage_plans(directory, spec)
-                planned = sum(len(stage["requested_points"]) for stage in stages)
-                state["spectral_progress"] = {
-                    "maximum_points": spec["maximum_points"],
-                    "planned_points": planned,
-                    "complete_points": len(rows),
-                    "pending_planned_points": planned - len(rows),
-                    "stage_count": len(stages),
-                    "last_stage_sha256": stages[-1]["stage_sha256"] if stages else None,
-                    "last_row_sha256": rows[-1]["row_sha256"] if rows else None,
-                }
-            elif spec.get("job_type") == "convergence_campaign":
-                from .convergence_campaign_rows import read_convergence_campaign_levels
-
-                directory = self.store.job_dir(job_id)
-                rows = read_convergence_campaign_levels(
-                    directory / "convergence_levels.jsonl",
-                    spec,
-                    artifact_root=directory,
-                )
-                state["convergence_progress"] = {
-                    "declared_levels": len(spec["levels"]),
-                    "completed_levels": len(rows),
-                    "pending_levels": len(spec["levels"]) - len(rows),
-                    "completed_level_ids": [row["level_id"] for row in rows],
-                    "last_level_row_sha256": rows[-1]["row_sha256"] if rows else None,
-                    "maximum_total_points": spec["maximum_total_points"],
-                }
-            elif spec.get("job_type") == "branch_continuation_campaign":
-                from .branch_continuation_campaign_rows import (
-                    read_branch_continuation_campaign_states,
-                )
-
-                directory = self.store.job_dir(job_id)
-                rows = read_branch_continuation_campaign_states(
-                    directory / "continuation_states.jsonl",
-                    spec,
-                    artifact_root=directory,
-                )
-                state["branch_continuation_progress"] = {
-                    "declared_states": len(spec["states"]),
-                    "completed_states": len(rows),
-                    "pending_states": len(spec["states"]) - len(rows),
-                    "completed_state_ids": [row["state_id"] for row in rows],
-                    "last_state_row_sha256": rows[-1]["row_sha256"] if rows else None,
-                    "maximum_total_points": spec["maximum_total_points"],
-                }
             elif spec.get("job_type") == "thermo_optomechanical_replay":
                 from .thermo_optomechanical_replay_rows import (
                     read_thermo_optomechanical_stage_rows,
@@ -1410,29 +1298,6 @@ class JobManager:
                     "completed_stage_ids": [row["stage_id"] for row in rows],
                     "last_stage_row_sha256": rows[-1]["row_sha256"] if rows else None,
                     "declared_optical_points": spec["declared_optical_point_count"],
-                }
-            elif spec.get("job_type") == "robust_shape_optimization":
-                from .robust_shape_rows import read_robust_shape_rows
-
-                directory = self.store.job_dir(job_id)
-                rows = read_robust_shape_rows(
-                    directory / "robust_shape_rows.jsonl",
-                    job_fingerprint=spec["spec_fingerprint"],
-                )
-                condition_rows = [row for row in rows if row["kind"] == "condition"]
-                completed = {
-                    row["payload"]["condition_id"]
-                    for row in condition_rows
-                    if row["payload"]["status"] in {"completed", "skipped"}
-                }
-                declared = _point_count(spec)
-                state["robust_shape_progress"] = {
-                    "declared_conditions": declared,
-                    "completed_conditions": len(completed),
-                    "pending_conditions": declared - len(completed),
-                    "row_count": len(rows),
-                    "last_row_sha256": rows[-1]["row_sha256"] if rows else None,
-                    "cleanup_recorded": any(row["kind"] == "cleanup" for row in rows),
                 }
             if state.get("status") in TERMINAL_STATES:
                 # B13 warning-only post-run probe: cached after first terminal

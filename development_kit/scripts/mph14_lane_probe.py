@@ -37,7 +37,8 @@ SUITES = (
     "development_kit/tests/test_surrogate_manifests.py",
     "development_kit/tests/test_surrogate_training_job.py",
     "development_kit/tests/test_robust_adapter_configuration.py",
-    "development_kit/tests/test_robust_shape_worker.py",
+    "development_kit/tests/test_native_condition_matrix.py",
+    "development_kit/tests/test_native_condition_gradients.py",
 )
 
 

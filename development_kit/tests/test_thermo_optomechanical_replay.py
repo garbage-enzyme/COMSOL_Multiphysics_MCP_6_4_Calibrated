@@ -98,7 +98,7 @@ def test_licensed_fixture_manifest_is_valid_before_comsol_start(ascii_tmp_path):
     manifest = ascii_tmp_path / "submission.json"
     raw = licensed_gate._raw_spec(source, manifest, cores=1)
     spec = normalize_thermo_optomechanical_replay_spec(raw)
-    ledger = licensed_gate.normalize_thermal_material_ledger(licensed_gate._ledger())
+    ledger = licensed_gate._frozen_material_ledger()
     state = ledger["states"][0]
     assert state["classification"] == "assumed"
     assert state["uncertainty"]["relative_fraction"] == 0.01

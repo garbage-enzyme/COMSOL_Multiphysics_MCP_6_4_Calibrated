@@ -30,6 +30,37 @@ def _tool_names(server) -> list[str]:
     return sorted(tool.name for tool in asyncio.run(server.list_tools()))
 
 
+def test_removed_thermal_analysis_and_retained_training_surface():
+    removed = {
+        "thermal_kirchhoff_assess",
+        "thermal_radiation_evaluate",
+        "thermal_material_validate",
+        "thermal_material_evaluate",
+        "spectral_characterize",
+        "spectral_model_compare",
+        "convergence_evaluate",
+        "branch_continuation_plan",
+        "research_campaign_compile",
+        "research_optimizer_advance",
+        "research_robustness_plan",
+        "robust_shape_plan_preview",
+        "robust_shape_job_submit",
+        "robust_shape_evidence_inspect",
+        "robust_shape_evidence_verify",
+    }
+    for profile in PROFILE_NAMES:
+        names = set(_tool_names(create_server(f"removed-thermal-{profile}", profile=profile)))
+        assert names.isdisjoint(removed)
+    names = set(_tool_names(create_server("retained-training", profile="full")))
+    assert {
+        "surrogate_dataset_validate",
+        "surrogate_training_preview",
+        "surrogate_model_inspect",
+        "surrogate_model_verify",
+        "surrogate_prediction_validate",
+    } <= names
+
+
 def _call_tool(server, name: str, arguments: dict) -> dict:
     return decode_tool_result(asyncio.run(server.call_tool(name, arguments)))
 
@@ -53,13 +84,22 @@ def test_default_profile_is_core_after_h3_cutover(monkeypatch):
     server = create_server("default-core-profile-test")
 
     assert DEFAULT_PROFILE == "core"
-    assert len(_tool_names(server)) == 56
+    assert len(_tool_names(server)) == 52
     names = set(_tool_names(server))
     assert {"solver_status", "job_cancel", "model_load", "study_solve"} <= names
-    assert "spectral_characterize" in names
-    assert "spectral_model_compare" in names
-    assert "convergence_evaluate" in names
-    assert "branch_continuation_plan" in names
+    assert {
+        "spectral_characterize",
+        "spectral_model_compare",
+        "convergence_evaluate",
+        "branch_continuation_plan",
+        "research_campaign_compile",
+        "research_optimizer_advance",
+        "research_robustness_plan",
+        "robust_shape_plan_preview",
+        "robust_shape_job_submit",
+        "robust_shape_evidence_inspect",
+        "robust_shape_evidence_verify",
+    }.isdisjoint(names)
     assert {"evidence_integrity_status", "evidence_integrity_verify"} <= names
     assert {
         "wave_optics_preflight",
@@ -79,7 +119,7 @@ def test_invalid_profile_falls_back_to_core_with_explicit_provenance():
     assert selection.fallback_used is True
     assert selection.requested_name == "not-real"
     assert selection.source == "explicit_argument_invalid_profile_fallback"
-    assert len(_tool_names(server)) == 56
+    assert len(_tool_names(server)) == 52
 
 
 def test_environment_profile_is_normalized(monkeypatch):
@@ -92,7 +132,7 @@ def test_environment_profile_is_normalized(monkeypatch):
     assert selection.environment_variable == PROFILE_ENV_VAR
 
     server = create_server("environment-wave-profile-test")
-    assert len(_tool_names(server)) == 85
+    assert len(_tool_names(server)) == 77
     assert "wave_optics_field_datasets" in _tool_names(server)
     assert "wave_optics_field_extract" in _tool_names(server)
     assert "wave_optics_material_expression_preview" in _tool_names(server)
@@ -165,10 +205,10 @@ def test_profile_registration_has_no_cross_server_leakage():
     semantic = create_server("isolated-semantic", profile=semantic_selection)
     experimental = create_server("isolated-experimental", profile="experimental")
 
-    assert len(_tool_names(core)) == 56
-    assert len(_tool_names(full)) == 166
-    assert len(_tool_names(semantic)) == 59
-    assert len(_tool_names(experimental)) == 110
+    assert len(_tool_names(core)) == 52
+    assert len(_tool_names(full)) == 151
+    assert len(_tool_names(semantic)) == 55
+    assert len(_tool_names(experimental)) == 98
     assert _tool_names(core) != _tool_names(experimental)
     assert {"semantic_search", "semantic_status", "semantic_worker_reset"} <= set(
         _tool_names(semantic)
@@ -374,10 +414,10 @@ def test_capabilities_are_bound_to_each_server_profile(monkeypatch):
     wave_result = _call_tool(wave, "capabilities", {})
 
     assert core_result["active_profile"] == "core"
-    assert core_result["tool_count"] == 56
+    assert core_result["tool_count"] == 52
     assert core_result["profile_source"]["source"] == "explicit_argument"
     assert wave_result["active_profile"] == "wave_optics"
-    assert wave_result["tool_count"] == 85
+    assert wave_result["tool_count"] == 77
 
 
 @pytest.mark.parametrize("profile", ["core", "basic_fem", "wave_optics"])

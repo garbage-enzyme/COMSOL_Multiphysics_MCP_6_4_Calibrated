@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -14,6 +15,10 @@ from typing import Any, Callable
 from .process_control import contain_current_process_tree
 from .store import JobStore, cancel_request_targets_attempt, process_identity
 from .validation_rows import completed_point_fingerprints
+
+
+class NativeCleanupUnverified(RuntimeError):
+    """The native worker cannot prove retirement of its owned resources."""
 
 
 def _sha256_file(path: Path) -> str:
@@ -80,6 +85,7 @@ def _run(
     collector_executor: Callable[[dict[str, Any], dict[str, Any], Path], Any] | None = None,
     telemetry_provider: Callable[[str, str, Any, Path, float], dict[str, Any]] | None = None,
     native_cancel_enabled: bool = True,
+    java_environment_reader: Callable[[str], str | None] | None = None,
 ) -> int:
     worker_started = time.monotonic()
     store = JobStore(Path(root))
@@ -116,11 +122,54 @@ def _run(
     cancel_stop = threading.Event()
     cancel_thread: threading.Thread | None = None
     native_monitor_errors: list[Exception] = []
+    frozen_source: tempfile.TemporaryDirectory[str] | None = None
+    previous_temporary_directory = os.environ.get("COMSOL_TMPDIR")
+    requested_temporary_directory = spec.get("comsol_temporary_directory")
+    native_execution = any(
+        collector["name"] in {"native_condition_gradient", "native_condition_forward"}
+        for point in spec["points"]
+        for collector in point["collectors"]
+    )
+    native_completion_count: int | None = None
     try:
         source = Path(spec["source_model_path"])
         if _sha256_file(source) != spec["source_model_sha256"]:
             raise RuntimeError("Immutable validation source hash changed before client startup")
         completed_point_fingerprints(directory / "matrix_rows.jsonl", spec, artifact_root=directory)
+        if native_execution:
+            from comsol_mcp.contracts.startup_admission import evaluate_robust_startup_admission
+            from comsol_mcp.durable import atomic_write_json
+
+            from .native_wall_watchdog import await_native_wall_watchdog
+            from .resource_admission import collect_resource_telemetry
+
+            await_native_wall_watchdog(store, job_id, spec, attempt)
+            admission = evaluate_robust_startup_admission(
+                spec["startup_admission"],
+                collect_resource_telemetry(stage="pre_mesh", runtime_path=directory),
+            )
+            atomic_write_json(directory / "startup-admission.json", admission)
+            if admission["ready"] is not True:
+                raise RuntimeError(
+                    "Caller-declared native startup RAM/disk admission refused the job"
+                )
+            frozen_source = tempfile.TemporaryDirectory(
+                prefix="native-source-", dir=directory, delete=False
+            )
+            snapshot = Path(frozen_source.name) / "source.mph"
+            digest = hashlib.sha256()
+            with source.open("rb") as original, snapshot.open("xb") as copied:
+                for block in iter(lambda: original.read(1024 * 1024), b""):
+                    digest.update(block)
+                    copied.write(block)
+            if digest.hexdigest() != spec["source_model_sha256"]:
+                raise RuntimeError("Immutable native source changed before snapshot capture")
+            source = snapshot
+            if cancel_request_targets_attempt(store.read_control(job_id), attempt):
+                store.record_cooperative_cancel_observed(
+                    job_id, attempt=attempt, message="Stopped before native client startup"
+                )
+                return 0
         ownership = ownership_factory(store.root.parent, f"job:{job_id}")
         preflight = ownership.preflight(
             model_path=str(source),
@@ -133,7 +182,32 @@ def _run(
         if not claim.get("success"):
             raise RuntimeError(claim.get("error", "solver ownership claim failed"))
         lease_acquired = True
+        if requested_temporary_directory is not None:
+            os.environ["COMSOL_TMPDIR"] = requested_temporary_directory
         client = client_factory(spec)
+        if requested_temporary_directory is not None:
+            if java_environment_reader is None:
+                import jpype
+
+                def read_java_environment(name: str) -> str:
+                    return str(jpype.JClass("java.lang.System").getenv(name))
+
+                java_environment_reader = read_java_environment
+            observed = java_environment_reader("COMSOL_TMPDIR")
+            from comsol_mcp.durable import atomic_write_json
+
+            atomic_write_json(
+                directory / "comsol-temporary-directory.json",
+                {
+                    "control": "COMSOL_TMPDIR",
+                    "requested_path": requested_temporary_directory,
+                    "process_environment_path": os.environ.get("COMSOL_TMPDIR"),
+                    "java_environment_path": observed,
+                    "matches": observed == requested_temporary_directory,
+                },
+            )
+            if observed != requested_temporary_directory:
+                raise RuntimeError("COMSOL temporary directory readback mismatch")
         ownership.heartbeat(model_path=str(source), refresh_server_processes=True)
         model = client.load(str(source))
         model_name = str(model.name())
@@ -235,6 +309,7 @@ def _run(
                 expected_source_sha256=spec["source_model_sha256"],
                 session_state={"connected": True},
                 ownership_preflight=preflight,
+                cancel_requested=should_stop,
             )
 
         total = len(spec["points"])
@@ -285,15 +360,26 @@ def _run(
             raise RuntimeError(f"Expected {total} complete validation rows, found {completed}")
         if _sha256_file(source) != spec["source_model_sha256"]:
             raise RuntimeError("Immutable validation source hash changed after matrix execution")
+        if (
+            native_execution
+            and _sha256_file(Path(spec["source_model_path"])) != spec["source_model_sha256"]
+        ):
+            raise RuntimeError("Immutable native original source changed during matrix execution")
         current = store.read_state(job_id)["status"]
         if current == "smoke_running":
             store.update_state(job_id, "smoke_validated", event="first_point_validated")
-        store.update_state(
-            job_id,
-            "completed",
-            patch={"progress": {"completed": completed, "total": total}, "source_unchanged": True},
-            event="completed",
-        )
+        if native_execution:
+            native_completion_count = completed
+        else:
+            store.update_state(
+                job_id,
+                "completed",
+                patch={
+                    "progress": {"completed": completed, "total": total},
+                    "source_unchanged": True,
+                },
+                event="completed",
+            )
         return 0
     except Exception as exc:
         current = store.read_state(job_id)["status"]
@@ -319,11 +405,13 @@ def _run(
         return 1
     finally:
         cancel_stop.set()
+        cleanup_errors: list[str] = []
         native_cancel_active = False
         if cancel_thread is not None:
             cancel_thread.join(timeout=1.0)
             native_cancel_active = cancel_thread.is_alive()
             if native_cancel_active:
+                cleanup_errors.append("native_cancel_monitor_active")
                 print(
                     "Native cancel thread is still active; preserving client and lease",
                     file=sys.stderr,
@@ -339,20 +427,86 @@ def _run(
             try:
                 client.clear()
             except Exception as exc:
+                cleanup_errors.append(f"client_clear:{type(exc).__name__}")
                 print(f"Client clear warning: {exc}", file=sys.stderr, flush=True)
             if getattr(client, "port", None):
                 try:
                     client.disconnect()
                 except Exception as exc:
+                    cleanup_errors.append(f"client_disconnect:{type(exc).__name__}")
                     print(f"Client disconnect warning: {exc}", file=sys.stderr, flush=True)
-        if ownership is not None and lease_acquired and not native_cancel_active:
-            release = ownership.release()
-            if not release.get("success"):
-                print(json.dumps(release, ensure_ascii=False), file=sys.stderr, flush=True)
+        if (
+            ownership is not None
+            and lease_acquired
+            and not native_cancel_active
+            and not (native_execution and cleanup_errors)
+        ):
+            try:
+                release = ownership.release()
+                if not release.get("success"):
+                    cleanup_errors.append("lease_release_refused")
+                    print(json.dumps(release, ensure_ascii=False), file=sys.stderr, flush=True)
+            except Exception as exc:
+                if not native_execution:
+                    raise
+                cleanup_errors.append(f"lease_release:{type(exc).__name__}")
+        if not native_cancel_active and not (native_execution and cleanup_errors):
+            if frozen_source is not None:
+                try:
+                    Path(frozen_source.name).resolve().relative_to(directory.resolve())
+                    frozen_source.cleanup()
+                except Exception as exc:
+                    if not native_execution:
+                        raise
+                    cleanup_errors.append(f"source_snapshot_cleanup:{type(exc).__name__}")
+        if not native_cancel_active:
+            if requested_temporary_directory is not None:
+                if previous_temporary_directory is None:
+                    os.environ.pop("COMSOL_TMPDIR", None)
+                else:
+                    os.environ["COMSOL_TMPDIR"] = previous_temporary_directory
+        if native_execution:
+            from comsol_mcp.durable import atomic_write_json
+
+            cleanup = {"success": not cleanup_errors, "errors": cleanup_errors}
+            atomic_write_json(directory / "native-worker-cleanup.json", cleanup)
+            patch: dict[str, Any] = {
+                "owned_cleanup": cleanup,
+                "cleanup_pending": bool(cleanup_errors),
+            }
+            current = store.read_state(job_id)["status"]
+            if native_completion_count is not None and current not in {
+                "cancel_requested",
+                "cancelling",
+            }:
+                patch["progress"] = {
+                    "completed": native_completion_count,
+                    "total": native_completion_count,
+                }
+                if cleanup_errors:
+                    patch["last_error"] = {
+                        "type": "NativeCleanupUnverified",
+                        "message": "Native owned resources could not be proved cleaned.",
+                    }
+                else:
+                    patch["source_unchanged"] = True
+                store.update_state(
+                    job_id,
+                    "failed" if cleanup_errors else "completed",
+                    patch=patch,
+                    event="owned_cleanup_unverified" if cleanup_errors else "completed",
+                )
+            else:
+                store.update_state(job_id, patch=patch, event="owned_cleanup_recorded")
+            if cleanup_errors:
+                raise NativeCleanupUnverified("Native owned cleanup remains unverified")
 
 
 def run(root: str, job_id: str) -> int:
-    return _run(root, job_id)
+    try:
+        return _run(root, job_id)
+    except NativeCleanupUnverified:
+        return 1
 
 
 if __name__ == "__main__":

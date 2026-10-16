@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from comsol_mcp.research.robust_adapter_configuration import (
+from comsol_mcp.contracts.condition_adapter import (
     SCHEMA_NAME,
     normalize_robust_shape_adapter_configuration,
 )
-from comsol_mcp.research.robust_condition_controls import (
+from comsol_mcp.contracts.condition_controls import (
     normalize_robust_condition_controls,
 )
 from development_kit.tests.test_lin2025_pedot_backend import (

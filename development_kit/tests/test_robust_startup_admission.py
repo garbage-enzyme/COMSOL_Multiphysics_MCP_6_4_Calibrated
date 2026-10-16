@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from comsol_mcp.research.robust_startup_admission import (
+from comsol_mcp.contracts.startup_admission import (
     evaluate_robust_startup_admission,
     normalize_robust_startup_policy,
 )

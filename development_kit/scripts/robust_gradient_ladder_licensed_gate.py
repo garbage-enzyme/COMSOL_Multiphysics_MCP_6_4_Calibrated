@@ -17,11 +17,11 @@ from typing import Any, Callable
 
 import psutil
 
+from comsol_mcp.contracts.gradient_contracts import normalize_native_optimizer_configuration
 from comsol_mcp.durable import atomic_write_json
-from comsol_mcp.research.gradient_contracts import normalize_native_optimizer_configuration
-from comsol_mcp.research.robust_gradient_acceptance import assess_licensed_gradient_ladder
-from comsol_mcp.research.robust_optimizer_policy import assess_robust_optimizer_execution
 from comsol_mcp.tools.ownership import SolverOwnership
+from development_kit.scripts.native_gradient_gate_checks import assess_licensed_gradient_ladder
+from development_kit.scripts.native_optimizer_gate_checks import assess_robust_optimizer_execution
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_NAME = "comsol_mcp.robust_gradient_ladder_licensed_gate"

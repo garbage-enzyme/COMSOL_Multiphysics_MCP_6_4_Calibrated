@@ -1419,11 +1419,56 @@ def test_resume_preflight_can_read_job_summaries_without_self_lock_delay(jobs_ro
     assert result["attempt"] == 2
 
 
+def test_resume_preflight_refusal_preserves_durable_state(jobs_root, monkeypatch):
+    source = jobs_root / "baseline.mph"
+    source.write_bytes(b"model")
+    calls = []
+
+    def preflight(**_kwargs):
+        calls.append("preflight")
+        return {"ready": False, "blockers": ["owner_busy"]}
+
+    manager = JobManager(jobs_root, preflight=preflight)
+    spec = validate_staged_sweep_spec(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "wl",
+            "parameter_values": [4.25],
+            "expressions": ["A"],
+        }
+    )
+    job_id = manager.store.create(
+        spec,
+        {
+            "schema_version": "1",
+            "status": "interrupted",
+            "attempt": 1,
+            "progress": {"completed": 0, "total": 1},
+        },
+    )
+    root = manager.store.job_dir(job_id)
+    before = {
+        path.name: path.read_bytes()
+        for path in root.iterdir()
+        if path.suffix in {".json", ".jsonl"}
+    }
+    monkeypatch.setattr(manager, "_launch_worker", lambda *_args: calls.append("launch"))
+    with pytest.raises(ValueError, match="owner_busy"):
+        manager.resume(job_id)
+    assert calls == ["preflight"]
+    assert {
+        path.name: path.read_bytes()
+        for path in root.iterdir()
+        if path.suffix in {".json", ".jsonl"}
+    } == before
+
+
 @pytest.mark.parametrize("during_preflight", [False, True])
 @pytest.mark.parametrize(
     "job_type", ["staged_sweep", "convergence_campaign", "branch_continuation_campaign"]
 )
-def test_resume_rejects_changed_source_without_launch_or_attempt_change(
+def test_resume_rejects_changed_source_or_removed_job_without_state_change(
     jobs_root, monkeypatch, during_preflight, job_type
 ):
     source = jobs_root / "baseline.mph"
@@ -1474,9 +1519,10 @@ def test_resume_rejects_changed_source_without_launch_or_attempt_change(
     monkeypatch.setattr(manager, "_launch_worker", lambda *_args: calls.append("launch"))
     if not during_preflight:
         source.write_bytes(b"changed")
-    with pytest.raises(ValueError, match="source SHA-256"):
+    rejection = "source SHA-256" if job_type == "staged_sweep" else "removed in 0.8.0"
+    with pytest.raises(ValueError, match=rejection):
         manager.resume(job_id)
-    assert calls == (["preflight"] if during_preflight else [])
+    assert calls == (["preflight"] if during_preflight and job_type == "staged_sweep" else [])
     assert manager.store.read_state(job_id) == before
 
 

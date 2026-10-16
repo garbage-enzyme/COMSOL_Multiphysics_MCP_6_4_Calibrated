@@ -495,21 +495,12 @@ def test_production_runtime_guards_survive_python_optimization():
     assert assert_statements == []
 
     code = """
-from src.evidence.spectral_characterization import _fit_candidate
+from comsol_mcp.contracts.adapter_values import _identifier
 
 try:
-    _fit_candidate(
-        method='local_polynomial_fit',
-        wavelengths=[1.0, 2.0, 3.0],
-        oriented=[0.0, 1.0, 0.0],
-        candidate_index=1,
-        support_count=3,
-        baseline=0.0,
-        polynomial_degree=None,
-        max_evaluations=10,
-    )
+    _identifier('invalid/control', 'native control')
 except ValueError as exc:
-    if str(exc) != 'polynomial_degree is required for local_polynomial_fit':
+    if str(exc) != 'native control must be a bounded identifier':
         raise
 else:
     raise SystemExit('optimized Python skipped the production runtime guard')

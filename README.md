@@ -149,7 +149,7 @@ a crash before the session is saved.
   General, and Weak Form PDE interfaces, and atomic boundary batches with exact
   type and property allowlists.
 - **Safe solver ownership.** An ASCII-path lease, process identity checks, external-client detection, status, and preflight checks prevent accidental competing COMSOL clients.
-- **Durable background work.** Detached workers run staged sweeps and adaptive spectral characterization. They preserve immutable specifications, atomic state, fsync'd evidence rows, checkpoints, validated resume, and verified same-host cancellation. The [local launcher](launcher/README.md) provides the same point-boundary pattern for project drivers.
+- **Durable background work.** Detached workers execute caller-declared staged sweeps and validation matrices. They preserve immutable specifications, atomic state, durable evidence rows, checkpoints, validated resume, and verified cancellation. The [local launcher](launcher/README.md) supports project drivers.
 - **Bounded native adjoint optimization (experimental).** An `adjoint_optimization`
   durable job supports one allowlisted fixed-topology periodic-MIM adapter with
   validated COMSOL-native gradients and GCMMA. Every request must declare its
@@ -242,45 +242,44 @@ Restart after changing it.
 | `experimental` | Explicit opt-in generic creation, async, property escape hatches, and project helpers. |
 | `full` | Broad compatibility/discovery surface containing every non-feature-gated tool. |
 
-The `experimental` and `full` profiles expose three solver-free alpha7 research
-preparation tools. `research_campaign_compile` turns a complete goal, frozen
-design space, and explicit approval into a fingerprinted manifest. It never
-starts a solver. `research_robustness_plan` creates a centered one-axis-at-a-time
-perturbation matrix and rejects candidates that would require bound clipping.
-`research_optimizer_advance` is a stateless checkpoint/feedback step for the
-experimental adaptive backend. Clients own the returned checkpoint and can
-resume exact proposals after a restart.
-These tools prepare evidence-safe work. They do not start an autonomous
-campaign, change materials, claim success without caller tolerances, or make
-RCWA mandatory when an independent adapter is not applicable.
+Version 0.8 removes the research campaign, optimizer, robustness, spectral,
+convergence, thermal-analysis, and robust-shape tools from discovery. There are
+no compatibility wrappers. Use the accepted 0.7.8 package when a workflow still
+requires those tools. Callers own analysis, candidate selection, aggregate
+objectives, and scientific acceptance. Training and surrogate/ONNX tools remain
+in MCP.
 
-The same two profiles expose the alpha7.2 robust-shape workflow through four
-bounded experimental tools. `robust_shape_plan_preview` validates and
-summarizes a hash-pinned manifest without admission or solver startup.
-`robust_shape_job_submit` routes only through the durable job authority.
-`robust_shape_evidence_inspect` returns a path-redacted bounded journal
-summary. And `robust_shape_evidence_verify` checks immutable specification
-identity, hash-chain ordering, condition completeness, validated gradients,
-fresh-forward optimizer evidence, finalist validation, checkpoints, and
-cleanup. They expose no generic Java property mutation and remain absent from
-`core`, `basic_fem`, and `wave_optics`.
+| Removed responsibility | Removed tools |
+| --- | --- |
+| Thermal analysis | `thermal_kirchhoff_assess`, `thermal_material_evaluate`, `thermal_material_validate`, `thermal_radiation_evaluate` |
+| Spectral analysis | `spectral_characterize`, `spectral_model_compare` |
+| Convergence and continuation | `convergence_evaluate`, `branch_continuation_plan` |
+| Research strategy | `research_campaign_compile`, `research_robustness_plan`, `research_optimizer_advance` |
+| Robust campaigns | `robust_shape_plan_preview`, `robust_shape_job_submit`, `robust_shape_evidence_inspect`, `robust_shape_evidence_verify` |
 
-Finalist validation policy schema `1.1.0` keeps legacy `1.0.0` readable and
-adds caller-owned baseline/finer mesh references plus an explicit maximum
-independent-COMSOL condition delta. A licensed finalist uses fresh derived
-models for 24 baseline conditions, 24 finer-mesh conditions, and 96 declared
-off-design conditions. It persists the external-fidelity receipt separately,
-binds it into the tamper-evident finalist receipt, and cannot reach completed
-state until finalist, checkpoint, and current-attempt cleanup evidence agree.
+The retained `job_spec_preview` and `job_submit` tools accept a
+`validation_matrix` point with the `native_condition_forward` or
+`native_condition_gradient` collector. Their `inputs` use
+`comsol_mcp.native_condition_forward_request` or
+`comsol_mcp.native_condition_gradient_request`, respectively, at version `1.0.0`:
+`support`, `shape_policy`, `adapter_configuration`, `condition_table`, and
+`initial_values` bind one explicit condition and candidate. The point wavelength,
+incidence, source hash, observable, and mesh bound must match that request.
+The current native adapter is `lin2025_pedot_cylinder_v1`.
+Forward collection retains condition-controls versions `1.0.0` through `1.5.0`.
+Gradient collection requires the explicit sensitivity controls in `1.4.0` or `1.5.0`.
+Forward collection does not run a gradient solve.
 
-For a licensed robust run, optimizer configuration schema `1.1.0` keeps every
-condition solve and adjoint in COMSOL while driving the aggregate objective with
-an explicit outer-loop GCMMA state. The caller supplies an ASCII path and exact
-SHA-256 for the separately obtained pure-Python `mmapy 0.3.1` wheel. The wheel
-is hash-checked and loaded only on this experimental execution path. It is not
-installed, bundled, imported by discovery, or silently replaced by MMA/CCSAQ.
-Every proposal, nonconservative inner revision, accepted fresh-forward result,
-move limit, and true condition-solve budget is durable and fingerprinted.
+Native execution requires an explicit COMSOL version, startup RAM/disk policy,
+and resource policy. Out-of-core execution also requires the caller's existing
+absolute ASCII `comsol_temporary_directory`; the worker verifies Java's
+`COMSOL_TMPDIR` readback. MCP retains source snapshots, sole solver ownership,
+wall watchdogs, cancellation, recovery checks, and derived-model cleanup.
+Both collectors persist forward observations, control readbacks, and cleanup
+evidence. The gradient collector also persists raw complex gradients.
+Their manifests report `native_unchecked` and
+`UNVALIDATED`. Callers must perform independent gradient and scientific
+validation before accepting those results.
 
 Robust condition-controls schema `1.4.0` retains readable `1.3.0` mesh-reference
 controls and additionally binds the native Sensitivity study features, regenerated
@@ -419,37 +418,6 @@ mesh identity, and each level's exact property map must match before a completed
 level can be skipped. CSV and checkpoint failures are terminal persistence
 outcomes for that level and never trigger another solve.
 
-For an adaptive spectrum, submit `job_type: "spectral_characterization"` with
-an explicit source/configuration identity, initial wavelength grid, expansion
-and refinement policies, collector configuration, scientific tolerances, and
-point/stage/resource caps. The worker solves one wavelength at a time, persists
-the complete point audit and its hash-chained row before advancing, and freezes
-every requested stage so an exact resume neither regenerates the plan nor
-duplicates completed wavelengths. Resubmission observes an existing job only
-when its normalized specification, collector, source, and exact worker-driver
-identity match.
-
-Execution status and scientific interpretation are separate. A job can finish
-with `status: "completed"` while its `scientific_disposition` is `residual` or
-`unresolved_at_declared_cap`. Boundary peaks, missing brackets, fit sensitivity,
-and exhausted expansion budgets are scientific non-acceptance outcomes, not
-worker failures. `accepted` requires complete hash-resolvable raw evidence.
-Partial interrupted or cancelled rows remain diagnostic, and cancellation is
-terminal only after worker, descendants, port, lease, and cleanup evidence pass.
-Spectral summaries retain raw R/T/A, closure, wavelength synchronization, mesh
-counts, own-peak, FWHM, Q, stage hashes, and exact artifact references when the
-declared collector and evidence support those quantities.
-
-The solver-free `spectral_model_compare` tool compares two or three declared
-scalar line-shape models on exactly the same spectral rows, support, baseline,
-response, polarity, coordinate domain, and quality policy. It supports local
-polynomial, Lorentzian, and Fano fits in wavelength, frequency, angular-frequency,
-or energy coordinates, then maps peak and half-prominence crossings back to the
-original wavelength evidence. It reports fit diagnostics, support sensitivity,
-AIC, AICc when defined, BIC, deltas, and descriptive Akaike weights. These rank
-model support only. They do not prove Lorentzian physics, Fano interference,
-mode identity, or scientific acceptance.
-
 Three solver-free preview tools make configuration review explicit before any
 COMSOL admission or mutation. `simulation_configuration_validate` accepts a
 closed typed contract for source/producer identity, geometry semantics, ordered
@@ -463,36 +431,9 @@ semantic, label-only, or unavailable. Labels never become physical identity.
 checks, requirements, and declared submit-time side effects without admission,
 ownership acquisition, filesystem writes, process creation, or solver startup.
 
-The solver-free `thermal_kirchhoff_assess` tool permits directional
-absorptivity-to-emissivity substitution only when the exact channel has verified
-linearity, time invariance, reciprocity, local equilibrium, direction, frequency,
-and polarization evidence. Unknown facts remain conditional or unavailable, and
-nonreciprocal channels are not applicable. `thermal_radiation_evaluate` applies
-the SI Planck law with explicit wavelength/frequency/wavenumber Jacobians,
-projected-solid-angle integration, scalar, incoherent TE/TM, or Stokes/Mueller
-polarization, and bounded gas/aperture/optics/analyzer/detector kernels. Its
-hash-bound evidence records coverage, integration policy, extrapolation state,
-uncertainty, source artifacts, and detector/reference/background signals. It
-does not replace COMSOL's Surface-to-Surface Radiation solver.
-
-Absorptivity requests must declare `absorptivity_evidence_sha256` and
-`channel_identity_sha256`. The evidence hash must identify a source artifact.
-The Kirchhoff receipt must match both hashes, propagation direction, polarization
-basis, and source handedness. Stokes Q, U, and V can be negative.
-Their combined magnitude must not exceed I. Scalar and TE/TM values remain in [0, 1].
-
-The solver-free `thermal_material_validate` and `thermal_material_evaluate`
-tools use a versioned ledger instead of embedding a material database. Each
-state binds material/sample identity, phase and fabrication state, source,
-spectral/temperature validity, uncertainty, measurement conditions, and whether
-the data are measured, fitted, or assumed. Typed entries cover n/k and complex
-permittivity tables plus Drude, Lorentz, TOLO, and thermo-optic models. State IDs
-remain distinct across carrier density, mobility, effective mass, and phase
-fraction. Declared phase/discontinuity boundaries are never smoothed through.
-The internal convention is `exp(-i*omega*t)` with passive `Im(epsilon)>=0`.
-COMSOL output is a mutation-free `exp(+i*omega*t)` conversion preview containing
-exact target property/function tags, units, interpolation/extrapolation policy,
-table hashes, readback expectations, and rollback requirements.
+Version 0.8.0 removes the standalone thermal-radiation and thermal-material analysis tools.
+Use version 0.7.8 in a separate environment if these tools are required.
+COMSOL material operations and native thermal-to-optical execution remain available.
 
 A licensed durable thermal-to-optical replay uses
 `job_type: "thermo_optomechanical_replay"` plus an ASCII JSON
@@ -514,33 +455,6 @@ fixture gate before use with research models.
 Set `model_contract.expressions.transfer_displacement_max` to measure transferred mesh displacement in the transfer study dataset.
 If omitted, the transfer stage uses the declared `displacement_max` expression in that same dataset.
 An unavailable expression fails the stage. The executor does not substitute a prior structural result.
-
-A durable convergence campaign uses `job_type: "convergence_campaign"` and an
-immutable ordered ladder of two to eight exact source or prebuilt derived model
-identities. Every level runs the accepted adaptive spectral job, persists its
-complete hash-bound artifacts, and enters the offline convergence evaluator only
-at its own bracketed peak. The caller supplies metrics, units, tolerances,
-governing-pair and declared-cap rules, total point/wall-time caps, and any early-
-acceptance permission. One solver owner and client serve the whole campaign.
-The worker never invents an extra level and resumes only verified complete level
-rows. This release does not apply arbitrary parameter setters inside a campaign.
-Prepare and verify derived model levels before submission.
-
-A durable branch-continuation campaign uses
-`job_type: "branch_continuation_campaign"` and an immutable sequence of two to
-sixteen exact source or prebuilt derived model states. Each state binds one
-coordinate value, polarization and material identities, the exact source and
-configuration hashes, and measured incidence readback from the periodic parent
-and both ports. Every coordinate runs its own adaptive spectrum and persists a
-hash-chained state row before the offline continuation planner can use it.
-Caller policy bounds the guard window, absolute wavelength domain, expansion
-count, total window, request grid, point count, wall time, and whether to stop at
-the first unresolved transition. Boundary-high and competing-candidate results
-remain residual or `unresolved_at_declared_cap`. The campaign never reports
-physical branch disappearance or starts an undeclared coordinate. One solver
-owner and client serve the campaign, and resume reuses only complete verified
-state spectra. This release supports exact/prebuilt models only and does not
-apply arbitrary incidence or geometry setters inside the campaign.
 
 ### Wave Optics metasurfaces
 
@@ -601,6 +515,9 @@ python -m pytest -q -m integration development_kit/tests/integration
 Real COMSOL checks cover localized JSON transport, circle/union geometry, DXF import, parametric sweep properties, multiphysics coupling, clone cleanup, and Unicode-path saving. They also cover solver ownership, durable interruption/restart/resume/cancellation, profile discovery, Wave Optics preflight, one-point audit, and bounded manual retrieval.
 
 The Python 3.14 licensed parallel-plate regression returns **1.8593794419540677 pF**, versus the theoretical **1.8593794406880002 pF**, on COMSOL **6.4.0.293**.
+
+The following spectral, convergence, and continuation receipts describe historical 0.7.8 capabilities.
+They do not establish 0.8.0 acceptance or restore removed tools.
 
 Licensed adaptive spectral acceptance on the same COMSOL build used a neutral
 air-dielectric-air periodic-port slab with 4,798 elements and 1,039 vertices.
@@ -731,7 +648,7 @@ This is a COMSOL 6.4.0.293 standalone/clientapi compatibility and reliability fo
 | COMSOL API target | Direct `com.comsol.model.Model` API assumptions. | MPh 1.3.1 standalone `model.java` clientapi wrappers, including their different overloads, tags, lists, and Java-string transport. |
 | Tool surface | Broad feature discovery by default. | Compact `core` default. Larger construction and compatibility surfaces require an explicit profile. |
 | Solver concurrency | No same-host ownership protocol. | Process-aware lease, external-client detection, status, preflight, and stale-lease recovery that never kills an unowned process. |
-| Long runs | Interactive/current-process workflows. | Detached durable sweeps and adaptive spectra with immutable specs, fsync'd evidence rows, frozen stages, validated resume, and verified cancellation cleanup. |
+| Long runs | Interactive/current-process workflows. | Detached sweeps and validation matrices with immutable specifications, durable evidence rows, validated resume, and verified cancellation cleanup. |
 | Wave Optics | General tools only. | A dedicated preflight plus one-point evidence audit for periodic metasurfaces, with raw evidence separated from caller policy. |
 | Manual search | No bounded manual retrieval. | Bounded isolated lexical manual retrieval is the production default. Experimental semantic retrieval is isolated and explicitly not promoted. The legacy in-process ChromaDB path has been removed. |
 | Windows paths | No special guarantee for Unicode save paths. | Clientapi Java save path for Unicode `.mph` saves. ASCII-only runtime/index roots for native and durable artifacts. |
@@ -742,11 +659,9 @@ Use this fork when the upstream server fails under MPh standalone with errors su
 
 This repository is distributed under the [MIT License](LICENSE). COMSOL,
 licensed manuals, third-party models, papers, and datasets are not relicensed by
-this repository. The optional external `mmapy` GCMMA/MMA wheel remains under
-GPL-3.0-or-later and is neither copied into nor distributed with this package.
-We thank Krister Svanberg for MMA/GCMMA and Arjen Deetman for the reviewed Python
-implementation. Users of that execution path should retain their license and
-citation notices.
+this repository. Version 0.8.0 removes the external `mmapy` execution path.
+The historical optional wheel uses GPL-3.0-or-later and is not distributed with this package.
+We acknowledge Krister Svanberg for MMA/GCMMA and Arjen Deetman for the Python implementation.
 
 ## Publication and citation
 

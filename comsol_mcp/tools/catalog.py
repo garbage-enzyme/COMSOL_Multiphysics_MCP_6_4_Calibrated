@@ -251,10 +251,6 @@ _TOOLS_BY_REGISTRAR = {
         "semantic_status",
         "semantic_worker_reset",
     ),
-    "comsol_mcp.tools.spectral_characterization.register_spectral_characterization_tools": (
-        "spectral_characterize",
-        "spectral_model_compare",
-    ),
     "comsol_mcp.tools.mph_inspection.register_mph_inspection_tools": (
         "mph_diff",
         "mph_inspect",
@@ -274,31 +270,6 @@ _TOOLS_BY_REGISTRAR = {
     "comsol_mcp.tools.configuration.register_configuration_tools": (
         "simulation_configuration_validate",
         "simulation_configuration_diff",
-    ),
-    "comsol_mcp.tools.thermal_radiation.register_thermal_radiation_tools": (
-        "thermal_kirchhoff_assess",
-        "thermal_radiation_evaluate",
-    ),
-    "comsol_mcp.tools.thermal_material.register_thermal_material_tools": (
-        "thermal_material_validate",
-        "thermal_material_evaluate",
-    ),
-    "comsol_mcp.tools.convergence_evaluation.register_convergence_evaluation_tools": (
-        "convergence_evaluate",
-    ),
-    "comsol_mcp.tools.branch_continuation.register_branch_continuation_tools": (
-        "branch_continuation_plan",
-    ),
-    "comsol_mcp.tools.research.register_research_tools": (
-        "research_campaign_compile",
-        "research_optimizer_advance",
-        "research_robustness_plan",
-    ),
-    "comsol_mcp.tools.robust_shape.register_robust_shape_tools": (
-        "robust_shape_plan_preview",
-        "robust_shape_job_submit",
-        "robust_shape_evidence_inspect",
-        "robust_shape_evidence_verify",
     ),
     "comsol_mcp.tools.shared_session.register_shared_session_tools": (
         "shared_server_preflight",
@@ -363,19 +334,12 @@ _GROUP_BY_REGISTRAR = {
     "register_visual_review_tools": "visual_review",
     "register_field_evidence_tools": "field_evidence",
     "register_semantic_doc_tools": "semantic_docs",
-    "register_spectral_characterization_tools": "spectral_evidence",
     "register_configuration_tools": "configuration_evidence",
     "register_mph_inspection_tools": "mph_inspection",
     "register_model_identity_tools": "model_identity",
     "register_compatibility_registry_tools": "compatibility_registry",
     "register_offline_export_tools": "offline_export",
     "register_surrogate_tools": "surrogate_evidence",
-    "register_thermal_radiation_tools": "thermal_radiation_evidence",
-    "register_thermal_material_tools": "thermal_material_evidence",
-    "register_convergence_evaluation_tools": "convergence_evidence",
-    "register_branch_continuation_tools": "branch_continuation_evidence",
-    "register_research_tools": "research_exploration",
-    "register_robust_shape_tools": "robust_shape_optimization",
     "register_shared_session_tools": "shared_session",
     "register_model_manager_tools": "model_manager",
     "register_knowledge_tools": "embedded_docs",
@@ -431,13 +395,6 @@ _EXPERIMENTAL_TOOLS = frozenset(
         "shared_model_unlock",
         "shared_model_snapshot",
         "shared_model_adopt",
-        "research_campaign_compile",
-        "research_optimizer_advance",
-        "research_robustness_plan",
-        "robust_shape_plan_preview",
-        "robust_shape_job_submit",
-        "robust_shape_evidence_inspect",
-        "robust_shape_evidence_verify",
         "model_manager_open",
         "model_manager_run",
         "model_manager_download",
@@ -452,7 +409,6 @@ _SIDE_EFFECTS = {
     "job_submit": "solver_execution",
     "job_cancel": "job_control",
     "job_resume": "solver_execution",
-    "robust_shape_job_submit": "solver_execution",
     "standalone_build": "filesystem_write",
     "standalone_start": "solver_execution",
     "standalone_pause": "job_control",
@@ -559,7 +515,6 @@ _STARTS_SOLVER = frozenset(
     {
         "job_submit",
         "job_resume",
-        "robust_shape_job_submit",
         "standalone_start",
         "standalone_resume",
         "comsol_start",
@@ -575,12 +530,10 @@ _STARTS_SOLVER = frozenset(
 
 _EXPLICIT_READ_ONLY_TOOLS = frozenset(
     {
-        "branch_continuation_plan",
         "capabilities",
         "catalog",
         "clientapi_property_get",
         "comsol_status",
-        "convergence_evaluate",
         "datasets_list",
         "docs_get",
         "docs_list",
@@ -637,20 +590,8 @@ _EXPLICIT_READ_ONLY_TOOLS = frozenset(
         "standalone_status",
         "standalone_tail",
         "standalone_results",
-        "spectral_characterize",
-        "spectral_model_compare",
         "simulation_configuration_validate",
         "simulation_configuration_diff",
-        "thermal_kirchhoff_assess",
-        "thermal_radiation_evaluate",
-        "thermal_material_validate",
-        "thermal_material_evaluate",
-        "research_campaign_compile",
-        "research_optimizer_advance",
-        "research_robustness_plan",
-        "robust_shape_plan_preview",
-        "robust_shape_evidence_inspect",
-        "robust_shape_evidence_verify",
         "study_get_progress",
         "study_list",
         "troubleshoot",
@@ -724,18 +665,8 @@ _SOLVER_FREE_TOOLS = frozenset(
         "visual_review_request_create",
         "visual_review_receipt_create",
         "visual_review_dual_evaluate",
-        "spectral_characterize",
-        "spectral_model_compare",
         "simulation_configuration_validate",
         "job_spec_preview",
-        "convergence_evaluate",
-        "branch_continuation_plan",
-        "research_campaign_compile",
-        "research_optimizer_advance",
-        "research_robustness_plan",
-        "robust_shape_plan_preview",
-        "robust_shape_evidence_inspect",
-        "robust_shape_evidence_verify",
         "geometry_fin_preview",
         "geometry_blocks_preview",
         "wave_optics_incidence_preview",
@@ -743,13 +674,6 @@ _SOLVER_FREE_TOOLS = frozenset(
         "standalone_tail",
         "standalone_results",
         "simulation_configuration_diff",
-        "thermal_kirchhoff_assess",
-        "thermal_radiation_evaluate",
-        "thermal_material_validate",
-        "thermal_material_evaluate",
-        "research_campaign_compile",
-        "research_optimizer_advance",
-        "research_robustness_plan",
     }
 )
 
@@ -758,7 +682,6 @@ _MODEL_REVISION_EXCLUSIONS = frozenset(
         "job_submit",
         "job_spec_preview",
         "job_resume",
-        "robust_shape_job_submit",
         "comsol_start",
         "comsol_connect",
         "comsol_disconnect",
@@ -864,12 +787,8 @@ _CORE_TOOLS = frozenset(
         "solutions_list",
         "datasets_list",
         "results_global_evaluate",
-        "spectral_characterize",
-        "spectral_model_compare",
         "simulation_configuration_validate",
         "job_spec_preview",
-        "convergence_evaluate",
-        "branch_continuation_plan",
     }
 )
 
@@ -940,10 +859,6 @@ _BASIC_FEM_ADDITIONS = frozenset(
         "standalone_tail",
         "standalone_results",
         "simulation_configuration_diff",
-        "thermal_kirchhoff_assess",
-        "thermal_radiation_evaluate",
-        "thermal_material_validate",
-        "thermal_material_evaluate",
     }
 )
 
@@ -974,10 +889,6 @@ _WAVE_OPTICS_ADDITIONS = frozenset(
         "visual_review_receipt_create",
         "visual_review_dual_evaluate",
         "simulation_configuration_diff",
-        "thermal_kirchhoff_assess",
-        "thermal_radiation_evaluate",
-        "thermal_material_validate",
-        "thermal_material_evaluate",
     }
 )
 
@@ -1029,14 +940,6 @@ _EXPERIMENTAL_ADDITIONS = frozenset(
         "standalone_tail",
         "standalone_results",
         "simulation_configuration_diff",
-        "thermal_kirchhoff_assess",
-        "thermal_radiation_evaluate",
-        "thermal_material_validate",
-        "thermal_material_evaluate",
-        "robust_shape_plan_preview",
-        "robust_shape_job_submit",
-        "robust_shape_evidence_inspect",
-        "robust_shape_evidence_verify",
     }
 )
 
