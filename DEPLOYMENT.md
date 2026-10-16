@@ -187,7 +187,7 @@ build/modules, license, scheduler, storage, and output requirements first.
 | `core` | Compact default control plane and lexical manuals. |
 | `basic_fem` | Conventional FEM construction, bounded exports, and the Python-free standalone launcher tools. |
 | `wave_optics` | Periodic optics, metasurfaces, bounded field discovery/extraction, preflight, and evidence audits. |
-| `experimental` | Explicit opt-in generic tools plus bounded robust-shape preview, durable submission, and evidence inspection/verification. |
+| `experimental` | Explicit opt-in generic tools and retained native execution contracts. |
 | `full` | Broad non-feature compatibility surface. Not recommended by default. |
 
 Select the profile in the Settings GUI. Developers and agents may set the
@@ -209,6 +209,13 @@ Use 0.7.8 when a workflow requires these tools. Compatibility wrappers are unava
 The README lists all removed tools and retained execution contracts.
 Native forward and gradient collection use `validation_matrix` through `job_submit`.
 Native optimization and training remain available under their declared contracts.
+Before switching environments, inspect the job store through the 0.7.8 host.
+Complete or cancel each active job in that environment.
+Verify terminal state, worker exit, solver lease release and cleanup evidence before switching.
+Keep 0.7.8 available until these checks pass.
+Version 0.8.0 reads removed job types as history only.
+It cannot cancel, resume or reconcile their execution.
+Preserve the original store and settings. Do not migrate their records in place.
 
 The standalone tools in `basic_fem` still run inside the normal Python MCP host. They build
 and control a separate native EXE whose target runtime needs only Windows

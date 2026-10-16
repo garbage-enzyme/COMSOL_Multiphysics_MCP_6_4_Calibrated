@@ -865,6 +865,7 @@ class JobManager:
         return armed
 
     def cancel(self, job_id: str, *, expected_attempt: int | None = None) -> dict[str, Any]:
+        _refuse_removed_job(self.store.read_spec(job_id).get("job_type"))
         request = self.store.request_cancel(
             job_id,
             requester_identity=process_identity(os.getpid()),
@@ -985,8 +986,12 @@ class JobManager:
         for directory in directories:
             job_id = directory.name
             try:
+                if self.store.read_spec(job_id).get("job_type") in REMOVED_RESEARCH_JOB_TYPES:
+                    continue
                 action: tuple[str, dict[str, Any]] | None = None
                 with self.store.lock(job_id, timeout=0.1):
+                    if self.store.read_spec(job_id).get("job_type") in REMOVED_RESEARCH_JOB_TYPES:
+                        continue
                     state = self.store.read_state(job_id)
                     control = self.store.read_control(job_id)
                     if state.get("status") not in {"cancel_requested", "cancelling"}:
@@ -1116,6 +1121,7 @@ class JobManager:
         return reconciled
 
     def resume(self, job_id: str) -> dict[str, Any]:
+        _refuse_removed_job(self.store.read_spec(job_id).get("job_type"))
         with self.store.lock(job_id):
             state = self.store.read_state(job_id)
             if state["status"] not in {"failed", "interrupted", "cancelled"}:

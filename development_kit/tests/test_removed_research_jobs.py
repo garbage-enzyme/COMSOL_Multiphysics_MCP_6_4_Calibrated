@@ -10,7 +10,12 @@ from comsol_mcp.jobs.manager import REMOVED_RESEARCH_JOB_TYPES, JobManager
 
 @pytest.mark.parametrize(
     "module",
-    ["spectral_worker", "convergence_campaign_worker", "branch_continuation_campaign_worker", "robust_shape_worker"],
+    [
+        "spectral_worker",
+        "convergence_campaign_worker",
+        "branch_continuation_campaign_worker",
+        "robust_shape_worker",
+    ],
 )
 def test_removed_workers_are_not_importable(module):
     assert importlib.util.find_spec("comsol_mcp.jobs." + module) is None
@@ -49,3 +54,43 @@ def test_removed_resume_preserves_legacy_record(ascii_tmp_path, job_type):
     assert observed["legacy_execution"]["analysis_replayed"] is False
     assert observed["legacy_execution"]["supported"] is False
     assert all((directory / name).read_bytes() == data for name, data in before.items())
+
+
+@pytest.mark.parametrize("job_type", sorted(REMOVED_RESEARCH_JOB_TYPES))
+@pytest.mark.parametrize("status", ["running", "cancel_requested", "cancelling"])
+def test_removed_active_job_is_immutable_on_start_status_and_cancel(
+    ascii_tmp_path, monkeypatch, job_type, status
+):
+    manager = JobManager(ascii_tmp_path / "jobs", reconcile_on_start=False)
+    job_id = manager.store.create({"job_type": job_type}, {"status": "running", "attempt": 1})
+    if status != "running":
+        manager.store.request_cancel(
+            job_id,
+            requester_identity={
+                "pid": 123,
+                "process_create_time": 1.0,
+                "command_signature": "legacy",
+            },
+        )
+    if status == "cancelling":
+        manager.store.update_state(job_id, new_status="cancelling")
+    directory = manager.store.job_dir(job_id)
+    before = {path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()}
+
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("Legacy execution must remain in its original environment")
+
+    monkeypatch.setattr(JobManager, "_launch_cancel_coordinator", refuse)
+    recovered = JobManager(manager.store.root)
+    assert {
+        path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()
+    } == before
+    observed = recovered.status(job_id, refresh_probe=True)
+    assert observed["status"] == status
+    assert observed["legacy_execution"]["supported"] is False
+    with pytest.raises(ValueError, match="removed in 0.8.0"):
+        recovered.cancel(job_id)
+    with pytest.raises(ValueError, match="removed in 0.8.0"):
+        recovered.resume(job_id)
+    after = {path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()}
+    assert after == before

@@ -139,7 +139,7 @@ comsol-mcp-settings --settings-path "D:\settings\settings.json" --remove-desktop
 | `core` | 紧凑默认控制面和词法手册检索。 |
 | `basic_fem` | 常规 FEM 构建、有界导出，以及无需 Python 的独立启动器工具。 |
 | `wave_optics` | 周期光学、超表面、有界场数据发现/提取、预检和证据审计。 |
-| `experimental` | 显式选择的通用工具，以及有界的鲁棒形状预览、durable 提交和证据检查/验证工具。 |
+| `experimental` | 显式选择的通用工具和保留的原生执行接口。 |
 | `full` | 宽泛的非 feature 兼容界面。默认不推荐。 |
 
 普通用户在设置界面选择 profile。开发者和 agent 可以在 JSON 的 `profile.name` 中设置
@@ -157,6 +157,13 @@ experimental 兼容工具，不能替代该生命周期。
 README 列出完整移除清单和保留的执行接口。
 原生 forward 和 gradient 收集通过 `job_submit` 的 `validation_matrix` 执行。
 原生优化和训练仍按各自声明的接口保留。
+切换环境前，使用 0.7.8 host 检查任务库。
+在该环境中完成或取消所有活动任务。
+确认任务进入终态、worker 已退出、求解器租约已释放，并保留清理证据后再切换。
+这些检查通过前，请保留可用的 0.7.8 环境。
+0.8.0 仅将已移除类型的任务作为历史记录读取。
+它不能取消、恢复或协调这些任务的执行。
+保留原始任务库和设置，不要原地迁移任务记录。
 
 `basic_fem` 中的独立启动器工具仍运行在普通 Python MCP host 中。它们负责构建和控制另一个原生
 EXE。目标机只需 Windows 10/11 x64 与已安装并授权的 COMSOL 6.4。EXE 不打包 COMSOL，
