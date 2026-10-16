@@ -16,6 +16,24 @@ from mcp import Client, ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.shared.exceptions import MCPError
 
+REMOVED_TOOLS = (
+    "spectral_characterize",
+    "spectral_model_compare",
+    "thermal_kirchhoff_assess",
+    "thermal_radiation_evaluate",
+    "thermal_material_validate",
+    "thermal_material_evaluate",
+    "convergence_evaluate",
+    "branch_continuation_plan",
+    "research_campaign_compile",
+    "research_optimizer_advance",
+    "research_robustness_plan",
+    "robust_shape_plan_preview",
+    "robust_shape_job_submit",
+    "robust_shape_evidence_inspect",
+    "robust_shape_evidence_verify",
+)
+
 
 def _sdk_attribute(value: Any, snake_case: str, legacy_alias: str, default: Any = None) -> Any:
     if hasattr(value, snake_case):
@@ -69,78 +87,29 @@ def _stdio_environment(workdir: Path) -> dict[str, str]:
     return environment
 
 
-def _validate_passive_evidence(capabilities: dict[str, Any], spectral: dict[str, Any]) -> bool:
+def _validate_passive_evidence(capabilities: dict[str, Any], preview: dict[str, Any]) -> bool:
     session_state = capabilities.get("session")
     if not isinstance(session_state, dict):
         raise RuntimeError("installed stdio probe omitted session-state evidence")
     if session_state.get("connected") is not False or session_state.get("starting") is not False:
         raise RuntimeError("installed stdio probe unexpectedly started COMSOL")
-    if spectral.get("solver_started") is not False:
+    guarantees = preview.get("preview_guarantees", {})
+    if guarantees.get("solver_started") is not False:
         raise RuntimeError("installed native probe did not prove solver absence")
-    if spectral.get("filesystem_modified") is not False:
+    if guarantees.get("filesystem_modified") is not False:
         raise RuntimeError("installed native probe did not prove filesystem passivity")
     return bool(session_state["connected"] or session_state["starting"])
 
 
-def _spectral_arguments() -> dict[str, Any]:
-    configuration_sha256 = "a" * 64
-    absorptions = (0.1, 0.5, 0.9, 0.5, 0.1)
-    rows = []
-    for index, absorption in enumerate(absorptions):
-        wavelength = 4.8e-6 + index * 0.1e-6
-        rows.append(
-            {
-                "row_id": f"point-{index:03d}",
-                "raw_row_sha256": hashlib.sha256(
-                    f"installed-stdio-native-{index}".encode()
-                ).hexdigest(),
-                "configuration_sha256": configuration_sha256,
-                "requested_wavelength_m": wavelength,
-                "evaluated_wavelength_m": wavelength,
-                "frequency_wavelength_m": wavelength,
-                "R": 0.95 - absorption,
-                "T": 0.05,
-                "A": absorption,
-            }
-        )
+def _preview_arguments() -> dict[str, Any]:
     return {
-        "bundle_spec": {
-            "bundle_id": "installed-stdio-native-matrix",
-            "source_model": {
-                "relative_identity": "fixtures/solver-free.mph",
-                "sha256": "b" * 64,
-            },
-            "configuration_sha256": configuration_sha256,
-            "parameter_state": {"probe": "native-runtime"},
-            "wavelength_convention": {
-                "unit": "m",
-                "requested_field": "requested_wavelength_m",
-                "evaluated_field": "evaluated_wavelength_m",
-                "frequency_derived_field": "frequency_wavelength_m",
-                "frequency_relation": "c_const/frequency",
-            },
-            "expressions": {"R": "R", "T": "T", "A": "1-R-T"},
-            "rows": rows,
-        },
-        "analysis_policy": {
-            "response_quantity": "A",
-            "candidate_polarity": "maximum",
-            "passivity_abs_tolerance": 1.0e-12,
-            "closure_abs_tolerance": 1.0e-12,
-            "wavelength_sync_abs_m": 1.0e-15,
-            "flat_response_abs_tolerance": 1.0e-12,
-            "minimum_point_count": 5,
-        },
-        "measurement_configuration": {
-            "peak_method": "measured_grid",
-            "baseline_rule": "local_prominence",
-            "baseline_response_value": None,
-            "fwhm_definition": "half_prominence",
-            "fit_support_points": None,
-            "fit_support_sensitivity_points": [],
-            "local_polynomial_degree": None,
-            "fit_max_evaluations": None,
-        },
+        "spec": {
+            "job_type": "staged_sweep",
+            "source_model_path": "fixtures/solver-free.mph",
+            "parameter_name": "wl",
+            "parameter_values": [5.0],
+            "expressions": ["R", "T"],
+        }
     }
 
 
@@ -180,6 +149,18 @@ async def _expect_rejection(
     }
 
 
+async def _verify_removed_tools(session: Any, names: list[str]) -> list[dict[str, Any]]:
+    if set(names).intersection(REMOVED_TOOLS):
+        raise RuntimeError("installed discovery exposes removed tools")
+    results = []
+    for name in REMOVED_TOOLS:
+        result = await _expect_rejection(session, case_id=name, tool_name=name, arguments={})
+        if not result["rejected"]:
+            raise RuntimeError(f"removed tool did not fail closed: {name}")
+        results.append(result)
+    return results
+
+
 async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, Any]:
     environment = _stdio_environment(workdir)
     parameters = StdioServerParameters(
@@ -198,6 +179,7 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
                 initialized = await session.initialize()
                 listed = await session.list_tools()
                 tool_names = sorted(tool.name for tool in listed.tools)
+                removed = await _verify_removed_tools(session, tool_names)
                 preflight_started = time.perf_counter()
                 preflight_result = await session.call_tool(
                     "solver_preflight",
@@ -208,21 +190,19 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
                 if _sdk_attribute(preflight_result, "is_error", "isError", False):
                     raise RuntimeError("installed cold solver_preflight call returned a tool error")
                 preflight = _tool_payload(preflight_result)
-                spectral_started = time.perf_counter()
-                spectral_result = await session.call_tool(
-                    "spectral_characterize",
-                    _spectral_arguments(),
+                preview_started = time.perf_counter()
+                preview_result = await session.call_tool(
+                    "job_spec_preview",
+                    _preview_arguments(),
                     read_timeout_seconds=15.0,
                 )
-                spectral_wall = time.perf_counter() - spectral_started
-                if _sdk_attribute(spectral_result, "is_error", "isError", False):
+                preview_wall = time.perf_counter() - preview_started
+                if _sdk_attribute(preview_result, "is_error", "isError", False):
+                    raise RuntimeError("installed cold job_spec_preview call returned a tool error")
+                preview = _tool_payload(preview_result)
+                if preview.get("success") is not True:
                     raise RuntimeError(
-                        "installed cold spectral_characterize call returned a tool error"
-                    )
-                spectral = _tool_payload(spectral_result)
-                if spectral.get("success") is not True:
-                    raise RuntimeError(
-                        f"installed cold spectral_characterize call failed safely: {spectral}"
+                        f"installed cold job_spec_preview call failed safely: {preview}"
                     )
                 capabilities_result = await session.call_tool(
                     "capabilities",
@@ -266,7 +246,7 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
         or preflight.get("filesystem_modified") is not False
     ):
         raise RuntimeError("installed Linux preflight did not refuse before native work")
-    comsol_client_started = _validate_passive_evidence(capabilities, spectral)
+    comsol_client_started = _validate_passive_evidence(capabilities, preview)
     names_payload = json.dumps(tool_names, separators=(",", ":")).encode("utf-8")
     return {
         "schema_name": "comsol_mcp.installed_stdio_probe",
@@ -298,16 +278,17 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
             "transport_wall_seconds": preflight_wall,
             "outcome": preflight.get("control_plane", {}).get("outcome"),
         },
-        "cold_native_tool_matrix": {
-            "spectral_characterize": {
-                "success": spectral["success"],
-                "classification": spectral["classification"],
-                "transport_wall_seconds": spectral_wall,
-                "solver_started": spectral["solver_started"],
-                "filesystem_modified": spectral["filesystem_modified"],
+        "cold_solver_free_tool_matrix": {
+            "job_spec_preview": {
+                "success": preview["success"],
+                "job_type": preview["job_type"],
+                "transport_wall_seconds": preview_wall,
+                "solver_started": preview["preview_guarantees"]["solver_started"],
+                "filesystem_modified": preview["preview_guarantees"]["filesystem_modified"],
             },
         },
         "malformed_request_matrix": malformed,
+        "removed_tool_matrix": removed,
         "comsol_client_started": comsol_client_started,
         "stderr_byte_count": stderr_path.stat().st_size,
         "paths_included": False,
@@ -324,13 +305,12 @@ async def _probe_modern(command: Path, workdir: Path) -> dict[str, Any]:
             raise RuntimeError("installed modern client did not select the target revision")
         listed = await client.list_tools()
         names = sorted(tool.name for tool in listed.tools)
+        removed = await _verify_removed_tools(client, names)
         capabilities = _tool_payload(await client.call_tool("capabilities", {}))
-        spectral = _tool_payload(
-            await client.call_tool("spectral_characterize", _spectral_arguments())
-        )
-        if spectral.get("success") is not True:
-            raise RuntimeError("installed modern offline spectral call failed")
-        started = _validate_passive_evidence(capabilities, spectral)
+        preview = _tool_payload(await client.call_tool("job_spec_preview", _preview_arguments()))
+        if preview.get("success") is not True:
+            raise RuntimeError("installed modern offline preview call failed")
+        started = _validate_passive_evidence(capabilities, preview)
         if capabilities["deployment_identity"]["source_classification"] != "installed_site_package":
             raise RuntimeError("installed modern stdio loaded source-tree code")
         rejected = await _expect_rejection(
@@ -352,6 +332,7 @@ async def _probe_modern(command: Path, workdir: Path) -> dict[str, Any]:
             "source_classification": "installed_site_package",
             "comsol_client_started": started,
             "malformed_request": rejected,
+            "removed_tool_matrix": removed,
         }
 
 

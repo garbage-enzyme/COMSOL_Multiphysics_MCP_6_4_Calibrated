@@ -16,8 +16,8 @@ from mcp.shared.exceptions import MCPError
 
 from development_kit.scripts.installed_stdio_probe import (
     _expect_rejection,
+    _preview_arguments,
     _probe_modern_isolated,
-    _spectral_arguments,
     _stdio_environment,
     _tool_payload,
     _validate_passive_evidence,
@@ -158,42 +158,43 @@ def test_explicit_protocol_error_is_accepted_as_rejection():
 
 
 @pytest.mark.parametrize(
-    ("session", "spectral", "message"),
+    ("session", "preview", "message"),
     [
         ({"connected": True, "starting": False}, {}, "started COMSOL"),
         ({"connected": False, "starting": True}, {}, "started COMSOL"),
-        ({"connected": False, "starting": False}, {"solver_started": True}, "solver absence"),
         (
             {"connected": False, "starting": False},
-            {"solver_started": False, "filesystem_modified": True},
+            {"preview_guarantees": {"solver_started": True}},
+            "solver absence",
+        ),
+        (
+            {"connected": False, "starting": False},
+            {"preview_guarantees": {"solver_started": False, "filesystem_modified": True}},
             "filesystem passivity",
         ),
     ],
 )
-def test_passive_evidence_rejects_active_or_incomplete_results(session, spectral, message):
+def test_passive_evidence_rejects_active_or_incomplete_results(session, preview, message):
     with pytest.raises(RuntimeError, match=message):
-        _validate_passive_evidence({"session": session}, spectral)
+        _validate_passive_evidence({"session": session}, preview)
 
 
 def test_passive_evidence_requires_exact_negative_observations():
     assert (
         _validate_passive_evidence(
             {"session": {"connected": False, "starting": False}},
-            {"solver_started": False, "filesystem_modified": False},
+            {"preview_guarantees": {"solver_started": False, "filesystem_modified": False}},
         )
         is False
     )
 
 
-def test_installed_spectral_probe_arguments_are_bounded_and_passive():
-    arguments = _spectral_arguments()
-    rows = arguments["bundle_spec"]["rows"]
-
-    assert len(rows) == 5
-    assert len({row["raw_row_sha256"] for row in rows}) == 5
-    assert all(abs(row["R"] + row["T"] + row["A"] - 1.0) < 1.0e-12 for row in rows)
-    assert all(0.0 <= row[quantity] <= 1.0 for row in rows for quantity in ("R", "T", "A"))
-    assert arguments["measurement_configuration"]["peak_method"] == "measured_grid"
+def test_installed_preview_arguments_are_bounded_and_solver_free():
+    arguments = _preview_arguments()
+    spec = arguments["spec"]
+    assert spec["job_type"] == "staged_sweep"
+    assert spec["parameter_values"] == [5.0]
+    assert spec["expressions"] == ["R", "T"]
 
 
 def test_modern_probe_uses_a_fresh_temporary_root_on_repeated_runs(tmp_path, monkeypatch):
