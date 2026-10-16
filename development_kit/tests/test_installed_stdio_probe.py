@@ -15,12 +15,14 @@ import pytest
 from mcp.shared.exceptions import MCPError
 
 from development_kit.scripts.installed_stdio_probe import (
+    REMOVED_TOOLS,
     _expect_rejection,
     _preview_arguments,
     _probe_modern_isolated,
     _stdio_environment,
     _tool_payload,
     _validate_passive_evidence,
+    _verify_removed_tools,
 )
 
 
@@ -195,6 +197,37 @@ def test_installed_preview_arguments_are_bounded_and_solver_free():
     assert spec["job_type"] == "staged_sweep"
     assert spec["parameter_values"] == [5.0]
     assert spec["expressions"] == ["R", "T"]
+
+
+@pytest.mark.parametrize("failure", ["discovery", "transport", "unexpected_success"])
+def test_removed_tool_probe_rejects_false_acceptance(failure):
+    calls = []
+
+    class Session:
+        async def call_tool(self, name, arguments, **_kwargs):
+            calls.append((name, arguments))
+            if failure == "transport":
+                raise ConnectionError("injected transport failure")
+            return SimpleNamespace(is_error=False)
+
+    names = [REMOVED_TOOLS[0]] if failure == "discovery" else []
+    with pytest.raises(RuntimeError):
+        asyncio.run(_verify_removed_tools(Session(), names))
+    assert len(calls) == (0 if failure == "discovery" else 1)
+
+
+def test_removed_tool_probe_requires_each_tool_to_be_rejected():
+    calls = []
+
+    class Session:
+        async def call_tool(self, name, arguments, **_kwargs):
+            calls.append((name, arguments))
+            return SimpleNamespace(is_error=True)
+
+    results = asyncio.run(_verify_removed_tools(Session(), ["job_spec_preview"]))
+    assert len(results) == len(REMOVED_TOOLS) == 15
+    assert calls == [(name, {}) for name in REMOVED_TOOLS]
+    assert all(item["rejected"] for item in results)
 
 
 def test_modern_probe_uses_a_fresh_temporary_root_on_repeated_runs(tmp_path, monkeypatch):

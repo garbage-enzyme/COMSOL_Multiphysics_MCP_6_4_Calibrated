@@ -1,13 +1,13 @@
 # COMSOL 6.4 MCP Server
 
-0.7.8 包含缺陷扫描修复，并保留[无求解器 Ubuntu 实验支持](docs/experimental_linux/README_CN.md)和[显式严格波长验证](docs/strict_wavelength/README_CN.md)。Windows 仍是原生求解平台。调用工具前请先阅读平台限制。
+0.8.0 将研究策略与原生执行分离，保留训练和 surrogate/ONNX，以及[无求解器 Ubuntu 实验支持](docs/experimental_linux/README_CN.md)和[显式严格波长验证](docs/strict_wavelength/README_CN.md)。Windows 仍是原生求解平台。调用工具前请先阅读平台限制。
 
 [English](README.md) | 中文
 
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.8](https://img.shields.io/badge/release-0.7.8-blue)
+![Release: 0.8.0](https://img.shields.io/badge/release-0.8.0-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
