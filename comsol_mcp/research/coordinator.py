@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from comsol_mcp.durable import atomic_write_json, canonical_json_v1
+from comsol_mcp.durable import atomic_write_json, canonical_json_v1, domain_sha256_v2
 from comsol_mcp.jobs.store import JobLock
 
 from .evaluations import normalize_evaluation_record
@@ -57,13 +57,20 @@ class ResearchCampaignCoordinator:
     ) -> None:
         self.root = Path(root)
         _require_ascii_path(self.root)
-        self.root.mkdir(parents=True, exist_ok=True)
         self.manifest = json.loads(canonical_json_v1(dict(campaign_manifest)))
         if self.manifest.get("schema_name") != "comsol_mcp.research_campaign_manifest":
             raise ValueError("campaign manifest schema is unsupported")
         self.campaign_fingerprint = _fingerprint(
             self.manifest.get("campaign_fingerprint"), "campaign_fingerprint"
         )
+        manifest_body = {
+            key: value for key, value in self.manifest.items() if key != "campaign_fingerprint"
+        }
+        if domain_sha256_v2("comsol_mcp.research_campaign_manifest", manifest_body) != (
+            self.campaign_fingerprint
+        ):
+            raise ValueError("campaign fingerprint does not match manifest content")
+        self.root.mkdir(parents=True, exist_ok=True)
         self.evaluator = evaluator
         self.evaluator_identity = _fingerprint(evaluator_identity, "evaluator_identity")
         self.clock = clock
@@ -98,11 +105,17 @@ class ResearchCampaignCoordinator:
                 runtime = json.loads(self.runtime_path.read_text(encoding="utf-8"))
                 if runtime.get("campaign_fingerprint") != self.campaign_fingerprint:
                     raise ValueError("campaign runtime identity is inconsistent")
+                if runtime.get("evaluator_identity") != self.evaluator_identity:
+                    raise ValueError("campaign runtime evaluator identity is inconsistent")
             else:
                 now = self._now()
                 atomic_write_json(
                     self.runtime_path,
-                    {"campaign_fingerprint": self.campaign_fingerprint, "started_at_epoch": now},
+                    {
+                        "campaign_fingerprint": self.campaign_fingerprint,
+                        "evaluator_identity": self.evaluator_identity,
+                        "started_at_epoch": now,
+                    },
                 )
 
     def _runtime(self) -> dict[str, Any]:

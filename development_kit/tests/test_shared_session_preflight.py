@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from comsol_mcp.shared_session.preflight import (
@@ -82,3 +84,21 @@ def test_identity_hash_ignores_volatile_window_and_responsiveness_fields():
     volatile = _process(window_count=5, responding=False)
 
     assert base["identity_sha256"] == volatile["identity_sha256"]
+
+
+@pytest.mark.parametrize(
+    ("pid", "address"),
+    [(None, SimpleNamespace(ip="127.0.0.1", port=2036)), (20, SimpleNamespace())],
+)
+def test_listener_with_unknown_identity_marks_inventory_incomplete(monkeypatch, pid, address):
+    from comsol_mcp.shared_session import process_probe
+
+    connection = SimpleNamespace(
+        status=process_probe.psutil.CONN_LISTEN,
+        pid=pid,
+        laddr=address,
+    )
+    monkeypatch.setattr(process_probe.psutil, "net_connections", lambda **_kwargs: [connection])
+    listeners, complete = process_probe._listener_records()
+    assert listeners == []
+    assert complete is False

@@ -1,13 +1,13 @@
 # COMSOL MCP Server for COMSOL 6.4
 
-Version 0.7.7 adds [experimental solver-free Ubuntu support](docs/experimental_linux/README.md) and [explicit strict wavelength validation](docs/strict_wavelength/README.md). Windows remains the native solver platform. Read the platform limits before invoking a tool.
+Version 0.7.8 contains the bug-sweep repairs. It retains [experimental solver-free Ubuntu support](docs/experimental_linux/README.md) and [explicit strict wavelength validation](docs/strict_wavelength/README.md). Windows remains the native solver platform. Read the platform limits before invoking a tool.
 
 English | [中文](README_CN.md)
 
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.7](https://img.shields.io/badge/release-0.7.7-blue)
+![Release: 0.7.8](https://img.shields.io/badge/release-0.7.8-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -409,6 +409,9 @@ existing output unless `--overwrite-output` is explicit.
 
 Durable sweep controls are `job_submit`, `job_status`, `job_tail`, `job_cancel`, and `job_resume`. Each job has its own ASCII-only runtime directory containing its immutable specification, state, CSV journal, checkpoint, and log. Resume accepts only matching, finite, successful rows. Cancellation reaches a terminal cancelled state only after worker/process cleanup and lease release are verified. This coordination is for a shared runtime directory on one host. It is not distributed execution.
 
+An owned staged sweep reports `completed` only after its client and lease cleanup succeeds.
+A cleanup failure preserves result rows and reports `failed`, `cleanup_pending`, and `owned_cleanup` details.
+
 The interactive `mesh_convergence_study` helper also writes a manifest beside
 its CSV. Any resume or append to an existing journal requires
 `source_model_path`. The source hash, study, expressions, parameter setting,
@@ -472,6 +475,12 @@ hash-bound evidence records coverage, integration policy, extrapolation state,
 uncertainty, source artifacts, and detector/reference/background signals. It
 does not replace COMSOL's Surface-to-Surface Radiation solver.
 
+Absorptivity requests must declare `absorptivity_evidence_sha256` and
+`channel_identity_sha256`. The evidence hash must identify a source artifact.
+The Kirchhoff receipt must match both hashes, propagation direction, polarization
+basis, and source handedness. Stokes Q, U, and V can be negative.
+Their combined magnitude must not exceed I. Scalar and TE/TM values remain in [0, 1].
+
 The solver-free `thermal_material_validate` and `thermal_material_evaluate`
 tools use a versioned ledger instead of embedding a material database. Each
 state binds material/sample identity, phase and fabrication state, source,
@@ -501,6 +510,10 @@ mesh, wavelength, zero-CTE, zero-temperature-rise, rollback, source-integrity,
 and cleanup evidence separate from execution completion. The minimal supported
 route forbids topology change and requires a licensed COMSOL 6.4 synthetic
 fixture gate before use with research models.
+
+Set `model_contract.expressions.transfer_displacement_max` to measure transferred mesh displacement in the transfer study dataset.
+If omitted, the transfer stage uses the declared `displacement_max` expression in that same dataset.
+An unavailable expression fails the stage. The executor does not substitute a prior structural result.
 
 A durable convergence campaign uses `job_type: "convergence_campaign"` and an
 immutable ordered ladder of two to eight exact source or prebuilt derived model

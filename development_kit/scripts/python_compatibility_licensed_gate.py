@@ -560,6 +560,7 @@ def _run_parent(args) -> int:
                     raise RuntimeError(f"owned listener inventory failed: {ports['error']}")
                 for listener in ports["listeners"]:
                     listeners[(listener["pid"], listener["port"])] = listener
+                time.sleep(0.25)
             while process.poll() is None:
                 if time.monotonic() >= deadline:
                     timed_out = True

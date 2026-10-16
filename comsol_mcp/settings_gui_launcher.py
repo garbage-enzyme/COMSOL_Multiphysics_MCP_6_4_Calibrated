@@ -201,6 +201,11 @@ def launch_settings_gui(
     handshake: Path | None = None
     try:
         target = resolve_settings_location(environ).writable_path
+        # The first launch has no settings directory yet.  Prepare the safe
+        # parent before the POSIX instance lock creates its lock file.
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.parent.is_symlink() or getattr(target.parent, "is_junction", lambda: False)():
+            return _result("launch_failed")
         if settings_gui_is_running(target):
             return _result("already_running")
         root = (runtime_dir or default_runtime_dir(dict(environ or {}))) / "settings_gui"

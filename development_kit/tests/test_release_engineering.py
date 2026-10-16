@@ -55,6 +55,41 @@ FIXTURES = RELEASE / "integration_fixtures"
 SNAPSHOTS = ROOT / "development_kit" / "tests" / "snapshots"
 
 
+@pytest.mark.parametrize("hosted", [False, True])
+def test_release_tests_preserve_main_and_serial_tail(tmp_path, monkeypatch, hosted):
+    monkeypatch.setenv("GITHUB_ACTIONS", str(hosted).lower())
+    calls = []
+    monkeypatch.setattr(release_gate_module, "_run", lambda command: calls.append(command))
+    result = release_gate_module._run_release_tests(tmp_path / "gate")
+    assert len(calls) == 2
+    main, serial = calls
+    target = "development_kit/tests/test_control_plane_startup.py"
+    assert main[main.index("--ignore") + 1] == target
+    assert serial[4] == target
+    assert ("-n" in main) is not hosted
+    if not hosted:
+        assert main[main.index("-n") + 1] == "4"
+        assert main[main.index("--dist") + 1] == "loadscope"
+    roots = [Path(command[command.index("--basetemp") + 1]) for command in calls]
+    assert roots[0] != roots[1]
+    assert all(root.parent == tmp_path and not root.exists() for root in roots)
+    assert result["main_workers"] == (1 if hosted else 4)
+
+
+def test_release_tests_fail_before_serial_tail_and_clean_roots(tmp_path, monkeypatch):
+    calls = []
+
+    def refuse(command):
+        calls.append(command)
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(release_gate_module, "_run", refuse)
+    with pytest.raises(subprocess.CalledProcessError):
+        release_gate_module._run_release_tests(tmp_path / "gate")
+    assert len(calls) == 1
+    assert list(tmp_path.iterdir()) == []
+
+
 @pytest.mark.parametrize(
     "relative_path",
     ["comsol_mcp/tools/ownership.py", "comsol_mcp/jobs/store.py"],
@@ -971,7 +1006,16 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         for step in job["steps"]
         if "uses" in step
     ]
-    assert len(action_references) == 30
+    assert len(action_references) == 33
+    bridge = jobs["dsh-bridge"]
+    assert bridge["strategy"]["matrix"]["os"] == ["windows-latest", "ubuntu-latest"]
+    assert bridge["defaults"]["run"]["working-directory"] == "dsh_bridge"
+    assert {step.get("run") for step in bridge["steps"]} >= {
+        "node --test --test-reporter=spec",
+        "node scripts/smoke.mjs",
+    }
+    assert jobs["dsh-bridge-install"]["runs-on"] == "windows-latest"
+    assert not (ROOT / "dsh_bridge/.github/workflows/ci.yml").exists()
     paired_job = jobs["paired-platform-coverage"]
     assert paired_job["needs"] == ["unit-and-package-py314", "experimental-ubuntu-backend"]
     paired_commands = "\n".join(str(step.get("run", "")) for step in paired_job["steps"])

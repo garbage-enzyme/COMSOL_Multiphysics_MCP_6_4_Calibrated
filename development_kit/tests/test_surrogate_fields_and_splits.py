@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from comsol_mcp.durable.canonical import canonical_sha256_v1
+
 from comsol_mcp.surrogate.fields import (
     apply_transforms,
     build_field_schema,
@@ -57,6 +59,21 @@ def _targets() -> list[dict]:
 def _schema() -> dict:
     return build_field_schema(
         schema_id="waveopt-scalar-v1", features=_features(), targets=_targets()
+    )
+
+
+def test_transforms_match_independent_nonidentity_values():
+    fitted = fit_transforms(
+        transform_id="golden",
+        schema=_schema(),
+        train_rows=[{"w": 100.0, "h": 50.0, "R": 0.1}, {"w": 300.0, "h": 150.0, "R": 0.9}],
+        kinds={"w": "standardize", "R": "minmax"},
+    )
+    assert apply_transforms(fitted, {"w": 250.0, "h": 75.0, "R": 0.3}) == pytest.approx(
+        {"w": 0.5, "h": 75.0, "R": 0.25}
+    )
+    assert invert_transforms(fitted, {"w": -0.5, "h": 75.0, "R": 0.75}) == pytest.approx(
+        {"w": 150.0, "h": 75.0, "R": 0.7}
     )
 
 
@@ -179,6 +196,20 @@ def test_transforms_ignore_non_train_values_by_construction() -> None:
         validate_fitted_transforms({**body, "manifest_sha256": canonical_sha256_v1(body)})
 
 
+def test_transforms_reject_empty_manifest_and_nonfinite_roundtrip_rows() -> None:
+    schema = _schema()
+    transforms = fit_transforms(
+        transform_id="t", schema=schema, train_rows=[{"w": 1.0, "h": 2.0, "R": 0.1}]
+    )
+    body = {k: v for k, v in transforms.items() if k != "manifest_sha256"}
+    body["transforms"] = []
+    resealed = {**body, "manifest_sha256": canonical_sha256_v1(body)}
+    with pytest.raises(ValueError, match="non-empty sequence"):
+        validate_fitted_transforms(resealed)
+    with pytest.raises(ValueError, match="finite"):
+        verify_transform_roundtrip(transforms, [{"w": float("nan"), "h": 2.0, "R": 0.1}])
+
+
 def test_standardize_with_zero_scale_is_refused() -> None:
     schema = _schema()
     with pytest.raises(ValueError, match="zero scale"):
@@ -231,9 +262,7 @@ def test_split_changes_with_seed_and_holdout_is_excluded_from_fit() -> None:
     seed29 = assign_group_disjoint_split(group_ids=groups, seed=29)
     assert seed17["manifest_sha256"] != seed29["manifest_sha256"]
 
-    plan = assign_group_disjoint_split(
-        group_ids=groups, seed=17, holdout_group_ids=["g0", "g1"]
-    )
+    plan = assign_group_disjoint_split(group_ids=groups, seed=17, holdout_group_ids=["g0", "g1"])
     holdout = {
         item["group_id"] for item in plan["assignments"] if item["split"] == "scientific_holdout"
     }
@@ -253,6 +282,10 @@ def test_split_plan_rejects_tampering_and_bad_inputs() -> None:
     tampered["seed"] = 18
     with pytest.raises(ValueError):
         validate_split_plan(tampered)
+    tampered_counts = dict(plan)
+    tampered_counts["group_counts"] = {**plan["group_counts"], "train": 0}
+    with pytest.raises(ValueError, match="manifest_sha256"):
+        validate_split_plan(tampered_counts)
     with pytest.raises(ValueError, match="sum to 100"):
         assign_group_disjoint_split(
             group_ids=groups, seed=17, proportions={"train": 70, "validation": 15, "test": 10}
@@ -324,6 +357,7 @@ def test_surrogate_modules_are_solver_free() -> None:
     import comsol_mcp.surrogate.splits as splits_mod
 
     for module in (fields_mod, manifests_mod, splits_mod):
-        source = open(module.__file__, encoding="utf-8").read().lower()
+        with open(module.__file__, encoding="utf-8") as handle:
+            source = handle.read().lower()
         for banned in SOLVER_FREE_BANNED:
             assert banned not in source, f"{module.__name__} references {banned}"

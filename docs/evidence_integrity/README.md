@@ -38,7 +38,9 @@ has a different default: it is disabled until explicitly enabled.
 7. If inputs or artifacts change, create a new run identity and verify again.
    Re-enabling a check never upgrades an old unverified receipt in place.
 
-Both public guard tools are solver-free and available in every static profile:
+Both public guard tools are solver-free. Every static profile except
+`comsolless_read_only` provides them. That profile exposes only five offline
+inspection tools and does not provide these guard tools.
 
 - `evidence_integrity_status` reports effective settings without revealing the
   settings path.

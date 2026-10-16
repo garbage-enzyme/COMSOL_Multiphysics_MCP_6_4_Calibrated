@@ -349,6 +349,23 @@ def test_checkpoint_verification_fails_closed_on_each_mutation(tmp_path, mutate,
     assert expected_code in result["reason_codes"]
 
 
+def test_checkpoint_missing_receipt_source_hash_fails_closed(tmp_path):
+    payload = b"checkpoint"
+    raw = _checkpoint_record(payload)
+    raw["source_identity"]["file_sha256"] = None
+    row = build_bounded_step_receipt(raw)
+    target = tmp_path / "ckpt.mph"
+    target.write_bytes(payload)
+    result = verify_checkpoint_usability(
+        row,
+        target,
+        current_source_file_sha256="f" * 64,
+        current_model_fingerprint=row["source_identity"]["model_fingerprint"],
+        current_revision=row["source_identity"]["revision"],
+    )
+    assert result == {"usable": False, "reason_codes": ["source_identity_undeclared"]}
+
+
 def test_undeclared_current_expectations_fail_closed(tmp_path):
     payload = b"bytes"
     row = build_bounded_step_receipt(_checkpoint_record(payload))

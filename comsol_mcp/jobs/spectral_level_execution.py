@@ -32,6 +32,7 @@ def execute_loaded_spectral_level(
     | None = None,
     telemetry_provider: Callable[[str, str, Any, Path, float], dict[str, Any]] | None = None,
     fault_hook: Callable[[str, Mapping[str, Any]], Any] | None = None,
+    resource_journal_name: str = "resource.jsonl",
 ) -> dict[str, Any]:
     """Compose resource admission, point audit, and the accepted spectral runner."""
     root = Path(directory).resolve()
@@ -96,6 +97,7 @@ def execute_loaded_spectral_level(
         policy=spec["resource_policy"],
         telemetry_provider=sample,
         completed_point_ids_provider=completed_ids,
+        journal_name=resource_journal_name,
     )
     latest_resource_decision: dict[str, Any] | None = None
 

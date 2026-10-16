@@ -221,6 +221,23 @@ def test_runtime_refuses_manifest_reuse_and_non_ascii_root(tmp_path):
             evaluator_identity="d" * 64,
             clock=lambda: 1000.0,
         )
+
+
+def test_fresh_runtime_rejects_modified_manifest_with_stale_fingerprint(tmp_path):
+    manifest = _manifest()
+    manifest["goal"]["resource_budget"]["max_fem_evaluations"] += 1
+    root = tmp_path / "modified"
+
+    with pytest.raises(ValueError, match="campaign fingerprint"):
+        ResearchCampaignCoordinator(
+            root,
+            manifest,
+            _response,
+            evaluator_identity="d" * 64,
+            clock=lambda: 1000.0,
+        )
+
+    assert not root.exists()
     with pytest.raises(ValueError, match="ASCII"):
         ResearchCampaignCoordinator(
             tmp_path / "非ascii",

@@ -265,7 +265,7 @@ def main() -> None:
             client.remove(model)
         except Exception as exc:
             remove_error = exc
-        if staging is not None and staging.exists():
+        if active_error is not None and staging is not None and staging.exists():
             try:
                 staging.unlink(missing_ok=True)
             except Exception as cleanup_error:

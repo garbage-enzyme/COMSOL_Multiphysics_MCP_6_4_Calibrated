@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 import pytest
 
 from comsol_mcp.durable.canonical import canonical_sha256_v1
@@ -16,6 +19,7 @@ from comsol_mcp.surrogate.campaign import (
     validate_campaign_spec,
     validate_screening_record,
 )
+from development_kit.scripts import surrogate_campaign_licensed_gate as licensed_gate
 
 SOLVER_FREE_BANNED = (
     "import mph",
@@ -31,6 +35,26 @@ SOLVER_FREE_BANNED = (
 SHA_A = "a" * 64
 SHA_B = "b" * 64
 SHA_C = "c" * 64
+
+
+def test_licensed_gate_hashes_the_saved_fem_model_file(tmp_path: Path) -> None:
+    class FakeModel:
+        def save(self, path: str) -> None:
+            Path(path).write_bytes(b"reviewable COMSOL model artifact")
+
+    target = tmp_path / "fem-results" / "candidate.mph"
+    digest = licensed_gate._save_fem_artifact(FakeModel(), target)
+    assert target.read_bytes() == b"reviewable COMSOL model artifact"
+    assert digest == hashlib.sha256(target.read_bytes()).hexdigest()
+
+
+def test_licensed_gate_rejects_missing_fem_model_artifact(tmp_path: Path) -> None:
+    class EmptyModel:
+        def save(self, path: str) -> None:
+            Path(path).touch()
+
+    with pytest.raises(RuntimeError, match="durable FEM model artifact"):
+        licensed_gate._save_fem_artifact(EmptyModel(), tmp_path / "empty.mph")
 
 
 def _spec(**overrides) -> dict:
@@ -363,6 +387,24 @@ def test_summary_reports_no_metrics_without_verified_fem() -> None:
     assert summary["verified_count"] == 0
     assert summary["worst_absolute_error"] is None
     assert summary["error_metrics_source"] == "no_verified_fem_results"
+
+
+def test_summary_rejects_duplicate_or_unscreened_fem_results() -> None:
+    result = record_fem_result(
+        candidate_id="c1", predicted_objective=1.0, measured_objective=None,
+        fem_evidence_state="failed", fem_artifact_sha256=None, absolute_tolerance=1e-6,
+    )
+    with pytest.raises(ValueError, match="duplicate FEM result"):
+        summarize_campaign(
+            spec=_spec(), screening_records=[_record("c1", 1.0)],
+            fem_results=[result, result], fem_escalations_used=2, wall_time_seconds=1.0,
+        )
+    unknown = {**result, "candidate_id": "missing"}
+    with pytest.raises(ValueError, match="unscreened candidate"):
+        summarize_campaign(
+            spec=_spec(), screening_records=[_record("c1", 1.0)],
+            fem_results=[unknown], fem_escalations_used=1, wall_time_seconds=1.0,
+        )
 
 
 def test_summary_enforces_the_escalation_and_time_budgets() -> None:

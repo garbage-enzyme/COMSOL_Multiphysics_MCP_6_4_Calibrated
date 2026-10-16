@@ -1,13 +1,13 @@
 # COMSOL 6.4 MCP Server
 
-0.7.7 增加[无求解器 Ubuntu 实验支持](docs/experimental_linux/README_CN.md)和[显式严格波长验证](docs/strict_wavelength/README_CN.md)。Windows 仍是原生求解平台。调用工具前请先阅读平台限制。
+0.7.8 包含缺陷扫描修复，并保留[无求解器 Ubuntu 实验支持](docs/experimental_linux/README_CN.md)和[显式严格波长验证](docs/strict_wavelength/README_CN.md)。Windows 仍是原生求解平台。调用工具前请先阅读平台限制。
 
 [English](README.md) | 中文
 
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.7](https://img.shields.io/badge/release-0.7.7-blue)
+![Release: 0.7.8](https://img.shields.io/badge/release-0.7.8-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -340,6 +340,9 @@ python -m recipes.acoustic_duct_2d `
 
 持久化扫描控制工具为 `job_submit`、`job_status`、`job_tail`、`job_cancel` 和 `job_resume`。每个任务在 ASCII-only runtime 目录中保存不可变规格、状态、CSV 日志、检查点和日志文件。恢复时只接受规格一致、数值有限且成功完成的行。只有 worker/相关进程清理和租约释放都得到验证后，取消才会进入终态。此协调机制仅适用于同一台主机上共享 runtime 目录的任务，不是分布式或跨主机取消。
 
+拥有求解器的 staged sweep 仅在 client 和租约清理成功后报告 `completed`。
+清理失败时保留结果行，并报告 `failed`、`cleanup_pending` 和 `owned_cleanup` 详情。
+
 交互式 `mesh_convergence_study` 也会在 CSV 旁写入 manifest。对已有日志执行
 resume 或 append 时必须提供 `source_model_path`。只有源文件哈希、study、表达式、
 参数设置、mesh identity 以及每个 level 的精确 properties 全部一致，已完成 level
@@ -389,6 +392,11 @@ Stokes/Mueller 偏振，并可应用受限的气体、孔径、光学、analyzer
 以及 detector/reference/background signal。它不替代 COMSOL Surface-to-Surface
 Radiation solver。
 
+使用 absorptivity 时，请求必须提供 `absorptivity_evidence_sha256` 和
+`channel_identity_sha256`。吸收证据哈希必须对应一个 source artifact。
+Kirchhoff 回执必须匹配这两个哈希、传播方向、偏振基和源手性约定。
+Stokes Q、U、V 可以为负值，其合成模长不能超过 I。scalar 与 TE/TM 值仍限制在 [0, 1]。
+
 solver-free 的 `thermal_material_validate` 与 `thermal_material_evaluate` 使用
 versioned ledger，而不是内置第二套材料数据库。每个 state 都绑定 material/sample
 identity、phase/fabrication state、source、光谱与温度有效域、不确定度、测量条件以及
@@ -412,6 +420,10 @@ frame 形变传递和精确光学重放。resume 会先验证孤立 evidence，�
 zero-CTE、zero-temperature-rise、rollback、源完整性与 cleanup 证据，不把执行完成等同
 于科学通过。最小支持路径禁止拓扑变化，并要求先通过 COMSOL 6.4 synthetic fixture 的
 licensed gate，之后才可用于研究模型。
+
+用 `model_contract.expressions.transfer_displacement_max` 声明传递 study 数据集中的网格传递位移表达式。
+省略时，传递 stage 在同一数据集中读取已声明的 `displacement_max`。
+表达式无法计算时，该 stage 失败。执行器不会用旧结构解代替传递结果。
 
 持久化收敛任务使用 `job_type: "convergence_campaign"`，并声明 2–8 个严格排序的
 exact source 或预先构建并验证的 derived model identity。每个 level 都复用已验收的

@@ -763,7 +763,6 @@ def run_staged_parametric_sweep(
                 "success": False,
                 "error": "checkpoint/save path must not overwrite source_model_path",
             }
-
     jm = model.java
     study_tag = _resolve_study_tag(model, study_name)
     if study_tag is None:
@@ -1350,6 +1349,7 @@ def run_mesh_convergence(
                 jm.study(study_tag).run()
                 solve_sec = time.time() - solve_start
                 evaluated = _evaluate_expressions(model, expression_names)
+                _validate_evaluated_values(evaluated, expression_names, None)
                 row = {
                     "schema_version": MESH_SCHEMA_VERSION,
                     "config_id": manifest["config_id"],

@@ -63,6 +63,34 @@ def test_isolated_single_field_png_is_hash_bound_and_unlabeled(tmp_path):
     assert result["semantic_mode_label"] == "not_assigned"
     assert png.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert descriptor["sha256"] == hashlib.sha256(png.read_bytes()).hexdigest()
+    assert list(output.iterdir()) == [png]
+
+
+def test_renderer_refuses_concurrent_final_publication(tmp_path, monkeypatch):
+    array = tmp_path / "race.npz"
+    digest = _array(array)
+    output = tmp_path / "race-output"
+    real_link = os.link
+
+    def competing_link(source, destination, *args, **kwargs):
+        Path(destination).write_bytes(b"competing-publisher")
+        raise FileExistsError(destination)
+
+    monkeypatch.setattr(field_render_module.os, "link", competing_link)
+    with pytest.raises(FileExistsError, match="published concurrently"):
+        render_field_png_bundle(
+            views=[_view("race", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=False,
+            output_root=output,
+        )
+    monkeypatch.setattr(field_render_module.os, "link", real_link)
+    competitor = output / f"{hashlib.sha256(b'race').hexdigest()[:16]}.png"
+    assert competitor.read_bytes() == b"competing-publisher"
+    assert list(output.iterdir()) == [competitor]
 
 
 def test_renderer_rejects_malformed_array_digest_before_worker_start(tmp_path):
@@ -78,6 +106,34 @@ def test_renderer_rejects_malformed_array_digest_before_worker_start(tmp_path):
             shared_color_limits=False,
             output_root=tmp_path / "invalid-hash-output",
         )
+    assert list((tmp_path / "invalid-hash-output").iterdir()) == []
+
+
+def test_paired_publication_conflict_rolls_back_only_own_output(tmp_path, monkeypatch):
+    array = tmp_path / "paired-race.npz"
+    digest = _array(array)
+    output = tmp_path / "paired-race-output"
+    real_link = os.link
+    competitor = output / f"{hashlib.sha256(b'second').hexdigest()[:16]}.png"
+
+    def competing_link(source, destination, *args, **kwargs):
+        if Path(destination) == competitor:
+            competitor.write_bytes(b"other-writer")
+        return real_link(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(field_render_module.os, "link", competing_link)
+    with pytest.raises(FileExistsError, match="published concurrently"):
+        render_field_png_bundle(
+            views=[_view("first", array, digest), _view("second", array, digest)],
+            quantity_name="abs_ex",
+            quantity_unit="V/m",
+            coordinate_unit="um",
+            color_scale="linear",
+            shared_color_limits=True,
+            output_root=output,
+        )
+    assert competitor.read_bytes() == b"other-writer"
+    assert list(output.iterdir()) == [competitor]
 
 
 def test_renderer_uses_windows_safe_filename_for_portable_view_id(tmp_path):
@@ -206,7 +262,7 @@ def test_renderer_rejects_hash_policy_and_log_failures_without_residue(tmp_path)
             shared_color_limits=False,
             output_root=output,
         )
-    assert not list(output.glob("*.png"))
+    assert not list(output.rglob("*.png"))
 
 
 def test_worker_output_is_redirected_and_read_with_a_hard_bound(tmp_path, monkeypatch):
@@ -396,7 +452,7 @@ def test_worker_failure_removes_every_owned_partial_png(tmp_path, monkeypatch):
             output_root=output,
         )
 
-    assert not list(output.glob("*.png"))
+    assert not list(output.rglob("*.png"))
 
 
 def test_worker_timeout_stays_bounded_and_removes_partial_png(tmp_path, monkeypatch):
@@ -438,7 +494,7 @@ def test_worker_timeout_stays_bounded_and_removes_partial_png(tmp_path, monkeypa
 
     assert process.killed is True
     assert process.waited is True
-    assert not list(output.glob("*.png"))
+    assert not list(output.rglob("*.png"))
 
 
 @pytest.mark.parametrize(

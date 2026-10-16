@@ -98,3 +98,16 @@ def test_model_resource_redacts_backend_exception(monkeypatch):
 
     assert result == "# Error\n\nModel tree is unavailable."
     assert SECRET not in result
+
+
+def test_job_wrapper_redacts_storage_path(monkeypatch):
+    from src.tools import jobs
+
+    result = jobs._job_call(
+        "job_status",
+        lambda: (_ for _ in ()).throw(OSError(SECRET)),
+        job_id="job-fixture",
+    )
+    assert result["success"] is False
+    assert result["error"] == "Job operation failed safely."
+    _assert_secret_absent(result)

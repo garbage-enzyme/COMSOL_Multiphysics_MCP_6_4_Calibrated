@@ -266,7 +266,10 @@ class GaussianProcessExpectedImprovementOptimizer:
         if not available:
             raise ValueError("Gaussian-process candidate pool is exhausted")
         selected = available[0]
-        completed = [item for item in self.observations.values() if item["status"] == "completed"]
+        completed = sorted(
+            (item for item in self.observations.values() if item["status"] == "completed"),
+            key=lambda item: item["proposal_index"],
+        )
         if len(completed) >= self.warmup_count:
             recent = completed[-MAX_GP_OBSERVATIONS:]
             observations = [

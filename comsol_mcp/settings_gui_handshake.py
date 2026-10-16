@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import time
 from pathlib import Path
 from typing import Any, Mapping
@@ -67,17 +68,23 @@ def validate_handshake_path(value: str | Path) -> Path:
 
 
 def read_handshake(path: Path) -> dict[str, Any] | None:
+    descriptor: int | None = None
     try:
-        if not path.is_file():
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | int(getattr(os, "O_NOFOLLOW", 0)) | int(getattr(os, "O_NONBLOCK", 0)),
+        )
+        if not os.path.isfile(path) or not stat.S_ISREG(os.fstat(descriptor).st_mode):
             return None
-        # Enforce the bound on the bytes actually read: a stat-then-read race
-        # could otherwise swap in a larger file between the two calls.
-        data = path.read_bytes()
+        data = os.read(descriptor, MAX_HANDSHAKE_BYTES + 1)
         if len(data) > MAX_HANDSHAKE_BYTES:
             return None
         value = json.loads(data.decode("ascii"))
     except OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError:
         return None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
     if not isinstance(value, dict):
         return None
     state = value.get("state")

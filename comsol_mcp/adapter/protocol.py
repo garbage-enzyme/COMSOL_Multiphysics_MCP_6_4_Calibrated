@@ -457,7 +457,7 @@ class ComsolAdapter(Protocol):
         """
         ...
 
-    def java_typed_read(self, node: NodeRef, name: str) -> JavaTypedRead:
+    def java_typed_read(self, node: NodeRef, name: str, *, form: str = "auto") -> JavaTypedRead:
         """Read one property through the typed accessors, recording which one won."""
         ...
 

@@ -219,6 +219,14 @@ def test_append_runs_recovery_inside_the_exclusive_lock(tmp_path, monkeypatch):
             return super().__exit__(*args)
 
     monkeypatch.setattr(journal_module, "JobLock", RecordingLock)
+    real_recover = journal_module.recover_research_journal
+
+    def recover(*args, **kwargs):
+        assert events[-1] == "enter", events
+        events.append("recover")
+        return real_recover(*args, **kwargs)
+
+    monkeypatch.setattr(journal_module, "recover_research_journal", recover)
     append_research_journal_record(
         tmp_path / "research.jsonl",
         "candidate",
@@ -228,3 +236,4 @@ def test_append_runs_recovery_inside_the_exclusive_lock(tmp_path, monkeypatch):
 
     assert events[0] == "enter"
     assert events[-1] == "exit"
+    assert events == ["enter", "recover", "exit"]

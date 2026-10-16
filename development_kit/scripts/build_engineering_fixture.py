@@ -482,9 +482,18 @@ def _save_staged(java_model: Any, destination: Path) -> Path:
     if destination.exists():
         raise FileExistsError(f"refusing to overwrite an existing fixture model: {destination}")
     staging = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.staging")
-    java_model.save(str(staging))
-    if not staging.is_file() or staging.stat().st_size <= 0:
-        raise RuntimeError("COMSOL did not produce a nonempty staging model")
+    try:
+        java_model.save(str(staging))
+        if not staging.is_file() or staging.stat().st_size <= 0:
+            raise RuntimeError("COMSOL did not produce a nonempty staging model")
+    except BaseException:
+        try:
+            staging.unlink(missing_ok=True)
+        except OSError:
+            # Keep the original save failure; the caller's receipt records that
+            # staging cleanup could not complete only when a path is returned.
+            pass
+        raise
     return staging
 
 

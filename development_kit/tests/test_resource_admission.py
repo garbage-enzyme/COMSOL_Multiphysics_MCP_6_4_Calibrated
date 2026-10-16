@@ -732,6 +732,49 @@ def test_completed_point_is_never_authorized_for_a_duplicate_valid_row():
     assert replay["duplicate_valid_rows_authorized"] is False
 
 
+def test_child_resource_journals_replay_distinct_policies_independently(ascii_jobs_root):
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "running"})
+    for index, maximum in enumerate((1000, 2000)):
+        policy = {**POLICY, "max_mesh_elements": maximum}
+        adapter = ResourceStageAdapter(
+            store=store,
+            job_id=job_id,
+            attempt=1,
+            policy=policy,
+            telemetry_provider=lambda stage, _point_id: sample(stage=stage, mesh_elements=12),
+            completed_point_ids_provider=lambda: set(),
+            journal_name=f"resource-level-{index}.jsonl",
+        )
+        result = adapter.evaluate(stage="pre_solve", point_id=f"point-{index}")
+        assert result["start_authorized"] is True
+        entries = store.read_resource_journal(job_id, journal_name=f"resource-level-{index}.jsonl")
+        assert entries[-1]["policy"] == normalize_resource_policy(policy)
+    assert store.read_resource_journal(job_id) == []
+
+
+@pytest.mark.parametrize("journal_name", ["../resource.jsonl", "resource-other.jsonl", "resource-level-x.jsonl", "resource.jsonl.bak"])
+def test_resource_journal_rejects_unsafe_or_ambiguous_names(ascii_jobs_root, journal_name):
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "running"})
+    with pytest.raises(ValueError, match="journal"):
+        store.read_resource_journal(job_id, journal_name=journal_name)
+
+
+def test_resource_journal_rejects_symlinked_file(ascii_jobs_root):
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "running"})
+    job_dir = store.job_dir(job_id)
+    outside = ascii_jobs_root / "outside.jsonl"
+    outside.write_text("", encoding="utf-8")
+    try:
+        (job_dir / "resource-level-0.jsonl").symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation is unavailable")
+    with pytest.raises(ValueError, match="journal"):
+        store.read_resource_journal(job_id, journal_name="resource-level-0.jsonl")
+
+
 def test_completed_point_shortcut_validates_resource_journal(ascii_jobs_root, monkeypatch):
     store = JobStore(ascii_jobs_root / "jobs")
     job_id = store.create(

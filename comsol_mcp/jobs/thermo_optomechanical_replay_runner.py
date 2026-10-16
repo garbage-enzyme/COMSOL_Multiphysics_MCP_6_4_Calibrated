@@ -133,6 +133,7 @@ def run_thermo_optomechanical_replay(
     stage_executor: Callable[[str, Path, Mapping[str, Any]], Mapping[str, Any]],
     control_hook: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
     on_durable_stage: Callable[[Mapping[str, Any]], None] | None = None,
+    after_durable_stage_hook: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
     fault_hook: Callable[[str, Mapping[str, Any]], Any] | None = None,
 ) -> dict[str, Any]:
     """Execute each stage once and resume only from verified durable rows."""
@@ -193,6 +194,24 @@ def run_thermo_optomechanical_replay(
             on_durable_stage(dict(row))
         if fault_hook is not None:
             fault_hook("after_stage_row", row)
+        action = _control_action(
+            after_durable_stage_hook,
+            {
+                "phase": "after_durable_stage",
+                "attempt": attempt,
+                "ordinal": ordinal,
+                "stage_id": stage_id,
+                "completed_stages": len(rows),
+            },
+        )
+        if action != "continue":
+            return {
+                "completed": False,
+                "stop_reason": f"after_durable_stage_{action}",
+                "executed_this_attempt": executed,
+                "skipped_complete": skipped,
+                "recovered_from_evidence": recovered,
+            }
     summary = build_thermo_optomechanical_summary(spec, rows, artifact_root=root)
     summary_path = root / "analysis" / "summary.json"
     atomic_write_json(summary_path, summary)

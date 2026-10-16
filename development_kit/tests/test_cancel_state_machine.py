@@ -199,6 +199,26 @@ def test_cooperative_exit_inside_native_grace_commits_verified_cancelled(jobs_ro
     }
 
 
+def test_worker_exit_during_grace_cleans_known_uncontained_descendant(jobs_root, monkeypatch):
+    clock = FakeClock()
+    processes = FakeProcesses(clock, auto_exit_at=0.5, descendants=1)
+    store = JobStore(jobs_root)
+    job_id, request_id = _prepare_cancel(store, processes, process_tree_contained=False)
+    _install_fakes(monkeypatch, clock, processes)
+    assert cancel_worker.run(str(jobs_root), job_id, request_id, 1.0, 2.0) == 0
+    state = store.read_state(job_id)
+    assert state["status"] == "cancelled"
+    assert state["cancel"]["verification"]["absent"] is True
+    child_actions = [
+        action
+        for action in processes.actions
+        if action["before"]["identity"] == processes.descendants[0]
+    ]
+    assert child_actions and child_actions[-1]["acted"] is True
+    assert child_actions[-1]["action"] == "kill"
+    assert all(value == "stale" for value in processes.descendant_states.values())
+
+
 def test_terminal_commit_failure_returns_failure(jobs_root, monkeypatch):
     clock = FakeClock()
     processes = FakeProcesses(clock, auto_exit_at=0.5)

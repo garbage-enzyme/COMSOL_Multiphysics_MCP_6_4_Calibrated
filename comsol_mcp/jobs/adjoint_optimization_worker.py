@@ -128,7 +128,8 @@ def _run_native(root: str, job_id: str) -> int:
                 "iteration_id": "native-final",
                 "gradient_fingerprint": gradient_fingerprint,
                 "check_fingerprint": receipt_fingerprint,
-                "evidence_state": "gradient_validated",
+                # Fresh forward validation does not check the native gradient.
+                "evidence_state": "native_unchecked",
             },
         )
         iteration = append_adjoint_row(

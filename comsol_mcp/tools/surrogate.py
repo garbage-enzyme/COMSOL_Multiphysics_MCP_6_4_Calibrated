@@ -130,6 +130,7 @@ def register_surrogate_tools(mcp: MCPServer) -> None:
                 expected_row_count=request.expected_row_count,
                 expected_feature_names=request.expected_feature_names,
                 expected_target_names=request.expected_target_names,
+                field_schema_path=request.field_schema_path,
             )
         except (SurrogateEvidenceError, TypeError, ValueError, OSError) as exc:
             return _rejection(exc, "surrogate_dataset_rejected")

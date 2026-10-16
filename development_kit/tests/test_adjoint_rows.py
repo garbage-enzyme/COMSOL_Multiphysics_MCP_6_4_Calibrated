@@ -132,6 +132,39 @@ def test_oversized_unterminated_tail_never_discards_earlier_rows(ascii_tmp_path)
     assert second["previous_row_sha256"] == first["row_sha256"]
 
 
+def test_reader_rejects_more_than_declared_row_limit(ascii_tmp_path):
+    from comsol_mcp.durable import domain_sha256_v2
+    from comsol_mcp.jobs.adjoint_rows import (
+        ADJOINT_ROW_SCHEMA_NAME,
+        MAX_ADJOINT_ROWS,
+    )
+
+    path = ascii_tmp_path / "too_many_rows.jsonl"
+    rows = []
+    previous = None
+    for index in range(MAX_ADJOINT_ROWS + 1):
+        body = {
+            "schema_name": ADJOINT_ROW_SCHEMA_NAME,
+            "schema_version": "1.0.0",
+            "sequence": index,
+            "attempt": 1,
+            "created_at_epoch": 1.0,
+            "job_fingerprint": JOB,
+            "kind": "iteration",
+            "payload": _iteration(index),
+            "previous_row_sha256": previous,
+        }
+        row = {**body, "row_sha256": domain_sha256_v2(ADJOINT_ROW_SCHEMA_NAME, body)}
+        rows.append(row)
+        previous = row["row_sha256"]
+    path.write_text(
+        "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="entry limit"):
+        read_adjoint_rows(path, job_fingerprint=JOB)
+
+
 def test_changed_job_or_hash_payload_is_rejected(ascii_tmp_path):
     path = ascii_tmp_path / "identity_rows.jsonl"
     append_adjoint_row(path, job_fingerprint=JOB, attempt=1, kind="iteration", payload=_iteration())

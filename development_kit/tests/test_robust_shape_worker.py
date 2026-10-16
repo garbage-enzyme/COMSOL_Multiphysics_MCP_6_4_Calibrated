@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -258,6 +260,36 @@ def test_condition_runtime_rejects_stale_receipt_with_drifted_condition_paramete
         )
 
 
+@pytest.mark.parametrize("field", ["absorption", "mesh_elements", "minimum_mesh_quality"])
+def test_condition_runtime_revalidates_science_and_mesh_on_receipt_recovery(ascii_tmp_path, field):
+    spec = _condition_runtime_spec()
+    spec["condition_table"]["conditions"] = spec["condition_table"]["conditions"][:1]
+    execute_robust_conditions(
+        spec,
+        ascii_tmp_path,
+        attempt=1,
+        backend=_ConditionBackend(),
+        cancel_requested=lambda: False,
+    )
+    receipt_path = ascii_tmp_path / "condition-0000.json"
+    receipt = read_json(receipt_path)
+    if field == "absorption":
+        receipt[field] = 0.5
+    elif field == "mesh_elements":
+        receipt[field] = 1001
+    else:
+        receipt[field] = 0.1
+    atomic_write_json(receipt_path, receipt)
+    with pytest.raises(ValueError, match="persisted robust condition receipt is invalid"):
+        execute_robust_conditions(
+            spec,
+            ascii_tmp_path,
+            attempt=1,
+            backend=_ConditionBackend(),
+            cancel_requested=lambda: False,
+        )
+
+
 @pytest.mark.parametrize(
     ("backend", "message"),
     [
@@ -328,6 +360,7 @@ def test_native_runtime_records_observed_client_cleanup_on_startup_failure(
         robust_shape_native_runtime.execute_lin2025_conditions(
             {
                 "source_model_path": str(source),
+                "source_model_sha256": hashlib.sha256(b"fixture").hexdigest(),
                 "cores": 2,
                 "version": "6.4",
                 "comsol_temporary_directory": str(ascii_tmp_path),
@@ -354,6 +387,55 @@ def test_native_runtime_records_observed_client_cleanup_on_startup_failure(
         "requested_path": str(ascii_tmp_path),
     }
     assert os.environ.get("COMSOL_TMPDIR") == prior_temporary_directory
+
+
+@pytest.mark.parametrize("change_before_entry", [False, True])
+def test_native_entry_binds_loaded_bytes_before_client_start(ascii_tmp_path, change_before_entry):
+    source = ascii_tmp_path / "source.mph"
+    source.write_bytes(b"fixture")
+    calls = []
+    loaded_paths = []
+
+    class Client:
+        port = None
+
+        def load(self, path):
+            loaded_paths.append(Path(path))
+            assert Path(path) != source
+            assert Path(path).read_bytes() == b"fixture"
+            raise RuntimeError("stop after verified load")
+
+        def clear(self):
+            calls.append("clear")
+
+    def factory(**_kwargs):
+        calls.append("client")
+        source.write_bytes(b"changed during startup")
+        return Client()
+
+    if change_before_entry:
+        source.write_bytes(b"changed before entry")
+    previous = os.environ.get("COMSOL_TMPDIR")
+    message = "source SHA-256" if change_before_entry else "stop after verified load"
+    with pytest.raises((ValueError, RuntimeError), match=message):
+        robust_shape_native_runtime.execute_lin2025_conditions(
+            {
+                "source_model_path": str(source),
+                "source_model_sha256": hashlib.sha256(b"fixture").hexdigest(),
+                "cores": 1,
+                "version": "6.4",
+                "comsol_temporary_directory": str(ascii_tmp_path),
+            },
+            ascii_tmp_path,
+            attempt=1,
+            client_factory=factory,
+            java_environment_reader=os.environ.get,
+            cancel_requested=lambda: False,
+        )
+    assert calls == ([] if change_before_entry else ["client", "clear"])
+    assert os.environ.get("COMSOL_TMPDIR") == previous
+    assert all(not path.exists() for path in loaded_paths)
+    assert list(ascii_tmp_path.glob("native-source-*")) == []
 
 
 class _CleanupOwnership:
@@ -777,6 +859,8 @@ def test_native_condition_saves_exact_configured_model_before_solve(ascii_tmp_pa
         "observed": "on",
     }
     backend.study_step = _Feature()
+    admissions = []
+    backend._admit_mesh = lambda boundary: admissions.append(boundary)
 
     class Study:
         def run(self):
@@ -793,6 +877,7 @@ def test_native_condition_saves_exact_configured_model_before_solve(ascii_tmp_pa
             },
             ["1"] * 9,
         )
+    assert admissions == ["before-condition-solve"]
     assert backend.model.java.saved == [
         (
             str(backend.working_model_path),
@@ -1514,6 +1599,11 @@ def _stage_backend(events, *, with_shape_support=True, solve_for_drift=None):
             }
         },
     }
+    backend.mesh_policy = {
+        "max_elements_per_model": 20000,
+        "minimum_element_quality": 0.1,
+        "quality_measure": "volcircum",
+    }
     backend.working_model_path = Path("C:/mcp_tests/robust-working.mph")
     return backend
 
@@ -1622,6 +1712,9 @@ def _application_model(
 
         def getMinQuality(self):
             return 0.2314
+
+        def getQualityMeasure(self):
+            return "volcircum"
 
     class Mesh:
         def stat(self):
@@ -1736,9 +1829,10 @@ def _application_model(
     return Model()
 
 
-def test_shape_application_solves_stage_and_reads_back_solved_shape():
+def test_shape_application_solves_stage_and_reads_back_solved_shape(ascii_tmp_path):
     events = []
     backend = _stage_backend(events)
+    backend.working_model_path = ascii_tmp_path / "working.mph"
     backend._prepare_forward_shape_stage()
     backend.model = _application_model(events)
 
@@ -1769,9 +1863,60 @@ def test_shape_application_solves_stage_and_reads_back_solved_shape():
     assert receipt["stage_fingerprint"] == backend._forward_stage_readback["receipt_fingerprint"]
 
 
-def test_shape_application_readback_mismatch_fails_closed():
+def test_shape_application_refuses_over_cap_mesh_before_study_run(ascii_tmp_path):
     events = []
     backend = _stage_backend(events)
+    backend._prepare_forward_shape_stage()
+    backend.model = _application_model(events)
+    backend.mesh_policy = {
+        "max_elements_per_model": 1,
+        "minimum_element_quality": 0.1,
+        "quality_measure": "volcircum",
+    }
+    backend.working_model_path = ascii_tmp_path / "working.mph"
+    backend.study = type("Study", (), {"run": lambda self: events.append(("study_run",))})()
+    with pytest.raises(ValueError, match="mesh admission refused"):
+        backend.run_shape_application()
+    assert ("study_run",) not in events
+    receipt = json.loads((ascii_tmp_path / "mesh-admission-before-shape-solve.json").read_text())
+    assert receipt["admitted"] is False
+    assert receipt["element_count"] == 18985
+
+
+@pytest.mark.parametrize(
+    "cap,quality,measure,admitted",
+    [
+        (18985, 0.2314, "volcircum", True),
+        (18984, 0.2314, "volcircum", False),
+        (18985, 0.2315, "volcircum", False),
+        (18985, 0.1, "other", False),
+    ],
+)
+def test_mesh_admission_checks_equality_quality_and_measure(
+    ascii_tmp_path, cap, quality, measure, admitted
+):
+    backend = _stage_backend([])
+    backend.model = _application_model([])
+    backend.working_model_path = ascii_tmp_path / "working.mph"
+    backend.mesh_policy = {
+        "max_elements_per_model": cap,
+        "minimum_element_quality": quality,
+        "quality_measure": measure,
+    }
+    if admitted:
+        assert backend._admit_mesh("after-build")["admitted"] is True
+    else:
+        with pytest.raises(ValueError, match="mesh admission refused"):
+            backend._admit_mesh("after-build")
+    receipt = read_json(ascii_tmp_path / "mesh-admission-after-build.json")
+    assert receipt["admitted"] is admitted
+    assert receipt["quality_measure"] == "volcircum"
+
+
+def test_shape_application_readback_mismatch_fails_closed(ascii_tmp_path):
+    events = []
+    backend = _stage_backend(events)
+    backend.working_model_path = ascii_tmp_path / "working.mph"
     backend._prepare_forward_shape_stage()
     backend.model = _application_model(events, moved=(1.0e-9, 1.0e-9))
 
@@ -1784,9 +1929,12 @@ def test_shape_application_readback_mismatch_fails_closed():
         backend.run_shape_application()
 
 
-def test_shape_application_does_not_widen_strict_relative_tolerance_to_one_nanometre():
+def test_shape_application_does_not_widen_strict_relative_tolerance_to_one_nanometre(
+    ascii_tmp_path,
+):
     events = []
     backend = _stage_backend(events)
+    backend.working_model_path = ascii_tmp_path / "working.mph"
     backend.controls["forward_solved_shape_relative_tolerance"] = 1e-6
     backend._prepare_forward_shape_stage()
     backend.model = _application_model(events, moved=(12.58e-9, 12.58e-9))
@@ -1800,9 +1948,10 @@ def test_shape_application_does_not_widen_strict_relative_tolerance_to_one_nanom
         backend.run_shape_application()
 
 
-def test_shape_application_zero_movement_readback_accepts_null_field():
+def test_shape_application_zero_movement_readback_accepts_null_field(ascii_tmp_path):
     events = []
     backend = _stage_backend(events)
+    backend.working_model_path = ascii_tmp_path / "working.mph"
     backend._prepare_forward_shape_stage()
     backend.model = _application_model(events, moved=(0.0, 0.0))
     backend._initial_values = [260.0, 260.0]
@@ -1821,7 +1970,7 @@ def test_shape_application_zero_movement_readback_accepts_null_field():
     )
 
 
-def test_shape_application_opposite_extreme_flip_reads_radius_magnitude():
+def test_shape_application_opposite_extreme_flip_reads_radius_magnitude(ascii_tmp_path):
     """Regression: the max |component| vertex may sit on the opposite side.
 
     The opposite extreme carries the same displacement magnitude with the
@@ -1831,6 +1980,7 @@ def test_shape_application_opposite_extreme_flip_reads_radius_magnitude():
     """
     events = []
     backend = _stage_backend(events)
+    backend.working_model_path = ascii_tmp_path / "working.mph"
     backend._prepare_forward_shape_stage()
     backend.model = _application_model(events, flipped_extreme=True)
 
@@ -1901,7 +2051,7 @@ def test_worker_projects_complete_native_gradient_to_public_row(ascii_tmp_path):
 
     rows = read_robust_shape_rows(path, job_fingerprint="a" * 64)
     assert rows[0]["kind"] == "gradient"
-    assert rows[0]["payload"]["evidence_state"] == "gradient_validated"
+    assert rows[0]["payload"]["evidence_state"] == "native_unchecked"
     assert rows[0]["payload"]["gradient_fingerprint"] == "c" * 64
 
 
@@ -2018,6 +2168,7 @@ def test_native_runtime_persists_controls_before_condition_failure(ascii_tmp_pat
         robust_shape_native_runtime.execute_lin2025_conditions(
             {
                 "source_model_path": str(source),
+                "source_model_sha256": hashlib.sha256(b"fixture").hexdigest(),
                 "cores": 2,
                 "version": "6.4",
                 "comsol_temporary_directory": str(ascii_tmp_path),
@@ -2280,3 +2431,11 @@ def test_full_gradient_request_covers_declared_conditions(execution_limit, decla
         robust_shape_worker._requests_full_condition_gradients(execution_limit, declared)
         is expected
     )
+
+
+@pytest.mark.parametrize(
+    ("budget", "declared", "expected"),
+    [(5, 3, False), (6, 3, True), (100, 24, True)],
+)
+def test_initial_gradient_budget_requires_forward_and_gradient_batches(budget, declared, expected):
+    assert robust_shape_worker._initial_gradient_budget_is_sufficient(budget, declared) is expected

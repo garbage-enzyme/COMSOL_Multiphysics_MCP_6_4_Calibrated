@@ -60,6 +60,32 @@ def _study_step(study):
     raise ValueError(f"study contains no identifiable Wavelength step{suffix}")
 
 
+def _cleanup_resources(client, owner):
+    """Attempt client and lease cleanup and return explicit acceptance evidence."""
+    cleanup = {"client_clear": {"attempted": client is not None, "success": client is None}}
+    if client is not None:
+        try:
+            client.clear()
+            cleanup["client_clear"]["success"] = True
+        except Exception as exc:
+            cleanup["client_clear"].update(
+                {"success": False, "error_type": type(exc).__name__}
+            )
+    try:
+        lease_release = owner.release()
+        cleanup["lease_release"] = lease_release
+        cleanup["lease_release_success"] = (
+            isinstance(lease_release, dict) and lease_release.get("success") is True
+        )
+    except Exception as exc:
+        cleanup["lease_release"] = {"success": False, "error_type": type(exc).__name__}
+        cleanup["lease_release_success"] = False
+    cleanup["passed"] = (
+        cleanup["client_clear"]["success"] and cleanup["lease_release_success"]
+    )
+    return cleanup
+
+
 def _bound_source_sha256(case: dict) -> str:
     expected = case.get("expected_source_sha256")
     if not isinstance(expected, str) or len(expected) != 64:
@@ -235,12 +261,13 @@ def main() -> None:
         output["error"] = str(exc)
         output["traceback"] = traceback.format_exc(limit=12)
     finally:
-        if client is not None:
-            try:
-                client.clear()
-            except Exception:
-                pass
-        output["lease_release"] = owner.release()
+        cleanup = _cleanup_resources(client, owner)
+        output["cleanup"] = cleanup
+        output["lease_release"] = cleanup["lease_release"]
+        if not cleanup["passed"]:
+            output["success"] = False
+            output["cleanup_error"] = "client or solver lease cleanup failed"
+            exit_code = 1
         result_path.write_text(
             json.dumps(output, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )

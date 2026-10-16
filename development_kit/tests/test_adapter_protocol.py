@@ -286,6 +286,88 @@ def test_an_unsupported_form_is_refused() -> None:
         convert_explicitly(1, form="complex_matrix")
 
 
+def test_integer_to_float_conversion_requires_exact_float64_representation() -> None:
+    with pytest.raises(AdapterError, match="exactly representable"):
+        convert_explicitly(2**53 + 1, form="float")
+
+
+def test_integer_to_float_overflow_is_a_stable_adapter_error() -> None:
+    with pytest.raises(AdapterError, match="finite float"):
+        convert_explicitly(10**1000, form="float")
+
+
+def test_real_backend_session_identity_uses_public_client_version() -> None:
+    class Client:
+        version = "6.4"
+        host = "localhost"
+        port = 2036
+        standalone = False
+
+    backend = MphBackendBase()
+    backend._client = Client()
+    assert backend.session_identity().comsol_version == "6.4"
+
+
+@pytest.mark.parametrize(
+    ("form", "accessor", "value"),
+    [("float", "getDouble", 1.5), ("int", "getInt", 3), ("bool", "getBoolean", True)],
+)
+def test_real_backend_typed_read_uses_declared_accessor(monkeypatch, form, accessor, value):
+    from comsol_mcp.adapter.protocol import NodeRef
+
+    class Java:
+        def getString(self, _name):
+            raise AssertionError("numeric property must not use getString")
+
+    java = Java()
+    calls = []
+    setattr(java, accessor, lambda name: calls.append(name) or value)
+    backend = MphBackendBase()
+    monkeypatch.setattr(backend, "_java_node", lambda _path: java)
+    node = NodeRef(tag="comp1", path=("comp1",), node_type=None)
+    assert backend.read_property(node, "value", form=form).value == value
+    assert calls == ["value"]
+
+
+@pytest.mark.parametrize(
+    "form,accessor,proxy_name,value",
+    [
+        ("float_matrix", "getDoubleMatrix", "java.lang.Double", 1.5),
+        ("int_matrix", "getIntMatrix", "java.lang.Integer", 3),
+        ("bool_matrix", "getBooleanMatrix", "java.lang.Boolean", True),
+        ("str_matrix", "getStringMatrix", "java.lang.String", "x"),
+    ],
+)
+def test_real_backend_matrix_read_unwraps_cells_without_flattening(
+    monkeypatch, form, accessor, proxy_name, value
+):
+    from comsol_mcp.adapter.protocol import NodeRef
+
+    class Cell:
+        def __float__(self):
+            return float(value)
+
+        def __int__(self):
+            return int(value)
+
+        def __bool__(self):
+            return bool(value)
+
+        def __str__(self):
+            return str(value)
+
+    Cell.__name__ = proxy_name
+    java = type("Java", (), {})()
+    setattr(java, accessor, lambda _name: [[Cell(), Cell()], [Cell(), Cell()]])
+    backend = MphBackendBase()
+    monkeypatch.setattr(backend, "_java_node", lambda _path: java)
+    node = NodeRef(tag="comp1", path=("comp1",), node_type=None)
+    assert backend.read_property(node, "matrix", form=form).value == [
+        [value, value],
+        [value, value],
+    ]
+
+
 def test_an_oversized_matrix_is_refused_rather_than_materialized() -> None:
     from comsol_mcp.adapter.conversion import MAX_MATRIX_ELEMENTS
 

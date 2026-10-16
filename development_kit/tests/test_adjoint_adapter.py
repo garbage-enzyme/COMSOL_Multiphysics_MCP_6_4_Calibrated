@@ -24,6 +24,8 @@ class _Node:
         return self.node_type
 
     def set(self, name, value):
+        if name in {"constraint", "constraintL", "constraintU"}:
+            raise ValueError("Unknown COMSOL Optimization property")
         self.values[name] = list(value) if isinstance(value, list) else value
 
     def getString(self, name):
@@ -128,6 +130,145 @@ def test_adapter_configures_fixed_nodes_and_canonicalizes_units():
         "std2/opt_a71",
         "std2/wavelength_a71",
     ]
+
+
+def test_adapter_uses_caller_initial_values_without_changing_source_baseline():
+    support = _support()
+    original = copy.deepcopy(support)
+    backend = _Backend()
+    receipt = configure_native_adjoint(backend, support, _optimizer(), initial_values=[800.0])
+    assert receipt["optimization"]["initval"] == {"requested": ["800[nm]"], "readback": ["800[nm]"]}
+    assert receipt["sensitivity"]["initval"]["readback"] == ["800[nm]"]
+    assert receipt["controls"]["parameters"]["patch_length_x"] == "856.0[nm]"
+    assert support == original
+
+
+@pytest.mark.parametrize("values", [[True], [float("nan")], [float("inf")], [0.0], [], [800, 800]])
+def test_adapter_rejects_invalid_initial_values_before_model_mutation(values):
+    backend = _Backend()
+    original = backend.snapshot()
+    with pytest.raises(ValueError, match="initial_values"):
+        configure_native_adjoint(backend, _support(), _optimizer(), initial_values=values)
+    assert backend.snapshot() == original
+
+
+def test_adapter_rejects_match_objective_without_a_native_target_before_mutation():
+    support = _support()
+    support["objective"]["direction"] = "match"
+    backend = _Backend()
+    original = backend.snapshot()
+    with pytest.raises(ValueError, match="match.*target"):
+        configure_native_adjoint(backend, support, _optimizer())
+    assert backend.snapshot() == original
+
+
+@pytest.mark.parametrize("direction", ["minimize", "maximize"])
+def test_adapter_preserves_declared_optimization_direction(direction):
+    support = _support()
+    support["objective"]["direction"] = direction
+    receipt = configure_native_adjoint(_Backend(), support, _optimizer())
+    expected = "minimization" if direction == "minimize" else "maximization"
+    assert receipt["optimization"]["objectivetype"]["readback"] == expected
+
+
+def test_adapter_binds_differentiable_scalar_constraints_with_units_and_bounds():
+    support = _support()
+    support["constraints"] = [
+        {
+            "constraint_id": "transmission_bound",
+            "kind": "differentiable_scalar",
+            "expression": "ewfd.Tport1",
+            "unit": "1",
+            "lower": 0.0,
+            "upper": 0.1,
+            "derivative_supported": True,
+        },
+        {
+            "constraint_id": "loss_bound",
+            "kind": "differentiable_scalar",
+            "expression": "ewfd.loss",
+            "unit": "W",
+            "lower": None,
+            "upper": 2.5,
+            "derivative_supported": True,
+        },
+    ]
+    backend = _Backend()
+    receipt = configure_native_adjoint(backend, support, _optimizer())
+    node = backend.studies["std2"]._features.nodes["opt_a71"]
+    assert node.values["constraintExpression"] == ["ewfd.loss", "ewfd.Tport1"]
+    # Explicit activation rows can pass readback but fail native equation compilation.
+    # Keep the native default while retaining every constraint expression and bound.
+    assert node.values["constraintActive"] == []
+    assert receipt["optimization"]["constraintActive"] == {"requested": [], "readback": []}
+    assert node.values["constraintLbound"] == ["", "0[1]"]
+    assert node.values["constraintUbound"] == ["2.5[W]", "0.10000000000000001[1]"]
+    assert receipt["optimization"]["constraint"]["readback"] == node.values["constraintExpression"]
+    assert receipt["optimization"]["constraintL"]["readback"] == node.values["constraintLbound"]
+    assert receipt["optimization"]["constraintU"]["readback"] == node.values["constraintUbound"]
+
+
+def test_adapter_rejects_forward_only_constraint_before_backend_mutation():
+    support = _support()
+    support["constraints"] = [
+        {
+            "constraint_id": "power",
+            "kind": "forward_only",
+            "expression": "R+T+A",
+            "unit": "1",
+            "lower": 0.99,
+            "upper": 1.01,
+            "derivative_supported": False,
+        }
+    ]
+    backend = _Backend()
+    original = backend.snapshot()
+    with pytest.raises(ValueError, match="differentiable scalar"):
+        configure_native_adjoint(backend, support, _optimizer())
+    assert backend.snapshot() == original
+
+
+@pytest.mark.parametrize(
+    "property_name",
+    ["constraintExpression", "constraintLbound", "constraintUbound", "constraintActive"],
+)
+@pytest.mark.parametrize("failure", ["write", "readback"])
+def test_constraint_configuration_failure_restores_original_state(
+    monkeypatch, property_name, failure
+):
+    support = _support()
+    support["constraints"] = [
+        {
+            "constraint_id": "transmission_bound",
+            "kind": "differentiable_scalar",
+            "expression": "ewfd.Tport1",
+            "unit": "1",
+            "lower": 0.0,
+            "upper": 0.1,
+            "derivative_supported": True,
+        }
+    ]
+    backend = _Backend()
+    backend.create_study("existing")
+    original = backend.snapshot()
+    original_set = _Node.set
+    original_get = _Node.getStringArray
+
+    def set_value(self, name, value):
+        if name == property_name and failure == "write":
+            raise RuntimeError("injected constraint write failure")
+        return original_set(self, name, value)
+
+    def get_value(self, name):
+        if name == property_name and failure == "readback":
+            return ["unexpected"]
+        return original_get(self, name)
+
+    monkeypatch.setattr(_Node, "set", set_value)
+    monkeypatch.setattr(_Node, "getStringArray", get_value)
+    with pytest.raises((RuntimeError, ValueError), match="failure|readback differs"):
+        configure_native_adjoint(backend, support, _optimizer())
+    assert backend.snapshot() == original
 
 
 def test_adapter_rolls_back_when_a_fixed_property_fails():
@@ -446,3 +587,28 @@ def test_clientapi_prepare_controls_builds_exact_deformed_geometry(monkeypatch):
     assert "patch_length_x" in receipt["deformed_geometry"]["patch_displacement"][0]
     assert "patch_length_y" in receipt["deformed_geometry"]["patch_displacement"][1]
     assert receipt["deformed_geometry"]["patch_displacement"][2] == "0"
+
+    # Solve the implicit boundary equation at both reference endpoints.
+    # COMSOL evaluates x/y in the deformed frame; material.u/v are displacement.
+    for axis, displacement_name, expression in zip(
+        ("x", "y"), ("u", "v"), receipt["deformed_geometry"]["patch_displacement"][:2], strict=True
+    ):
+        for requested in (642e-9, 802.5e-9, 856e-9, 909.5e-9, 1070e-9):
+            numeric = expression.replace("[m]", "").replace(f"patch_length_{axis}", "requested")
+            numeric = numeric.replace(f"material.{displacement_name}", "displacement")
+            endpoints = []
+            for reference in (247e-9, 1103e-9):
+
+                def residual(displacement):
+                    coordinate = reference + displacement
+                    values = {
+                        "requested": requested,
+                        axis: coordinate,
+                        "displacement": displacement,
+                    }
+                    return displacement - eval(numeric, {"__builtins__": {}}, values)  # noqa: S307
+
+                offset = residual(0.0)
+                slope = (residual(1e-7) - offset) / 1e-7
+                endpoints.append(reference - offset / slope)
+            assert endpoints[1] - endpoints[0] == pytest.approx(requested, rel=1e-12, abs=1e-18)

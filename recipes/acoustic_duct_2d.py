@@ -230,6 +230,13 @@ def validate_solution(
     wavenumber = 2.0 * math.pi * frequency_hz / SOUND_SPEED_M_PER_S
     analytical = math.sin(wavenumber * (LENGTH_M - sample_x)) / math.sin(wavenumber * LENGTH_M)
     relative_error = abs(measured - analytical) / max(abs(analytical), 1e-12)
+    if (
+        not math.isfinite(measured.real)
+        or not math.isfinite(measured.imag)
+        or not math.isfinite(analytical)
+        or not math.isfinite(relative_error)
+    ):
+        raise ValueError("Acoustic pressure evidence must be finite")
     if relative_error > maximum_relative_error:
         raise AssertionError(
             "Acoustic pressure mismatch: "

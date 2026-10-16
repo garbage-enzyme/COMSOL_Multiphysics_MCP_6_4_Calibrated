@@ -9,18 +9,22 @@ path-bearing diagnostics.
 from __future__ import annotations
 
 import hashlib
+import struct
 import types
 import unicodedata
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, Callable, cast
 
 from comsol_mcp.contracts.mph_inspection import MphInspectionLimits
 
 _STREAM_CHUNK_BYTES = 1_048_576
 _UNIX_FILE_TYPE_MASK = 0o170_000
 _UNIX_LINK_FILE_TYPE = 0o120_000
+_ZIP_CENTRAL_HEADER_BYTES = 46
+_ZIP64_END_SIGNATURE = b"PK\x06\x06"
+_ZIP64_END_AND_LOCATOR_BYTES = 56 + 20
 
 
 class MphInspectionError(ValueError):
@@ -29,6 +33,58 @@ class MphInspectionError(ValueError):
     def __init__(self, reason_code: str, message: str):
         super().__init__(message)
         self.reason_code = reason_code
+
+
+def _preflight_entry_count(path: Path, max_entries: int) -> None:
+    """Count bounded directory records before ZipFile allocates their metadata.
+
+    The stdlib EOCD reader handles ZIP64 and reads a bounded archive tail.
+    Scan fixed-size headers to check the actual count too: a declared count
+    can be smaller than the number of directory records.
+    """
+    try:
+        with path.open("rb") as stream:
+            end_reader = cast(
+                Callable[[BinaryIO], list[Any] | None], getattr(zipfile, "_EndRecData")
+            )
+            end = end_reader(stream)
+            if end is None:
+                raise zipfile.BadZipFile("missing end record")
+            if end[4] > max_entries:
+                raise MphInspectionError(
+                    "mph_too_many_entries", "archive exceeds the caller entry-count limit"
+                )
+            directory_bytes = end[5]
+            directory_start = end[9] - directory_bytes
+            if end[0] == _ZIP64_END_SIGNATURE:
+                # New stdlib readers point at the ZIP64 end record. Older
+                # readers retain the ordinary end-record location.
+                stream.seek(end[9])
+                if stream.read(4) != _ZIP64_END_SIGNATURE:
+                    directory_start -= _ZIP64_END_AND_LOCATOR_BYTES
+            if directory_start < 0:
+                raise zipfile.BadZipFile("invalid directory offset")
+            stream.seek(directory_start)
+            consumed = 0
+            count = 0
+            while consumed < directory_bytes:
+                header = stream.read(_ZIP_CENTRAL_HEADER_BYTES)
+                if len(header) != _ZIP_CENTRAL_HEADER_BYTES or header[:4] != b"PK\x01\x02":
+                    raise zipfile.BadZipFile("invalid central directory record")
+                count += 1
+                if count > max_entries:
+                    raise MphInspectionError(
+                        "mph_too_many_entries", "archive exceeds the caller entry-count limit"
+                    )
+                variable_bytes = sum(struct.unpack_from("<3H", header, 28))
+                consumed += _ZIP_CENTRAL_HEADER_BYTES + variable_bytes
+                if consumed > directory_bytes:
+                    raise zipfile.BadZipFile("truncated central directory record")
+                stream.seek(variable_bytes, 1)
+    except (OSError, zipfile.BadZipFile, struct.error) as exc:
+        raise MphInspectionError(
+            "mph_invalid_zip", "the file is not a readable ZIP archive"
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -145,6 +201,7 @@ def inspect_archive_inventory(
                     "archive grew beyond the caller byte limit during hashing",
                 )
             digest.update(chunk)
+    _preflight_entry_count(path, bounds.max_entries)
     try:
         archive = zipfile.ZipFile(path)
     except (zipfile.BadZipFile, OSError, ValueError) as exc:

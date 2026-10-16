@@ -9,8 +9,14 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp import settings as _settings
 from comsol_mcp.durable import read_file_bytes_bounded
-from comsol_mcp.settings import load_settings, settings_fingerprint, settings_status
+from comsol_mcp.settings import (
+    load_settings_report,
+    settings_fingerprint,
+)
+
+load_settings = _settings.load_settings
 
 EVIDENCE_SETTINGS_ENV = "COMSOL_MCP_EVIDENCE_SETTINGS_PATH"
 EVIDENCE_SETTINGS_SCHEMA = "comsol_mcp.evidence_integrity_settings"
@@ -207,8 +213,12 @@ def load_evidence_integrity_status(
     if environ is None and EVIDENCE_SETTINGS_ENV in os.environ:
         environ = os.environ
     if environ is None:
-        project_status = settings_status()
-        project = load_settings()
+        report = load_settings_report()
+        project = report["settings"]
+        project_status = {
+            "settings_errors": report.get("errors", []),
+            "reason_code": "settings_invalid" if report.get("errors") else None,
+        }
         effective = {
             "schema_name": EVIDENCE_SETTINGS_SCHEMA,
             "schema_version": EVIDENCE_INTEGRITY_VERSION,
@@ -294,6 +304,18 @@ def warning_fields(status: Mapping[str, Any]) -> dict[str, Any]:
 
 def annotate_tool_response(tool_name: str, result: Any) -> Any:
     """Propagate opt-out or invalid-settings warnings without upgrading results."""
+    if tool_name == "evidence_integrity_verify" and isinstance(result, dict):
+        # The verifier owns its settings snapshot and warning fields. Seal the
+        # complete public receipt after the tool wrapper adds path metadata.
+        if result.get("schema_name") == EVIDENCE_VERIFICATION_SCHEMA and "verification_sha256" in result:
+            from comsol_mcp.evidence.contracts import canonical_sha256
+
+            sealed = dict(result)
+            sealed["verification_sha256"] = canonical_sha256(
+                {key: value for key, value in sealed.items() if key != "verification_sha256"}
+            )
+            return sealed
+        return result
     if not isinstance(result, dict) or tool_name in {
         "capabilities",
         "evidence_integrity_status",

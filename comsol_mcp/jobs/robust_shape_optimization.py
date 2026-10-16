@@ -218,6 +218,11 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
             adapter_configuration["configuration"]["material_tensor_rows"],
             conditions,
             expected_temperature_k=adapter_binding["temperature_k"],
+            finalist_wavelength_relative_offsets=(
+                tuple(finalist_validation_policy["off_design"]["wavelength_relative_offsets"])
+                if finalist_validation_policy["off_design"]["mode"] != "not_requested"
+                else ()
+            ),
         )
         condition_controls = adapter_configuration["configuration"]["condition_controls"]
         if condition_controls["observable_expression"] != support["objective"]["expression"]:
@@ -264,9 +269,12 @@ def expand_robust_shape_manifest(submission: object) -> dict[str, Any]:
         if condition["active"] and condition["objective_role"] == "objective"
     )
     off_design = finalist_validation_policy["off_design"]
-    expected_validation_solves = active_count * (
-        2 + len(off_design["wavelength_relative_offsets"]) + len(off_design["angle_offsets_deg"])
+    off_design_count = (
+        0
+        if off_design["mode"] == "not_requested"
+        else len(off_design["wavelength_relative_offsets"]) + len(off_design["angle_offsets_deg"])
     )
+    expected_validation_solves = active_count * (2 + off_design_count)
     if expected_validation_solves > 4096:
         raise ValueError("finalist validation solve count exceeds its bound")
     if finalist_mesh["max_elements_per_model"] != shape_mesh["max_elements_per_model"]:

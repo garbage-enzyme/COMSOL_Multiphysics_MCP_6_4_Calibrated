@@ -7,7 +7,7 @@ import copy
 import pytest
 
 from comsol_mcp.research.records import normalize_candidate_record
-from development_kit.tests.test_research_contracts import _space
+from development_kit.tests.test_research_contracts import _integer_space, _space
 
 
 def _candidate() -> dict:
@@ -64,6 +64,28 @@ def test_candidate_rejects_oversized_integer_as_value_error():
     value["requested_values"] = {"patch_length_x": 10**400, "patch_length_y": 80}
     with pytest.raises(ValueError, match="must be finite"):
         normalize_candidate_record(value, _space())
+
+
+@pytest.mark.parametrize("lower", [2**53 + 1, 2**60 + 3, -(2**60) + 3])
+def test_integer_candidates_preserve_exact_values_and_adjacent_identities(lower):
+    space = _integer_space(lower, lower + 31)
+    records = []
+    for number in (lower, lower + 1):
+        candidate = _candidate()
+        candidate["requested_values"] = {"grid_cells": number}
+        record = normalize_candidate_record(candidate, space)
+        assert type(record["normalized_values"]["grid_cells"]) is int
+        assert record["normalized_values"]["grid_cells"] == number
+        records.append(record)
+    assert records[0]["candidate_fingerprint"] != records[1]["candidate_fingerprint"]
+
+
+def test_integer_candidate_keeps_small_integral_float_compatibility():
+    candidate = _candidate()
+    candidate["requested_values"] = {"grid_cells": 3.0}
+    record = normalize_candidate_record(candidate, _integer_space(1, 5))
+    assert record["normalized_values"]["grid_cells"] == 3
+    assert type(record["normalized_values"]["grid_cells"]) is int
 
 
 def test_candidate_fingerprint_changes_with_campaign_or_normalized_point():

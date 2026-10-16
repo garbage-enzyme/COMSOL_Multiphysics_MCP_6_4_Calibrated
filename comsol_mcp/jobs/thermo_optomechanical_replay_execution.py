@@ -111,6 +111,16 @@ class ThermoOptomechanicalComsolExecutor:
         self._active_dataset = None
         return self.model
 
+    def prepare_resource_model(self) -> None:
+        """Load a verified source for admission without building or solving."""
+        self._verify_source()
+        if self.model is None:
+            if self.derived_path.is_file():
+                self._load_derived()
+            else:
+                self._load_source()
+        self._verify_source()
+
     def _load_derived(self) -> Any:
         if not self.derived_path.is_file():
             raise RuntimeError("derived thermo-optomechanical model is missing")
@@ -320,6 +330,68 @@ class ThermoOptomechanicalComsolExecutor:
             "reference_temperature_parameter", expansion["reference_temperature_K"], "K"
         )
         self._parameter("deformation_scale_parameter", transfer["deformation_scale"])
+        self._apply_thermal_load_features()
+
+    @staticmethod
+    def _feature_by_type(
+        physics: Any, feature_type: str, subtype: tuple[str, str] | None = None
+    ) -> Any:
+        features = physics.feature()
+        matches = [
+            physics.feature(tag)
+            for tag in list(features.tags())
+            if str(physics.feature(tag).getType()) == feature_type
+            and (subtype is None or str(physics.feature(tag).getString(subtype[0])) == subtype[1])
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                "thermo-optomechanical model must contain exactly one "
+                f"{subtype[1] if subtype else feature_type} feature"
+            )
+        return matches[0]
+
+    @staticmethod
+    def _set_feature_value(feature: Any, key: str, expression: str) -> None:
+        feature.set(key, expression)
+        observed = str(feature.getString(key))
+        if observed != expression:
+            raise RuntimeError(f"feature parameter {key} did not read back exactly: {observed!r}")
+
+    @staticmethod
+    def _bind_feature_selection(feature: Any, component: Any, tag: str) -> None:
+        expected = {int(item) for item in component.selection(tag).entities()}
+        if not expected:
+            raise RuntimeError(f"thermal load selection {tag} is empty")
+        feature.selection().named(tag)
+        if {int(item) for item in feature.selection().entities()} != expected:
+            raise RuntimeError(f"thermal load selection {tag} did not read back exactly")
+
+    def _apply_thermal_load_features(self) -> None:
+        contract = self.spec["model_contract"]
+        load = self.spec["thermal_load"]
+        component = self.model.java.component(contract["component_tag"])
+        heat = component.physics(contract["heat_transfer_tag"])
+        source = self._feature_by_type(heat, "HeatSource")
+        self._bind_feature_selection(source, component, contract["heated_domain_selection"])
+        self._set_feature_value(
+            source,
+            "Q0",
+            f"{load['volumetric_heat_source_W_per_m3']:.17g}[{load['heat_source_unit']}]",
+        )
+        convection = self._feature_by_type(
+            heat, "HeatFluxBoundary", ("HeatFluxType", "ConvectiveHeatFlux")
+        )
+        self._bind_feature_selection(convection, component, contract["thermal_boundary_selection"])
+        self._set_feature_value(
+            convection,
+            "h",
+            f"{load['convection_coefficient_W_per_m2_K']:.17g}[{load['convection_coefficient_unit']}]",
+        )
+        self._set_feature_value(
+            convection,
+            "Text",
+            f"{load['ambient_temperature_K']:.17g}[K]",
+        )
 
     def _thermal_structural(self) -> Mapping[str, Any]:
         self._verify_source()
@@ -431,7 +503,12 @@ class ThermoOptomechanicalComsolExecutor:
         self._study("transfer_study_tag")
         # _study() already binds the transfer study's own solution dataset;
         # measuring through that binding is what observes the Transfer output.
-        displacement = abs(self._evaluate("displacement_max"))
+        displacement_key = (
+            "transfer_displacement_max"
+            if self.spec["model_contract"]["expressions"].get("transfer_displacement_max")
+            else "displacement_max"
+        )
+        displacement = abs(self._evaluate(displacement_key))
         deformed_geometry = _fingerprint(
             {
                 "source_model_sha256": self.spec["source_model_sha256"],
@@ -442,7 +519,7 @@ class ThermoOptomechanicalComsolExecutor:
         self._save(self.derived_path)
         self._load_derived()
         self._bind_study_dataset(self.spec["model_contract"]["transfer_study_tag"])
-        displacement_readback = abs(self._evaluate("displacement_max"))
+        displacement_readback = abs(self._evaluate(displacement_key))
         return {
             "method": self.spec["deformation_transfer"]["method"],
             "material_frame_semantics": "spatial_deformation_preserves_material",

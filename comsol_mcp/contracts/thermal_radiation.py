@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -180,8 +181,15 @@ class ThermalRadiationRequest(_ClosedModel):
     polarization: PolarizationContract
     optical_quantity: Literal["emissivity", "absorptivity"]
     values_flat: Annotated[
-        list[Annotated[float, Field(ge=0.0, le=1.0)]],
-        Field(min_length=1, max_length=MAX_DATA_VALUES),
+        list[float],
+        Field(
+            min_length=1,
+            max_length=MAX_DATA_VALUES,
+            description=(
+                "Scalar and TE/TM values lie in [0, 1]. Stokes I lies in [0, 1]; "
+                "Q, U, and V are signed, and their magnitude cannot exceed I."
+            ),
+        ),
     ]
     uncertainty_flat: Annotated[
         list[Annotated[float, Field(ge=0.0)]], Field(max_length=MAX_DATA_VALUES)
@@ -194,9 +202,15 @@ class ThermalRadiationRequest(_ClosedModel):
     configuration_sha256: Sha256
     source_artifact_sha256s: Annotated[list[Sha256], Field(min_length=1, max_length=64)]
     artifact_chain_sha256: Sha256
+    absorptivity_evidence_sha256: Sha256 | None = None
+    channel_identity_sha256: Sha256 | None = None
 
     @model_validator(mode="after")
     def validate_declared_shape(self) -> ThermalRadiationRequest:
+        if self.optical_quantity == "absorptivity" and (
+            self.absorptivity_evidence_sha256 is None or self.channel_identity_sha256 is None
+        ):
+            raise ValueError("absorptivity requires explicit evidence and channel identities")
         if self.extrapolation:
             raise ValueError("thermal radiation extrapolation is disabled")
         dimensions = (
@@ -237,6 +251,17 @@ class ThermalRadiationRequest(_ClosedModel):
                 raise ValueError("TE/TM incoherent weights must contain two values summing to one")
         elif self.polarization.channels != ["I", "Q", "U", "V"]:
             raise ValueError("Stokes polarization requires channels ['I', 'Q', 'U', 'V']")
+        if self.polarization.mode != "stokes_mueller" and any(
+            value < 0.0 or value > 1.0 for value in self.values_flat
+        ):
+            raise ValueError("scalar and TE/TM values must lie in [0, 1]")
+        if self.polarization.mode == "stokes_mueller":
+            for offset in range(0, len(self.values_flat), 4):
+                intensity, q_value, u_value, v_value = self.values_flat[offset : offset + 4]
+                if not 0.0 <= intensity <= 1.0:
+                    raise ValueError("Stokes I values must lie in [0, 1]")
+                if math.hypot(q_value, u_value, v_value) > intensity + 1.0e-12:
+                    raise ValueError("Stokes polarization magnitude cannot exceed I")
         if self.polarization.mode == "stokes_mueller":
             analyzer = self.polarization.analyzer_stokes
             if (

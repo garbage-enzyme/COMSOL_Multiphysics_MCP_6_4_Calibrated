@@ -60,6 +60,27 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _reload_identity_matches(expected: dict[str, Any], observed: dict[str, Any]) -> bool:
+    """Compare native identities and readable seed values after reload."""
+    for name in ("study_tags", "func_tags", "dnn_type", "step_type"):
+        if name not in expected or observed.get(name) != expected[name]:
+            return False
+    seeds = observed.get("seed_readback")
+    expected_seeds = expected.get("seed_readback")
+    if not isinstance(seeds, dict) or not isinstance(expected_seeds, dict):
+        return False
+    names = {"useseed", "rndseed", "useseedvalidation", "rndseedvalidation"}
+    if set(seeds) != names or set(expected_seeds) != names:
+        return False
+    return all(
+        isinstance(seeds[name], dict)
+        and seeds[name].get("readable") is True
+        and isinstance(expected_seeds[name], str)
+        and seeds[name].get("value") == expected_seeds[name]
+        for name in names
+    )
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -91,7 +112,7 @@ def _process_identity(pid: int) -> dict:
         command_line = list(process.cmdline())
         try:
             executable = process.exe()
-        except (psutil.AccessDenied, psutil.ZombieProcess):
+        except psutil.AccessDenied, psutil.ZombieProcess:
             executable = None
         return {
             "pid": process.pid,
@@ -436,6 +457,15 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
         except Exception as exc:
             result["step_side_binding"] = {"error": f"{type(exc).__name__}: {exc}"}
 
+        expected_identity = {
+            "study_tags": [str(item) for item in list(jm.study().tags())],
+            "func_tags": [str(item) for item in list(jm.func().tags())],
+            "dnn_type": str(backend.get_dnn_function(DNN_FUNCTION_TAG).getType()),
+            "seed_readback": dict(result["seed_readback"]),
+            "step_type": str(backend.get_study_step(STUDY_TAG, STUDY_STEP_TAG).getType()),
+        }
+        result["pre_save_identity"] = expected_identity
+
         # ---- Phase 2: save / reload identity -------------------------------
         model_path = workspace / "surrogate_dnn_gate.mph"
         model.save(str(model_path))
@@ -457,6 +487,9 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
         }
         rstep = reload_backend.get_study_step(STUDY_TAG, STUDY_STEP_TAG)
         result["reload"]["step_type"] = str(rstep.getType())
+        result["reload"]["identity_matches_pre_save"] = _reload_identity_matches(
+            expected_identity, result["reload"]
+        )
 
         # ---- Phase 3: rollback leaves no partial tree -----------------------
         # Re-create the same tags on the reloaded model; the adapter must refuse
@@ -470,6 +503,9 @@ def _run_worker(output: Path, cores: int, workspace: Path) -> int:
         result["post_refusal_tags"] = {
             "study_tags": [str(item) for item in list(rjm.study().tags())],
             "func_tags": [str(item) for item in list(rjm.func().tags())],
+        }
+        result["refusal_on_existing_tags"]["tags_unchanged"] = result["post_refusal_tags"] == {
+            key: result["reload"][key] for key in ("study_tags", "func_tags")
         }
 
         # ---- Phase 4: injected mid-batch failure rolls back -----------------
@@ -662,8 +698,7 @@ def _run_parent(args) -> int:
             and worker_result.get("unreadable_after_apply") == []
             # The `args` write is deferred until a data source is bound, then
             # resolved from the columns COMSOL actually reported.
-            and [item["property"] for item in apply_result.get("deferred_writes", [])]
-            == ["args"]
+            and [item["property"] for item in apply_result.get("deferred_writes", [])] == ["args"]
             and worker_result.get("data_source_bound") is True
             and binding.get("success") is True
             and binding.get("bound_arguments") == ["a1", "a2", "qoi"]
@@ -674,6 +709,8 @@ def _run_parent(args) -> int:
             and worker_result.get("post_rollback_tags") == {"study_tags": [], "func_tags": []}
             and refusal.get("success") is False
             and refusal.get("created_nodes") == []
+            and refusal.get("tags_unchanged") is True
+            and (worker_result.get("reload") or {}).get("identity_matches_pre_save") is True
             and active.get("durable_jobs", {}).get("active_count") == 0
         )
         if not phase_passed:

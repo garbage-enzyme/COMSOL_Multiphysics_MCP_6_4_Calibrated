@@ -8,6 +8,8 @@ import shutil
 import uuid
 from pathlib import Path
 
+import pytest
+
 from development_kit.scripts import lin2025_pedot_shape_licensed_gate as gate
 
 
@@ -80,5 +82,23 @@ def test_dry_run_is_solver_free_and_hash_bound(tmp_path: Path):
         assert result["solver_started"] is False
         assert result["filesystem_modified"] is False
         assert result["paths_included"] is False
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_spec_rejects_source_that_is_a_fixed_output(tmp_path: Path):
+    root = _root(tmp_path)
+    try:
+        source = root / "base.mph"
+        source.write_bytes(b"source")
+        fixture_path = root / "fixture.json"
+        fixture_path.write_text(json.dumps(_fixture(hashlib.sha256(b"source").hexdigest())), encoding="utf-8")
+        tree = root / "tree.json"; tree.write_text("{}", encoding="utf-8")
+        support = root / "support.json"; support.write_text("{}", encoding="utf-8")
+        tensors = root / "state-tensors.json"; tensors.write_text(json.dumps({"OX": ["0"] * 9, "MR": ["0"] * 9}), encoding="utf-8")
+        args = argparse.Namespace(test_root=root, source_model=source, fixture=fixture_path,
+            tree_readback=tree, support=support, state_tensors=tensors, cores=1, dry_run=True)
+        with pytest.raises(ValueError, match="distinct"):
+            gate._spec(args)
     finally:
         shutil.rmtree(root, ignore_errors=True)

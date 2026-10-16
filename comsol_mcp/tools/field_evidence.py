@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -12,6 +13,7 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
+from comsol_mcp.durable.io import read_file_bytes_bounded, snapshot_file_bounded
 from comsol_mcp.evidence.field_bundle import (
     normalize_field_evidence_request,
     validate_field_evidence_request,
@@ -20,6 +22,10 @@ from comsol_mcp.evidence.field_dataset import collect_existing_dataset_field_evi
 from comsol_mcp.evidence.field_discovery import (
     discover_field_datasets,
     validate_field_discovery_limits,
+)
+from comsol_mcp.evidence.field_manifest import (
+    MAX_FIELD_MANIFEST_BYTES,
+    validate_field_evidence_manifest,
 )
 from comsol_mcp.utils.public_errors import public_error
 
@@ -64,6 +70,34 @@ def _loaded_source_path(model: Any) -> Path:
     if not path.is_file() or path.suffix.casefold() != ".mph":
         raise ValueError("loaded model source must be one existing MPH file")
     return path
+
+
+def _validate_cached_view(root: Path, request: dict[str, Any], view: dict[str, Any]) -> None:
+    """Accept only a complete, request-bound immutable artifact bundle."""
+    view_root = root / view["view_fingerprint"]
+    if view_root.is_symlink() or view_root.resolve().parent != root.resolve():
+        raise ValueError("cached field view must remain inside its artifact root")
+    limit = request["limits"]["max_artifact_bytes"]
+    payload = read_file_bytes_bounded(
+        view_root / "field_manifest.json",
+        max_bytes=min(limit, MAX_FIELD_MANIFEST_BYTES),
+        no_symlink_parents=True,
+    )
+    manifest = validate_field_evidence_manifest(json.loads(payload), request=request)
+    if manifest["view_fingerprint"] != view["view_fingerprint"]:
+        raise ValueError("cached field manifest does not match the requested view")
+    total = len(payload)
+    for kind, filename in (("array", "field_arrays.npz"), ("png", "field_render.png")):
+        artifact = manifest["artifacts"][kind]
+        if artifact is None:
+            continue
+        expected_path = f"{view['view_fingerprint']}/{filename}"
+        if artifact["relative_path"] != expected_path:
+            raise ValueError("cached field artifact path does not match the requested view")
+        snapshot = snapshot_file_bounded(view_root / filename, max_bytes=limit - total)
+        if any(snapshot[key] != artifact[key] for key in ("sha256", "byte_count")):
+            raise ValueError("cached field artifact bytes do not match the manifest")
+        total += snapshot["byte_count"]
 
 
 def register_field_evidence_tools(mcp: MCPServer) -> None:
@@ -155,7 +189,11 @@ def register_field_evidence_tools(mcp: MCPServer) -> None:
             relative_root = Path("field_evidence") / normalized["request_fingerprint"]
             artifact_root = ownership_manager.runtime_dir / relative_root
             artifact_root.parent.mkdir(parents=True, exist_ok=True)
-            if artifact_root.exists():
+            view_root = artifact_root / view["view_fingerprint"]
+            if view_root.exists() or view_root.is_symlink():
+                _validate_cached_view(artifact_root, normalized, view)
+                if _sha256_file(source_path) != source_before:
+                    raise RuntimeError("loaded source changed during field cache verification")
                 return {
                     "success": True,
                     "model_name": model_name,
@@ -163,6 +201,8 @@ def register_field_evidence_tools(mcp: MCPServer) -> None:
                     "source_model_sha256": source_before,
                     "source_unchanged": True,
                     "already_present": True,
+                    "view_id": view_id,
+                    "view_fingerprint": view["view_fingerprint"],
                     "ownership_checked": True,
                     "solver_started_by_tool": False,
                     "evaluation_skipped": True,
@@ -184,7 +224,8 @@ def register_field_evidence_tools(mcp: MCPServer) -> None:
                 source_after = _sha256_file(source_path)
                 if source_after != source_before:
                     raise RuntimeError("loaded source changed during read-only field extraction")
-                os.rename(staging_root, artifact_root)
+                artifact_root.mkdir(parents=True, exist_ok=True)
+                os.rename(staging_root / view["view_fingerprint"], view_root)
             finally:
                 source_hash_error = None
                 if source_after is None:

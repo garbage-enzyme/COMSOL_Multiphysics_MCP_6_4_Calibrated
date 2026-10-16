@@ -15,8 +15,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -514,13 +517,37 @@ class _Wire:
             stderr=subprocess.PIPE,
         )
         self._id = 0
+        self._start_reader()
+
+    def _start_reader(self) -> None:
+        self._responses = queue.Queue(maxsize=256)
+        self._reader_stopped = threading.Event()
+
+        def read() -> None:
+            assert self.process.stdout is not None
+            while not self._reader_stopped.is_set():
+                line = self.process.stdout.readline()
+                while not self._reader_stopped.is_set():
+                    try:
+                        self._responses.put(line, timeout=0.05)
+                        break
+                    except queue.Full:
+                        continue
+                if not line:
+                    break
+
+        self._reader = threading.Thread(target=read, daemon=True)
+        self._reader.start()
 
     def _send(self, payload: dict) -> None:
         assert self.process.stdin is not None
         self.process.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
         self.process.stdin.flush()
 
-    def request(self, method: str, params: dict | None = None) -> dict:
+    def request(
+        self, method: str, params: dict | None = None, *, timeout_seconds: float = 15
+    ) -> dict:
+        deadline = time.monotonic() + timeout_seconds
         self._id += 1
         payload: dict = {"jsonrpc": "2.0", "id": self._id, "method": method}
         if params is not None:
@@ -528,7 +555,13 @@ class _Wire:
         self._send(payload)
         assert self.process.stdout is not None
         while True:
-            line = self.process.stdout.readline()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"server response deadline expired during {method}")
+            try:
+                line = self._responses.get(timeout=remaining)
+            except queue.Empty as exc:
+                raise TimeoutError(f"server response deadline expired during {method}") from exc
             if not line:
                 raise AssertionError(f"server closed stdout during {method}")
             text = line.decode("utf-8").strip()
@@ -544,6 +577,7 @@ class _Wire:
         self._send({"jsonrpc": "2.0", "method": method})
 
     def close(self) -> None:
+        self._reader_stopped.set()
         try:
             if self.process.stdin is not None:
                 self.process.stdin.close()
@@ -553,6 +587,30 @@ class _Wire:
             self.process.wait(timeout=20)
         except subprocess.TimeoutExpired:
             self.process.kill()
+            self.process.wait(timeout=5)
+        self._reader.join(timeout=5)
+        assert not self._reader.is_alive(), "stdout reader survived server cleanup"
+        for stream in (self.process.stdout, self.process.stderr):
+            if stream is not None:
+                stream.close()
+
+
+def test_raw_wire_silent_pipe_obeys_request_deadline():
+    wire = object.__new__(_Wire)
+    wire.process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    wire._id = 0
+    wire._start_reader()
+    try:
+        with pytest.raises(TimeoutError, match="deadline"):
+            wire.request("tools/list", {}, timeout_seconds=0.05)
+    finally:
+        wire.process.kill()
+        wire.close()
 
 
 @pytest.mark.parametrize("revision", ["2024-11-05", "2025-03-26", "2025-06-18"])

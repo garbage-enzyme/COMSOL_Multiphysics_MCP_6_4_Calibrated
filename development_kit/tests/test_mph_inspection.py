@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import struct
 import zipfile
 from pathlib import Path
 
@@ -239,6 +240,88 @@ def test_entry_count_limits_are_enforced(tmp_path):
     _refuse(fixture, "mph_too_many_entries", limits)
 
 
+def test_entry_count_is_rejected_before_central_directory_expansion(tmp_path, monkeypatch):
+    """The EOCD count guard runs before ``infolist`` allocates metadata."""
+    fixture = tmp_path / "forged-count.mph"
+    with zipfile.ZipFile(fixture, "w") as archive:
+        archive.writestr("only.txt", b"x")
+    raw = bytearray(fixture.read_bytes())
+    eocd = raw.rfind(b"PK\x05\x06")
+    assert eocd >= 0
+    raw[eocd + 10 : eocd + 12] = (65_535).to_bytes(2, "little")
+    fixture.write_bytes(raw)
+
+    def _must_not_expand(_self):
+        raise AssertionError("central directory expanded before the bound check")
+
+    monkeypatch.setattr(zipfile.ZipFile, "infolist", _must_not_expand)
+    _refuse(fixture, "mph_too_many_entries", MphInspectionLimits(max_entries=3))
+
+
+def test_underreported_entry_count_is_rejected_by_bounded_directory_scan(tmp_path):
+    fixture = tmp_path / "underreported-count.mph"
+    with zipfile.ZipFile(fixture, "w") as archive:
+        archive.writestr("one.txt", b"1")
+        archive.writestr("two.txt", b"2")
+    raw = bytearray(fixture.read_bytes())
+    eocd = raw.rfind(b"PK\x05\x06")
+    assert eocd >= 0
+    raw[eocd + 10 : eocd + 12] = (1).to_bytes(2, "little")
+    fixture.write_bytes(raw)
+    _refuse(fixture, "mph_too_many_entries", MphInspectionLimits(max_entries=1))
+
+
+@pytest.mark.parametrize("legacy_location", [False, True])
+def test_zip64_inventory_accepts_exact_entry_limit_without_source_mutation(
+    tmp_path, monkeypatch, legacy_location
+):
+    monkeypatch.setattr(zipfile, "ZIP_FILECOUNT_LIMIT", 1)
+    fixture = _write_valid_mph(tmp_path / "valid-zip64.mph")
+    original = fixture.read_bytes()
+    assert b"PK\x06\x06" in original
+    assert b"PK\x06\x07" in original
+    with zipfile.ZipFile(fixture) as archive:
+        count = len(archive.infolist())
+        assert archive.testzip() is None
+    if legacy_location:
+        reader = zipfile._EndRecData
+
+        def legacy_end_record(stream):
+            end = reader(stream)
+            end[zipfile._ECD_LOCATION] = original.rfind(b"PK\x05\x06")
+            return end
+
+        monkeypatch.setattr(zipfile, "_EndRecData", legacy_end_record)
+        from comsol_mcp.evidence.inspection.archive import _preflight_entry_count
+
+        # Only preflight receives the emulated legacy location. The current
+        # ZipFile implementation requires its own reader's location semantics.
+        _preflight_entry_count(fixture, count)
+        monkeypatch.setattr(zipfile, "_EndRecData", reader)
+    inventory = inspect_archive_inventory(fixture, MphInspectionLimits(max_entries=count))
+    assert len(inventory.entries) == count
+    assert fixture.read_bytes() == original
+
+
+@pytest.mark.parametrize("declared_count", [None, 1, 100_000])
+def test_zip64_count_refusal_precedes_zipfile_construction(tmp_path, monkeypatch, declared_count):
+    monkeypatch.setattr(zipfile, "ZIP_FILECOUNT_LIMIT", 1)
+    fixture = _write_valid_mph(tmp_path / "bounded-zip64.mph")
+    raw = bytearray(fixture.read_bytes())
+    record_offset = raw.rfind(b"PK\x06\x06")
+    assert record_offset >= 0
+    if declared_count is not None:
+        struct.pack_into("<Q", raw, record_offset + 24, declared_count)
+        struct.pack_into("<Q", raw, record_offset + 32, declared_count)
+    fixture.write_bytes(raw)
+
+    def must_not_construct(*_args, **_kwargs):
+        pytest.fail("ZIP64 metadata allocation must not precede entry-count admission")
+
+    monkeypatch.setattr(zipfile.ZipFile, "__init__", must_not_construct)
+    _refuse(fixture, "mph_too_many_entries", MphInspectionLimits(max_entries=1))
+
+
 def test_missing_required_markers_fail_closed_as_unsupported(tmp_path):
     fixture = _write_valid_mph(tmp_path / "nodmodel.mph", include_dmodel=False)
     _refuse(fixture, "mph_unsupported_format")
@@ -304,6 +387,32 @@ def test_dtd_or_entity_markers_are_refused(tmp_path, member, payload):
                 ).encode(),
             )
         archive.writestr(member, payload)
+    _refuse(fixture, "mph_marker_dtd_rejected")
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16", "utf-16-le", "utf-16-be"])
+def test_encoded_dtd_marker_is_refused_before_entity_expansion(encoding):
+    from comsol_mcp.evidence.inspection.summary import _parse_xml
+
+    marker = '<!DOCTYPE modelInfo [<!ENTITY x "expanded">]><modelInfo>&x;</modelInfo>'
+    with pytest.raises(MphInspectionError) as excinfo:
+        _parse_xml(marker.encode(encoding), "modelinfo.xml")
+    assert excinfo.value.reason_code == "mph_marker_dtd_rejected"
+    assert (
+        _parse_xml("<modelInfo>safe</modelInfo>".encode(encoding), "modelinfo.xml").text == "safe"
+    )
+
+
+@pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16-be"])
+def test_bomless_utf16_archive_dtd_is_refused(tmp_path, encoding):
+    fixture = _write_valid_mph(tmp_path / f"dtd-{encoding}.mph")
+    marker = '<!DOCTYPE Model [<!ENTITY x "expanded">]><Model>&x;</Model>'
+    with zipfile.ZipFile(fixture) as archive:
+        entries = {item.filename: archive.read(item) for item in archive.infolist()}
+    entries["dmodel.xml"] = marker.encode(encoding)
+    with zipfile.ZipFile(fixture, "w") as archive:
+        for name, value in entries.items():
+            archive.writestr(name, value)
     _refuse(fixture, "mph_marker_dtd_rejected")
 
 
@@ -570,3 +679,71 @@ def test_b13_probe_cache_hit_and_invalidation_on_file_change(tmp_path):
     forced = probe_mph_artifacts(tmp_path, refresh=True)
     assert forced["cache"]["refreshed"] is True
     assert forced["cache"]["status"] == "miss"
+
+
+def test_oversized_probe_cache_remains_warning_only(tmp_path):
+    from comsol_mcp.evidence.inspection.probe import (
+        _MPH_PROBE_CACHE_BYTES,
+        MPH_ARTIFACT_PROBE_CACHE_FILENAME,
+        probe_mph_artifacts,
+    )
+
+    _write_valid_mph(tmp_path / "good.mph")
+    cache = tmp_path / MPH_ARTIFACT_PROBE_CACHE_FILENAME
+    cache.write_bytes(b"x" * (_MPH_PROBE_CACHE_BYTES + 1))
+    report = probe_mph_artifacts(tmp_path)
+    assert report["available"] is True
+    assert report["cache"]["status"] == "miss"
+    assert report["probes"][0]["available"] is True
+    assert cache.stat().st_size <= _MPH_PROBE_CACHE_BYTES
+
+
+def test_probe_cache_preserves_linked_caller_staging_file(tmp_path):
+    import os
+
+    from comsol_mcp.evidence.inspection.probe import (
+        MPH_ARTIFACT_PROBE_CACHE_FILENAME,
+        probe_mph_artifacts,
+    )
+
+    job = tmp_path / "job"
+    job.mkdir()
+    caller = tmp_path / "caller.bin"
+    caller.write_bytes(b"caller-owned bytes")
+    staging = job / f".{MPH_ARTIFACT_PROBE_CACHE_FILENAME}.tmp-{os.getpid()}"
+    os.link(caller, staging)
+
+    report = probe_mph_artifacts(job)
+
+    assert caller.read_bytes() == b"caller-owned bytes"
+    assert staging.read_bytes() == b"caller-owned bytes"
+    assert report["cache"]["status"] == "miss"
+    assert probe_mph_artifacts(job)["cache"]["status"] == "hit"
+
+
+def test_probe_cache_removes_owned_staging_on_publication_failure(tmp_path, monkeypatch):
+    from comsol_mcp.evidence.inspection import probe
+
+    def fail_replace(_source, _destination):
+        raise OSError("injected cache publication failure")
+
+    monkeypatch.setattr(probe.os, "replace", fail_replace)
+
+    report = probe.probe_mph_artifacts(tmp_path)
+
+    assert report["cache"]["status"] == "unavailable"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_probe_cache_removes_owned_staging_on_write_failure(tmp_path, monkeypatch):
+    from comsol_mcp.evidence.inspection import probe
+
+    def fail_encode(*_args, **_kwargs):
+        raise OSError("injected cache encoding failure")
+
+    monkeypatch.setattr(probe.json, "dumps", fail_encode)
+
+    report = probe.probe_mph_artifacts(tmp_path)
+
+    assert report["cache"]["status"] == "unavailable"
+    assert list(tmp_path.iterdir()) == []

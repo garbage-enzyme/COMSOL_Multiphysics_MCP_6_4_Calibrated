@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,7 @@ from comsol_mcp.jobs import native_adjoint_runtime
 from comsol_mcp.jobs.adjoint_optimization import (
     expand_adjoint_optimization_manifest,
     normalize_adjoint_optimization_submission,
+    normalize_native_execution_policy,
 )
 from comsol_mcp.jobs.adjoint_optimization_worker import run as run_adjoint_worker
 from comsol_mcp.jobs.adjoint_rows import read_adjoint_rows
@@ -21,8 +23,122 @@ from development_kit.tests.test_derivative_support import _support
 from development_kit.tests.test_gradient_contracts import _optimizer
 
 
+def _execution_policy():
+    return {
+        "smoothing_type": "hyperelastic",
+        "geometry_shape_order": "1",
+        "gradient_method": "adjoint",
+        "finalist_fractions": [0.25, 0.5, 0.75, 1.0],
+        "geometry_jacobian_expression": "reldetjac",
+        "minimum_geometry_jacobian": 0.0,
+        "material_jacobian_expression": "comp1.material.detF",
+        "minimum_material_jacobian": 0.0,
+        "minimum_element_quality": 0.1,
+        "passivity_absolute_tolerance": 1e-6,
+        "closure_absolute_tolerance": 1e-6,
+    }
+
+
+@pytest.mark.parametrize("fractions", [[], [0, 1], [True, 1], [0.5, 0.5, 1], [0.9], [1] * 33])
+def test_execution_policy_refuses_incomplete_or_invalid_loading(fractions):
+    policy = _execution_policy()
+    policy["finalist_fractions"] = fractions
+    with pytest.raises(ValueError):
+        normalize_native_execution_policy(policy)
+
+
+def test_execution_policy_preserves_explicit_configuration():
+    policy = _execution_policy()
+    assert normalize_native_execution_policy(policy) == policy
+    policy["automatic_fallback"] = True
+    with pytest.raises(ValueError, match="fields mismatch"):
+        normalize_native_execution_policy(policy)
+
+
+def test_versioned_execution_policy_is_hash_bound_and_reserves_solves(ascii_tmp_path):
+    envelope, _, manifest = _write_manifest(ascii_tmp_path)
+    raw = json.loads(manifest.read_text())
+    raw["schema_version"] = "1.1.0"
+    raw["execution_policy"] = _execution_policy()
+    raw["optimizer"]["budget"]["max_solves"] = 5
+
+    def publish():
+        payload = json.dumps(raw).encode()
+        manifest.write_bytes(payload)
+        envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+
+    publish()
+    with pytest.raises(ValueError, match="reserve"):
+        expand_adjoint_optimization_manifest(envelope)
+    raw["optimizer"]["budget"]["max_solves"] = 6
+    publish()
+    spec = expand_adjoint_optimization_manifest(envelope)
+    assert spec["execution_policy"] == _execution_policy()
+    assert spec["schema_version"] == "1.1.0"
+
+
+def test_loading_uses_actual_solver_and_preserves_initialization():
+    values = {}
+    calls = []
+    node = SimpleNamespace(set=lambda k, v: values.__setitem__(k, v), getString=lambda k: values[k])
+    solution = SimpleNamespace(feature=lambda tag: node, runAll=lambda: calls.append("solve"))
+    model = SimpleNamespace(java=SimpleNamespace(sol=lambda tag: solution))
+    study = SimpleNamespace(
+        createAutoSequences=lambda kind: calls.append(kind),
+        getSolverSequences=lambda kind: ["actual_solver"],
+    )
+    tag, observed = native_adjoint_runtime._run_loading_solution(model, study)
+    assert tag == "actual_solver"
+    assert observed == {"initmethod": "sol", "initsol": tag, "solnum": "last"}
+    assert calls == ["all", "solve"]
+
+
+def test_loading_initial_vector_converts_declared_units():
+    support = {
+        "variables": [
+            {"variable_id": "patch_length_x", "unit": "nm"},
+            {"variable_id": "patch_length_y", "unit": "um"},
+        ]
+    }
+    result = native_adjoint_runtime._initial_values_si(support, [800.0, 0.9])
+    assert result == pytest.approx({"patch_length_x": 8e-7, "patch_length_y": 9e-7})
+
+
 def _resource_policy() -> dict:
     return {"max_mesh_elements": 1000}
+
+
+@pytest.mark.parametrize("failure", [None, "empty", "mismatch", "exited"])
+def test_watchdog_identity_confirmation_is_bounded_and_strict(monkeypatch, failure):
+    from comsol_mcp.jobs import manager as module
+
+    command = ["python", "-m", "owned-watchdog"]
+    signature = hashlib.sha256("\0".join(command).encode()).hexdigest()
+    expected = {"pid": 123, "process_create_time": 1.0, "command_signature": signature}
+    clock = [0.0]
+    calls = []
+
+    def observe(pid):
+        calls.append(pid)
+        if failure == "empty" or (failure is None and len(calls) == 1):
+            raise OSError("temporarily empty command line")
+        return {**expected, "command_signature": "0" * 64} if failure == "mismatch" else expected
+
+    monkeypatch.setattr(module, "process_identity", observe)
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        module.time, "sleep", lambda interval: clock.__setitem__(0, clock[0] + interval)
+    )
+    process = SimpleNamespace(pid=123, poll=lambda: 0 if failure == "exited" else None)
+    if failure is None:
+        assert module._wait_for_launched_identity(process, command) == expected
+        assert len(calls) == 2
+    else:
+        with pytest.raises(RuntimeError, match="identity could not be verified"):
+            module._wait_for_launched_identity(process, command)
+        assert clock[0] <= 2.01
+        if failure == "exited":
+            assert calls == []
 
 
 def _write_manifest(tmp_path):
@@ -103,6 +219,33 @@ def test_manifest_rejects_source_mutation_after_submission(ascii_tmp_path):
     source.write_bytes(b"changed")
     with pytest.raises(ValueError, match="source SHA-256"):
         expand_adjoint_optimization_manifest(envelope)
+
+
+def test_manifest_rejects_match_without_an_explicit_native_target(ascii_tmp_path):
+    envelope, _, manifest = _write_manifest(ascii_tmp_path)
+    raw = json.loads(manifest.read_text(encoding="utf-8"))
+    raw["support"]["objective"]["direction"] = "match"
+    payload = json.dumps(raw).encode()
+    manifest.write_bytes(payload)
+    envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+    with pytest.raises(ValueError, match="match.*target"):
+        expand_adjoint_optimization_manifest(envelope)
+
+
+def test_native_runtime_rejects_match_before_client_or_workdir(ascii_tmp_path):
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
+    spec = expand_adjoint_optimization_manifest(envelope)
+    spec["support"]["objective"]["direction"] = "match"
+    root = ascii_tmp_path / "refused-native-runtime"
+
+    def unexpected_client(**kwargs):
+        pytest.fail("unsupported match must not construct a native client")
+
+    with pytest.raises(ValueError, match="match.*target"):
+        native_adjoint_runtime.execute_native_adjoint_optimization(
+            spec, root, client_factory=unexpected_client
+        )
+    assert not root.exists()
 
 
 def test_manifest_rejects_oversized_or_non_numeric_initial_values(ascii_tmp_path):
@@ -361,6 +504,7 @@ def test_real_adjoint_worker_dispatches_validated_runtime_and_persists_rows(
     assert terminal["status"] == "completed"
     assert terminal["solver_started"] is True
     assert [row["kind"] for row in persisted] == ["gradient", "iteration"]
+    assert persisted[0]["payload"]["evidence_state"] == "native_unchecked"
 
 
 def _real_adjoint_envelope(ascii_tmp_path):
@@ -413,7 +557,10 @@ def _minimal_adjoint_runtime_spec(tmp_path):
     return {
         "source_model_path": str(source),
         "source_model_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-        "support": {"support_fingerprint": "a" * 64},
+        "support": {
+            "support_fingerprint": "a" * 64,
+            "objective": {"direction": "maximize"},
+        },
         "optimizer": {
             "method": "gcmma",
             "optimizer_fingerprint": "b" * 64,
@@ -422,6 +569,124 @@ def _minimal_adjoint_runtime_spec(tmp_path):
         "cores": 1,
         "version": "6.4",
     }
+
+
+@pytest.mark.parametrize("total", [True, False, 0, 1, 2, 3.0, None])
+def test_native_runtime_refuses_insufficient_solve_budget_before_client(ascii_tmp_path, total):
+    spec = _minimal_adjoint_runtime_spec(ascii_tmp_path)
+    spec["optimizer"]["budget"]["max_solves"] = total
+    root = ascii_tmp_path / "refused-budget"
+
+    def unexpected_client(**kwargs):
+        pytest.fail("insufficient budget must not construct a native client")
+
+    with pytest.raises(ValueError, match="baseline.*optimization.*finalist"):
+        native_adjoint_runtime.execute_native_adjoint_optimization(
+            spec, root, client_factory=unexpected_client
+        )
+    assert not root.exists()
+
+
+def test_native_runtime_reserves_non_optimizer_solves():
+    assert native_adjoint_runtime._optimizer_solve_budget(3) == 1
+    assert native_adjoint_runtime._optimizer_solve_budget(25) == 23
+
+
+@pytest.mark.parametrize(
+    ("evaluated", "solved", "error"),
+    [
+        (1.1e-6, 1e-6, "evaluated wavelength changed"),
+        (1e-6, 1.1e-6, "solved wavelength changed"),
+        (1.1e-6, 1.1e-6, "evaluated wavelength changed"),
+        (float("nan"), 1e-6, "nonfinite"),
+        (1e-6, float("inf"), "nonfinite"),
+    ],
+)
+def test_finalist_wavelength_checks_bind_both_values_to_request(evaluated, solved, error):
+    with pytest.raises(ValueError, match=error):
+        native_adjoint_runtime._validate_wavelengths(1e-6, evaluated, solved)
+
+
+def test_finalist_wavelength_checks_accept_matching_values():
+    native_adjoint_runtime._validate_wavelengths(1e-6, 1e-6, 1e-6)
+
+
+def test_native_runtime_applies_remaining_budget_to_actual_optimizer(ascii_tmp_path, monkeypatch):
+    spec = _minimal_adjoint_runtime_spec(ascii_tmp_path)
+    spec["initial_values"] = [856.0]
+    spec["support"]["objective"]["expression"] = "objective"
+    seen = {}
+    feature = SimpleNamespace(set=lambda key, value: seen.__setitem__(key, value))
+    features = SimpleNamespace(remove=lambda tag: None)
+    study = SimpleNamespace(feature=lambda tag=None: features if tag is None else feature)
+    model = SimpleNamespace(
+        java=SimpleNamespace(
+            save=lambda path, copy: Path(path).write_bytes(b"configured"),
+            study=lambda tag: study,
+        ),
+        evaluate=lambda *args, **kwargs: [0.5],
+    )
+    study.run = lambda: None
+    client = SimpleNamespace(load=lambda path: model, remove=lambda model: None, clear=lambda: None)
+    monkeypatch.setattr(native_adjoint_runtime, "configure_native_adjoint", lambda *a, **kw: None)
+    monkeypatch.setattr(native_adjoint_runtime, "_freeze_wavelength", lambda *a: None)
+    monkeypatch.setattr(native_adjoint_runtime, "_forward_sweep_dataset", lambda model: object())
+
+    def stop_before_optimizer(*args):
+        assert seen["nsolvemax"] == "3"
+        raise RuntimeError("verified optimizer budget")
+
+    monkeypatch.setattr(native_adjoint_runtime, "_configure_solver", stop_before_optimizer)
+    with pytest.raises(RuntimeError, match="verified optimizer budget"):
+        native_adjoint_runtime.execute_native_adjoint_optimization(
+            spec, ascii_tmp_path / "budget-runtime", client_factory=lambda **kwargs: client
+        )
+
+
+def test_native_runtime_passes_manifest_initial_values_to_adapter(ascii_tmp_path, monkeypatch):
+    envelope, _source, _manifest = _write_manifest(ascii_tmp_path)
+    spec = expand_adjoint_optimization_manifest(envelope)
+    spec["initial_values"] = [800.0]
+    seen = []
+
+    def configure(_backend, support, optimizer, *, initial_values):
+        seen.append((initial_values, support["variables"][0]["baseline"]))
+        raise RuntimeError("stop after configuration boundary")
+
+    monkeypatch.setattr(native_adjoint_runtime, "configure_native_adjoint", configure)
+    client = SimpleNamespace(load=lambda _path: object(), clear=lambda: None)
+    with pytest.raises(RuntimeError, match="configuration boundary"):
+        native_adjoint_runtime.execute_native_adjoint_optimization(
+            spec, ascii_tmp_path / "initial-runtime", client_factory=lambda **_kwargs: client
+        )
+    assert seen == [([800.0], 856.0)]
+
+
+def test_freeze_wavelength_preserves_caller_initial_vector(monkeypatch):
+    from comsol_mcp.research.derivative_support import normalize_derivative_support
+
+    values = {}
+    nodes = {
+        tag: SimpleNamespace(set=lambda key, value, tag=tag: values.__setitem__((tag, key), value))
+        for tag in ("sweep1", "step1", "sens_a71")
+    }
+    study = SimpleNamespace(feature=lambda tag: nodes[tag])
+    model = SimpleNamespace(
+        java=SimpleNamespace(
+            study=lambda tag: study,
+            param=lambda: SimpleNamespace(
+                set=lambda key, value: values.__setitem__(("param", key), value)
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        native_adjoint_runtime, "_set_vector", lambda node, key, value: node.set(key, value)
+    )
+    support = normalize_derivative_support(_support())
+    native_adjoint_runtime._freeze_wavelength(model, support, [800.0])
+    assert values[("sens_a71", "initval")] == ["800[nm]"]
+    assert values[("sens_a71", "pname")] == ["patch_length_x"]
+    assert support["variables"][0]["baseline"] == 856.0
 
 
 def test_cleanup_failure_records_errors_and_preserves_original_error(ascii_tmp_path):
@@ -470,4 +735,136 @@ def test_clean_failure_receipt_omits_empty_cleanup_errors(ascii_tmp_path):
     receipt = json.loads((workdir / "native-optimizer-receipt.json").read_text(encoding="utf-8"))
     assert receipt["success"] is False
     assert receipt["cleanup"] == {"client_clear": True, "source_unchanged": True}
-    assert "cleanup_errors" not in receipt["cleanup"]
+
+
+def test_mapping_refusal_retains_failed_extrema():
+    evidence = {}
+    model = SimpleNamespace(evaluate=lambda *a, **kw: [1.0, -0.25])
+    with pytest.raises(ValueError, match="geometry mapping"):
+        native_adjoint_runtime._mapping_evidence(
+            model, object(), _execution_policy(), evidence=evidence
+        )
+    assert evidence["geometry"]["minimum"] == -0.25
+    assert evidence["geometry"]["maximum"] == 1.0
+    assert evidence["geometry"]["sample_count"] == 2
+
+
+def test_constraint_refusal_retains_raw_residual():
+    evidence = []
+    model = SimpleNamespace(evaluate=lambda *a, **kw: 1.2)
+    support = {
+        "constraints": [
+            {"constraint_id": "bound", "expression": "x", "unit": "m", "lower": None, "upper": 1.0}
+        ]
+    }
+    with pytest.raises(ValueError, match="constraint violates"):
+        native_adjoint_runtime._constraint_evidence(
+            model, object(), support, 0.01, evidence=evidence
+        )
+    assert evidence[0]["value"] == 1.2
+    assert evidence[0]["violation"] == pytest.approx(0.2)
+    assert evidence[0]["unit"] == "m"
+    assert evidence[0]["tolerance"] == 0.01
+
+
+@pytest.mark.parametrize("absorption", [0.1, -0.004867])
+def test_explicit_runtime_loading_checks_physics_and_actual_solve_budget(
+    ascii_tmp_path, monkeypatch, absorption
+):
+    spec = _minimal_adjoint_runtime_spec(ascii_tmp_path)
+    spec["execution_policy"] = _execution_policy()
+    spec["resource_policy"] = {"rules": {"max_mesh_elements": 1000}}
+    spec["initial_values"] = [800.0, 900.0]
+    spec["support"].update(
+        variables=[
+            {"variable_id": "patch_length_x", "unit": "nm"},
+            {"variable_id": "patch_length_y", "unit": "nm"},
+        ],
+        constraints=[],
+    )
+    spec["support"]["objective"].update(expression="objective", wavelength_um=1.0)
+    spec["optimizer"].update(constraint_tolerance=0.0)
+    spec["optimizer"]["budget"].update(max_solves=25, max_disk_bytes=100000)
+    values = {}
+    calls = []
+    node = SimpleNamespace(set=lambda k, v: values.__setitem__(k, v), getString=lambda k: values[k])
+    study = SimpleNamespace(
+        feature=lambda tag=None: SimpleNamespace(remove=lambda tag: None) if tag is None else node,
+        run=lambda: calls.append("study"),
+    )
+    solution = SimpleNamespace(feature=lambda tag: node)
+    deformation = SimpleNamespace(prop=lambda tag: node)
+    mesh = SimpleNamespace(run=lambda: calls.append("mesh"))
+    component = SimpleNamespace(physics=lambda tag: deformation, mesh=lambda tag: mesh)
+    java = SimpleNamespace(
+        component=lambda tag: component,
+        study=lambda tag: study,
+        sol=lambda tag: solution,
+        param=lambda: node,
+        save=lambda path, copy: Path(path).write_bytes(b"configured"),
+    )
+
+    def evaluate(expression, **kwargs):
+        if isinstance(expression, list):
+            if len(expression) == 3:
+                return [0.6, 800.0, 900.0]
+            return [0.6, 0.3, 0.7 - absorption, absorption, 1e-6, 1e-6]
+        return {
+            "objective": 0.6,
+            "patch_length_x": 8e-7,
+            "patch_length_y": 9e-7,
+            "reldetjac": 1.0,
+            "comp1.material.detF": 0.5,
+        }[expression]
+
+    model = SimpleNamespace(java=java, evaluate=evaluate)
+    client = SimpleNamespace(load=lambda path: model, remove=lambda model: None, clear=lambda: None)
+    dataset = SimpleNamespace(tag=lambda: "bound_dataset")
+    monkeypatch.setattr(
+        native_adjoint_runtime,
+        "configure_native_adjoint",
+        lambda *a, **kw: {"controls": {"deformed_geometry": {"patch_domain": 3}}},
+    )
+    monkeypatch.setattr(native_adjoint_runtime, "_freeze_wavelength", lambda *a: None)
+    monkeypatch.setattr(
+        native_adjoint_runtime,
+        "_configure_solver",
+        lambda *a: {"solution_tag": "actual_solver", "feature_tag": "o1"},
+    )
+    monkeypatch.setattr(native_adjoint_runtime, "_dataset_for_solution", lambda *a: dataset)
+    monkeypatch.setattr(native_adjoint_runtime, "_forward_sweep_dataset", lambda *a: dataset)
+    monkeypatch.setattr(
+        native_adjoint_runtime,
+        "_mesh_statistics",
+        lambda *a: {"element_count": 100, "minimum_quality": 0.5},
+    )
+    monkeypatch.setattr(native_adjoint_runtime, "_admit_policy_mesh", lambda *a: None)
+    monkeypatch.setattr(
+        native_adjoint_runtime,
+        "_solved_dimensions",
+        lambda model, dataset, domain, controls: dict(controls),
+    )
+
+    def load_step(*args):
+        calls.append("loading")
+        return "actual_solver", {"initmethod": "sol"}
+
+    monkeypatch.setattr(native_adjoint_runtime, "_run_loading_solution", load_step)
+    root = ascii_tmp_path / "explicit-runtime"
+    if absorption < 0:
+        with pytest.raises(ValueError, match="passivity"):
+            native_adjoint_runtime.execute_native_adjoint_optimization(
+                spec, root, client_factory=lambda **kw: client
+            )
+    else:
+        result = native_adjoint_runtime.execute_native_adjoint_optimization(
+            spec, root, client_factory=lambda **kw: client
+        )
+        assert result["success"]
+        assert result["final_variables_si"] == {"patch_length_x": 8e-7, "patch_length_y": 9e-7}
+    receipt = json.loads((root / "native-optimizer-receipt.json").read_text())
+    assert receipt["success"] == (absorption >= 0)
+    assert receipt["physical_values"]["ewfd.Atotal"] == absorption
+    assert values["nsolvemax"] == "20"
+    assert calls.count("loading") == 4
+    assert receipt["cleanup"] == {"client_clear": True, "source_unchanged": True}

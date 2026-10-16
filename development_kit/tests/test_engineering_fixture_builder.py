@@ -30,6 +30,7 @@ class FakeJavaModel:
     def save(self, path: str) -> None:
         self.saved_paths.append(path)
         if self.fail:
+            Path(path).write_bytes(b"partial")
             raise RuntimeError("injected save failure")
         Path(path).write_bytes(self.payload)
 
@@ -104,6 +105,7 @@ def test_builder_rejects_an_empty_staging_model(tmp_path):
         fixture_builder._save_staged(FakeJavaModel(b""), destination)
 
     assert not destination.exists()
+    assert list(tmp_path.iterdir()) == [], "empty staging output must be removed"
 
 
 def test_builder_release_records_clear_and_disconnect_failures():

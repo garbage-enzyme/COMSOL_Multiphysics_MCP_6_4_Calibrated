@@ -1,5 +1,5 @@
 """Windows-native settings editor for COMSOL MCP."""
 
-GUI_RELEASE = "alpha7.7"
+GUI_RELEASE = "alpha7.8"
 
 __all__ = ["GUI_RELEASE"]

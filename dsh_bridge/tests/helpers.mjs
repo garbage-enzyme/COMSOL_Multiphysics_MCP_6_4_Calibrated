@@ -38,9 +38,11 @@ export function createFakeJobs() {
 		started,
 		start(spec) {
 			const id = `comsol-${started.length + 1}`;
-			const record = { id, spec, hooks: null, done: null };
+			const output = [];
+			const job = { id, append: (text) => output.push(text), updateProgress: () => {} };
+			const record = { id, spec, hooks: null, done: null, output };
 			started.push(record);
-			record.hooks = spec.run();
+			record.hooks = spec.run(job);
 			record.done = record.hooks.done;
 			return id;
 		},

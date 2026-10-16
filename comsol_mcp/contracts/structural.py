@@ -102,7 +102,9 @@ def bounded_public_schema(value: dict[str, Any]) -> dict[str, Any]:
             clamp_maximum(node, "maxItems", MAX_PUBLIC_COLLECTION_ITEMS)
         if "object" in node_types:
             clamp_maximum(node, "maxProperties", MAX_PUBLIC_OBJECT_FIELDS)
-            if node.get("additionalProperties") is True:
+            if node.get("additionalProperties") is True and (
+                "properties" in node or "patternProperties" in node
+            ):
                 node["additionalProperties"] = False
             elif "additionalProperties" not in node:
                 node["additionalProperties"] = False

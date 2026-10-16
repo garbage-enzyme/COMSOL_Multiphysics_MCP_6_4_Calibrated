@@ -62,7 +62,27 @@ def _run(
     spec = store.read_spec(job_id)
     if spec.get("job_type") != "spectral_characterization":
         raise ValueError("Spectral worker accepts only spectral_characterization jobs")
-    validate_spectral_driver_identity(spec)
+    startup_attempt = int(store.read_state(job_id).get("attempt", 1))
+    try:
+        validate_spectral_driver_identity(spec)
+    except Exception as exc:
+        publication = store.record_startup_failure(
+            job_id,
+            attempt=startup_attempt,
+            error={
+                "type": type(exc).__name__,
+                "message": str(exc)[:240],
+            },
+            event="spectral_driver_validation_failed",
+        )
+        if publication.get("reason") == "cancellation_owns_state":
+            store.record_cooperative_cancel_observed(
+                job_id,
+                attempt=startup_attempt,
+                message="Stopped during driver validation",
+                worker_error={"type": type(exc).__name__, "message": str(exc)[:240]},
+            )
+        return 1
     identity = process_identity(os.getpid())
     store.bind_worker_identity(job_id, identity)
     contained = contain_current_process_tree()
@@ -319,13 +339,17 @@ def _run(
         worker_error = exc
     finally:
         cancel_stop.set()
+        native_cancel_active = False
         if cancel_thread is not None:
             cancel_thread.join(timeout=1.0)
+            native_cancel_active = cancel_thread.is_alive()
+            if native_cancel_active:
+                cleanup_errors.append("native_cancel_thread_still_active")
         if native_monitor_errors and worker_error is None:
             worker_error = RuntimeError(
                 f"native cancel monitor failed: {type(native_monitor_errors[0]).__name__}"
             )
-        if client is not None:
+        if client is not None and not native_cancel_active:
             try:
                 client.clear()
                 client_cleared = True
@@ -341,7 +365,7 @@ def _run(
                 fault_hook("during_cleanup", {"job_id": job_id, "attempt": attempt})
             except Exception as exc:
                 cleanup_errors.append(f"cleanup_hook:{type(exc).__name__}:{exc}")
-        if ownership is not None and lease_acquired:
+        if ownership is not None and lease_acquired and not native_cancel_active:
             try:
                 release = ownership.release()
                 lease_released = bool(release.get("success"))

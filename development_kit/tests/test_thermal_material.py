@@ -540,6 +540,43 @@ def test_table_query_inside_both_validity_and_grid_remains_normal():
     assert result["model_kind"] == "nk_table"
 
 
+@pytest.mark.parametrize(
+    ("wavelength", "temperature", "expected"),
+    [(2.5e-6, 300.0, 1.6), (1.5e-6, 600.0, 1.7), (2.5e-6, 600.0, 1.8)],
+)
+def test_piecewise_constant_table_uses_final_grid_value_at_endpoint(
+    wavelength, temperature, expected
+):
+    model = _narrow_table()
+    model["interpolation"]["wavelength_method"] = "piecewise_constant"
+    model["interpolation"]["temperature_method"] = "piecewise_constant"
+    result = evaluate_thermal_material(
+        _request(_ledger([_state(model=model)]), wavelength=wavelength, temperature=temperature)
+    )
+    assert result["refractive_index_internal"]["n"] == pytest.approx(expected)
+
+
+def test_numeric_overflow_becomes_a_stable_material_rejection():
+    model = _narrow_table()
+    model["n_flat"] = [1.0e308] * 4
+    request = _request(_ledger([_state(model=model)]))
+    with pytest.raises(ValueError, match="finite numeric range") as excinfo:
+        evaluate_thermal_material(request)
+    assert type(excinfo.value) is ValueError
+
+
+def test_public_material_tool_returns_stable_refusal_for_finite_drude_overflow():
+    ledger = _ledger()
+    ledger["states"][0]["optical_model"]["plasma_angular_frequency_rad_s"] = 1.0e200
+    server = create_server("material-overflow", profile="basic_fem")
+    result = _decode(
+        asyncio.run(server.call_tool("thermal_material_evaluate", {"request": _request(ledger)}))
+    )
+    assert result["success"] is False
+    assert result["reason_code"] == "thermal_material_evaluation_rejected"
+    assert result["solver_started"] is False
+
+
 def _table_kwargs(model_kind: str, *, discontinuities: dict) -> dict:
     common = {
         "model_kind": model_kind,

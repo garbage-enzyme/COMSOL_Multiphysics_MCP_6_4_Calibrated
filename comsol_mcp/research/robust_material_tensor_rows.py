@@ -8,10 +8,12 @@ from typing import Any
 from comsol_mcp.durable import domain_sha256_v2
 
 from .derivative_support import _bounded_json, _finite, _object, _sha256
+from .robust_material_mapping import normalize_optical_property_mapping
 
 SCHEMA_NAME = "comsol_mcp.robust_material_tensor_rows"
 SCHEMA_VERSION = "1.0.0"
 _STATES = ("OX", "MR")
+_WAVELENGTH_UNIT_TO_METRE = {"m": 1.0, "cm": 1e-2, "mm": 1e-3, "um": 1e-6, "nm": 1e-9, "pm": 1e-12}
 _ROW_FIELDS = {
     "wavelength_m",
     "xx_real",
@@ -80,7 +82,11 @@ def normalize_robust_material_tensor_rows(value: object) -> dict[str, Any]:
 
 
 def bind_robust_material_tensor_rows(
-    value: object, condition_table: object, *, expected_temperature_k: object
+    value: object,
+    condition_table: object,
+    *,
+    expected_temperature_k: object,
+    finalist_wavelength_relative_offsets: tuple[float, ...] = (),
 ) -> dict[str, Any]:
     """Bind exact tensor samples to all active condition wavelengths and state sources."""
     rows = normalize_robust_material_tensor_rows(value)
@@ -105,12 +111,42 @@ def bind_robust_material_tensor_rows(
             raise ValueError("condition table row is invalid for tensor-row binding")
         if condition.get("active"):
             required_wavelengths[condition["material_state_id"]].add(condition["wavelength_m"])
+            if condition.get("objective_role") == "objective":
+                for offset in finalist_wavelength_relative_offsets:
+                    wavelength = _finite(
+                        condition["wavelength_m"] * (1.0 + _finite(offset, "finalist offset")),
+                        "finalist wavelength",
+                        positive=True,
+                    )
+                    required_wavelengths[condition["material_state_id"]].add(wavelength)
     for state_id, state in states_by_id.items():
         tensor_state = tensor_by_id[state_id]
         if tensor_state["source_sha256"] != state.get("optical_property_source_sha256"):
             raise ValueError("material tensor source identity differs from the condition table")
         if state.get("temperature_k") != temperature:
             raise ValueError("material-state temperature differs from the adapter fixture")
+        mapping = normalize_optical_property_mapping(state.get("optical_property_mapping"))
+        if mapping["source_sha256"] != tensor_state["source_sha256"]:
+            raise ValueError("material tensor source identity differs from its optical mapping")
+        independent = mapping["independent_variable"]
+        scale = _WAVELENGTH_UNIT_TO_METRE.get(independent["source_unit"])
+        if scale is None:
+            raise ValueError("material mapping wavelength unit is unsupported")
+        minimum = independent["valid_min"] * scale
+        maximum = independent["valid_max"] * scale
+        if not all(math.isfinite(bound) and bound > 0.0 for bound in (minimum, maximum)):
+            raise ValueError(
+                "material mapping wavelength range is not finite and positive in metres"
+            )
+        for required in required_wavelengths[state_id]:
+            if (
+                required < minimum
+                and not math.isclose(required, minimum, rel_tol=1e-12, abs_tol=1e-18)
+            ) or (
+                required > maximum
+                and not math.isclose(required, maximum, rel_tol=1e-12, abs_tol=1e-18)
+            ):
+                raise ValueError("active wavelength is outside the declared material mapping range")
         available = [item["wavelength_m"] for item in tensor_state["rows"]]
         if any(
             not any(

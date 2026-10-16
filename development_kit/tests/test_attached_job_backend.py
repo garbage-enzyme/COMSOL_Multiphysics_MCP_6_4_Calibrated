@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import types
 from copy import deepcopy
 from dataclasses import replace
@@ -303,9 +304,11 @@ def test_attached_revision_verifier_rejects_coercive_sequence_values(sequence):
         )
 
 
-@pytest.mark.parametrize("projection_gap", [False, True])
+@pytest.mark.parametrize(
+    ("projection_gap", "blocked_cancel"), [(False, False), (True, False), (False, True)]
+)
 def test_attached_production_worker_uses_existing_model_and_never_clears_server(
-    ascii_job_root, monkeypatch, projection_gap
+    ascii_job_root, monkeypatch, projection_gap, blocked_cancel
 ):
     import src.tools.ownership as ownership_module
     import src.tools.workflow as workflow_module
@@ -339,6 +342,22 @@ def test_attached_production_worker_uses_existing_model_and_never_clears_server(
     events = []
     runner_save_copy = []
     projection_gap_injected = False
+    probe_entered = threading.Event()
+    release_probe = threading.Event()
+    probe_exited = threading.Event()
+
+    def blocked_probe():
+        probe_entered.set()
+        try:
+            assert release_probe.wait(timeout=10)
+            return {"requested": False}
+        finally:
+            probe_exited.set()
+
+    if blocked_cancel:
+        monkeypatch.setattr(
+            "src.jobs.native_cancel_probe.request_native_cancel_once", blocked_probe
+        )
 
     class FakeOwnership:
         def __init__(self, *_args, **_kwargs):
@@ -408,6 +427,10 @@ def test_attached_production_worker_uses_existing_model_and_never_clears_server(
     def fake_runner(_model, _parameter, values, _expressions, **kwargs):
         nonlocal projection_gap_injected
         runner_save_copy.append(kwargs["save_model_copy"])
+        if blocked_cancel:
+            store.request_cancel(job_id, requester_identity=identity)
+            assert probe_entered.wait(timeout=2)
+            return {"success": True, "stop_reason": "control_request"}
         output = Path(kwargs["csv_path"])
         existing = []
         if output.is_file() and output.stat().st_size:
@@ -468,7 +491,28 @@ def test_attached_production_worker_uses_existing_model_and_never_clears_server(
         },
     )
 
-    code = production_worker.run(str(store.root), job_id)
+    try:
+        code = production_worker.run(str(store.root), job_id)
+        if blocked_cancel:
+            state = store.read_state(job_id)
+            assert code == 0
+            assert state["status"] in {"cancel_requested", "cancelling"}
+            assert state["attached_cleanup"]["success"] is False
+            assert state["attached_cleanup"]["lease_absent"] is False
+            assert ("disconnect", None) not in events
+            assert ("release", None) not in events
+            assert not probe_exited.is_set()
+            return
+    finally:
+        if blocked_cancel:
+            monitors = [
+                thread for thread in threading.enumerate() if thread.name == "comsol-native-cancel"
+            ]
+            release_probe.set()
+            assert probe_exited.wait(timeout=2)
+            for monitor in monitors:
+                monitor.join(timeout=2)
+                assert not monitor.is_alive()
 
     if projection_gap:
         failed = store.read_state(job_id)

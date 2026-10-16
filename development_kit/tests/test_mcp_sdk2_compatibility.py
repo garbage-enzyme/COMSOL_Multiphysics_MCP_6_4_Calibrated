@@ -57,15 +57,36 @@ def _response_payload(result: dict[str, Any]) -> dict[str, Any]:
     return candidates[0]
 
 
-async def _read_response(process: asyncio.subprocess.Process, request_id: int) -> dict[str, Any]:
+async def _read_response(
+    process: asyncio.subprocess.Process, request_id: int, *, timeout_seconds: float = 15
+) -> dict[str, Any]:
     assert process.stdout is not None
-    while True:
-        raw = await asyncio.wait_for(process.stdout.readline(), timeout=15)
-        if not raw:
-            raise AssertionError(f"MCP server closed before response {request_id}")
-        message = json.loads(raw)
-        if message.get("id") == request_id:
-            return message
+    async with asyncio.timeout(timeout_seconds):
+        while True:
+            raw = await process.stdout.readline()
+            if not raw:
+                raise AssertionError(f"MCP server closed before response {request_id}")
+            message = json.loads(raw)
+            if message.get("id") == request_id:
+                return message
+
+
+def test_response_budget_does_not_restart_for_notifications():
+    from types import SimpleNamespace
+
+    class Notifications:
+        async def readline(self):
+            await asyncio.sleep(0.01)
+            return b'{"jsonrpc":"2.0","method":"notifications/message"}\n'
+
+    async def run():
+        with pytest.raises(TimeoutError):
+            await _read_response(SimpleNamespace(stdout=Notifications()), 777, timeout_seconds=0.05)
+
+    async def bounded():
+        await asyncio.wait_for(run(), timeout=2)
+
+    asyncio.run(bounded())
 
 
 async def _write_message(process: asyncio.subprocess.Process, message: dict[str, Any]) -> None:
@@ -182,7 +203,7 @@ async def _legacy_stdio_exchange(protocol_version: str, runtime_root: Path) -> d
 
 def test_mcp_dependency_and_package_identity_are_the_conservative_2_0_lane() -> None:
     assert "mcp>=2.2.0,<2.3" in _runtime_dependencies()
-    assert __version__ == "0.7.7"
+    assert __version__ == "0.7.8"
 
 
 def test_server_uses_official_mcpserver_and_preserves_wire_schema_aliases() -> None:
@@ -215,7 +236,7 @@ def test_sdk2_server_preserves_legacy_stdio_protocols(
     assert initialized["protocolVersion"] == protocol_version
     assert initialized["serverInfo"] == {
         "name": "COMSOL MCP legacy compatibility",
-        "version": "0.7.7",
+        "version": "0.7.8",
     }
     assert initialized["instructions"] == SERVER_INSTRUCTIONS
 

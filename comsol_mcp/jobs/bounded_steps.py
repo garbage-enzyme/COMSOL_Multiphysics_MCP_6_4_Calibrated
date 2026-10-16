@@ -448,9 +448,10 @@ def verify_checkpoint_usability(
         if digest != row["checkpoint_sha256"]:
             reason_codes.append("checkpoint_hash_mismatch")
         source_sha = row["source_identity"]["file_sha256"]
-        if current_source_file_sha256 is not None and source_sha is not None:
-            if current_source_file_sha256.lower() != source_sha:
-                reason_codes.append("source_identity_mismatch")
+        if current_source_file_sha256 is None or source_sha is None:
+            reason_codes.append("source_identity_undeclared")
+        elif current_source_file_sha256.lower() != source_sha:
+            reason_codes.append("source_identity_mismatch")
         if current_model_fingerprint is not None:
             fingerprint = row["source_identity"]["model_fingerprint"]
             if fingerprint is None or current_model_fingerprint.lower() != fingerprint:

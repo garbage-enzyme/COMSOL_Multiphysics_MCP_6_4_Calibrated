@@ -489,6 +489,18 @@ def _validate_state_summary(value: Any, expected_ordinal: int) -> dict[str, Any]
         raise ValueError(
             f"{label}.search_window_m must exactly match the tested requested-wavelength domain"
         )
+    if (
+        complete
+        and normalized_candidate["fwhm_m"] is not None
+        and normalized_candidate["fwhm_m"] <= 0
+    ):
+        raise ValueError(f"{label}.candidate.fwhm_m must be positive")
+    if (
+        complete
+        and normalized_candidate["quality_factor"] is not None
+        and normalized_candidate["quality_factor"] <= 0
+    ):
+        raise ValueError(f"{label}.candidate.quality_factor must be positive")
     candidate_peak = normalized_candidate["peak_wavelength_m"]
     if candidate_peak is not None and not (
         search_window["lower_m"] <= candidate_peak <= search_window["upper_m"]
@@ -754,6 +766,7 @@ def _normalize_continuation_policy(value: Any, *, states: Mapping[str, Any]) -> 
         raise ValueError("continuation_policy.continuity_evidence exceeds transition count")
     normalized_evidence = []
     evidence_indexes = set()
+    indexed_evidence = []
     for evidence_position, evidence_value in enumerate(continuity_evidence):
         evidence_label = f"continuation_policy.continuity_evidence[{evidence_position}]"
         evidence = _exact_fields(evidence_value, _CONTINUITY_EVIDENCE_FIELDS, evidence_label)
@@ -767,11 +780,26 @@ def _normalize_continuation_policy(value: Any, *, states: Mapping[str, Any]) -> 
         if transition_index in evidence_indexes:
             raise ValueError("continuation_policy contains duplicate continuity evidence")
         evidence_indexes.add(transition_index)
+        indexed_evidence.append((transition_index, evidence_position, evidence))
+    evidence_by_index = {index: evidence for index, _, evidence in indexed_evidence}
+    for transition_index, evidence_position, evidence in sorted(indexed_evidence):
+        evidence_label = f"continuation_policy.continuity_evidence[{evidence_position}]"
         previous = states["states"][transition_index]
         current = states["states"][transition_index + 1]
         if current["candidate"]["classification"] != "multi_candidate":
             raise ValueError(f"{evidence_label} is only valid for a multi-candidate state")
-        previous_peak = previous["candidate"]["peak_wavelength_m"]
+        previous_peak = states["states"][0]["candidate"]["peak_wavelength_m"]
+        for prior_state_index in range(1, transition_index + 1):
+            prior_state = states["states"][prior_state_index]
+            if prior_state["candidate"]["classification"] == "multi_candidate":
+                prior_evidence = evidence_by_index.get(prior_state_index - 1)
+                previous_peak = (
+                    prior_evidence["selected_candidate_wavelength_m"]
+                    if prior_evidence is not None
+                    else None
+                )
+            else:
+                previous_peak = prior_state["candidate"]["peak_wavelength_m"]
         if previous_peak is None:
             raise ValueError(f"{evidence_label} requires a preceding measured peak")
         selected_wavelength = _finite(
@@ -893,8 +921,13 @@ def _one_transition(
     policy: Mapping[str, Any],
     total_expansions: int,
     planned_points: int,
+    previous_effective_peak: float | None = None,
 ) -> tuple[dict[str, Any], int, int]:
-    previous_peak = previous["candidate"]["peak_wavelength_m"]
+    previous_peak = (
+        previous_effective_peak
+        if previous_effective_peak is not None
+        else previous["candidate"]["peak_wavelength_m"]
+    )
     current_candidate = current["candidate"]
     current_peak = current_candidate["peak_wavelength_m"]
     classification = current_candidate["classification"]
@@ -1052,6 +1085,7 @@ def plan_branch_continuation(
     transitions = []
     total_expansions = 0
     planned_points = 0
+    effective_peak = None
     stopped_after_state_index = None
     for index in range(1, len(all_states)):
         transition, total_expansions, planned_points = _one_transition(
@@ -1060,8 +1094,15 @@ def plan_branch_continuation(
             policy,
             total_expansions,
             planned_points,
+            effective_peak,
         )
         transitions.append(transition)
+        if transition["branch_followed"]:
+            effective_peak = (
+                transition["selected_candidate_wavelength_m"]
+                or transition["current_peak_wavelength_m"]
+                or effective_peak
+            )
         if (
             policy["stop_policy"] == "stop_at_first_unresolved"
             and not transition["branch_followed"]

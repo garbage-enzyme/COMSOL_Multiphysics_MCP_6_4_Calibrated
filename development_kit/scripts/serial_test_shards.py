@@ -45,14 +45,16 @@ def run_shards(
 ) -> None:
     shards = shard_files(test_files(ignore=ignore), shard_count)
     basetemp_root.mkdir(parents=True, exist_ok=True)
-    if coverage_root is not None:
-        coverage_root.mkdir(parents=True, exist_ok=True)
+    # Every shard collects coverage. Never let concurrent processes combine
+    # or delete another shard's default or inherited coverage data.
+    if coverage_root is None:
+        coverage_root = basetemp_root / "coverage"
+    coverage_root.mkdir(parents=True, exist_ok=True)
     processes: list[tuple[int, subprocess.Popen[bytes], object]] = []
     try:
         for index, files in enumerate(shards):
             environment = dict(os.environ)
-            if coverage_root is not None:
-                environment["COVERAGE_FILE"] = str(coverage_root / f".coverage-shard-{index}")
+            environment["COVERAGE_FILE"] = str(coverage_root / f".coverage-shard-{index}")
             command = [
                 sys.executable,
                 "-u",

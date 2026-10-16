@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,6 +17,22 @@ def _load_contracts():
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+class PowerModel:
+    def __init__(self, values):
+        self.values = values
+        self.dataset = SimpleNamespace(tag=lambda: "dset1")
+
+    def __truediv__(self, name):
+        assert name == "datasets"
+        return [self.dataset]
+
+    def evaluate(self, expression, *, dataset, outer, unit=None):
+        assert dataset is self.dataset
+        if expression in ("wl", "c_const/freq"):
+            return [1e-6 * outer]
+        return [self.values[expression][outer - 1]]
 
 
 class Selection:
@@ -173,6 +190,67 @@ def test_passive_reflection_allows_solver_tolerance_but_rejects_nonphysical_valu
         contracts.require_passive_reflection([1.01], "R")
 
 
+@pytest.mark.parametrize("power", [(0.17, 0.834867, -0.004867), (0.2, 0.7, 0.2)])
+def test_passive_power_rejects_gain_and_nonclosure(power):
+    contracts = _load_contracts()
+
+    model = PowerModel(
+        dict(zip(("ewfd.Rtotal", "ewfd.Ttotal", "ewfd.Atotal"), ([v] for v in power)))
+    )
+    with pytest.raises(ValueError, match="passive power|closure"):
+        contracts.require_passive_power(model, [1e-6], "fixture")
+
+
+def test_passive_power_accepts_passive_closed_spectrum():
+    contracts = _load_contracts()
+
+    model = PowerModel(
+        {"ewfd.Rtotal": [0.2, 0.3], "ewfd.Ttotal": [0.7, 0.6], "ewfd.Atotal": [0.1, 0.1]}
+    )
+    assert contracts.require_passive_power(model, [1e-6, 2e-6], "fixture")["R"] == [0.2, 0.3]
+
+
+def test_power_rejects_requested_wavelength_drift():
+    contracts = _load_contracts()
+    model = PowerModel({"ewfd.Rtotal": [0.2], "ewfd.Ttotal": [0.7], "ewfd.Atotal": [0.1]})
+    with pytest.raises(ValueError, match="wavelengths differ"):
+        contracts.require_passive_power(model, [2e-6], "fixture")
+
+
+def test_pointwise_solve_synchronizes_material_and_solver_before_each_solve(monkeypatch):
+    contracts = _load_contracts()
+    events = []
+    node = SimpleNamespace(
+        active=lambda value: events.append(("active", value)),
+        set=lambda key, value: events.append((key, value)),
+    )
+    study = SimpleNamespace(feature=lambda tag: node, run=lambda: events.append(("solve",)))
+    model = SimpleNamespace(java=SimpleNamespace(study=lambda tag: study, param=lambda: node))
+
+    def verify(model, wavelengths, label, **kwargs):
+        events.append(("verified", wavelengths[0]))
+        return {"R": [0.2], "T": [0.7], "A": [0.1]}
+
+    monkeypatch.setattr(contracts, "require_passive_power", verify)
+    result = contracts.solve_passive_wavelengths(model, [1e-6, 2e-6], "fixture")
+    assert result["A"] == [0.1, 0.1]
+    assert events[0] == ("active", False)
+    for index, wavelength in enumerate([1e-6, 2e-6]):
+        block = events[1 + 4 * index : 5 + 4 * index]
+        assert block == [
+            ("wl", f"{wavelength:.17g}[m]"),
+            ("plist", f"{wavelength:.17g}"),
+            ("solve",),
+            ("verified", wavelength),
+        ]
+
+
+def test_pointwise_invalid_later_wavelength_is_refused_before_model_access():
+    contracts = _load_contracts()
+    with pytest.raises(ValueError, match="finite and positive"):
+        contracts.solve_passive_wavelengths(object(), [1e-6, float("nan")], "fixture")
+
+
 def test_partition_requires_an_observed_split_and_unique_patch_boundary():
     contracts = _load_contracts()
 
@@ -183,12 +261,26 @@ def test_partition_requires_an_observed_split_and_unique_patch_boundary():
         contracts.require_partition_result(10, 12, [11, 12])
 
 
+def test_opaque_power_requires_explicit_termination_and_does_not_read_a_covered_port():
+    contracts = _load_contracts()
+
+    model = PowerModel({"ewfd.Rtotal": [0.7], "ewfd.Atotal": [0.3]})
+    with pytest.raises(KeyError):
+        contracts.require_passive_power(model, [1e-6], "fixture")
+    assert contracts.require_passive_power(model, [1e-6], "fixture", opaque_termination=True) == {
+        "R": [0.7],
+        "A": [0.3],
+        "T": [0.0],
+    }
+
+
 def test_save_is_published_only_after_a_nonempty_staging_model(tmp_path):
     contracts = _load_contracts()
 
     class Model:
         @staticmethod
-        def save(path):
+        def save(path, copy):
+            assert copy is True
             Path(path).write_bytes(b"model")
 
     target = tmp_path / "result.mph"
@@ -197,7 +289,8 @@ def test_save_is_published_only_after_a_nonempty_staging_model(tmp_path):
 
     class EmptyModel:
         @staticmethod
-        def save(path):
+        def save(path, copy):
+            assert copy is True
             Path(path).write_bytes(b"")
 
     with pytest.raises(RuntimeError, match="nonempty"):
@@ -227,13 +320,14 @@ def test_mim_recipes_use_fail_closed_solve_result_port_wavelength_and_save_contr
     assert "set('plist', str(5e-6))" not in source
 
 
-def test_drude_recipe_solves_and_retains_distinct_baseline_and_patch_spectra():
+def test_drude_recipe_uses_continuous_film_and_routes_patterned_film_to_partition_recipe():
     source = (Path(__file__).parents[2] / "recipes" / "mim_drude_sweep.py").read_text(
         encoding="utf-8"
     )
 
     assert "baseline_reflection = solve_required('continuous baseline')" in source
-    assert "patch_reflection = solve_required('patch')" in source
+    assert "mim_patch_partition.py" in source
+    assert "patch_lth" not in source
 
 
 def test_drude_recipe_has_one_authoritative_dispersion_expression():
@@ -264,6 +358,11 @@ def test_partition_recipe_has_no_all_face_or_highest_boundary_fallback():
     assert "both MIM mesh strategies failed" in source
     assert "pf.selection('face').set('b_air', [5])" in source
     assert "after_partition_boundaries" in source
+    assert source.index("before_partition_boundaries =") < source.index("wp =")
+    assert "g.measureFinal()" in source
+    assert "math.isclose(area, ax*ax" in source
+    assert "copy_face.selection('source').set" in source
+    assert "copy_face.selection('destination').set" in source
 
 
 def test_layered_transition_retains_layer_stack_and_explicit_material_properties():

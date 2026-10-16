@@ -10,7 +10,7 @@ from typing import Any, Mapping
 
 from comsol_mcp.settings import settings_environment
 
-from .semantic_contracts import PUBLIC_LIMITS
+from .semantic_contracts import PUBLIC_LIMITS, validate_semantic_build_id
 from .semantic_process import SemanticWorkerManager
 
 SEMANTIC_ROOT_ENV = "COMSOL_SEMANTIC_ROOT"
@@ -107,8 +107,12 @@ def _lightweight_deployment_identity(configuration: Mapping[str, Any]) -> dict[s
             for document, field in required_identity
         ):
             raise ValueError("semantic deployment identity is incomplete")
-    except (OSError, KeyError, TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
-        return {"readable": False, "error": f"{type(exc).__name__}: {exc}"}
+        validate_semantic_build_id(manifest["build_id"])
+        for field in ("model_id", "model_revision", "model_fingerprint", "corpus_fingerprint"):
+            if not isinstance(manifest.get(field), str) or len(manifest[field]) > 256:
+                raise ValueError("semantic deployment identity is too large")
+    except (OSError, KeyError, TypeError, ValueError, UnicodeError, json.JSONDecodeError):
+        return {"readable": False, "error": "semantic deployment identity is invalid"}
     matches = (
         pointer.get("manifest_sha256") == manifest_sha256
         and pointer.get("build_id") == manifest.get("build_id")

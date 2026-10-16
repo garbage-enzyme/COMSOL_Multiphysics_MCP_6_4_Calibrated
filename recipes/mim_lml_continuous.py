@@ -14,7 +14,7 @@ from _mim_safety import (
     require_interface_boundaries,
     require_named_domains,
     require_port_pair,
-    require_passive_reflection,
+    require_passive_power,
     require_required_properties,
     require_spectrum,
     save_required,
@@ -148,9 +148,7 @@ step = study.feature('step1'); bind_wavelength_step(step, 'wl')
 jm.param().set('wl', f'{wl0}[m]')
 print('Solving wl=5um eps=2.1...', flush=True)
 t0=time.time(); jm.study('std1').run(); t1=time.time()
-R = require_passive_reflection(
-    require_spectrum(m.evaluate('ewfd.Rtotal'), [wl0], 'Rtotal'), 'Rtotal'
-)[0]
+R = require_passive_power(m, [wl0], 'continuous layer')['R'][0]
 print(f'Solve OK {t1-t0:.2f}s Rtotal={R:.6f}', flush=True)
 
 output_dir = recipe_output_dir()

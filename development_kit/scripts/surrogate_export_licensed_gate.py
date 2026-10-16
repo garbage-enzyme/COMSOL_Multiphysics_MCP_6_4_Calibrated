@@ -265,6 +265,9 @@ def _write_dataset(path: Path) -> list[dict[str, float]]:
 
 
 def _run_worker(output: Path, cores: int, workspace: Path, mph_lane: str = "1.3.1") -> int:
+    if workspace.exists() and any(workspace.iterdir()):
+        raise ValueError("worker workspace must be empty before export")
+    workspace.mkdir(parents=True, exist_ok=True)
     result: dict[str, Any] = {
         "schema_name": f"{SCHEMA_NAME}_worker",
         "schema_version": SCHEMA_VERSION,
@@ -546,7 +549,6 @@ def _run_parent(args) -> int:
     git = _git_identity()
     output.parent.mkdir(parents=True, exist_ok=True)
     workspace = output.parent / "workspace"
-    workspace.mkdir(parents=True, exist_ok=True)
     worker_output = output.with_name(f".{output.stem}.worker.{uuid.uuid4().hex}.json")
     worker_stdout = worker_output.with_suffix(".stdout.log")
     worker_stderr = worker_output.with_suffix(".stderr.log")

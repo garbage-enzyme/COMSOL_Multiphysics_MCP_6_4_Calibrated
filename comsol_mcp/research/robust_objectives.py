@@ -197,14 +197,21 @@ def evaluate_robust_absolute_contrast(
 
     temperature = objective["worst_case_temperature"]
     minimum = min(pair["smooth_absolute_contrast"] for pair in pairs)
-    weighted_terms = [
-        pair["weight"] * math.exp(-(pair["smooth_absolute_contrast"] - minimum) / temperature)
-        for pair in pairs
+    log_weights = [math.log(pair["weight"]) for pair in pairs]
+    log_terms = [
+        log_weight - (pair["smooth_absolute_contrast"] - minimum) / temperature
+        for pair, log_weight in zip(pairs, log_weights, strict=True)
     ]
-    total_weight = sum(pair["weight"] for pair in pairs)
-    partition = sum(weighted_terms) / total_weight
-    aggregate = minimum - temperature * math.log(partition)
-    softmin_weights = [term / sum(weighted_terms) for term in weighted_terms]
+    weight_shift = max(log_weights)
+    term_shift = max(log_terms)
+    shifted_terms = [math.exp(term - term_shift) for term in log_terms]
+    term_sum = math.fsum(shifted_terms)
+    log_total_weight = weight_shift + math.log(
+        math.fsum(math.exp(weight - weight_shift) for weight in log_weights)
+    )
+    log_partition = term_shift + math.log(term_sum) - log_total_weight
+    aggregate = minimum - temperature * log_partition
+    softmin_weights = [term / term_sum for term in shifted_terms]
     for pair, softmin_weight in zip(pairs, softmin_weights, strict=True):
         pair["smooth_worst_case_weight"] = softmin_weight
 

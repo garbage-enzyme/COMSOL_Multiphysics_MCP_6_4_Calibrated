@@ -432,7 +432,11 @@ def configure_electrode_reaction(
 
     created = False
     try:
-        node = physics.feature().create(feature, "ElectrodeSurface", 2)
+        component_dimension = int(_component_sdim(component))
+        if component_dimension < 1:
+            raise ValueError("ElectrodeSurface requires a positive component dimension")
+        boundary_dimension = max(component_dimension - 1, 0)
+        node = physics.feature().create(feature, "ElectrodeSurface", boundary_dimension)
         created = True
         if safe_label:
             node.label(safe_label)

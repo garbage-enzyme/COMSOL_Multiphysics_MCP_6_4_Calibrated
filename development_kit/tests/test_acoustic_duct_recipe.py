@@ -142,6 +142,24 @@ def test_publish_never_overwrites_competing_output(tmp_path, monkeypatch):
     assert not staging.exists()
 
 
+@pytest.mark.parametrize("pressure", [complex(float("nan"), 0.0), complex(float("inf"), 0.0)])
+def test_acoustic_validation_rejects_nonfinite_pressure_before_verified(pressure, monkeypatch):
+    namespace = _namespace(monkeypatch)
+
+    class Study:
+        def run(self):
+            pass
+
+    model = SimpleNamespace(java=SimpleNamespace(study=lambda _tag: Study()))
+    namespace["_field_columns"] = lambda _model: (
+        namespace["np"].array([0.5]), namespace["np"].array([0.05]),
+        namespace["np"].array([pressure]),
+    )
+
+    with pytest.raises(ValueError, match="must be finite"):
+        namespace["validate_solution"](model, 100.0, 0.02)
+
+
 def test_publish_retries_transient_windows_file_lock(tmp_path, monkeypatch):
     namespace = _namespace(monkeypatch)
     staging = tmp_path / ".duct.staging.mph"

@@ -190,7 +190,8 @@ def test_group_disjoint_split_still_allows_an_ungrouped_ineligible_row() -> None
 def test_module_is_solver_free() -> None:
     import comsol_mcp.surrogate.manifests as mod
 
-    source = open(mod.__file__, encoding="utf-8").read()
+    with open(mod.__file__, encoding="utf-8") as handle:
+        source = handle.read()
     for banned in (
         "import mph",
         "from mph",

@@ -268,9 +268,10 @@ def _entries() -> list[dict[str, Any]]:
         ),
         _entry(
             "comsol_mcp.adjoint_optimization_manifest",
-            "1.0.0",
+            "1.1.0",
             "comsol_mcp.jobs.adjoint_optimization",
             artifact_kind="configuration",
+            readable_versions=("1.0.0", "1.1.0"),
         ),
         _entry(
             "comsol_mcp.adjoint_optimization_row",

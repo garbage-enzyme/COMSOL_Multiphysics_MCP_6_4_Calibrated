@@ -12,12 +12,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from comsol_mcp.durable.io import fsync_directory
+from comsol_mcp.path_policy import read_contained_file_snapshot
 
 from .journal import locked_journal, recover_jsonl_tail
 
 VALIDATION_ROW_SCHEMA_VERSION = "1.0.0"
 MAX_VALIDATION_ROWS = 256
 MAX_VALIDATION_ROW_BYTES = 128 * 1024
+MAX_VALIDATION_MANIFEST_BYTES = 16 * 1024 * 1024
 _COMPLETE_AUDIT_STATES = frozenset({"measurement_complete", "policy_evaluated"})
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
@@ -50,6 +52,43 @@ def _hex_digest(value: object, name: str) -> str:
     ):
         raise ValueError(f"{name} must be exactly 64 hexadecimal characters")
     return value.lower()
+
+
+def _validate_nested_manifest_snapshot(manifest: Path, payload: bytes, *, root: Path) -> None:
+    """Validate the bounded wrapper-to-inner manifest link used by collectors."""
+    try:
+        document = json.loads(payload.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("validation manifest is not valid JSON") from exc
+    if not isinstance(document, Mapping):
+        raise ValueError("validation manifest must be a JSON object")
+    if document.get("schema_name") != "comsol_mcp.validation_matrix_collector":
+        return
+    inner = document.get("inner_manifest")
+    if not isinstance(inner, Mapping):
+        raise ValueError("validation collector manifest has no inner manifest")
+    if set(inner) != {"relative_path", "sha256", "size_bytes"}:
+        raise ValueError("validation collector inner manifest descriptor is invalid")
+    relative = _normalize_manifest_path(inner.get("relative_path"), "inner_manifest.relative_path")
+    expected_hash = _hex_digest(inner.get("sha256"), "inner_manifest.sha256")
+    size = inner.get("size_bytes")
+    if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+        raise ValueError("inner_manifest.size_bytes must be a positive integer")
+    candidate_raw = manifest.parent / relative
+    candidate = candidate_raw.resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("validation inner manifest escapes the artifact root") from exc
+    if candidate_raw.is_symlink() or not candidate.is_file():
+        raise ValueError("validation inner manifest is missing or is not a regular file")
+    snapshot = read_contained_file_snapshot(
+        candidate_raw, root=root, max_bytes=MAX_VALIDATION_MANIFEST_BYTES
+    )
+    if snapshot["byte_count"] != size:
+        raise ValueError("validation inner manifest size differs from its wrapper")
+    if snapshot["sha256"] != expected_hash:
+        raise ValueError("validation inner manifest hash differs from its wrapper")
 
 
 def _identifier(value: object, name: str) -> str:
@@ -315,13 +354,45 @@ def read_validation_rows(path: str | Path, spec: Mapping[str, Any]) -> list[dict
         return _read_validation_rows_unlocked(journal, spec)
 
 
-def completed_point_fingerprints(path: str | Path, spec: Mapping[str, Any]) -> set[str]:
+def completed_point_fingerprints(
+    path: str | Path, spec: Mapping[str, Any], *, artifact_root: str | Path | None = None
+) -> set[str]:
     """Return only exact valid point identities with one complete durable row."""
-    return {
-        row["point_fingerprint"]
-        for row in read_validation_rows(path, spec)
-        if row["status"] == "ok"
-    }
+    rows = read_validation_rows(path, spec)
+    if artifact_root is None:
+        return {row["point_fingerprint"] for row in rows if row["status"] == "ok"}
+    root = Path(artifact_root).resolve()
+    completed: set[str] = set()
+    for row in rows:
+        if row["status"] != "ok":
+            continue
+        for summary in row["collector_summaries"]:
+            candidate_raw = root / summary["manifest_relative_path"]
+            candidate = candidate_raw.resolve()
+            try:
+                candidate.relative_to(root)
+            except ValueError as exc:
+                raise ValueError("validation manifest escapes the artifact root") from exc
+            if not candidate.is_file():
+                raise ValueError("validation manifest is missing for a completed row")
+            snapshot = read_contained_file_snapshot(
+                candidate_raw, root=root, max_bytes=MAX_VALIDATION_MANIFEST_BYTES
+            )
+            if snapshot["byte_count"] != summary["manifest_size_bytes"]:
+                raise ValueError("validation manifest size differs from the durable row")
+            if snapshot["sha256"] != summary["manifest_sha256"]:
+                raise ValueError("validation manifest hash differs from the durable row")
+            _validate_nested_manifest_snapshot(candidate, snapshot["payload"], root=root)
+        if any(
+            summary["collector"] == "wave_optics_field_evidence"
+            for summary in row["collector_summaries"]
+        ):
+            # Reuse the same immutable point and NPZ checks as field review.
+            from .field_review import _load_point_field
+
+            _load_point_field(root, spec, row)
+        completed.add(row["point_fingerprint"])
+    return completed
 
 
 def append_validation_row(

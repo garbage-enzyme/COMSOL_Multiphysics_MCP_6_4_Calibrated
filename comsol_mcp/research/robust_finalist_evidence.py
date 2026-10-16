@@ -410,7 +410,22 @@ def _external_fidelity(value: object, policy: Mapping[str, Any]) -> tuple[str | 
         mode_ok = receipt["fallback"]["mode"] == "primary"
     else:
         mode_ok = receipt["fallback"]["mode"] == "explicit_manual_fallback"
-    return receipt["receipt_fingerprint"], mode_ok and receipt["disposition"] == "validated"
+    policy_limit = policy.get("maximum_absolute_condition_delta")
+    metric_name = "maximum_absolute_condition_delta"
+    if policy_limit is None and metric_name not in receipt["comparison_metrics"]:
+        metric_name = "maximum_absolute_delta"
+    metric = receipt["comparison_metrics"].get(metric_name)
+    tolerance = receipt["comparison_tolerances"].get(metric_name)
+    bounds_ok = (
+        metric is not None
+        and tolerance is not None
+        and 0 <= metric <= tolerance
+        and (policy_limit is None or metric <= policy_limit)
+    )
+    return (
+        receipt["receipt_fingerprint"],
+        mode_ok and receipt["disposition"] == "validated" and bounds_ok,
+    )
 
 
 def assess_robust_finalist_validation(

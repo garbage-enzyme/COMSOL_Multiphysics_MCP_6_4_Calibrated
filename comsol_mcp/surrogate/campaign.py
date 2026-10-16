@@ -13,6 +13,7 @@ therefore cannot report a surrogate prediction as a measurement.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -49,7 +50,7 @@ def _require_str(name: str, value: Any, *, max_len: int = 256) -> str:
 
 
 def _require_hex64(name: str, value: Any) -> str:
-    if not isinstance(value, str) or len(value) != 64:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
         raise ValueError(f"{name} must be a 64-character hex digest")
     try:
         int(value, 16)
@@ -449,7 +450,19 @@ def summarize_campaign(
         raise ValueError("wall_time_seconds must be non-negative")
 
     states: dict[str, int] = {}
+    screened_ids = {record["candidate_id"] for record in records}
+    fem_candidate_ids: set[str] = set()
     for result in fem_results:
+        if not isinstance(result, Mapping):
+            raise ValueError("each FEM result must be a mapping")
+        candidate_id = result.get("candidate_id")
+        if not isinstance(candidate_id, str) or not candidate_id:
+            raise ValueError("each FEM result must declare a non-empty candidate_id")
+        if candidate_id not in screened_ids:
+            raise ValueError(f"FEM result for unscreened candidate: {candidate_id!r}")
+        if candidate_id in fem_candidate_ids:
+            raise ValueError(f"duplicate FEM result for candidate: {candidate_id!r}")
+        fem_candidate_ids.add(candidate_id)
         state = result.get("state")
         if state not in CANDIDATE_STATES:
             raise ValueError(f"unknown candidate state: {state!r}")

@@ -69,6 +69,20 @@ def test_completed_levels_append_in_declared_order_and_replay_exact_artifacts(tm
     }
 
 
+def test_partial_tail_is_repaired_before_convergence_resume(tmp_path):
+    spec = normalize_convergence_campaign_spec(_raw_campaign(tmp_path / "sources"))
+    root = tmp_path / "campaign-tail"
+    journal = root / "convergence_levels.jsonl"
+    level_dir = _complete_level(spec, root, 0)
+    first = append_convergence_campaign_level(
+        journal, spec, attempt=1, level_dir=level_dir, artifact_root=root
+    )
+    with journal.open("ab") as handle:
+        handle.write(b'{"partial":')
+    assert read_convergence_campaign_levels(journal, spec, artifact_root=root) == [first]
+    assert journal.read_bytes().endswith(b"\n")
+
+
 def test_first_journal_publication_fsyncs_its_directory(tmp_path, monkeypatch):
     spec = normalize_convergence_campaign_spec(_raw_campaign(tmp_path / "sources"))
     root = tmp_path / "campaign"

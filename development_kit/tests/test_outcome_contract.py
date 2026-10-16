@@ -250,6 +250,31 @@ def test_cancelled_mapping_fails_closed_without_process_port_or_lease_proof():
             )
 
 
+@pytest.mark.parametrize(
+    "broken",
+    [
+        {"ok": False},
+        {"recorded_port_closed": False},
+        {"lease_state": "uncertain"},
+    ],
+)
+def test_cancelled_mapping_requires_each_solver_proof_with_nonempty_verdicts(broken):
+    solver = {"ok": True, "recorded_port_closed": True, "lease_state": "absent", **broken}
+    with pytest.raises(ValueError, match="cancelled execution requires verified cleanup"):
+        execution_from_terminal_job_state(
+            {
+                "status": "cancelled",
+                "cancel": {
+                    "verification": {
+                        "absent": True,
+                        "verdicts": [{"state": "stale"}],
+                        "solver": solver,
+                    }
+                },
+            }
+        )
+
+
 def test_process_loss_maps_to_interrupted_and_never_claims_cleanup_or_acceptance():
     execution = execution_from_terminal_job_state(
         {

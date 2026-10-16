@@ -141,7 +141,11 @@ def test_existing_dataset_adapter_verifies_readback_and_writes_artifacts(tmp_pat
                 "comp1.y",
                 "comp1.z",
             ],
-            {"dataset": "研究 1//解 1", "inner": [1]},
+                {
+                    "dataset": "研究 1//解 1",
+                    "unit": ["V/m", "A/m", "um", "um", "um", "um", "um", "um"],
+                    "inner": [1],
+                },
         )
     ]
     assert result["dataset_identity"]["readback_state"] == "verified"
@@ -323,7 +327,11 @@ def test_validation_matrix_adapter_reads_exact_bound_dataset(tmp_path):
         artifact_root=tmp_path,
     )
 
-    assert model.calls[0][1] == {"dataset": "研究 1//解 1", "inner": None}
+    assert model.calls[0][1] == {
+        "dataset": "研究 1//解 1",
+        "unit": ["V/m", "A/m", "um", "um", "um", "um", "um", "um"],
+        "inner": None,
+    }
     assert result["dataset_identity"]["source_kind"] == "validation_matrix_point"
     assert result["dataset_identity"]["job_id"] == "job-123"
     assert result["dataset_identity"]["source_artifact_id"] == "audit-target"

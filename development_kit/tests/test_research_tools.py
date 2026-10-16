@@ -85,3 +85,38 @@ def test_optimizer_advance_round_trips_checkpoint_and_exact_feedback():
     assert second["success"] is True
     assert second["state"] == "proposal_ready"
     assert second["proposal"]["proposal_index"] == proposal["proposal_index"] + 1
+
+
+def test_optimizer_advance_rejects_checkpoint_from_another_campaign():
+    tool = _tools()["research_optimizer_advance"]
+    first = tool.fn(
+        _space(),
+        "a" * 64,
+        "b" * 64,
+        "2026-08-07T00:00:00Z",
+        warmup_count=2,
+        candidate_pool_count=8,
+    )
+    checkpoint = first["checkpoint"]
+    proposal = first["proposal"]
+    feedback = {
+        "proposal_index": proposal["proposal_index"],
+        "proposal_fingerprint": proposal["proposal_fingerprint"],
+        "candidate_fingerprint": "c" * 64,
+        "status": "completed",
+        "score_fingerprint": "d" * 64,
+        "losses": {"peak": 1.0},
+    }
+
+    result = tool.fn(
+        _space(),
+        "e" * 64,
+        "f" * 64,
+        "2026-08-07T00:00:01Z",
+        checkpoint=checkpoint,
+        feedback=feedback,
+    )
+
+    assert result["success"] is False
+    assert result["reason_code"] == "research_optimizer_rejected"
+    assert "campaign" in result["error"]

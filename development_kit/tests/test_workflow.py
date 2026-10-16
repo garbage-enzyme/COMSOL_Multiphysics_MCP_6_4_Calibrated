@@ -616,6 +616,44 @@ def test_mesh_convergence_resumes_completed_levels(tmp_path):
     assert [row["level"] for row in read_csv(csv_path)] == ["coarse", "fine"]
 
 
+def test_mesh_convergence_nonfinite_evaluation_is_failed_and_not_skipped_on_resume(tmp_path):
+    csv_path = tmp_path / "mesh-nonfinite.csv"
+    source = tmp_path / "mesh-source.mph"
+    source.write_bytes(b"immutable mesh source")
+    level = [{"name": "coarse", "properties": {"hmax": "0.1"}}]
+    first_model = FakeModel()
+    first_model.evaluate = lambda _expressions: [np.array([float("nan")])]
+
+    first = run_mesh_convergence(
+        first_model,
+        level,
+        ["A"],
+        csv_path=str(csv_path),
+        source_model_path=str(source),
+        continue_on_error=True,
+    )
+
+    assert first["success"] is False
+    assert first["n_failed"] == 1
+    assert read_csv(csv_path)[0]["status"] == "error"
+
+    resumed_model = FakeModel()
+    resumed = run_mesh_convergence(
+        resumed_model,
+        level,
+        ["A"],
+        csv_path=str(csv_path),
+        source_model_path=str(source),
+        resume_csv=True,
+        continue_on_error=True,
+    )
+
+    assert resumed["success"] is True
+    assert resumed["n_skipped"] == 0
+    assert resumed["n_levels"] == 1
+    assert resumed_model.java.study_node.run_count == 1
+
+
 def test_complex_values_are_json_safe_and_csv_serializable():
     value = _scalarize(np.array([1.5 - 0.25j]))
 

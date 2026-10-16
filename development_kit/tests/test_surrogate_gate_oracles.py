@@ -22,6 +22,45 @@ def load_script(name):
     return module
 
 
+@pytest.mark.parametrize(
+    "mutation", [None, "seed", "unreadable", "missing", "tags", "type", "step"]
+)
+def test_dnn_reload_identity_compares_readable_values(mutation):
+    gate = load_script("surrogate_dnn_licensed_gate")
+    expected = {
+        "study_tags": ["std1"],
+        "func_tags": ["dnn1"],
+        "dnn_type": "DNN",
+        "step_type": "SurrogateModelTraining",
+        "seed_readback": {
+            "useseed": "manual",
+            "rndseed": "17",
+            "useseedvalidation": "manual",
+            "rndseedvalidation": "17",
+        },
+    }
+    observed = {
+        **expected,
+        "seed_readback": {
+            name: {"readable": True, "value": value, "accessor": "getString"}
+            for name, value in expected["seed_readback"].items()
+        },
+    }
+    if mutation == "seed":
+        observed["seed_readback"]["rndseed"]["value"] = "18"
+    elif mutation == "unreadable":
+        observed["seed_readback"]["rndseed"]["readable"] = False
+    elif mutation == "missing":
+        del observed["seed_readback"]["rndseed"]
+    elif mutation == "tags":
+        observed["func_tags"] = []
+    elif mutation == "type":
+        observed["dnn_type"] = "Interpolation"
+    elif mutation == "step":
+        observed["step_type"] = "Stationary"
+    assert gate._reload_identity_matches(expected, observed) is (mutation is None)
+
+
 def rows():
     return [{"a1": float(i), "a2": float(i + 1), "qoi": float(i * 2)} for i in range(48)]
 

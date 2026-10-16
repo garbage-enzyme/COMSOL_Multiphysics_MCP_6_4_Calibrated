@@ -32,7 +32,8 @@ artifact 字节、模型 revision 和软件身份来降低这些风险。它不�
 7. 只要输入或 artifact 改变，就创建新的 run identity 并重新验证。重新开启检查不能
    原地升级旧的 unverified receipt。
 
-两个公共 guard tool 都是 solver-free，并存在于每个 static profile：
+两个公共 guard tool 都不需要求解器。除 `comsolless_read_only` 外，每个静态 profile 都提供它们。
+`comsolless_read_only` 仅提供五个离线检查工具，不提供这两个 guard tool。
 
 - `evidence_integrity_status` 报告有效设置，但不泄露 settings 路径。
 - `evidence_integrity_verify` 执行确定性的正式验证，不启动 COMSOL，也不修改模型。

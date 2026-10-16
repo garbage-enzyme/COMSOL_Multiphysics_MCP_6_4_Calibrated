@@ -94,7 +94,7 @@ function handleCall(params, id) {
 				respond(id, { content: [{ type: "text", text: JSON.stringify({ job_id: args.job_id, state: "cancelling" }) }] });
 				break;
 			case "stats":
-				respond(id, { content: [{ type: "text", text: JSON.stringify({ maxInFlight, jobCount: jobsState.size, jobs: [...jobsState.keys()] }) }] });
+				respond(id, { content: [{ type: "text", text: JSON.stringify({ maxInFlight, submitCount: jobSeq, jobCount: jobsState.size, jobs: [...jobsState.keys()] }) }] });
 				break;
 			case "die":
 				respond(id, { content: [{ type: "text", text: "bye" }] });

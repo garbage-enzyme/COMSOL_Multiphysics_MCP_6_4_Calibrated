@@ -78,6 +78,7 @@ class BoundedResearchCampaignLoop:
             strict=False
         ):
             raise ValueError("optimizer checkpoint must remain in the campaign root")
+        self.success_claim_allowed = self.coordinator.manifest.get("success_claim_allowed") is True
 
     def _checkpoint(
         self, proposal: Mapping[str, Any], evaluation: Mapping[str, Any]
@@ -154,6 +155,14 @@ class BoundedResearchCampaignLoop:
             losses=score["losses"],
         )
         checkpoint = self._checkpoint(proposal, evaluation)
+        if score["success"] and not self.success_claim_allowed:
+            return {
+                "stop_reason": "success_claim_not_allowed",
+                "success": False,
+                "evaluation": evaluation,
+                "score": score,
+                "checkpoint_fingerprint": checkpoint["checkpoint_fingerprint"],
+            }
         return {
             "stop_reason": "success" if score["success"] else "continue",
             "success": score["success"],

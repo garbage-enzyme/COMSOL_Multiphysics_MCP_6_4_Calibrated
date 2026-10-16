@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from comsol_mcp.evidence.contracts import validate_physical_evidence
+from comsol_mcp.path_policy import read_contained_file_snapshot
 
 from .journal import locked_journal, recover_jsonl_tail
 
@@ -18,6 +19,7 @@ SPECTRAL_ROW_SCHEMA_NAME = "comsol_mcp.durable_spectral_point"
 SPECTRAL_ROW_SCHEMA_VERSION = "1.0.0"
 MAX_SPECTRAL_ROW_BYTES = 128 * 1024
 MAX_SPECTRAL_ROWS = 1024
+MAX_SPECTRAL_ARTIFACT_BYTES = 16 * 1024 * 1024
 SPECTRAL_STAGE_KINDS = frozenset({"initial_locator", "window_expansion", "refinement"})
 
 
@@ -168,24 +170,27 @@ def _verify_artifact_bytes(
     *,
     spec: Mapping[str, Any],
     point_fingerprint: str,
+    row_values: Mapping[str, Any],
 ) -> None:
     resolved_root = root.resolve()
     expected_source = _hex_digest(spec.get("source_model_sha256"), "spec source_model_sha256")
     payloads: dict[str, bytes] = {}
     for prefix in ("wrapper", "inner"):
-        path = (resolved_root / artifact[f"{prefix}_relative_path"]).resolve()
+        path_raw = resolved_root / artifact[f"{prefix}_relative_path"]
+        path = path_raw.resolve()
         try:
             path.relative_to(resolved_root)
         except ValueError as exc:
             raise ValueError(f"audit {prefix} artifact escapes the durable job directory") from exc
         if not path.is_file():
             raise ValueError(f"audit {prefix} artifact is missing")
-        # Read once and hash the exact bytes that will be parsed so a swap
-        # between verification and use cannot pass the integrity gate.
-        data = path.read_bytes()
-        if len(data) != artifact[f"{prefix}_size_bytes"]:
+        snapshot = read_contained_file_snapshot(
+            path_raw, root=resolved_root, max_bytes=MAX_SPECTRAL_ARTIFACT_BYTES
+        )
+        data = snapshot["payload"]
+        if snapshot["byte_count"] != artifact[f"{prefix}_size_bytes"]:
             raise ValueError(f"audit {prefix} artifact size does not match")
-        if hashlib.sha256(data).hexdigest() != artifact[f"{prefix}_sha256"]:
+        if snapshot["sha256"] != artifact[f"{prefix}_sha256"]:
             raise ValueError(f"audit {prefix} artifact hash does not match")
         payloads[prefix] = data
     try:
@@ -204,6 +209,73 @@ def _verify_artifact_bytes(
         raise ValueError("physical evidence source hash differs from the immutable job")
     if physical["identity"]["config_id"] != point_fingerprint:
         raise ValueError("physical evidence point identity differs from the durable row")
+    measurement_raw = inner.get("measurement")
+    if measurement_raw is None:
+        raise ValueError("complete audit is missing its measurement")
+    if measurement_raw is not None:
+        measurement = _mapping(measurement_raw, "audit measurement")
+        wavelength = _mapping(measurement.get("wavelength"), "audit measurement wavelength")
+        power = _mapping(measurement.get("power"), "audit measurement power")
+        mesh = _mapping(measurement.get("mesh"), "audit measurement mesh")
+        solve = _mapping(measurement.get("solve"), "audit measurement solve")
+        if solve.get("ran") is not True or solve.get("error") is not None:
+            raise ValueError("audit solve did not complete cleanly")
+        if measurement.get("integrity_errors") not in ([], None):
+            raise ValueError("audit contains integrity errors")
+        if measurement.get("measurement_errors") not in ([], None):
+            raise ValueError("audit contains measurement errors")
+        expected = {
+            "requested_wavelength_m": normalize_spectral_wavelength_m(
+                _finite(wavelength.get("requested_m"), "requested wavelength", positive=True)
+            ),
+            "evaluated_wavelength_m": wavelength.get("evaluated_parameter_m"),
+            "frequency_wavelength_m": wavelength.get("solved_frequency_wavelength_m"),
+            "R": power.get("R"),
+            "T": power.get("T"),
+            "A": power.get("A"),
+            "mesh_element_count": mesh.get("element_count"),
+            "mesh_vertex_count": mesh.get("vertex_count"),
+            "solve_seconds": solve.get("seconds"),
+        }
+        for field, artifact_value in expected.items():
+            if artifact_value != row_values.get(field):
+                raise ValueError(f"audit measurement {field} differs from the durable row")
+    try:
+        wrapper = _mapping(json.loads(payloads["wrapper"].decode("utf-8")), "audit wrapper")
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("audit wrapper is not valid JSON") from exc
+    from .spectral_audit import build_spectral_audit_point
+
+    point = build_spectral_audit_point(spec, row_values["requested_wavelength_m"])
+    wrapped_point = _mapping(wrapper.get("point"), "audit wrapper point")
+    if wrapper.get("schema_name") != "comsol_mcp.validation_matrix_collector":
+        raise ValueError("audit wrapper schema is unsupported")
+    if wrapper.get("collector") != spec["collector"]["name"]:
+        raise ValueError("audit wrapper collector differs from the job")
+    if any(
+        wrapped_point.get(field) != point[field]
+        for field in ("point_id", "point_fingerprint", "configuration_sha256", "wavelength")
+    ):
+        raise ValueError("audit wrapper point differs from the durable row")
+    if wrapper.get("source_model_sha256") != expected_source:
+        raise ValueError("audit wrapper source differs from the immutable job")
+    if wrapper.get("audit_status") != artifact["audit_status"]:
+        raise ValueError("audit wrapper status differs from the durable row")
+    descriptor = _mapping(wrapper.get("inner_manifest"), "audit wrapper inner descriptor")
+    if set(descriptor) != {"relative_path", "sha256", "size_bytes"}:
+        raise ValueError("audit wrapper inner descriptor fields are invalid")
+    relative = _portable_relative_path(descriptor["relative_path"], "inner descriptor path")
+    wrapper_path = resolved_root / artifact["wrapper_relative_path"]
+    if (wrapper_path.parent / relative).resolve() != (
+        resolved_root / artifact["inner_relative_path"]
+    ).resolve():
+        raise ValueError("audit wrapper references a different inner artifact")
+    if (
+        descriptor["sha256"] != artifact["inner_sha256"]
+        or isinstance(descriptor["size_bytes"], bool)
+        or descriptor["size_bytes"] != artifact["inner_size_bytes"]
+    ):
+        raise ValueError("audit wrapper inner identity differs from the durable row")
 
 
 def _normalize_row_body(
@@ -333,6 +405,7 @@ def _normalize_row_body(
             artifact_root,
             spec=spec,
             point_fingerprint=identity["point_fingerprint"],
+            row_values=normalized,
         )
     return normalized
 

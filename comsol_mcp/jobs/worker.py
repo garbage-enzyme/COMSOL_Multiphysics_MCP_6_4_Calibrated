@@ -6,13 +6,17 @@ import csv
 import hashlib
 import json
 import os
+import shutil
 import sys
+import tempfile
 import threading
 import time
+from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from comsol_mcp.path_policy import pin_validated_reads, validated_read_pin
 from comsol_mcp.shared_session.locking import build_shared_model_revision
 
 from .attached_runtime import (
@@ -85,7 +89,7 @@ def _runner_kwargs(spec: dict[str, Any], directory: Path) -> dict[str, Any]:
         "csv_path": str(directory / "results.csv"),
         "resume_csv": True,
         "max_retries": int(spec.get("max_retries", 0)),
-        "continue_on_error": bool(spec.get("continue_on_error", False)),
+        "continue_on_error": spec.get("continue_on_error", False),
         "checkpoint_model_path": str(directory / "checkpoint.mph"),
         "checkpoint_every": int(spec.get("checkpoint_every", 1)),
         "save_model_copy": spec.get("execution_backend") is not None,
@@ -305,6 +309,10 @@ def _record_native_cancel(
         return True
 
 
+class _OwnedCleanupUnverified(RuntimeError):
+    """Signal a persisted owned cleanup failure to the process entry point."""
+
+
 def _run(root: str, job_id: str) -> int:
     worker_started_monotonic = time.monotonic()
     process_tree_contained = contain_current_process_tree()
@@ -344,9 +352,17 @@ def _run(root: str, job_id: str) -> int:
     lease_acquired = False
     attached_target: AttachedExecutionTarget | None = None
     attached_completion_count: int | None = None
+    owned_completion_count: int | None = None
     native_monitor_stop = threading.Event()
     native_monitor: threading.Thread | None = None
+    source_pins = ExitStack()
     try:
+        source_path = Path(spec["source_model_path"])
+        source_pins.enter_context(
+            pin_validated_reads((validated_read_pin(source_path, source_path.parent),))
+        )
+        if _source_sha256(str(source_path)) != spec["source_model_sha256"]:
+            raise RuntimeError("Immutable source SHA-256 changed before worker startup")
         from comsol_mcp.tools.ownership import SolverOwnership
 
         ownership = SolverOwnership(
@@ -368,6 +384,15 @@ def _run(root: str, job_id: str) -> int:
             )
             if not preflight["ready"]:
                 raise RuntimeError(f"Worker preflight failed: {preflight['blockers']}")
+            if _source_sha256(spec["source_model_path"]) != spec["source_model_sha256"]:
+                raise RuntimeError("Immutable source SHA-256 changed during worker preflight")
+            private = source_pins.enter_context(
+                tempfile.TemporaryDirectory(prefix="worker-source-", dir=directory)
+            )
+            load_source = Path(private) / "source.mph"
+            shutil.copyfile(source_path, load_source)
+            if _source_sha256(str(load_source)) != spec["source_model_sha256"]:
+                raise RuntimeError("Immutable source SHA-256 changed while freezing worker source")
             claim = ownership.acquire(mode="durable-job", model_path=spec["source_model_path"])
         if not claim["success"]:
             raise RuntimeError(claim["error"])
@@ -469,7 +494,9 @@ def _run(root: str, job_id: str) -> int:
             )
             if heartbeat is not True:
                 raise RuntimeError("Solver ownership heartbeat failed before model load")
-            model = client.load(spec["source_model_path"])
+            if _source_sha256(spec["source_model_path"]) != spec["source_model_sha256"]:
+                raise RuntimeError("Immutable source SHA-256 changed before model load")
+            model = client.load(str(load_source))
 
         resource_adapter = None
         completed_point_id_cache: set[str] = set()
@@ -702,12 +729,7 @@ def _run(root: str, job_id: str) -> int:
         if attached_target is not None:
             attached_completion_count = completed
         else:
-            store.update_state(
-                job_id,
-                "completed",
-                patch={"progress": {"completed": completed, "total": completed}},
-                event="completed",
-            )
+            owned_completion_count = completed
         return 0
     except Exception as exc:
         current = store.read_state(job_id)["status"]
@@ -733,9 +755,35 @@ def _run(root: str, job_id: str) -> int:
         return 1
     finally:
         native_monitor_stop.set()
+        native_monitor_active = False
         if native_monitor is not None:
             native_monitor.join(timeout=1.0)
-        if attached_target is not None:
+            native_monitor_active = native_monitor.is_alive()
+            if native_monitor_active:
+                print(
+                    "Native cancel monitor is still active; preserving client and lease",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if attached_target is not None and native_monitor_active:
+            # The native cancel call may still be using the attached client.
+            # Preserve the shared client and lease until that thread exits.
+            store.update_state(
+                job_id,
+                patch={
+                    "attached_cleanup": {
+                        "success": False,
+                        "released": False,
+                        "lease_absent": False,
+                        "error": (
+                            "Native cancel monitor is still active; attached resources preserved."
+                        ),
+                    }
+                },
+                event="attached_cleanup_deferred",
+                event_data={"success": False, "native_cancel_active": True},
+            )
+        elif attached_target is not None:
             cleanup = _cleanup_attached_execution(
                 client=client,
                 ownership=ownership,
@@ -787,28 +835,75 @@ def _run(root: str, job_id: str) -> int:
                     event_data={"success": cleanup["success"]},
                 )
         else:
-            if client is not None:
+            cleanup_errors: list[str] = []
+            if native_monitor_active:
+                cleanup_errors.append("native_cancel_monitor_active")
+            if client is not None and not native_monitor_active:
                 try:
                     client.clear()
                 except Exception as exc:
+                    cleanup_errors.append(f"client_clear:{type(exc).__name__}")
                     print(f"Client clear warning: {exc}", file=sys.stderr, flush=True)
                 if getattr(client, "port", None):
                     try:
                         client.disconnect()
                     except Exception as exc:
+                        cleanup_errors.append(f"client_disconnect:{type(exc).__name__}")
                         print(f"Client disconnect warning: {exc}", file=sys.stderr, flush=True)
-        if attached_target is None and ownership is not None and lease_acquired:
+        if (
+            attached_target is None
+            and ownership is not None
+            and lease_acquired
+            and not native_monitor_active
+        ):
             try:
                 release = ownership.release()
                 if not release.get("success"):
+                    cleanup_errors.append("lease_release_refused")
                     print(json.dumps(release, ensure_ascii=False), file=sys.stderr, flush=True)
             except Exception as exc:
+                cleanup_errors.append(f"lease_release:{type(exc).__name__}")
                 print(f"Ownership release warning: {exc}", file=sys.stderr, flush=True)
+        if attached_target is None:
+            try:
+                source_pins.close()
+            except Exception as exc:
+                cleanup_errors.append(f"source_pin_close:{type(exc).__name__}")
+            cleanup = {"success": not cleanup_errors, "errors": cleanup_errors}
+            current = store.read_state(job_id)["status"]
+            patch = {"owned_cleanup": cleanup, "cleanup_pending": bool(cleanup_errors)}
+            if owned_completion_count is not None and current not in {
+                "cancel_requested",
+                "cancelling",
+            }:
+                patch["progress"] = {
+                    "completed": owned_completion_count,
+                    "total": owned_completion_count,
+                }
+                if cleanup_errors:
+                    patch["last_error"] = {
+                        "type": "OwnedCleanupUnverified",
+                        "message": "Owned resources could not be proved cleaned.",
+                    }
+                store.update_state(
+                    job_id,
+                    "failed" if cleanup_errors else "completed",
+                    patch=patch,
+                    event="owned_cleanup_unverified" if cleanup_errors else "completed",
+                )
+            else:
+                store.update_state(job_id, patch=patch, event="owned_cleanup_recorded")
+            if cleanup_errors:
+                raise _OwnedCleanupUnverified("Owned cleanup remains unverified")
+        else:
+            source_pins.close()
 
 
 def run(root: str, job_id: str) -> int:
     try:
         return _run(root, job_id)
+    except _OwnedCleanupUnverified:
+        return 1
     except ValueError:
         store = JobStore(Path(root))
         state = store.read_state(job_id)

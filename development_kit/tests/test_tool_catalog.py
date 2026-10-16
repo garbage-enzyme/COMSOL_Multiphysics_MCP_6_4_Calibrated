@@ -95,6 +95,18 @@ def test_pre_h3_compatibility_snapshot_is_preserved():
             assert migrated_spec["oneOf"]
             assert observed.pop("$defs")
             observed["properties"]["spec"] = expected["properties"]["spec"]
+        if name == "job_cancel":
+            attempt = observed["properties"]["expected_attempt"]
+            assert attempt == {
+                "anyOf": [
+                    {"maximum": 1e308, "minimum": 1, "type": "integer"},
+                    {"type": "null"},
+                ],
+                "default": None,
+                "title": "Expected Attempt",
+            }
+            assert "expected_attempt" not in observed["required"]
+            allowed_additions.add("expected_attempt")
 
         actual_additions = set(observed["properties"]) - set(expected["properties"])
         assert actual_additions == allowed_additions, name
@@ -200,6 +212,15 @@ def test_new_tool_without_explicit_side_effect_class_fails_closed(monkeypatch):
 
 def test_model_mutating_mim_patch_build_requires_a_model_revision():
     metadata = TOOL_METADATA["mim_patch_build"]
+
+    assert metadata.side_effect_class == "model_mutation"
+    assert metadata.requires_model_revision is True
+    assert metadata.advances_model_revision is True
+
+
+@pytest.mark.parametrize("name", ["geometry_get_boundaries", "geometry_probe_domains"])
+def test_geometry_inspection_that_runs_geometry_requires_and_advances_revision(name):
+    metadata = TOOL_METADATA[name]
 
     assert metadata.side_effect_class == "model_mutation"
     assert metadata.requires_model_revision is True

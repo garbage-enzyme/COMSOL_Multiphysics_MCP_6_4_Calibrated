@@ -264,6 +264,11 @@ old and new revisions.
 preservation evidence. Cancellation must not terminate the user's Server,
 Desktop, listener, or model.
 
+Set `expected_attempt` to the observed positive integer attempt when cancelling
+one specific attempt. The server checks it under the job lock. A replacement
+attempt remains running if the identities differ. Omit it to cancel the current
+attempt. A Tasks request cannot override its bound attempt.
+
 ## COMSOL busy indication
 
 During a longer operation, Desktop may temporarily prevent editing and show an

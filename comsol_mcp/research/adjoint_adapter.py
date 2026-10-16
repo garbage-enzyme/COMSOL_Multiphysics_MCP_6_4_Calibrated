@@ -237,8 +237,8 @@ class ClientapiAdjointStudyBackend:
         center_x = position[0] + size[0] / 2.0
         center_y = position[1] + size[1] / 2.0
         displacement = [
-            f"(patch_length_x-{size[0]:.17g}[m])*(x-{center_x:.17g}[m])/{size[0]:.17g}[m]",
-            f"(patch_length_y-{size[1]:.17g}[m])*(y-{center_y:.17g}[m])/{size[1]:.17g}[m]",
+            f"(patch_length_x-{size[0]:.17g}[m])*(x-material.u-{center_x:.17g}[m])/{size[0]:.17g}[m]",
+            f"(patch_length_y-{size[1]:.17g}[m])*(y-material.v-{center_y:.17g}[m])/{size[1]:.17g}[m]",
             "0",
         ]
         physics = component.physics()
@@ -323,11 +323,32 @@ def _scalar(node: Any, name: str, value: str) -> dict[str, Any]:
     return {"requested": value, "readback": observed}
 
 
-def _variable_strings(support: Mapping[str, Any]) -> dict[str, list[str]]:
+def _variable_strings(
+    support: Mapping[str, Any], initial_values: object | None = None
+) -> dict[str, list[str]]:
     variables = support["variables"]
+    if initial_values is None:
+        starting_values = [item["baseline"] for item in variables]
+    else:
+        if not isinstance(initial_values, list) or len(initial_values) != len(variables):
+            raise ValueError("initial_values must match the support variable count")
+        starting_values = []
+        for value, variable in zip(initial_values, variables, strict=True):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError("initial_values must contain finite numbers within support bounds")
+            try:
+                number = float(value)
+            except (OverflowError, ValueError) as exc:
+                raise ValueError("initial_values must contain finite numbers") from exc
+            if not math.isfinite(number) or not variable["lower"] <= number <= variable["upper"]:
+                raise ValueError("initial_values must contain finite numbers within support bounds")
+            starting_values.append(number)
     names = [item["variable_id"] for item in variables]
     units = [item["unit"] for item in variables]
-    values = [f"{item['baseline']:.17g}[{item['unit']}]" for item in variables]
+    values = [
+        f"{value:.17g}[{item['unit']}]"
+        for item, value in zip(variables, starting_values, strict=True)
+    ]
     scales = [f"{item['scale']:.17g}[{item['unit']}]" for item in variables]
     lower = [f"{item['lower']:.17g}[{item['unit']}]" for item in variables]
     upper = [f"{item['upper']:.17g}[{item['unit']}]" for item in variables]
@@ -341,11 +362,36 @@ def _variable_strings(support: Mapping[str, Any]) -> dict[str, list[str]]:
     }
 
 
+def _native_objective_type(support: Mapping[str, Any]) -> str:
+    direction = support["objective"]["direction"]
+    if direction == "match":
+        raise ValueError("native match objective requires an explicit target contract")
+    if direction not in {"minimize", "maximize"}:
+        raise ValueError("native objective direction is unsupported")
+    return "maximization" if direction == "maximize" else "minimization"
+
+
+def _constraint_strings(support: Mapping[str, Any]) -> dict[str, list[str]]:
+    """Build the native global-constraint arrays from the trusted contract."""
+    expressions: list[str] = []
+    lower: list[str] = []
+    upper: list[str] = []
+    for item in support["constraints"]:
+        if item["kind"] != "differentiable_scalar" or item["derivative_supported"] is not True:
+            raise ValueError("native adjoint requires differentiable scalar constraints")
+        unit = item["unit"]
+        expressions.append(item["expression"])
+        lower.append("" if item["lower"] is None else f"{item['lower']:.17g}[{unit}]")
+        upper.append("" if item["upper"] is None else f"{item['upper']:.17g}[{unit}]")
+    return {"expressions": expressions, "lower": lower, "upper": upper}
+
+
 def configure_native_adjoint(
     backend: AdjointStudyBackend,
     support: object,
     optimizer: object,
     *,
+    initial_values: object | None = None,
     sensitivity_study_tag: str = "std1",
     sensitivity_feature_tag: str = "sens_a71",
     optimization_study_tag: str = "std2",
@@ -359,7 +405,9 @@ def configure_native_adjoint(
         raise ValueError("native adjoint adapter refuses an untrusted structure family")
     if normalized_support["derivative_method"] != "adjoint":
         raise ValueError("accepted native lane requires adjoint")
-    values = _variable_strings(normalized_support)
+    objective_type = _native_objective_type(normalized_support)
+    constraints = _constraint_strings(normalized_support)
+    values = _variable_strings(normalized_support, initial_values)
     objective_expression = normalized_support["objective"]["expression"]
     snapshot = dict(backend.snapshot())
     created: list[str] = []
@@ -395,13 +443,7 @@ def configure_native_adjoint(
             raise ValueError("Optimization feature type readback mismatch")
         optimization_readback = {
             "optmethod": _scalar(optimization, "optmethod", normalized_optimizer["method"]),
-            "objectivetype": _scalar(
-                optimization,
-                "objectivetype",
-                "maximization"
-                if normalized_support["objective"]["direction"] == "maximize"
-                else "minimization",
-            ),
+            "objectivetype": _scalar(optimization, "objectivetype", objective_type),
             "pname": _array(optimization, "pname", values["names"]),
             "punit": _array(optimization, "punit", values["units"]),
             "initval": _array(optimization, "initval", values["values"]),
@@ -409,6 +451,22 @@ def configure_native_adjoint(
             "lbound": _array(optimization, "lbound", values["lower"]),
             "ubound": _array(optimization, "ubound", values["upper"]),
             "optobj": _array(optimization, "optobj", [objective_expression]),
+            # COMSOL 6.4 uses these native Optimization property names.
+            # Keep the logical receipt keys stable for existing evidence readers.
+            "constraint": _array(optimization, "constraintExpression", constraints["expressions"])
+            if constraints["expressions"]
+            else {"requested": [], "readback": []},
+            "constraintL": _array(optimization, "constraintLbound", constraints["lower"])
+            if constraints["expressions"]
+            else {"requested": [], "readback": []},
+            "constraintU": _array(optimization, "constraintUbound", constraints["upper"])
+            if constraints["expressions"]
+            else {"requested": [], "readback": []},
+            # COMSOL 6.4 can accept explicit "on" rows but fail equation compilation.
+            # Use native default activation; preserve its empty readback in the receipt.
+            "constraintActive": _array(optimization, "constraintActive", [])
+            if constraints["expressions"]
+            else {"requested": [], "readback": []},
             "nsolvemax": _scalar(
                 optimization,
                 "nsolvemax",

@@ -293,14 +293,18 @@ def run_licensed_finalist(
     )
     finer_result, finer = execute("finer", finer_spec)
 
-    off_table, off_mapping = _off_design_table(spec["condition_table"], policy["off_design"])
-    off_spec = _candidate_spec(
-        spec,
-        candidate_values,
-        mesh_reference_value=mesh_policy["baseline_mesh_reference_value"],
-        condition_table=off_table,
-    )
-    off_result, _ = execute("off-design", off_spec, aggregate_objective=False)
+    if policy["off_design"]["mode"] == "not_requested":
+        off_mapping: dict[str, tuple[str, str, float]] = {}
+        off_result: dict[str, Any] = {"observations": []}
+    else:
+        off_table, off_mapping = _off_design_table(spec["condition_table"], policy["off_design"])
+        off_spec = _candidate_spec(
+            spec,
+            candidate_values,
+            mesh_reference_value=mesh_policy["baseline_mesh_reference_value"],
+            condition_table=off_table,
+        )
+        off_result, _ = execute("off-design", off_spec, aggregate_objective=False)
     observed_validation_solves = (
         len(baseline_result["observations"])
         + len(finer_result["observations"])
@@ -344,63 +348,70 @@ def run_licensed_finalist(
         spec["condition_table"],
         label="independent baseline",
     )
-    external_deltas = {
-        condition_id: abs(accepted_by_id[condition_id]["value"] - observation["value"])
-        for condition_id, observation in baseline_by_id.items()
-    }
-    maximum_delta = max(external_deltas.values())
-    external_body = {
-        "schema_name": "comsol_mcp.external_fidelity_validation_receipt",
-        "schema_version": "1.0.0",
-        "validation_id": "lin2025-finalist-independent-comsol",
-        "backend": {
-            "kind": "independent_comsol",
-            "provider": "COMSOL",
-            "version": str(spec["version"]),
-            "execution_location": "local",
-            "license_authority": "caller_authorized",
-        },
-        "fallback": {
-            "mode": "primary",
-            "prior_backend": None,
-            "prior_receipt_sha256": None,
-            "authorization_sha256": None,
-        },
-        "environment_identity_sha256": domain_sha256_v2(
-            "comsol_mcp.robust_finalist_environment",
-            {"version": spec["version"], "cores": spec["cores"]},
-        ),
-        "geometry_mapping_sha256": baseline_app["shape_controls"]["shape_support_fingerprint"],
-        "material_mapping_sha256": spec["material_tensor_binding"]["binding_fingerprint"],
-        "excitation_mapping_sha256": spec["condition_table"]["condition_table_fingerprint"],
-        "known_non_equivalences": [],
-        "sampling_sha256": spec["condition_table"]["condition_table_fingerprint"],
-        "discretization_sha256": baseline_mesh,
-        "convergence_sha256": domain_sha256_v2(
-            "comsol_mcp.robust_finalist_convergence",
-            {
-                "baseline": baseline_objective["receipt_fingerprint"],
-                "finer": finer_objective["receipt_fingerprint"],
+    external = None
+    maximum_delta = None
+    if policy["external_fidelity"]["mode"] == "required":
+        external_deltas = {
+            condition_id: abs(accepted_by_id[condition_id]["value"] - observation["value"])
+            for condition_id, observation in baseline_by_id.items()
+        }
+        maximum_delta = max(external_deltas.values())
+        external_body = {
+            "schema_name": "comsol_mcp.external_fidelity_validation_receipt",
+            "schema_version": "1.0.0",
+            "validation_id": "lin2025-finalist-independent-comsol",
+            "backend": {
+                "kind": "independent_comsol",
+                "provider": "COMSOL",
+                "version": str(spec["version"]),
+                "execution_location": "local",
+                "license_authority": "caller_authorized",
             },
-        ),
-        "raw_artifact_sha256": [baseline_model, finer_model, baseline_app["receipt_fingerprint"]],
-        "comparison_metrics": {
-            "maximum_absolute_condition_delta": maximum_delta,
-            "baseline_objective": baseline_objective["smooth_worst_case_absolute_contrast"],
-            "accepted_objective": accepted_objective_value,
-        },
-        "comparison_tolerances": {
-            "maximum_absolute_condition_delta": policy["external_fidelity"][
-                "maximum_absolute_condition_delta"
-            ]
-        },
-        "disposition": "validated"
-        if maximum_delta <= policy["external_fidelity"]["maximum_absolute_condition_delta"]
-        else "disagreed",
-        "retention_disposition": "hash_bound_local_only",
-    }
-    external = normalize_external_validation_receipt(external_body)
-    atomic_write_json(directory / "external-validation.json", external)
+            "fallback": {
+                "mode": "primary",
+                "prior_backend": None,
+                "prior_receipt_sha256": None,
+                "authorization_sha256": None,
+            },
+            "environment_identity_sha256": domain_sha256_v2(
+                "comsol_mcp.robust_finalist_environment",
+                {"version": spec["version"], "cores": spec["cores"]},
+            ),
+            "geometry_mapping_sha256": baseline_app["shape_controls"]["shape_support_fingerprint"],
+            "material_mapping_sha256": spec["material_tensor_binding"]["binding_fingerprint"],
+            "excitation_mapping_sha256": spec["condition_table"]["condition_table_fingerprint"],
+            "known_non_equivalences": [],
+            "sampling_sha256": spec["condition_table"]["condition_table_fingerprint"],
+            "discretization_sha256": baseline_mesh,
+            "convergence_sha256": domain_sha256_v2(
+                "comsol_mcp.robust_finalist_convergence",
+                {
+                    "baseline": baseline_objective["receipt_fingerprint"],
+                    "finer": finer_objective["receipt_fingerprint"],
+                },
+            ),
+            "raw_artifact_sha256": [
+                baseline_model,
+                finer_model,
+                baseline_app["receipt_fingerprint"],
+            ],
+            "comparison_metrics": {
+                "maximum_absolute_condition_delta": maximum_delta,
+                "baseline_objective": baseline_objective["smooth_worst_case_absolute_contrast"],
+                "accepted_objective": accepted_objective_value,
+            },
+            "comparison_tolerances": {
+                "maximum_absolute_condition_delta": policy["external_fidelity"][
+                    "maximum_absolute_condition_delta"
+                ]
+            },
+            "disposition": "validated"
+            if maximum_delta <= policy["external_fidelity"]["maximum_absolute_condition_delta"]
+            else "disagreed",
+            "retention_disposition": "hash_bound_local_only",
+        }
+        external = normalize_external_validation_receipt(external_body)
+        atomic_write_json(directory / "external-validation.json", external)
     evidence = {
         "candidate_fingerprint": candidate_fingerprint,
         "optimizer_execution_fingerprint": optimizer_execution_fingerprint,
@@ -474,7 +485,9 @@ def run_licensed_finalist(
             "finer_objective": finer_objective["smooth_worst_case_absolute_contrast"],
             "off_design_row_count": len(off_rows),
             "external_maximum_absolute_condition_delta": maximum_delta,
-            "external_validation_receipt_fingerprint": external["receipt_fingerprint"],
+            "external_validation_receipt_fingerprint": (
+                external["receipt_fingerprint"] if external is not None else None
+            ),
             "receipt_fingerprint": receipt["receipt_fingerprint"],
         },
     )

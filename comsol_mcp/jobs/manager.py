@@ -46,7 +46,82 @@ class _PollableProcess(Protocol):
     def poll(self) -> int | None: ...
 
 
+def _uses_windows_venv_redirector(command: list[str]) -> bool:
+    executable = Path(command[0])
+    return (
+        sys.platform == "win32"
+        and executable.parent.name.casefold() == "scripts"
+        and (executable.parent.parent / "pyvenv.cfg").is_file()
+    )
+
+
+def _launched_process_identity(process: subprocess.Popen, command: list[str]) -> dict[str, Any]:
+    """Identify the executing child when a Windows venv launcher redirects."""
+    if not _uses_windows_venv_redirector(command):
+        return process_identity(process.pid)
+    expected = hashlib.sha256("\0".join(command).encode("utf-8", errors="replace")).hexdigest()
+    launcher = process_identity(process.pid)
+    if launcher["command_signature"] != expected:
+        raise OSError("Python venv launcher command does not match")
+    matches = []
+    for child in psutil.Process(process.pid).children():
+        with child.oneshot():
+            if child.ppid() != process.pid:
+                continue
+            created = child.create_time()
+            observed = process_identity(child.pid)
+        if (
+            observed["pid"] == child.pid
+            and observed["process_create_time"] == created
+            and created >= launcher["process_create_time"]
+            and observed["command_signature"] == expected
+        ):
+            matches.append(observed)
+    if len(matches) != 1:
+        raise OSError("Python venv executing child identity is not uniquely verified")
+    # Recheck the launcher after enumeration so PID reuse cannot supply children.
+    if process_identity(process.pid) != launcher:
+        raise OSError("Python venv launcher identity changed")
+    return matches[0]
+
+
+def _wait_for_launched_identity(process: subprocess.Popen, command: list[str]) -> dict[str, Any]:
+    expected = hashlib.sha256("\0".join(command).encode("utf-8", errors="replace")).hexdigest()
+    deadline = time.monotonic() + 2.0
+    while process.poll() is None:
+        try:
+            observed = _launched_process_identity(process, command)
+            if observed["command_signature"] == expected:
+                return observed
+        except psutil.NoSuchProcess, psutil.ZombieProcess, OSError:
+            pass
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.01)
+    raise RuntimeError("Launched watchdog identity could not be verified before the deadline")
+
+
 logger = logging.getLogger(__name__)
+
+
+def _verify_source_identities(spec: dict[str, Any]) -> None:
+    if spec["job_type"] in {"test_sequence", "surrogate_training"}:
+        return
+    sources = (
+        [item["spectral_job"] for item in spec["levels"]]
+        if spec["job_type"] == "convergence_campaign"
+        else [item["spectral_job"] for item in spec["states"]]
+        if spec["job_type"] == "branch_continuation_campaign"
+        else [spec]
+    )
+    for source in sources:
+        digest = hashlib.sha256()
+        with Path(source["source_model_path"]).open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != source["source_model_sha256"]:
+            raise ValueError("Refusing resume because immutable source SHA-256 changed")
+
 
 _DETACHED_PROCESS_LOCK = threading.Lock()
 _DETACHED_PROCESS_WAKE = threading.Event()
@@ -189,6 +264,8 @@ def validate_staged_sweep_spec(raw: dict[str, Any]) -> dict[str, Any]:
             or not math.isfinite(float(value))
         ):
             raise ValueError("parameter_values must contain only finite numbers")
+    if len({str(value) for value in values}) != len(values):
+        raise ValueError("parameter_values must not contain duplicates")
     expressions = spec.get("expressions")
     if (
         not isinstance(expressions, list)
@@ -199,8 +276,13 @@ def validate_staged_sweep_spec(raw: dict[str, Any]) -> dict[str, Any]:
     if len(set(expressions)) != len(expressions):
         raise ValueError("expressions must not contain duplicates")
     smoke_points = spec.get("smoke_points", 1)
+    if isinstance(smoke_points, bool) or not isinstance(smoke_points, int):
+        raise ValueError("smoke_points must be an integer")
     if smoke_points not in (1, 2) or smoke_points > len(values):
         raise ValueError("smoke_points must be 1 or 2 and no larger than the sweep")
+    for key in ("continue_on_error", "record_wavelength_controls"):
+        if key in spec and not isinstance(spec[key], bool):
+            raise ValueError(f"{key} must be a boolean")
     for key in ("max_retries",):
         value = spec.get(key, 0)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -697,7 +779,7 @@ class JobManager:
         deadline = time.monotonic() + 2.0
         while True:
             try:
-                observed = process_identity(process.pid)
+                observed = _launched_process_identity(process, command)
                 if os.name == "nt" or observed["command_signature"] == expected_signature:
                     return observed
             except psutil.NoSuchProcess, psutil.ZombieProcess, OSError:
@@ -788,7 +870,7 @@ class JobManager:
                     start_new_session=(os.name != "nt"),
                 )
             _track_detached_process(process)
-            watchdog_identity = process_identity(process.pid)
+            watchdog_identity = _wait_for_launched_identity(process, command)
         except Exception as exc:
             atomic_write_json(
                 artifact,
@@ -1092,6 +1174,7 @@ class JobManager:
         # Ownership status merges durable-job summaries, so preflight must run
         # outside this job's lock.  The second locked validation below prevents
         # two concurrent resume callers from both transitioning and launching.
+        _verify_source_identities(spec)
         if spec["job_type"] in {
             "staged_sweep",
             "validation_matrix",
@@ -1134,6 +1217,7 @@ class JobManager:
             )
             if current_expected != expected or current_actual != expected:
                 raise ValueError("Refusing resume because immutable spec changed during preflight")
+            _verify_source_identities(current_spec)
             state["status"] = "starting"
             state["attempt"] = int(state.get("attempt", 1)) + 1
             state["worker_pid"] = None

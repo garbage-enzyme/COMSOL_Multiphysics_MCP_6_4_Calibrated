@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import os
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
@@ -159,6 +161,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
     def __init__(self, model: Any, spec: Mapping[str, Any], *, working_model_path: Path):
         self.model = model
         self.working_model_path = working_model_path.resolve()
+        self.mesh_policy = dict(spec["shape_policy"]["mesh_admission"])
         configuration = spec["adapter_configuration"]["configuration"]
         self.controls = configuration["condition_controls"]
         self.fixture = configuration["fixture"]
@@ -351,6 +354,36 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         self._forward_stage_prepared = True
         return readback
 
+    def _admit_mesh(self, boundary: str) -> dict[str, Any]:
+        """Persist mesh admission before an owned study can start."""
+        mesh = _get(self.model.java.component(), self.controls["component_tag"]).mesh(
+            self.controls["mesh_tag"]
+        )
+        statistics = mesh.stat()
+        elements = int(statistics.getNumElem())
+        quality = float(statistics.getMinQuality())
+        measure = str(statistics.getQualityMeasure())
+        admitted = (
+            0 < elements <= self.mesh_policy["max_elements_per_model"]
+            and math.isfinite(quality)
+            and self.mesh_policy["minimum_element_quality"] <= quality <= 1.0
+            and measure == self.mesh_policy["quality_measure"]
+        )
+        receipt = {
+            "boundary": boundary,
+            "element_count": elements,
+            "minimum_quality": quality,
+            "quality_measure": measure,
+            "policy": self.mesh_policy,
+            "admitted": admitted,
+        }
+        atomic_write_json(
+            self.working_model_path.parent / f"mesh-admission-{boundary}.json", receipt
+        )
+        if not admitted:
+            raise ValueError(f"mesh admission refused at {boundary}")
+        return receipt
+
     def run_shape_application(self) -> dict[str, Any]:
         """Solve the deformation-only stage and prove the solved shape.
 
@@ -369,6 +402,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             raise RuntimeError("forward shape application requires prepared initial values")
         self.set_shape_deformation_active(True)
         self.model.java.save(str(self.working_model_path))
+        self._admit_mesh("before-shape-solve")
         self.study.run()
         dataset_tag = controls["dataset_tag"]
         dataset = _dataset_by_tag(self.model, dataset_tag)
@@ -519,6 +553,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         )
         mesh_reference = self._set_mesh_reference_policy()
         mesh.run()
+        self._admit_mesh("after-build")
         forward_shape = None
         if self.controls.get("schema_version") == FORWARD_SHAPE_CONTROLS_VERSION:
             forward_shape = self._prepare_forward_shape_stage()
@@ -682,6 +717,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         ):
             raise ValueError("study wavelength property readback differs")
         self.model.java.save(str(self.working_model_path))
+        self._admit_mesh("before-condition-solve")
         self.study.run()
         tag = f"robust_eval_{self._counter:04d}"
         evaluator = self.numerical.create(tag, "EvalGlobal")
@@ -962,6 +998,7 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
         ):
             raise ValueError("native sensitivity stationary nonlinearity changed")
         self.model.java.save(str(self.working_model_path))
+        self._admit_mesh("before-sensitivity-solve")
         self.study.run()
         identity = _generated_sensitivity_identity(self.model)
         if [item["tag"] for item in identity["solutions"]] != controls["sensitivity_solution_tags"]:
@@ -1060,7 +1097,9 @@ class ClientapiLin2025ConditionBackend(RobustConditionBackend):
             "variable_ids": list(variable_ids),
             "raw_gradients": raw_gradients,
             "accepted_real_gradients": accepted_gradients,
-            "gradient_unit": self.support["result_identity"]["derivative_units"],
+            # Native sensitivity controls use metres regardless of caller units.
+            # The optimizer converts the aggregate once into its variable units.
+            "gradient_unit": "1/m",
             "identity_fingerprints": identities,
         }
 
@@ -1075,8 +1114,40 @@ def execute_lin2025_conditions(
     cancel_requested: Callable[[], bool],
     include_gradients: bool = True,
 ) -> dict[str, Any]:
+    """Verify and freeze source bytes before acquiring a licensed client."""
+    with tempfile.TemporaryDirectory(prefix="native-source-", dir=directory) as private:
+        snapshot = Path(private) / "source.mph"
+        digest = hashlib.sha256()
+        with Path(spec["source_model_path"]).open("rb") as original, snapshot.open("xb") as copy:
+            for chunk in iter(lambda: original.read(1024 * 1024), b""):
+                digest.update(chunk)
+                copy.write(chunk)
+        if digest.hexdigest() != spec["source_model_sha256"]:
+            raise ValueError("Immutable source SHA-256 changed before native startup")
+        return _execute_lin2025_snapshot(
+            spec,
+            directory,
+            source=snapshot,
+            attempt=attempt,
+            client_factory=client_factory,
+            java_environment_reader=java_environment_reader,
+            cancel_requested=cancel_requested,
+            include_gradients=include_gradients,
+        )
+
+
+def _execute_lin2025_snapshot(
+    spec: Mapping[str, Any],
+    directory: Path,
+    *,
+    source: Path,
+    attempt: int,
+    client_factory: Callable[..., Any] | None,
+    java_environment_reader: Callable[[str], str | None] | None,
+    cancel_requested: Callable[[], bool],
+    include_gradients: bool,
+) -> dict[str, Any]:
     """Load one derived copy, configure controls, and execute durable conditions."""
-    source = Path(spec["source_model_path"])
     configured = directory / "robust-working.mph"
     cleanup_path = directory / "native-cleanup.json"
     client = None

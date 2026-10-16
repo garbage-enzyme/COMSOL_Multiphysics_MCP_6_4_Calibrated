@@ -320,6 +320,52 @@ def test_recipe_main_executes_ordered_derived_build_and_cleanup(tmp_path, monkey
     ]
 
 
+def test_recipe_preserves_successful_staging_until_publish(tmp_path, monkeypatch):
+    namespace = _behavior_namespace(monkeypatch)
+    baseline = tmp_path / "baseline.mph"
+    baseline.write_bytes(b"immutable")
+    output = tmp_path / "derived.mph"
+    staging = tmp_path / ".derived.staging.mph"
+    staging.write_bytes(b"complete")
+    events = []
+    model = object()
+
+    class Client:
+        def load(self, _path):
+            return model
+
+        def remove(self, _value):
+            events.append("remove")
+
+    namespace["parse_args"] = lambda: SimpleNamespace(
+        baseline_model=baseline,
+        output_model=output,
+        frequency_khz=1.0,
+        solve=False,
+        overwrite_output=False,
+    )
+    namespace["mph"] = SimpleNamespace(Client=lambda version: Client())
+    namespace["sha256_file"] = lambda _path: "a" * 64
+    namespace["require_baseline_contract"] = lambda _model: (object(), object(), object())
+    for name in (
+        "replace_geometry",
+        "replace_physics",
+        "replace_materials",
+        "replace_mesh_and_study",
+    ):
+        namespace[name] = lambda *_args: None
+    namespace["configure_results"] = lambda _model: None
+    namespace["save_staged_model"] = lambda *_args: staging
+    namespace["publish_staged_model"] = lambda source, destination, *, overwrite: (
+        events.append("publish"), source.replace(destination)
+    )
+
+    namespace["main"]()
+
+    assert events == ["remove", "publish"]
+    assert output.read_bytes() == b"complete"
+
+
 def test_recipe_main_removes_loaded_model_after_intermediate_failure(tmp_path, monkeypatch):
     namespace = _behavior_namespace(monkeypatch)
     baseline = tmp_path / "baseline.mph"

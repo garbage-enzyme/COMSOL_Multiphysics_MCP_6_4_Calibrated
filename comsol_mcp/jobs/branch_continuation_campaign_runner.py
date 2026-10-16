@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -360,34 +358,21 @@ def run_branch_continuation_campaign(
         if fault_hook is not None:
             fault_hook("before_state", {"state_id": state["state_id"]})
         state_dir = branch_continuation_state_directory(root, state["ordinal"])
-        if state_dir.exists():
-            try:
-                row = append_branch_continuation_campaign_state(
-                    journal,
-                    spec,
-                    attempt=attempt,
-                    state_dir=state_dir,
-                    artifact_root=root,
-                )
-            except (OSError, ValueError) as err:
-                quarantine = state_dir.with_name(f".{state_dir.name}.invalid-{uuid.uuid4().hex}")
-                os.replace(state_dir, quarantine)
-                if fault_hook is not None:
-                    fault_hook(
-                        "state_row_quarantined",
-                        {
-                            "state_id": state["state_id"],
-                            "ordinal": state["ordinal"],
-                            "quarantine": str(quarantine),
-                            "error": f"{type(err).__name__}: {err}",
-                        },
-                    )
-            else:
-                if on_durable_state is not None:
-                    on_durable_state(dict(row))
-                if fault_hook is not None:
-                    fault_hook("after_state_row", row)
-                continue
+        # A partial spectrum has no summary. Resume its verified rows in place.
+        # Append or validation failures preserve artifacts and propagate.
+        if (state_dir / "analysis" / "summary.json").is_file():
+            row = append_branch_continuation_campaign_state(
+                journal,
+                spec,
+                attempt=attempt,
+                state_dir=state_dir,
+                artifact_root=root,
+            )
+            if on_durable_state is not None:
+                on_durable_state(dict(row))
+            if fault_hook is not None:
+                fault_hook("after_state_row", row)
+            continue
         result = state_executor(state, state_dir)
         if not isinstance(result, Mapping):
             raise RuntimeError("spectral state executor returned an invalid result")

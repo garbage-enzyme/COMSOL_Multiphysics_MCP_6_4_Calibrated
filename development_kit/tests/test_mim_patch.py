@@ -579,6 +579,134 @@ class BuildGeom:
     def run(self):
         self.runs += 1
 
+    def getBoundingBox(self):
+        return [0, 1, 0, 1, 0, 1]
+
+
+def test_mim_build_failure_restores_existing_physics_material_and_fin_state(monkeypatch):
+    class Selection:
+        def __init__(self, entities):
+            self.value = list(entities)
+
+        def entities(self):
+            return list(self.value)
+
+        def set(self, entities):
+            self.value = list(entities)
+
+    class PhysicsFeature:
+        def __init__(self, named=None, entities=()):
+            self.selections = {"default": Selection(entities)}
+            if named:
+                self.selections[named] = Selection(entities)
+
+        def selection(self, name="default"):
+            return self.selections[name]
+
+    class PhysicsFeatures:
+        def __init__(self):
+            self.nodes = {
+                "ltr1": PhysicsFeature(entities=[11]),
+                "lib1": PhysicsFeature(entities=[12]),
+                "ps1": PhysicsFeature(named="excitedPortSelection", entities=[13]),
+            }
+
+        def get(self, tag):
+            return self.nodes.get(tag)
+
+    physics_features = PhysicsFeatures()
+
+    class Physics:
+        def feature(self):
+            return physics_features
+
+    class PhysicsList:
+        def get(self, tag):
+            return Physics() if tag == "ewfd" else None
+
+    class Material:
+        def __init__(self):
+            self.selection_node = Selection([21])
+
+        def selection(self):
+            return self.selection_node
+
+    material = Material()
+
+    class MaterialList:
+        def get(self, tag):
+            return material if tag == "mat_air" else None
+
+    class Component:
+        def physics(self):
+            return PhysicsList()
+
+        def material(self):
+            return MaterialList()
+
+    component = Component()
+    fin = BuildBlock("0, 0, 0", "1, 1, 1")
+    fin.getString = lambda _name: fin.props.get("action", "assembly")
+    features = BuildFeatures({"air": BuildBlock("0, 0, 0", "1, 1, 1"), "fin": fin})
+    geom = BuildGeom(features)
+    built_actions = []
+
+    def run_geometry():
+        built_actions.append(fin.getString("action"))
+        geom.runs += 1
+        if geom.runs == 1:
+            physics_features.nodes["ltr1"].selection().set([101])
+            physics_features.nodes["lib1"].selection().set([102])
+            physics_features.nodes["ps1"].selection("excitedPortSelection").set([103])
+            material.selection().set([121])
+
+    geom.run = run_geometry
+
+    class Java:
+        def component(self, _tag):
+            return component
+
+    class Model:
+        java = Java()
+
+    monkeypatch.setattr(mim_patch_module.session_manager, "get_model", lambda _name=None: Model())
+    monkeypatch.setattr(mim_patch_module, "_get_geom_node", lambda *_args: (geom, None))
+    monkeypatch.setattr(mim_patch_module, "_probe_boundaries", lambda _geom: ([], 3, 8, 3))
+    monkeypatch.setattr(mim_patch_module, "_identify_patch_topology", lambda *_args: (5, [10]))
+    monkeypatch.setattr(
+        mim_patch_module,
+        "_identify_side_pairs",
+        lambda **_kwargs: {
+            "bottom": [14],
+            "top": [15],
+            "x_src": [1],
+            "x_dst": [2],
+            "y_src": [3],
+            "y_dst": [4],
+        },
+    )
+
+    def fail_mesh(*_args):
+        raise RuntimeError("mesh fail")
+
+    monkeypatch.setattr(mim_patch_module, "_build_periodic_mesh", fail_mesh)
+    server = MCPServer("mim-build-full-rollback-test")
+    register_mim_patch_tools(server)
+
+    result = server._tool_manager._tools["mim_patch_build"].fn(
+        [0.2, 0.2, 0.1], [0.1, 0.1, 0.1], air_block_tag="air"
+    )
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert physics_features.nodes["ltr1"].selection().entities() == [11]
+    assert physics_features.nodes["lib1"].selection().entities() == [12]
+    assert physics_features.nodes["ps1"].selection("excitedPortSelection").entities() == [13]
+    assert material.selection().entities() == [21]
+    assert fin.props["action"] == "assembly"
+    assert built_actions == ["union", "assembly"]
+    assert set(features.nodes) == {"air", "fin"}
+
 
 def test_air_block_auto_detection_must_contain_the_patch_footprint():
     geom_features = BuildFeatures(
@@ -609,12 +737,23 @@ def test_air_block_auto_detection_must_contain_the_patch_footprint():
 
 
 def test_failed_build_rolls_back_created_geometry_features(monkeypatch):
+    from types import SimpleNamespace
+
     features = BuildFeatures({"air": BuildBlock("0, 0, 0", "1e-6, 1e-6, 4e-6")})
     geom = BuildGeom(features)
+    selection = SimpleNamespace(entities=lambda: [], set=lambda _entities: None)
+    feature = SimpleNamespace(selection=lambda *_args: selection)
+    physics = SimpleNamespace(feature=lambda: SimpleNamespace(get=lambda _tag: feature))
 
     class Component:
         def geom(self, _name):
             return geom
+
+        def physics(self):
+            return SimpleNamespace(get=lambda _tag: physics)
+
+        def material(self):
+            return SimpleNamespace(get=lambda _tag: feature)
 
     class Java:
         def component(self, _name):

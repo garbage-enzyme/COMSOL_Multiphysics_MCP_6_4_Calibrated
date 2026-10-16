@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -43,6 +46,80 @@ def test_receipt_is_never_overwritten(tmp_path, ascii_root):
         run_acceptance(
             raw_spec=_raw(tmp_path), runtime_root=ascii_root, output=output, dry_run=True
         )
+
+
+def test_receipt_publish_refuses_target_created_after_precheck(tmp_path, monkeypatch):
+    from development_kit.tests.integration import convergence_campaign_acceptance as runner
+
+    output = tmp_path / "raced.json"
+    real_link = runner.os.link
+
+    def publish_competitor_then_link(source, destination):
+        output.write_text("competitor", encoding="ascii")
+        return real_link(source, destination)
+
+    monkeypatch.setattr(runner.os, "link", publish_competitor_then_link)
+    with pytest.raises(FileExistsError):
+        runner._write_json(output, {"ours": True})
+
+    assert output.read_text(encoding="ascii") == "competitor"
+
+
+def test_concurrent_receipt_publishers_keep_the_successful_payload(tmp_path, monkeypatch):
+    from development_kit.tests.integration import convergence_campaign_acceptance as runner
+
+    output = tmp_path / "shared.json"
+    first_staged, second_staged, first_published = Event(), Event(), Event()
+    real_link = runner.os.link
+
+    def ordered_link(source, destination):
+        publisher = json.loads(Path(source).read_text())["publisher"]
+        if publisher == "a":
+            first_staged.set()
+            assert second_staged.wait(5)
+            try:
+                return real_link(source, destination)
+            finally:
+                first_published.set()
+        second_staged.set()
+        assert first_published.wait(5)
+        return real_link(source, destination)
+
+    monkeypatch.setattr(runner.os, "link", ordered_link)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(runner._write_json, output, {"publisher": "a"})
+        assert first_staged.wait(5)
+        second = executor.submit(runner._write_json, output, {"publisher": "b"})
+        assert first.result(timeout=6) is None
+        with pytest.raises(FileExistsError):
+            second.result(timeout=6)
+    assert json.loads(output.read_text()) == {"publisher": "a"}
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_receipt_preserves_caller_fixed_temporary_file(tmp_path):
+    from development_kit.tests.integration import convergence_campaign_acceptance as runner
+
+    output = tmp_path / "owned.json"
+    caller_file = output.with_suffix(".json.tmp")
+    caller_file.write_bytes(b"caller-owned bytes")
+    runner._write_json(output, {"success": True})
+    assert caller_file.read_bytes() == b"caller-owned bytes"
+    assert json.loads(output.read_text()) == {"success": True}
+
+
+def test_receipt_fsync_failure_removes_only_its_owned_staging(tmp_path, monkeypatch):
+    from development_kit.tests.integration import convergence_campaign_acceptance as runner
+
+    output = tmp_path / "failed.json"
+    caller_file = tmp_path / "caller.bin"
+    caller_file.write_bytes(b"preserve")
+    monkeypatch.setattr(runner.os, "fsync", lambda _fd: (_ for _ in ()).throw(OSError("fsync")))
+    with pytest.raises(OSError, match="fsync"):
+        runner._write_json(output, {"success": True})
+    assert not output.exists()
+    assert not list(tmp_path.glob("*.tmp"))
+    assert caller_file.read_bytes() == b"preserve"
 
 
 def test_non_ascii_runtime_fails_before_worker(tmp_path):

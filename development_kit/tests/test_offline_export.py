@@ -34,6 +34,17 @@ def _sha(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+@pytest.mark.parametrize("source", [b"not-json", b"{}", b"x" * 17])
+def test_rejection_digest_covers_returned_path_evidence(tmp_path, source):
+    from comsol_mcp.durable.canonical import canonical_sha256_v1
+
+    verdict = validate_offline_export_manifest(source, tmp_path, max_manifest_bytes=16)
+    assert verdict["valid"] is False
+    assert "path_evidence" in verdict
+    body = {key: value for key, value in verdict.items() if key != "validation_sha256"}
+    assert verdict["validation_sha256"] == canonical_sha256_v1(body)
+
+
 def _artifact(
     artifact_id: str = "csv-1",
     relative_path: str = "data/sweep.csv",
@@ -117,6 +128,33 @@ def test_builder_rejects_duplicate_ids_and_path_escapes():
             model_sha256=None,
             artifacts=[_artifact(relative_path="../escape.csv")],
         )
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        (b"T,wl\n300,1\n", "csv_column_order_mismatch"),
+        (b"wl,wrong\n1,300\n", "csv_column_order_mismatch"),
+        (b"wl,T,T\n1,300,300\n", "csv_column_order_mismatch"),
+        (b"wl,T\n1\n", "csv_row_width_mismatch"),
+        (b"wl,T\n1,300,extra\n", "csv_row_width_mismatch"),
+        (b'wl,T\n"unclosed,300\n', "csv_parse_error"),
+    ],
+)
+def test_sealed_csv_with_invalid_actual_columns_is_rejected(tmp_path, payload, reason):
+    _, manifest = _write_export(tmp_path, [_artifact(payload=payload)])
+    verdict = validate_offline_export_manifest(manifest, tmp_path)
+    assert verdict["valid"] is False
+    assert verdict["failures"][0]["reason_codes"] == [reason]
+
+
+def test_csv_units_remain_explicitly_unverified_even_with_valid_header(tmp_path):
+    _, manifest = _write_export(tmp_path, [_artifact(payload=b'\xef\xbb\xbf"wl","T"\r\n1,300\r\n')])
+    verdict = validate_offline_export_manifest(manifest, tmp_path)
+    assert verdict["valid"] is True
+    assert verdict["input_binding"]["artifact_checks"][0]["csv_columns_verified"] is True
+    assert verdict["input_binding"]["artifact_checks"][0]["units_status"] == "declared_not_verified"
+    assert "csv-1:csv_units_declared_not_verified" in verdict["warnings"]
 
 
 def test_ordering_fingerprint_detects_unit_and_order_drift(tmp_path):

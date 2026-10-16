@@ -20,12 +20,36 @@ from src.settings import (
     settings_status,
 )
 
-
 from development_kit.tests.platform_fixtures import platform_test_root
 
 
 def _safe_defaults(environ=None) -> dict:
     return default_settings_document(environ=environ)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX XDG default contract")
+@pytest.mark.parametrize("xdg_key", ["XDG_DATA_HOME", "XDG_STATE_HOME"])
+def test_explicit_paths_do_not_depend_on_unused_unicode_defaults(monkeypatch, xdg_key, tmp_path):
+    from src.settings import serialize_settings_document
+
+    document = default_settings_document(
+        environ={"HOME": str(tmp_path)},
+        user_root=tmp_path / "models",
+        program_root=tmp_path / "state",
+    )
+    document["paths"]["model_read_roots"] = [str(tmp_path / "模型")]
+    environment = {"HOME": str(tmp_path), xdg_key: str(tmp_path / "用户")}
+    report = normalize_settings_document(document, environ=environment)
+    assert report["errors"] == []
+    assert report["settings"]["runtime"] == document["runtime"]
+    assert report["settings"]["paths"] == document["paths"]
+    monkeypatch.setenv(xdg_key, environment[xdg_key])
+    serialized = json.loads(serialize_settings_document(document))
+    assert serialized["paths"] == document["paths"]
+    for group, field in (("runtime", "directory"), ("paths", "artifact_write_root")):
+        incomplete = json.loads(json.dumps(document))
+        del incomplete[group][field]
+        assert normalize_settings_document(incomplete, environ=environment)["errors"]
 
 
 def _settings_path(tmp_path: Path, payload: object) -> Path:
@@ -264,8 +288,12 @@ def test_project_settings_fill_legacy_runtime_shape_for_existing_callers(tmp_pat
     )
     effective = settings_environment({SETTINGS_PATH_ENV: str(path)})
 
-    assert effective["COMSOL_MCP_RUNTIME_DIR"] == str(Path(str(platform_test_root("settings-runtime"))))
-    assert effective["COMSOL_MCP_JOBS_DIR"] == str(Path(str(platform_test_root("settings-runtime/jobs"))))
+    assert effective["COMSOL_MCP_RUNTIME_DIR"] == str(
+        Path(str(platform_test_root("settings-runtime")))
+    )
+    assert effective["COMSOL_MCP_JOBS_DIR"] == str(
+        Path(str(platform_test_root("settings-runtime/jobs")))
+    )
     assert effective["COMSOL_MCP_ENABLE_SHARED_SERVER"] == "true"
 
 
@@ -386,7 +414,9 @@ def test_legacy_override_preserves_itself_without_suppressing_project_defaults(t
     )
 
     assert effective["COMSOL_MCP_RUNTIME_DIR"] == "E:/explicit-runtime"
-    assert effective["COMSOL_MCP_JOBS_DIR"] == str(Path(str(platform_test_root("project-runtime/jobs"))))
+    assert effective["COMSOL_MCP_JOBS_DIR"] == str(
+        Path(str(platform_test_root("project-runtime/jobs")))
+    )
     assert effective["COMSOL_MCP_PROFILE"] == "wave_optics"
     assert effective["COMSOL_MCP_ENABLE_SHARED_SERVER"] == "true"
 
@@ -415,6 +445,13 @@ def test_legacy_synthetic_profiles_migrate_to_independent_feature_gates() -> Non
             "shared_server": {"enabled": False},
         }
     )
+    shared_default = normalize_settings_document(
+        {
+            "schema_name": SETTINGS_SCHEMA,
+            "schema_version": "1.1.0",
+            "profile": {"name": "desktop_shared"},
+        }
+    )
     full = normalize_settings_document(
         {
             "schema_name": SETTINGS_SCHEMA,
@@ -429,7 +466,9 @@ def test_legacy_synthetic_profiles_migrate_to_independent_feature_gates() -> Non
     assert semantic["settings"]["semantic_docs"]["enabled"] is True
     assert shared["errors"] == []
     assert shared["settings"]["profile"]["name"] == "core"
-    assert shared["settings"]["shared_server"]["enabled"] is True
+    assert shared["settings"]["shared_server"]["enabled"] is False
+    assert shared_default["errors"] == []
+    assert shared_default["settings"]["shared_server"]["enabled"] is True
     assert full["errors"] == []
     assert full["settings"]["profile"]["name"] == "full"
     assert full["settings"]["semantic_docs"]["enabled"] is True
@@ -469,6 +508,41 @@ def test_settings_1_2_moves_lexical_index_out_of_semantic_group() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "group",
+    ["semantic_docs", "lexical_docs", "manuals", "shared_server", "model_manager"],
+)
+@pytest.mark.parametrize("malformed", [[], "wrong-type"])
+def test_current_schema_migration_reports_malformed_object_groups(group, malformed):
+    document = {
+        "schema_name": SETTINGS_SCHEMA,
+        "schema_version": SETTINGS_VERSION,
+        "profile": {"name": "core"},
+        "runtime": {"directory": str(platform_test_root("runtime")), "jobs_directory": None},
+        "paths": {
+            "model_read_roots": [str(platform_test_root("models"))],
+            "artifact_write_root": str(platform_test_root("artifacts")),
+        },
+        "shared_server": {"enabled": False},
+        "discovery": {"pagination_enabled": False},
+        "model_manager": {"enabled": False, "upload_enabled": False},
+        "evidence_integrity": {"checks": {}},
+        "manuals": {"root": None},
+        "lexical_docs": {"enabled": False, "index_path": None},
+        "semantic_docs": {"enabled": False, "root": None, "model_path": None},
+        "ownership": {"owner": None},
+        "java": {"java_home": None, "jdk_home": None},
+        "comsol": {"installation_root": None},
+        "gui": {"language": "en", "scale": "normal"},
+    }
+    document[group] = malformed
+
+    report = normalize_settings_document(document)
+
+    assert report["errors"]
+    assert any(error["path"] == f"settings.{group}" for error in report["errors"])
+
+
 @pytest.mark.parametrize("schema_version", [[], {}])
 def test_malformed_legacy_schema_version_falls_back_without_type_error(schema_version) -> None:
     report = normalize_settings_document(
@@ -492,7 +566,10 @@ def test_current_feature_gates_are_boolean_composable_and_environment_visible(tm
             "profile": {"name": "wave_optics"},
             "shared_server": {"enabled": True},
             "manuals": {"root": str(platform_test_root("manuals"))},
-            "lexical_docs": {"enabled": True, "index_path": str(platform_test_root("manuals.sqlite3"))},
+            "lexical_docs": {
+                "enabled": True,
+                "index_path": str(platform_test_root("manuals.sqlite3")),
+            },
             "semantic_docs": {
                 "enabled": True,
                 "root": None,
@@ -512,5 +589,9 @@ def test_current_feature_gates_are_boolean_composable_and_environment_visible(tm
     assert effective["COMSOL_MCP_ENABLE_LEXICAL_DOCS"] == "true"
     assert effective["COMSOL_MCP_ENABLE_SEMANTIC_DOCS"] == "true"
     assert effective["COMSOL_MANUALS_ROOT"] == str(Path(str(platform_test_root("manuals"))))
-    assert effective["COMSOL_LEXICAL_DOCS_INDEX_PATH"] == str(Path(str(platform_test_root("manuals.sqlite3"))))
-    assert effective["COMSOL_SEMANTIC_LEXICAL_INDEX"] == str(Path(str(platform_test_root("manuals.sqlite3"))))
+    assert effective["COMSOL_LEXICAL_DOCS_INDEX_PATH"] == str(
+        Path(str(platform_test_root("manuals.sqlite3")))
+    )
+    assert effective["COMSOL_SEMANTIC_LEXICAL_INDEX"] == str(
+        Path(str(platform_test_root("manuals.sqlite3")))
+    )

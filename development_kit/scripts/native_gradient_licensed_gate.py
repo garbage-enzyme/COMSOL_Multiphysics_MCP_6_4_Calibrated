@@ -270,13 +270,15 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     git = _git_identity()
     if not git["clean"]:
         raise RuntimeError("native gradient licensed gate requires a clean source tree")
+    source_before = _sha(spec["source"])
+    if source_before != spec["source_sha256"]:
+        raise ValueError("native gradient source identity changed after compilation")
     preflight = _resource_preflight(spec["optimizer"]["budget"]["max_commit_fraction"])
     if preflight["admitted"] is not True:
         raise RuntimeError("caller-declared commit ceiling does not admit this run")
 
     import mph
 
-    source_before = _sha(spec["source"])
     support = _support(spec)
     for path in (
         spec["base_copy"],
@@ -420,7 +422,6 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         cleanup = {
             "model_removed": model is None,
             "client_clear": False,
-            "source_unchanged": _sha(spec["source"]) == source_before,
         }
         if client is not None:
             if model is not None:
@@ -434,6 +435,10 @@ def _run(spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
                 cleanup["client_clear"] = True
             except Exception as exc:
                 private["cleanup_error"] = f"{type(exc).__name__}: {exc}"
+        source_cleanup = _structural._cleanup_source_entry(spec["source"], source_before)
+        if "source_hash_error" in source_cleanup:
+            private["source_hash_error"] = source_cleanup.pop("source_hash_error")
+        cleanup.update(source_cleanup)
         receipt["cleanup"] = cleanup
         receipt["success"] = receipt.get("success") is True and all(cleanup.values())
     return receipt, private

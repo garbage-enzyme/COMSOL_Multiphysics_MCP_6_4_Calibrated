@@ -125,7 +125,7 @@ def run_pending_validation_points(
     directory = Path(job_directory).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     rows_path = directory / "matrix_rows.jsonl"
-    completed = completed_point_fingerprints(rows_path, spec)
+    completed = completed_point_fingerprints(rows_path, spec, artifact_root=directory)
     points = spec.get("points")
     if not isinstance(points, list) or not points:
         raise ValueError("validation_matrix points are unavailable")
@@ -144,140 +144,149 @@ def run_pending_validation_points(
         if point["point_fingerprint"] in completed:
             skipped += 1
             continue
-        if stop():
-            return {
-                "success": True,
-                "stop_reason": "control_request",
-                "processed": processed,
-                "skipped_completed": skipped,
-                "errors": errors,
-                "remaining": len(points) - len(completed),
-                "last_row_sha256": last_row_sha256,
-            }
-        before = _run_point_hook(
-            before_point_hook,
-            stage="pre_solve",
-            spec=spec,
-            point=point,
-        )
-        if before["action"] != "start_point":
-            return {
-                "success": True,
-                "stop_reason": f"before_point_{before['action']}",
-                "processed": processed,
-                "skipped_completed": skipped,
-                "errors": errors,
-                "remaining": len(points) - len(completed),
-                "last_row_sha256": last_row_sha256,
-                "resource_gate": before,
-            }
-        summaries: list[dict[str, Any]] = []
-        point_id = str(point["point_id"])
-        try:
-            collectors = point["collectors"]
-            artifact_ids = point["expected_artifact_ids"]
-            for index, collector_value in enumerate(collectors):
-                if stop():
-                    raise _ControlRequest("matching control request observed between collectors")
-                collector = dict(collector_value)
-                artifact_id = str(artifact_ids[index])
-                if (
-                    not artifact_id
-                    or artifact_id in {".", ".."}
-                    or Path(artifact_id).is_absolute()
-                    or (set(artifact_id) & set("/\\"))
-                ):
-                    raise ValueError(
-                        f"artifact id must be a single safe path component: {artifact_id!r}"
+        for point_retry in range(spec.get("max_retries", 0) + 1):
+            if stop():
+                return {
+                    "success": True,
+                    "stop_reason": "control_request",
+                    "processed": processed,
+                    "skipped_completed": skipped,
+                    "errors": errors,
+                    "remaining": len(points) - len(completed),
+                    "last_row_sha256": last_row_sha256,
+                }
+            before = _run_point_hook(
+                before_point_hook,
+                stage="pre_solve",
+                spec=spec,
+                point=point,
+            )
+            if before["action"] != "start_point":
+                return {
+                    "success": True,
+                    "stop_reason": f"before_point_{before['action']}",
+                    "processed": processed,
+                    "skipped_completed": skipped,
+                    "errors": errors,
+                    "remaining": len(points) - len(completed),
+                    "last_row_sha256": last_row_sha256,
+                    "resource_gate": before,
+                }
+            summaries: list[dict[str, Any]] = []
+            point_id = str(point["point_id"])
+            try:
+                collectors = point["collectors"]
+                artifact_ids = point["expected_artifact_ids"]
+                for index, collector_value in enumerate(collectors):
+                    if stop():
+                        raise _ControlRequest(
+                            "matching control request observed between collectors"
+                        )
+                    collector = dict(collector_value)
+                    artifact_id = str(artifact_ids[index])
+                    if (
+                        not artifact_id
+                        or artifact_id in {".", ".."}
+                        or Path(artifact_id).is_absolute()
+                        or (set(artifact_id) & set("/\\"))
+                    ):
+                        raise ValueError(
+                            f"artifact id must be a single safe path component: {artifact_id!r}"
+                        )
+                    artifact_base = directory / "artifacts" / artifact_id
+                    artifact_directory = artifact_base / f"attempt-{attempt}"
+                    for retry in range(MAX_ATTEMPT_ARTIFACT_RETRIES + 1):
+                        candidate = (
+                            artifact_directory
+                            if retry == 0
+                            else artifact_base / f"attempt-{attempt}-retry-{retry}"
+                        )
+                        try:
+                            candidate.mkdir(parents=True, exist_ok=False)
+                        except FileExistsError:
+                            continue
+                        artifact_directory = candidate
+                        break
+                    else:
+                        raise RuntimeError("attempt artifact retry directory limit exceeded")
+                    result = collector_executor(point, collector, artifact_directory)
+                    summaries.append(
+                        summarize_collector_result(
+                            result,
+                            collector_name=str(collector["name"]),
+                            artifact_id=artifact_id,
+                            artifact_directory=artifact_directory,
+                            job_directory=directory,
+                        )
                     )
-                artifact_base = directory / "artifacts" / artifact_id
-                artifact_directory = artifact_base / f"attempt-{attempt}"
-                for retry in range(MAX_ATTEMPT_ARTIFACT_RETRIES + 1):
-                    candidate = (
-                        artifact_directory
-                        if retry == 0
-                        else artifact_base / f"attempt-{attempt}-retry-{retry}"
-                    )
-                    try:
-                        candidate.mkdir(parents=True, exist_ok=False)
-                    except FileExistsError:
-                        continue
-                    artifact_directory = candidate
-                    break
-                else:
-                    raise RuntimeError("attempt artifact retry directory limit exceeded")
-                result = collector_executor(point, collector, artifact_directory)
-                summaries.append(
-                    summarize_collector_result(
-                        result,
-                        collector_name=str(collector["name"]),
-                        artifact_id=artifact_id,
-                        artifact_directory=artifact_directory,
-                        job_directory=directory,
-                    )
+                row = append_validation_row(
+                    rows_path,
+                    spec,
+                    attempt=attempt,
+                    point_id=point_id,
+                    status="ok",
+                    collector_summaries=summaries,
                 )
-            row = append_validation_row(
-                rows_path,
-                spec,
-                attempt=attempt,
-                point_id=point_id,
-                status="ok",
-                collector_summaries=summaries,
+                completed.add(point["point_fingerprint"])
+            except _ControlRequest:
+                return {
+                    "success": True,
+                    "stop_reason": "control_request",
+                    "processed": processed,
+                    "skipped_completed": skipped,
+                    "errors": errors,
+                    "remaining": len(points) - len(completed),
+                    "last_row_sha256": last_row_sha256,
+                }
+            except Exception as exc:
+                errors += 1
+                message = str(exc)[:2000] or f"{type(exc).__name__} raised without a message"
+                row = append_validation_row(
+                    rows_path,
+                    spec,
+                    attempt=attempt,
+                    point_id=point_id,
+                    status="error",
+                    collector_summaries=summaries,
+                    error={"type": type(exc).__name__, "message": message},
+                )
+            processed += 1
+            last_row_sha256 = row["row_sha256"]
+            if on_durable_row is not None:
+                on_durable_row(row)
+            after = _run_point_hook(
+                after_durable_row_hook,
+                stage="post_solve",
+                spec=spec,
+                point=point,
             )
-            completed.add(point["point_fingerprint"])
-        except _ControlRequest:
-            return {
-                "success": True,
-                "stop_reason": "control_request",
-                "processed": processed,
-                "skipped_completed": skipped,
-                "errors": errors,
-                "remaining": len(points) - len(completed),
-                "last_row_sha256": last_row_sha256,
-            }
-        except Exception as exc:
-            errors += 1
-            message = str(exc)[:2000] or f"{type(exc).__name__} raised without a message"
-            row = append_validation_row(
-                rows_path,
-                spec,
-                attempt=attempt,
-                point_id=point_id,
-                status="error",
-                collector_summaries=summaries,
-                error={"type": type(exc).__name__, "message": message},
-            )
-        processed += 1
-        last_row_sha256 = row["row_sha256"]
-        if on_durable_row is not None:
-            on_durable_row(row)
-        after = _run_point_hook(
-            after_durable_row_hook,
-            stage="post_solve",
-            spec=spec,
-            point=point,
-        )
-        if after["action"] in {"await_confirmation", "checkpoint_no_start"}:
-            return {
-                "success": row["status"] == "ok",
-                "stop_reason": f"after_durable_row_{after['action']}",
-                "processed": processed,
-                "skipped_completed": skipped,
-                "errors": errors,
-                "remaining": len(points) - len(completed),
-                "last_row_sha256": last_row_sha256,
-                "resource_gate": after,
-            }
-        if row["status"] == "error" and not spec.get("continue_on_error", False):
-            return {
-                "success": False,
-                "stop_reason": "point_error",
-                "processed": processed,
-                "skipped_completed": skipped,
-                "errors": errors,
-                "remaining": len(points) - len(completed),
-                "last_row_sha256": last_row_sha256,
-            }
+            if after["action"] in {"await_confirmation", "checkpoint_no_start"}:
+                return {
+                    "success": row["status"] == "ok",
+                    "stop_reason": f"after_durable_row_{after['action']}",
+                    "processed": processed,
+                    "skipped_completed": skipped,
+                    "errors": errors,
+                    "remaining": len(points) - len(completed),
+                    "last_row_sha256": last_row_sha256,
+                    "resource_gate": after,
+                }
+            if row["status"] == "error" and point_retry < spec.get("max_retries", 0):
+                processed -= 1
+                errors -= 1
+                continue
+            if row["status"] == "error" and not spec.get("continue_on_error", False):
+                return {
+                    "success": False,
+                    "stop_reason": "point_error",
+                    "processed": processed,
+                    "skipped_completed": skipped,
+                    "errors": errors,
+                    "remaining": len(points) - len(completed),
+                    "last_row_sha256": last_row_sha256,
+                }
+
+            break
 
     return {
         "success": errors == 0,

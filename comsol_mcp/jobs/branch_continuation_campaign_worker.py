@@ -157,11 +157,29 @@ def _run(
             )
             cancel_thread.start()
 
-        completed_points = int(store.read_state(job_id).get("progress", {}).get("completed", 0))
+        from .branch_continuation_campaign_runner import branch_continuation_state_directory
+        from .spectral_rows import read_spectral_rows
+
+        def durable_point_count() -> int:
+            return sum(
+                len(
+                    read_spectral_rows(
+                        branch_continuation_state_directory(directory, item["ordinal"])
+                        / "spectral_rows.jsonl",
+                        item["spectral_job"],
+                        artifact_root=branch_continuation_state_directory(
+                            directory, item["ordinal"]
+                        ),
+                    )
+                )
+                for item in spec["states"]
+            )
+
+        completed_points = durable_point_count()
 
         def point_persisted(campaign_state: Mapping[str, Any], row: Mapping[str, Any]) -> None:
             nonlocal completed_points
-            completed_points += 1
+            completed_points = durable_point_count()
             current = store.read_state(job_id)["status"]
             if current == "smoke_running":
                 store.update_state(job_id, "smoke_validated", event="first_point_validated")
@@ -213,6 +231,7 @@ def _run(
                 collector_executor=collector_executor,
                 telemetry_provider=telemetry_provider,
                 fault_hook=fault_hook,
+                resource_journal_name=f"resource-state-{campaign_state['ordinal']}.jsonl",
             )
             latest_resource_decision = execution["latest_resource_decision"]
             if _sha256_file(source) != child["source_model_sha256"]:

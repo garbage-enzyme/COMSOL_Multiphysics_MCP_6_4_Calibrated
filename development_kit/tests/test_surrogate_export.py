@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from development_kit.scripts import surrogate_export_licensed_gate as licensed_gate
+
 from comsol_mcp.durable.canonical import canonical_sha256_v1
 from comsol_mcp.surrogate.export import (
     EXPORT_FORMATS,
@@ -81,6 +83,14 @@ def test_hash_export_artifact_rejects_missing_empty_and_bad_format(tmp_path) -> 
         hash_export_artifact(path=real, export_format="pickle")
     with pytest.raises(ValueError, match="chunk_bytes"):
         hash_export_artifact(path=real, export_format="onnx", chunk_bytes=16)
+
+
+def test_worker_rejects_stale_nonempty_workspace_before_solver_import(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "stale.onnx").write_bytes(b"old run")
+    with pytest.raises(ValueError, match="workspace must be empty"):
+        licensed_gate._run_worker(tmp_path / "result.json", 1, workspace)
 
 
 # --------------------------------------------------------------------------

@@ -289,16 +289,18 @@ class OperationLedger:
         return row
 
     def _next_sequence(self) -> int:
-        report = self._read_report()
-        records = report.get("records")
-        highest = 0
-        if isinstance(records, list):
-            for raw in records[-MAX_LEDGER_ROWS:]:
-                if isinstance(raw, Mapping):
-                    value = raw.get("sequence")
-                    if isinstance(value, int) and not isinstance(value, bool):
-                        highest = max(highest, value)
-        return highest + 1
+        return int(self._recovery_state()["last_sequence"]) + 1
+
+    def _recovery_state(self) -> dict[str, Any]:
+        """Refuse new work when replay cannot prove the complete history."""
+        state = self.replay()
+        if state["journal_state"] not in {"absent", "current_valid"} or state["skipped_row_count"]:
+            raise LedgerError(
+                "ledger_damaged", "the operation ledger is damaged; new work is refused"
+            )
+        if state["row_count"] >= MAX_LEDGER_ROWS:
+            raise LedgerError("ledger_oversized", "the operation ledger exceeds its row bound")
+        return state
 
     # -- reads -------------------------------------------------------------
 
@@ -377,6 +379,7 @@ class OperationLedger:
         """
         normalized_subject = _bounded_text(subject, "subject", 512)
         digest = _sha256_or_unknown(artifact_sha256)
+        state = self._recovery_state()
         if digest == UNKNOWN:
             return {
                 "accept": True,
@@ -386,7 +389,7 @@ class OperationLedger:
                 # the caller cannot later mistake it for a confirmed match.
                 "verified": False,
             }
-        accepted = self.replay()["accepted_artifacts"]
+        accepted = state["accepted_artifacts"]
         existing = accepted.get(digest)
         if existing is None:
             return {
@@ -418,7 +421,7 @@ class OperationLedger:
         recorded as — which may be ``unknown``.
         """
         normalized = _bounded_text(subject, "subject", 512)
-        latest = self.replay()["latest_by_subject"].get(normalized)
+        latest = self._recovery_state()["latest_by_subject"].get(normalized)
         if latest is None:
             return {
                 "resume": True,

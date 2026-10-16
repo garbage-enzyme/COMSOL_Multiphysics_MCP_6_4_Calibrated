@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import queue
 import shutil
 import socket
 import subprocess
@@ -13,7 +15,6 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -28,6 +29,73 @@ from src.tools.ownership import SolverOwnership
 
 from development_kit.tests.platform_fixtures import platform_test_root
 from development_kit.tests.semantic_test_support import isolated_semantic_environment
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process group cleanup")
+@pytest.mark.parametrize("startup_failure", [False, True])
+@pytest.mark.parametrize("detached", [False, True])
+def test_posix_reset_reclaims_worker_descendants(tmp_path, startup_failure, detached):
+    import psutil
+
+    pid_path = tmp_path / "descendant.json"
+    code = (
+        "import json,os,subprocess,sys,time; "
+        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'],"
+        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,"
+        f"start_new_session={detached}); "
+        f"open({str(pid_path)!r},'w').write(json.dumps([child.pid])); "
+        "print(json.dumps({'schema_version':'1','event':'ready','pid':os.getpid(),"
+        "'host':'127.0.0.1','port':9}),flush=True); time.sleep(30)"
+    )
+    manager = SemanticWorkerManager(startup_deadline=5)
+    manager._command = lambda: [sys.executable, "-c", code]
+    child = None
+    try:
+        started = manager.start()
+        assert started["success"], started
+        child = psutil.Process(json.loads(pid_path.read_text())[0])
+        assert child.is_running() and child.status() != psutil.STATUS_ZOMBIE
+        assert (os.getpgid(child.pid) == manager._process.pid) is not detached
+        assert os.getpgid(child.pid) != os.getpgrp()
+        if startup_failure:
+            result = manager._terminate_unverified_spawn("injected_startup_failure")
+        else:
+            result = manager.reset()["reset"]
+        assert result["absent"], result
+        assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE
+    finally:
+        manager.reset()
+        if child is not None and child.is_running():
+            child.kill()
+
+
+def test_short_startup_line_returns_while_worker_pipe_remains_open():
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.buffer.write(b'ready\\n'); "
+            "sys.stdout.flush(); sys.stdin.read()",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=isolated_semantic_environment(),
+    )
+    result = queue.Queue(maxsize=1)
+    reader = threading.Thread(
+        target=lambda: result.put(SemanticWorkerManager._read_startup_line(process.stdout)),
+        daemon=True,
+    )
+    reader.start()
+    try:
+        assert result.get(timeout=5.0) == b"ready\n"
+        assert process.poll() is None
+    finally:
+        process.kill()
+        process.communicate(timeout=5.0)
+        reader.join(timeout=5.0)
+    assert not reader.is_alive()
 
 
 def _raw_request(
@@ -126,6 +194,42 @@ def test_non_object_startup_handshake_is_contained_and_reaped(monkeypatch):
         manager.reset()
 
     assert result is not None
+    assert result["success"] is False
+    assert result["error"]["code"] == "startup_failed"
+    assert result["cleanup"]["absent"] is True
+
+
+@pytest.mark.parametrize("size", [65_535, 65_536, 65_537])
+def test_startup_handshake_line_byte_limit_includes_newline(size):
+    payload = b'{"event":"ready"}'
+    line = payload + b" " * (size - len(payload) - 1) + b"\n"
+    assert json.loads(line) == {"event": "ready"}
+    if size > 65_536:
+        with pytest.raises(ValueError, match="exceeds the byte limit"):
+            SemanticWorkerManager._read_startup_line(BytesIO(line))
+    else:
+        assert SemanticWorkerManager._read_startup_line(BytesIO(line)) == line
+
+
+def test_startup_handshake_limit_excludes_bytes_after_first_newline():
+    line = b'{"event":"ready"}\n'
+    assert SemanticWorkerManager._read_startup_line(
+        BytesIO(line + b"x" * 4096), maximum=len(line)
+    ) == line
+
+
+def test_oversized_startup_handshake_is_rejected_before_json_decode(monkeypatch):
+    manager = SemanticWorkerManager(startup_deadline=2.0)
+    command = [
+        sys.executable,
+        "-c",
+        "import sys,time; sys.stdout.write('x'*70000+'\\n'); sys.stdout.flush(); time.sleep(30)",
+    ]
+    monkeypatch.setattr(manager, "_command", lambda: command)
+    try:
+        result = manager.start()
+    finally:
+        manager.reset()
     assert result["success"] is False
     assert result["error"]["code"] == "startup_failed"
     assert result["cleanup"]["absent"] is True
@@ -876,7 +980,7 @@ def test_termination_exceptions_still_clear_finished_process_resources(monkeypat
 
 
 def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search():
-    root = Path("D:/comsol_semantic_worker_test") / uuid.uuid4().hex
+    root = platform_test_root("semantic_worker") / uuid.uuid4().hex
     index = root / "manuals.sqlite3"
     runtime = root / "runtime"
     build_index_from_records(

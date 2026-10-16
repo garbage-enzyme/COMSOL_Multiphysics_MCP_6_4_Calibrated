@@ -137,6 +137,7 @@ def compile_lin2025_robust_submission(
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     envelope_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_preexisting = manifest_path.exists()
+    previous_manifest = manifest_path.read_bytes() if manifest_preexisting else None
     atomic_write_json(manifest_path, body)
     envelope["submission_manifest_sha256"] = _sha256(manifest_path)
     try:
@@ -144,7 +145,9 @@ def compile_lin2025_robust_submission(
     except Exception:
         # Remove only artifacts this invocation created; a pre-existing
         # envelope from an earlier successful run must survive a failed rerun.
-        if not manifest_preexisting:
+        if manifest_preexisting and previous_manifest is not None:
+            manifest_path.write_bytes(previous_manifest)
+        else:
             manifest_path.unlink(missing_ok=True)
         raise
     try:
@@ -152,7 +155,9 @@ def compile_lin2025_robust_submission(
     except Exception:
         # The envelope never became durable, so the freshly written manifest
         # must not survive as an orphaned half of an unpublished pair.
-        if not manifest_preexisting:
+        if manifest_preexisting and previous_manifest is not None:
+            manifest_path.write_bytes(previous_manifest)
+        else:
             manifest_path.unlink(missing_ok=True)
         raise
     return {

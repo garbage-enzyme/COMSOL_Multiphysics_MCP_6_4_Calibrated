@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from development_kit.scripts.acceptance_cleanup import CleanupRecorder
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
 
 
 def _cleanup_probe(client, output_file, output_dir, result) -> int:
@@ -43,7 +44,7 @@ def main() -> None:
     result = {"success": False}
     primary_error = None
     try:
-        client = mph.Client(version="6.4")
+        client = mph.Client(cores=required_acceptance_cores(), version="6.4")
         model = client.create("UnicodeSaveSmoke")
         model.java.save(str(output_file.resolve()))
         if not output_file.is_file() or output_file.stat().st_size == 0:

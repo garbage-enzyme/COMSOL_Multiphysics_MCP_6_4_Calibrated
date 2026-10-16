@@ -47,7 +47,7 @@ def test_save_mph_uses_java_clientapi_for_unicode_path(tmp_path):
 
     assert saved == str(requested.resolve())
     assert len(model.java.saved) == 1
-    assert Path(model.java.saved[0][0]).name.startswith(f".{requested.name}.")
+    assert Path(model.java.saved[0][0]).name.startswith(f".{requested.stem}.")
     assert model.java.saved[0][1] is True
     assert model.high_level_saves == []
     assert requested.parent.is_dir()
@@ -76,6 +76,54 @@ def test_save_source_export_keeps_mph_format_api(tmp_path):
     assert model.java.saved == []
 
 
+@pytest.mark.parametrize(
+    ("format_name", "suffix"),
+    [("Java", ".java"), ("Matlab", ".m"), ("VBA", ".vba"), ("matlab", ".m")],
+)
+def test_source_export_staging_keeps_format_suffix(tmp_path, format_name, suffix):
+    class FormatAwareModel(FakeModel):
+        def save(self, path=None, format=None):
+            expected = {"Java": ".java", "Matlab": ".m", "VBA": ".vba"}[format]
+            output = Path(path).with_suffix(expected)
+            self.high_level_saves.append((str(output), format))
+            output.write_bytes(b"saved-export")
+
+    model = FormatAwareModel()
+    requested = tmp_path / f"model{suffix}"
+
+    saved = _save_model_file(model, str(requested), format=format_name)
+
+    assert saved == str(requested.resolve())
+    assert requested.read_bytes() == b"saved-export"
+    assert model.high_level_saves[0][0].endswith(suffix)
+    assert list(tmp_path.iterdir()) == [requested]
+
+
+@pytest.mark.parametrize("fail_export", [False, True])
+def test_java_export_preserves_public_class_name_and_cleans_staging(tmp_path, fail_export):
+    requested = tmp_path / "PublicModel.java"
+    requested.write_bytes(b"previous export")
+
+    class JavaClassExporter(FakeModel):
+        def save(self, path=None, format=None):
+            staging = Path(path)
+            assert staging.stem.isidentifier(), "Java export requires a valid class name"
+            assert staging.name == requested.name
+            assert staging.parent != requested.parent
+            staging.write_text(f"public class {staging.stem} {{}}", encoding="utf-8")
+            if fail_export:
+                raise RuntimeError("injected native export failure")
+
+    if fail_export:
+        with pytest.raises(RuntimeError, match="injected native export failure"):
+            _save_model_file(JavaClassExporter(), str(requested), "java")
+        assert requested.read_bytes() == b"previous export"
+    else:
+        assert _save_model_file(JavaClassExporter(), str(requested), "java") == str(requested)
+        assert requested.read_text() == "public class PublicModel {}"
+    assert list(tmp_path.iterdir()) == [requested]
+
+
 def test_save_never_overwrites_a_target_created_during_native_staging(tmp_path):
     requested = tmp_path / "model.mph"
 
@@ -92,7 +140,7 @@ def test_save_never_overwrites_a_target_created_during_native_staging(tmp_path):
         _save_model_file(model, str(requested))
 
     assert requested.read_bytes() == b"competitor"
-    assert not list(tmp_path.glob(".*.save"))
+    assert set(tmp_path.iterdir()) == {requested}
 
 
 class CloneJava:
@@ -324,6 +372,50 @@ def test_save_requires_target_and_cleans_native_failure_staging(tmp_path):
     with pytest.raises(RuntimeError, match="save failure"):
         _save_model_file(model, str(tmp_path / "target.mph"))
     assert not list(tmp_path.glob(".*.save"))
+
+
+@pytest.mark.parametrize("failure_stage", ["post_load_hash", "registration"])
+def test_model_load_removes_native_model_when_registration_does_not_complete(
+    tmp_path, monkeypatch, failure_stage
+):
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"model")
+    loaded = object()
+
+    class Client:
+        removed = []
+
+        def load(self, _path):
+            return loaded
+
+        def remove(self, model):
+            self.removed.append(model)
+
+    client = Client()
+
+    class Session:
+        is_connected = True
+
+        def __init__(self):
+            self.client = client
+
+        def add_model(self, *_args, **_kwargs):
+            raise RuntimeError("registration failed")
+
+    hashes = iter(["a" * 64, "b" * 64] if failure_stage == "post_load_hash" else ["a" * 64] * 2)
+    monkeypatch.setattr(model_module, "session_manager", Session())
+    monkeypatch.setattr(model_module, "_sha256_file", lambda _path: next(hashes))
+    server = MCPServer("model-load-cleanup-test")
+    register_model_tools(server)
+
+    result = server._tool_manager._tools["model_load"].fn(file_path=str(source))
+
+    assert result["success"] is False
+    expected_error = (
+        "Model source changed" if failure_stage == "post_load_hash" else "registration failed"
+    )
+    assert expected_error in result["error"]
+    assert client.removed == [loaded]
 
 
 class JavaStringLike:

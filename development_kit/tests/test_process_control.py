@@ -76,12 +76,48 @@ def test_detached_reaper_isolates_poll_exceptions(monkeypatch):
     assert manager_module._DETACHED_PROCESSES == set()
 
 
-def test_exact_termination_refuses_a_reused_identity():
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("process_create_time", float("nan")),
+        ("process_create_time", float("inf")),
+        ("process_create_time", True),
+        ("process_create_time", "123"),
+        ("pid", True),
+        ("pid", "123"),
+        ("command_signature", "z" * 64),
+    ],
+)
+def test_exact_termination_rejects_invalid_identity_before_opening_process(
+    monkeypatch, field, value
+):
+    identity = {"pid": 123, "process_create_time": 123.0, "command_signature": "a" * 64}
+    identity[field] = value
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("invalid identity must not open a process")
+
+    monkeypatch.setattr(process_control_module.psutil, "Process", forbidden)
+    assert terminate_exact(identity)["acted"] is False
+
+
+def test_exact_termination_refuses_a_reused_identity(tmp_path):
+    ready = tmp_path / "reused-child-ready"
     child = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"],
+        [
+            sys.executable,
+            "-c",
+            "import pathlib,sys,time; "
+            "pathlib.Path(sys.argv[1]).write_text('ready'); time.sleep(30)",
+            str(ready),
+        ],
         creationflags=_HIDDEN_PROCESS_FLAGS,
     )
     try:
+        deadline = time.monotonic() + 5.0
+        while not ready.exists() and child.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.025)
+        assert ready.exists(), "child did not reach its Python readiness marker"
         identity = process_identity(child.pid)
         identity["process_create_time"] -= 10
 
@@ -96,12 +132,23 @@ def test_exact_termination_refuses_a_reused_identity():
             child.wait(timeout=5)
 
 
-def test_capture_and_terminate_only_owned_child_process():
+def test_capture_and_terminate_only_owned_child_process(tmp_path):
+    ready = tmp_path / "child-ready"
     child = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"],
+        [
+            sys.executable,
+            "-c",
+            "import pathlib,sys,time; "
+            "pathlib.Path(sys.argv[1]).write_text('ready'); time.sleep(30)",
+            str(ready),
+        ],
         creationflags=_HIDDEN_PROCESS_FLAGS,
     )
     try:
+        deadline = time.monotonic() + 5.0
+        while not ready.exists() and child.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.025)
+        assert ready.exists(), "child did not reach its Python readiness marker"
         identity = process_identity(child.pid)
         captured = capture_owned_descendants(identity)
         assert captured["worker"]["state"] == "active"

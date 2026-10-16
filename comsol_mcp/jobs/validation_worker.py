@@ -120,7 +120,7 @@ def _run(
         source = Path(spec["source_model_path"])
         if _sha256_file(source) != spec["source_model_sha256"]:
             raise RuntimeError("Immutable validation source hash changed before client startup")
-        completed_point_fingerprints(directory / "matrix_rows.jsonl", spec)
+        completed_point_fingerprints(directory / "matrix_rows.jsonl", spec, artifact_root=directory)
         ownership = ownership_factory(store.root.parent, f"job:{job_id}")
         preflight = ownership.preflight(
             model_path=str(source),
@@ -150,7 +150,7 @@ def _run(
         rows_path = directory / "matrix_rows.jsonl"
 
         def completed_ids() -> set[str]:
-            return completed_point_fingerprints(rows_path, spec)
+            return completed_point_fingerprints(rows_path, spec, artifact_root=directory)
 
         def sample(stage: str, point_id: str) -> dict[str, Any]:
             if telemetry_provider is not None:
@@ -319,15 +319,23 @@ def _run(
         return 1
     finally:
         cancel_stop.set()
+        native_cancel_active = False
         if cancel_thread is not None:
             cancel_thread.join(timeout=1.0)
+            native_cancel_active = cancel_thread.is_alive()
+            if native_cancel_active:
+                print(
+                    "Native cancel thread is still active; preserving client and lease",
+                    file=sys.stderr,
+                    flush=True,
+                )
         if native_monitor_errors:
             print(
                 f"Native cancel monitor warning: {type(native_monitor_errors[0]).__name__}",
                 file=sys.stderr,
                 flush=True,
             )
-        if client is not None:
+        if client is not None and not native_cancel_active:
             try:
                 client.clear()
             except Exception as exc:
@@ -337,7 +345,7 @@ def _run(
                     client.disconnect()
                 except Exception as exc:
                     print(f"Client disconnect warning: {exc}", file=sys.stderr, flush=True)
-        if ownership is not None and lease_acquired:
+        if ownership is not None and lease_acquired and not native_cancel_active:
             release = ownership.release()
             if not release.get("success"):
                 print(json.dumps(release, ensure_ascii=False), file=sys.stderr, flush=True)

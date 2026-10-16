@@ -304,35 +304,34 @@ def _migrate_legacy_document(document: Any) -> Any:
     profile = migrated.get("profile")
     raw_profile = profile.get("name") if isinstance(profile, dict) else None
     normalized_profile = raw_profile.strip().casefold() if isinstance(raw_profile, str) else None
-    semantic = migrated.get("semantic_docs")
-    if not isinstance(semantic, dict):
-        semantic = {}
-        migrated["semantic_docs"] = semantic
-    lexical_docs = migrated.get("lexical_docs")
-    if not isinstance(lexical_docs, dict):
-        lexical_docs = {}
-        migrated["lexical_docs"] = lexical_docs
-    manuals = migrated.get("manuals")
-    if not isinstance(manuals, dict):
-        manuals = {}
-        migrated["manuals"] = manuals
-    shared = migrated.get("shared_server")
-    if not isinstance(shared, dict):
-        shared = {}
-        migrated["shared_server"] = shared
-    model_manager = migrated.get("model_manager")
-    if not isinstance(model_manager, dict):
+    def migration_group(name: str) -> dict:
+        value = migrated.get(name)
+        if isinstance(value, dict):
+            return value
+        if name in migrated:
+            # Keep malformed values visible to `_object` so it can report them.
+            return {}
+        migrated[name] = {}
+        return migrated[name]
+
+    semantic = migration_group("semantic_docs")
+    lexical_docs = migration_group("lexical_docs")
+    manuals = migration_group("manuals")
+    shared = migration_group("shared_server")
+    model_manager = migration_group("model_manager")
+    if "model_manager" not in document:
         # A migrated file predates the Model Manager gate, so it gets the
         # default rather than inheriting any other feature's state.
-        model_manager = {}
-        migrated["model_manager"] = model_manager
+        model_manager["enabled"] = False
 
     if normalized_profile == "semantic_docs":
         migrated.setdefault("profile", {})["name"] = "core"
-        semantic["enabled"] = True
+        # A user-supplied explicit false is an opt-out and must survive
+        # migration. The legacy profile only supplies a default.
+        semantic.setdefault("enabled", True)
     elif normalized_profile == "desktop_shared":
         migrated.setdefault("profile", {})["name"] = "core"
-        shared["enabled"] = True
+        shared.setdefault("enabled", True)
     elif normalized_profile == "full" and raw_version in (None, "1.0.0", "1.1.0"):
         semantic.setdefault("enabled", True)
     else:
@@ -410,7 +409,18 @@ def _normalize(
         try:
             defaults = default_settings_document(environ=environment)
         except (OSError, RuntimeError, SettingsError) as exc:
-            _record_error(errors, "settings.environment", exc)
+            needs_path_defaults = not isinstance(document, dict) or any(
+                not isinstance(document.get(group), dict)
+                or field not in document[group]
+                or document[group][field] == _DEFAULT_SETTINGS[group][field]
+                for group, field in (
+                    ("runtime", "directory"),
+                    ("paths", "model_read_roots"),
+                    ("paths", "artifact_write_root"),
+                )
+            )
+            if needs_path_defaults:
+                _record_error(errors, "settings.environment", exc)
             defaults = deepcopy(_DEFAULT_SETTINGS)
         if isinstance(document, dict):
             document = deepcopy(document)

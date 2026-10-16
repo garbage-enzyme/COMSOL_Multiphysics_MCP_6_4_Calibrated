@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from comsol_mcp.durable import domain_sha256_v2
 from comsol_mcp.research.adaptive_acquisition import GaussianProcessExpectedImprovementOptimizer
 from comsol_mcp.research.campaign_loop import BoundedResearchCampaignLoop
@@ -72,6 +74,19 @@ def test_campaign_loop_stops_only_on_measured_success_and_checkpoints(ascii_tmp_
     assert (ascii_tmp_path / "optimizer_checkpoint.json").is_file()
 
 
+def test_campaign_without_all_success_thresholds_cannot_report_success(ascii_tmp_path):
+    goal = _goal()
+    goal["objectives"][0]["tolerance"] = None
+    manifest = compile_campaign_manifest(goal, _space(), _approval())
+    loop = _loop(ascii_tmp_path, manifest, lambda _values: {"peak_wavelength_nm": 1550.0})
+
+    result = loop.step()
+
+    assert manifest["success_claim_allowed"] is False
+    assert result["success"] is False
+    assert result["stop_reason"] == "success_claim_not_allowed"
+
+
 def test_impossible_campaign_exhausts_budget_without_manufacturing_success(ascii_tmp_path):
     loop = _loop(
         ascii_tmp_path,
@@ -110,6 +125,29 @@ def test_duplicate_terminal_failure_replays_through_the_failed_path(ascii_tmp_pa
     assert result["success"] is False
     assert result["evaluation"]["status"] == "failed"
     assert result["evaluation"]["candidate_fingerprint"] == "f" * 64
+
+
+def test_campaign_recovery_rejects_a_different_evaluator_identity(ascii_tmp_path):
+    manifest = _manifest()
+
+    def evaluator(_values):
+        return {"peak_wavelength_nm": 1550.0}
+
+    ResearchCampaignCoordinator(
+        ascii_tmp_path,
+        manifest,
+        evaluator,
+        evaluator_identity="b" * 64,
+        clock=lambda: 1000.0,
+    )
+    with pytest.raises(ValueError, match="evaluator identity"):
+        ResearchCampaignCoordinator(
+            ascii_tmp_path,
+            manifest,
+            evaluator,
+            evaluator_identity="c" * 64,
+            clock=lambda: 1000.0,
+        )
 
 
 def test_checkpoint_restart_replays_exact_next_adaptive_decision(ascii_tmp_path):

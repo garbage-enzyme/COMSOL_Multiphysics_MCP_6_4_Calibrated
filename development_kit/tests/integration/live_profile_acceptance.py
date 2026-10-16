@@ -21,6 +21,8 @@ if str(ROOT) not in sys.path:
 
 from src.evidence.real_fixture import controlled_fixture_from_environment
 
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
+
 PYTHON = Path(sys.executable)
 RUNTIME = Path(os.environ.get("COMSOL_MCP_RUNTIME_DIR", "D:/comsol_runtime"))
 ARTIFACT_DIR = RUNTIME / "live_profile"
@@ -40,6 +42,7 @@ PROFILE_COUNTS = {
 COLD_START_RESPONSE_LIMIT_SECONDS = 5.0
 CONTROL_PLANE_READ_LIMIT_SECONDS = 15.0
 LIVE_CLEANUP_LIMIT_SECONDS = 30.0
+POINT_AUDIT_LIMIT_SECONDS = 300.0
 #: Hard stop so a server that keeps handing back a cursor cannot loop forever.
 MAX_DISCOVERY_PAGES = 40
 
@@ -214,10 +217,11 @@ async def _wait_for_comsol(session: ClientSession) -> list[dict[str, Any]]:
 
 
 async def _setup_live_session(session: ClientSession, output: dict[str, Any]) -> None:
+    cores = required_acceptance_cores()
     start_result, start_timing = await _call_before(
         session,
         "comsol_start",
-        {"cores": 8, "version": "6.4"},
+        {"cores": cores, "version": "6.4"},
         deadline=time.monotonic() + COLD_START_RESPONSE_LIMIT_SECONDS,
     )
     _require(start_result.get("success"), start_result)
@@ -243,7 +247,7 @@ async def _setup_live_session(session: ClientSession, output: dict[str, Any]) ->
     restart_result, restart_timing = await _call_before(
         session,
         "comsol_start",
-        {"cores": 8, "version": "6.4"},
+        {"cores": cores, "version": "6.4"},
         deadline=time.monotonic() + COLD_START_RESPONSE_LIMIT_SECONDS,
     )
     _require(restart_result.get("success"), restart_result)
@@ -269,7 +273,9 @@ async def _cleanup_live_session(session: ClientSession, model_names: list[str]) 
                 "model_remove",
                 {
                     "model_name": model_name,
-                    "expected_model_revision": await _model_revision(session, model_name),
+                    "expected_model_revision": await _model_revision(
+                        session, model_name, deadline=deadline
+                    ),
                 },
                 deadline=deadline,
             )
@@ -322,7 +328,9 @@ def _agent_reasoning(case: dict[str, Any], audit: dict[str, Any]) -> dict[str, A
     }
 
 
-async def _model_revision(session: ClientSession, model_name: str) -> str:
+async def _model_revision(
+    session: ClientSession, model_name: str, *, deadline: float | None = None
+) -> str:
     """Read the exact current revision a guarded call must declare.
 
     `wave_optics_point_audit` (solver_execution) and `model_remove`
@@ -333,7 +341,7 @@ async def _model_revision(session: ClientSession, model_name: str) -> str:
     "expected_model_revision does not match current model state." The session
     status publishes `models[].revision_sha256`, which is the value to declare.
     """
-    status, timing = await _call(session, "comsol_status", {})
+    status, timing = await _call_before(session, "comsol_status", {}, deadline=deadline)
     _require(status.get("success", True), status)
     for entry in status.get("models", []):
         if entry.get("name") == model_name:
@@ -407,7 +415,8 @@ async def _live_three_call_matrix() -> dict[str, Any]:
                     )
                     _require(preflight.get("success"), preflight)
 
-                    audit, timing = await _call(
+                    deadline = time.monotonic() + POINT_AUDIT_LIMIT_SECONDS
+                    audit, timing = await _call_before(
                         session,
                         "wave_optics_point_audit",
                         {
@@ -421,13 +430,16 @@ async def _live_three_call_matrix() -> dict[str, Any]:
                             "study_step_tag": "wl_step",
                             "study_step_property": "plist",
                             "expected_source_sha256": source_hash,
-                            "expected_model_revision": await _model_revision(session, model_name),
+                            "expected_model_revision": await _model_revision(
+                                session, model_name, deadline=deadline
+                            ),
                             "config_id": f"live-profile-{case['name']}",
                             "artifact_dir": str(ARTIFACT_DIR / "audits"),
                             "top_air_domain_ids": case["top_air_domain_ids"],
                             "top_air_coordinate_range": case["top_air_coordinate_range"],
                             "validation_policy": case["validation_policy"],
                         },
+                        deadline=deadline,
                     )
                     calls.append(
                         {

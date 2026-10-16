@@ -2,6 +2,7 @@
 
 import ast
 import asyncio
+import contextlib
 import inspect
 import json
 import runpy
@@ -16,12 +17,151 @@ from development_kit.tests.integration import clientapi_property_acceptance as p
 from development_kit.tests.integration import derived_geometry_acceptance as derived_gate
 from development_kit.tests.integration import live_profile_acceptance as live_profile_gate
 from development_kit.tests.integration import periodic_mesh_acceptance as periodic_mesh_gate
+from development_kit.tests.integration import semantic_feature_acceptance as semantic_gate
 from development_kit.tests.integration import test_native_cancel_candidate as native_cancel_gate
 from development_kit.tests.integration import test_real_comsol as real_comsol_gate
 from development_kit.tests.integration import wave_optics_point_audit_acceptance as point_gate
 from development_kit.tests.integration import wave_optics_preflight_acceptance as preflight_gate
 
 ROOT = Path(__file__).parents[2]
+
+
+@pytest.mark.parametrize(
+    "sample",
+    [
+        [],
+        [[float("nan"), 0.5, 1]],
+        [[0.5, 0.5, float("nan")]],
+        [[0.5, float("inf"), 1]],
+        [[0.5, 0.5, complex(1, float("inf"))]],
+    ],
+)
+def test_poisson_probe_refuses_empty_or_nonfinite_fields(sample):
+    from development_kit.tests.integration.probes import acoustics_pde as probe
+
+    with pytest.raises(RuntimeError, match="field"):
+        probe._field_columns(SimpleNamespace(evaluate=lambda _expressions: sample))
+
+
+@pytest.mark.parametrize("value", [complex(float("nan"), 0), complex(0, float("inf")), 1.0])
+def test_poisson_probe_validates_before_publishing_verified(monkeypatch, value):
+    import numpy as np
+
+    from development_kit.tests.integration.probes import acoustics_pde as probe
+
+    class Node:
+        def __getattr__(self, _name):
+            return lambda *_args, **_kwargs: self
+
+    client = SimpleNamespace(create=lambda _name: SimpleNamespace(java=Node()))
+    monkeypatch.setattr(probe.jpype, "JArray", lambda *_args: lambda values: values)
+    monkeypatch.setattr(
+        probe,
+        "create_side_selections",
+        lambda *_args, **_kwargs: {
+            "success": True,
+            "selections": {
+                side: {"entities": [i]}
+                for i, side in enumerate(("left", "right", "bottom", "top"), 1)
+            },
+        },
+    )
+    monkeypatch.setattr(
+        probe,
+        "add_pde_interface",
+        lambda *_args, **_kwargs: {"success": True, "physics": "fixture"},
+    )
+    monkeypatch.setattr(
+        probe,
+        "configure_boundaries",
+        lambda *_args, **_kwargs: {"success": True, "configured_count": 4},
+    )
+    monkeypatch.setattr(probe, "create_mesh_sequence", lambda *_args, **_kwargs: {"success": True})
+    monkeypatch.setattr(
+        probe,
+        "_field_columns",
+        lambda _model: (np.array([0.5]), np.array([0.5]), np.array([value])),
+    )
+    if not np.isfinite(value):
+        with pytest.raises(RuntimeError, match="finite"):
+            probe._build_and_validate_poisson(client)
+    else:
+        receipt = probe._build_and_validate_poisson(client)
+        assert receipt["status"] == "verified"
+        assert receipt["sample"]["relative_error"] == 0
+
+
+def test_live_three_call_matrix_executes_point_audit_with_shared_budget(tmp_path, monkeypatch):
+    @contextlib.asynccontextmanager
+    async def stdio(_parameters):
+        yield None, None
+
+    calls = []
+    budgeted = []
+
+    class Session:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def initialize(self):
+            pass
+
+    async def call(_session, name, arguments):
+        calls.append((name, arguments))
+        if name == "model_load":
+            return {"success": True, "model": {"name": "fixture"}}, {}
+        return {"success": True}, {}
+
+    async def before(session, name, arguments, *, deadline):
+        budgeted.append((name, deadline))
+        return await call(session, name, arguments)
+
+    async def revision(_session, _name, *, deadline=None):
+        budgeted.append(("revision", deadline))
+        return "a" * 64
+
+    async def setup(*_args):
+        pass
+
+    async def cleanup(*_args):
+        return {"passed": True}
+
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"solver-free fixture")
+    case = {
+        "source": source,
+        "name": "fixture",
+        "wavelength_um": 0.8,
+        "top_air_domain_ids": [1],
+        "top_air_coordinate_range": {},
+        "validation_policy": {},
+    }
+    monkeypatch.setattr(live_profile_gate, "stdio_client", stdio)
+    monkeypatch.setattr(live_profile_gate, "ClientSession", Session)
+    monkeypatch.setattr(live_profile_gate, "_controlled_cases", lambda: (case,))
+    monkeypatch.setattr(live_profile_gate, "_setup_live_session", setup)
+    monkeypatch.setattr(live_profile_gate, "_cleanup_live_session", cleanup)
+    monkeypatch.setattr(live_profile_gate, "_call", call)
+    monkeypatch.setattr(live_profile_gate, "_call_before", before)
+    monkeypatch.setattr(live_profile_gate, "_model_revision", revision)
+    monkeypatch.setattr(live_profile_gate, "_agent_reasoning", lambda *_args: {})
+    result = asyncio.run(live_profile_gate._live_three_call_matrix())
+    assert len(result["cases"][0]["exact_three_calls"]) == 3
+    point_budget = next(
+        deadline for name, deadline in budgeted if name == "wave_optics_point_audit"
+    )
+    assert point_budget is not None
+    assert budgeted[0] == ("revision", point_budget)
+    audit = next(arguments for name, arguments in calls if name == "wave_optics_point_audit")
+    assert audit["expected_model_revision"] == "a" * 64
+
+
 STANDALONE_PROBES = tuple(
     path.relative_to(ROOT).as_posix()
     for path in sorted((ROOT / "development_kit/tests/integration/probes").glob("*.py"))
@@ -29,6 +169,34 @@ STANDALONE_PROBES = tuple(
 )
 if not STANDALONE_PROBES:
     raise RuntimeError("standalone integration probe collection must not be empty")
+
+
+def test_semantic_acceptance_profile_counts_match_frozen_snapshot():
+    frozen = json.loads(
+        (ROOT / "development_kit/tests/snapshots/profile_tool_names.json").read_text()
+    )
+    assert semantic_gate.PROFILE_COUNTS == {
+        name: len(frozen[name]) for name in semantic_gate.PROFILE_COUNTS
+    }
+    assert semantic_gate.SEMANTIC_CORE_COUNT == 64
+
+
+def test_semantic_acceptance_base_discovery_does_not_inject_deployment(monkeypatch, tmp_path):
+    for name in ("ROOT", "LEXICAL_INDEX", "MODEL_PATH"):
+        monkeypatch.delenv(f"COMSOL_SEMANTIC_{name}", raising=False)
+    base = semantic_gate._server("core", tmp_path)
+    assert not any(name.startswith("COMSOL_SEMANTIC_") for name in base.env)
+    enabled = semantic_gate._server("core", tmp_path, semantic_enabled=True)
+    for name in ("ROOT", "LEXICAL_INDEX", "MODEL_PATH"):
+        assert Path(enabled.env[f"COMSOL_SEMANTIC_{name}"]).is_absolute()
+    custom = str(tmp_path / "custom-model")
+    monkeypatch.setenv("COMSOL_SEMANTIC_MODEL_PATH", custom)
+    assert (
+        semantic_gate._server("core", tmp_path, semantic_enabled=True).env[
+            "COMSOL_SEMANTIC_MODEL_PATH"
+        ]
+        == custom
+    )
 
 
 def test_clientapi_property_acceptance_uses_explicit_runtime_checks():
@@ -738,6 +906,42 @@ def test_point_audit_requires_an_identifiable_wavelength_step():
         )
 
 
+def test_point_audit_cleanup_failures_are_explicit_and_fail_closed():
+    class Client:
+        def clear(self):
+            raise OSError("injected clear failure")
+
+    class Owner:
+        def __init__(self):
+            self.calls = 0
+
+        def release(self):
+            self.calls += 1
+            raise OSError("injected lease failure")
+
+    owner = Owner()
+    cleanup = point_gate._cleanup_resources(Client(), owner)
+
+    assert cleanup["passed"] is False
+    assert cleanup["client_clear"]["success"] is False
+    assert cleanup["lease_release_success"] is False
+    assert owner.calls == 1
+
+
+def test_point_audit_cleanup_passes_only_after_both_resources_are_clean():
+    class Client:
+        def clear(self):
+            return None
+
+    class Owner:
+        def release(self):
+            return {"success": True, "released": True}
+
+    cleanup = point_gate._cleanup_resources(Client(), Owner())
+
+    assert cleanup["passed"] is True
+
+
 def test_preflight_fixture_prerequisites_fail_with_explicit_errors():
     with pytest.raises(ValueError, match="no component"):
         preflight_gate._select_preflight_tags([], [], [])
@@ -747,3 +951,64 @@ def test_preflight_fixture_prerequisites_fail_with_explicit_errors():
     assert preflight_gate._select_preflight_tags(
         ["other", "comp1"], ["emw", "ewfd"], ["other", "std1"]
     ) == ("comp1", "ewfd", "std1")
+
+
+@pytest.mark.parametrize("port", [None, 2036])
+@pytest.mark.parametrize("clear_fails", [False, True])
+def test_study_mesh_cleanup_matches_client_mode(monkeypatch, port, clear_fails):
+    from development_kit.tests.integration.probes import study_mesh as probe
+
+    calls = []
+
+    class Node:
+        def __getattr__(self, name):
+            if name in {"getSDim", "getNumElem", "getNDomains", "getNBoundaries"}:
+                return lambda: 3
+            return lambda *_args: self
+
+    def clear():
+        calls.append("clear")
+        if clear_fails:
+            raise OSError("injected clear failure")
+
+    client = SimpleNamespace(
+        port=port,
+        create=lambda _name: SimpleNamespace(java=Node()),
+        clear=clear,
+        disconnect=lambda: calls.append("disconnect"),
+    )
+
+    def factory(**kwargs):
+        assert kwargs == {"cores": 1, "version": "6.4"}
+        return client
+
+    monkeypatch.setattr(probe.mph, "Client", factory)
+    monkeypatch.setattr(probe.jpype, "JArray", lambda *_args: lambda values: values)
+    monkeypatch.setattr(probe, "required_acceptance_cores", lambda: 1)
+    if clear_fails:
+        with pytest.raises(RuntimeError, match="cleanup failed: clear"):
+            probe.main()
+    else:
+        probe.main()
+    assert calls == (["clear", "disconnect"] if port else ["clear"])
+
+
+@pytest.mark.parametrize("cores", [1, 2])
+def test_live_profile_reuses_declared_cores_for_both_starts(monkeypatch, cores):
+    calls = []
+
+    async def call(_session, name, arguments, **_kwargs):
+        calls.append((name, arguments))
+        return {"success": True, "client_reusable": True, "lease": {"state": "absent"}}, {
+            "elapsed_seconds": 0.1
+        }
+
+    async def wait(_session):
+        return []
+
+    monkeypatch.setattr(live_profile_gate, "required_acceptance_cores", lambda: cores)
+    monkeypatch.setattr(live_profile_gate, "_call_before", call)
+    monkeypatch.setattr(live_profile_gate, "_wait_for_comsol", wait)
+    asyncio.run(live_profile_gate._setup_live_session(object(), {"setup": {}}))
+    starts = [arguments for name, arguments in calls if name == "comsol_start"]
+    assert starts == [{"cores": cores, "version": "6.4"}] * 2

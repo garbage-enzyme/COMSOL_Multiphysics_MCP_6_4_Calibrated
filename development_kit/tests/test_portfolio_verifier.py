@@ -39,6 +39,23 @@ def _write(root: Path, artifact_id: str, value: dict) -> dict:
     }
 
 
+def test_summary_only_read_refuses_grown_artifact_before_materialization(tmp_path, monkeypatch):
+    request, raw, _fit = _fixture(tmp_path)
+    (tmp_path / raw["relative_path"]).write_bytes(b"x" * (raw["byte_count"] + 1))
+    monkeypatch.setattr(
+        Path, "read_bytes",
+        lambda _path: (_ for _ in ()).throw(AssertionError("unbounded artifact read")),
+    )
+    with pytest.raises(ValueError, match="reading limit"):
+        verify_portfolio_evidence_checks(
+            request,
+            artifact_roots={"case-one": str(tmp_path)},
+            check_outcome_contract=False,
+            check_artifact_chain=False,
+            check_summary_claims=True,
+        )
+
+
 def _fixture(root: Path) -> tuple[dict, dict, dict]:
     raw_value = {
         "schema_name": "comsol_mcp.physical_evidence",

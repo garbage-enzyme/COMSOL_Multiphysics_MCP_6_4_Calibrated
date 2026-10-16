@@ -11,6 +11,18 @@ after(() => server.close());
 
 const MIRROR_OPTS = { pollIntervalMs: 30, tailLines: 20, outputLimitBytes: 4096, cancelConfirmTimeoutMs: 5000 };
 
+async function withDeadline(promise, message) {
+	let timer;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), 8000); }),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 // ---- pure helper branches (deterministic, no timers) ----
 
 test("isTerminal recognizes terminal states and rejects running", () => {
@@ -73,16 +85,13 @@ test("mirror completes when the server reaches a terminal state", { timeout: 100
 		assert.equal(rec.spec.kind, "comsol");
 		assert.equal(rec.spec.label, "comsol job job-1 (staged_sweep)");
 		assert.equal(rec.spec.owner, undefined); // unowned mirror
-		const outcome = await Promise.race([
-			rec.done,
-			new Promise((_, rej) => setTimeout(() => rej(new Error("mirror never settled")), 8000)),
-		]);
+		const outcome = await withDeadline(rec.done, "mirror never settled");
 		assert.equal(outcome.status, "completed");
 		assert.match(outcome.detail ?? "", /state=/);
 	} finally { conn.dispose(); }
 });
 
-test("mirror streams job_tail deltas through readOutput", { timeout: 10000 }, async () => {
+test("mirror appends job_tail deltas to the DSH job output ring", { timeout: 10000 }, async () => {
 	const jobs = createFakeJobs();
 	const conn = makeConnection(server, {});
 	await conn.connect();
@@ -90,11 +99,10 @@ test("mirror streams job_tail deltas through readOutput", { timeout: 10000 }, as
 		createJobMirror({ jobs, core: conn, jobId: "job-1", opts: MIRROR_OPTS, logger: quietLogger() });
 		const rec = jobs.started[0];
 		await rec.done;
-		const out = rec.hooks.readOutput();
+		const out = rec.output.join("");
 		assert.ok(out.length > 0, "expected tail progress in the output buffer");
 		assert.match(out, /point 1 done/);
-		// second read is drained (single cursor semantics)
-		assert.equal(rec.hooks.readOutput(), "");
+		assert.equal("readOutput" in rec.hooks, false, "output belongs to JobHandle, not producer hooks");
 	} finally { conn.dispose(); }
 });
 
@@ -106,10 +114,7 @@ test("cancel settles the mirror as killed", { timeout: 10000 }, async () => {
 		createJobMirror({ jobs, core: conn, jobId: "job-1", opts: MIRROR_OPTS, logger: quietLogger() });
 		const rec = jobs.started[0];
 		rec.hooks.cancel("caller cancelled");
-		const outcome = await Promise.race([
-			rec.done,
-			new Promise((_, rej) => setTimeout(() => rej(new Error("cancel never settled")), 8000)),
-		]);
+		const outcome = await withDeadline(rec.done, "cancel never settled");
 		assert.equal(outcome.status, "killed");
 	} finally { conn.dispose(); }
 });
@@ -123,15 +128,12 @@ test("disposed bridge settles the mirror as failed", { timeout: 10000 }, async (
 		createJobMirror({ jobs, core: conn, jobId: "job-1", opts: MIRROR_OPTS, logger: quietLogger(), isDisposed: () => disposed.value });
 		const rec = jobs.started[0];
 		disposed.value = true;
-		const outcome = await Promise.race([
-			rec.done,
-			new Promise((_, rej) => setTimeout(() => rej(new Error("dispose never settled")), 8000)),
-		]);
+		const outcome = await withDeadline(rec.done, "dispose never settled");
 		assert.equal(outcome.status, "failed");
 	} finally { conn.dispose(); }
 });
 
-test("outputLimitBytes caps the accumulated progress buffer", { timeout: 10000 }, async () => {
+test("outputLimitBytes is passed as the DSH model-facing output limit", { timeout: 10000 }, async () => {
 	const jobs = createFakeJobs();
 	const conn = makeConnection(server, {});
 	await conn.connect();
@@ -139,9 +141,9 @@ test("outputLimitBytes caps the accumulated progress buffer", { timeout: 10000 }
 		const tiny = { ...MIRROR_OPTS, outputLimitBytes: 12 };
 		createJobMirror({ jobs, core: conn, jobId: "job-1", opts: tiny, logger: quietLogger() });
 		const rec = jobs.started[0];
+		assert.equal(rec.spec.outputLimitBytes, 12);
 		await rec.done;
-		const out = rec.hooks.readOutput();
-		assert.ok(out.length <= 12, `buffer exceeded limit: ${out.length}`);
+		assert.ok(rec.output.join("").length > 0);
 	} finally { conn.dispose(); }
 });
 
@@ -159,8 +161,8 @@ test("two mirrors on independent jobs both complete", { timeout: 10000 }, async 
 		createJobMirror({ jobs, core: conn, jobId: j2, opts: MIRROR_OPTS, logger: quietLogger() });
 		assert.equal(jobs.started.length, 2);
 		const outcomes = await Promise.all([
-			Promise.race([jobs.started[0].done, new Promise((_, rej) => setTimeout(() => rej(new Error("mirror 1 never settled")), 8000))]),
-			Promise.race([jobs.started[1].done, new Promise((_, rej) => setTimeout(() => rej(new Error("mirror 2 never settled")), 8000))]),
+			withDeadline(jobs.started[0].done, "mirror 1 never settled"),
+			withDeadline(jobs.started[1].done, "mirror 2 never settled"),
 		]);
 		assert.deepEqual(outcomes.map((o) => o.status), ["completed", "completed"]);
 		const stats = await conn.callTool("stats", {});
@@ -417,6 +419,54 @@ for (const observedAttempt of [undefined, 2]) {
 		assert.equal(calls.includes("job_cancel"), false);
 	});
 }
+
+test("cancel waits for the stored attempt identity before contacting the server", { timeout: 3000 }, async () => {
+	const jobs = createFakeJobs();
+	const calls = [];
+	let resolveStatus;
+	createJobMirror({ jobs, jobId: "reused-job", attempt: 1, logger: quietLogger(),
+		core: { callTool: (name) => {
+			calls.push(name);
+			if (name === "job_status") return new Promise((resolve) => { resolveStatus = resolve; });
+			return Promise.resolve({ structuredContent: { state: "cancelling", attempt: 1 } });
+		} },
+	});
+	jobs.started[0].hooks.cancel("user cancel");
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	assert.equal(calls.includes("job_cancel"), false, "must not cancel an unverified reused job id");
+	resolveStatus({ structuredContent: { state: "running", attempt: 1 } });
+	const deadline = Date.now() + 500;
+	while (!calls.includes("job_cancel") && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+	assert.equal(calls.includes("job_cancel"), true, "matching attempt permits the requested cancellation");
+	jobs.started[0].hooks.cancel("owner disposed");
+	await jobs.started[0].done;
+});
+
+test("cancel binds the verified attempt when replacement starts after status", { timeout: 3000 }, async () => {
+	const jobs = createFakeJobs();
+	const cancellations = [];
+	let currentAttempt = 1;
+	createJobMirror({ jobs, jobId: "reused-job", attempt: 1, logger: quietLogger(),
+		core: { callTool: async (name, args) => {
+			if (name === "job_status") return { structuredContent: { state: "running", attempt: 1 } };
+			if (name === "job_cancel") {
+				const accepted = args.expected_attempt == null || args.expected_attempt === currentAttempt;
+				cancellations.push({ args, accepted });
+				return { structuredContent: { success: accepted } };
+			}
+			return { text: "" };
+		} },
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+	currentAttempt = 2;
+	jobs.started[0].hooks.cancel("user cancel");
+	await new Promise((resolve) => setImmediate(resolve));
+	jobs.started[0].hooks.cancel("owner disposed");
+	await jobs.started[0].done;
+	assert.equal(cancellations.length, 1);
+	assert.deepEqual(cancellations[0].args, { job_id: "reused-job", expected_attempt: 1 });
+	assert.equal(cancellations[0].accepted, false);
+});
 
 test("controller loss retains an unconfirmed observer outcome", { timeout: 3000 }, async () => {
 	const jobs = createFakeJobs();

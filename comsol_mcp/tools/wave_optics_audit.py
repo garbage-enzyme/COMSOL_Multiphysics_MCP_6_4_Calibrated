@@ -896,7 +896,9 @@ def _load_air_reference(
     payload, path, source_hash = _load_json_bounded(
         path_text, MAX_REFERENCE_BYTES, "air_reference_artifact_path"
     )
-    config_id = payload.get("config_id")
+    reference_payload = payload.get("reference")
+    record = reference_payload if isinstance(reference_payload, dict) else payload
+    config_id = record.get("config_id", payload.get("config_id"))
     if expected_config_id is not None and config_id != expected_config_id:
         warnings.append(
             {
@@ -906,7 +908,10 @@ def _load_air_reference(
             }
         )
         return None, warnings
-    stats = payload.get("component_statistics") or payload.get("field_statistics")
+    field = record.get("field")
+    stats = record.get("component_statistics") or record.get("field_statistics")
+    if not isinstance(stats, dict) and isinstance(field, dict):
+        stats = field.get("component_statistics") or field.get("field_statistics")
     if not isinstance(stats, dict):
         warnings.append({"code": "air_reference_field_statistics_missing", "path": str(path)})
         return None, warnings
@@ -2093,6 +2098,8 @@ def run_wave_optics_reference_audit(
         }
         transverse = max(value for axis, value in amplitudes.items() if axis != target_axis)
         ratio = amplitudes[target_axis] / max(transverse, sys.float_info.min)
+        if not math.isfinite(ratio):
+            raise FloatingPointError("reference polarization ratio is nonfinite")
         reference = {
             "config_id": config_id,
             "method": reference_method,

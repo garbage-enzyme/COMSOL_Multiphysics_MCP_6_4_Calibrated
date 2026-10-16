@@ -10,12 +10,20 @@ from src.evidence.contracts import build_physical_evidence
 from src.jobs.spectral_characterization import normalize_spectral_characterization_job_spec
 
 
-def spectral_job_spec(tmp_path: Path, *, maximum_points: int = 20) -> dict:
+def spectral_job_spec(
+    tmp_path: Path,
+    *,
+    maximum_points: int = 20,
+    max_retries: int = 0,
+    continue_on_error: bool = False,
+) -> dict:
     source = tmp_path / "source.mph"
     source.write_bytes(b"model")
     return normalize_spectral_characterization_job_spec(
         {
             "job_type": "spectral_characterization",
+            "max_retries": max_retries,
+            "continue_on_error": continue_on_error,
             "source_model_path": str(source),
             "source_model_relative_identity": "fixtures/source.mph",
             "configuration_sha256": "a" * 64,

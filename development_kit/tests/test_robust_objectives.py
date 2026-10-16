@@ -155,6 +155,28 @@ def test_pair_difference_overflow_is_rejected_instead_of_embedded_as_infinity():
         evaluate_robust_absolute_contrast(_configuration(), _table(), observations)
 
 
+def test_large_finite_weight_scaling_preserves_objective_and_gradient():
+    baseline = _table()
+    scaled = copy.deepcopy(baseline)
+    for row in baseline["conditions"]:
+        row["weight"] = 1.0
+    for row in scaled["conditions"]:
+        row["weight"] = 1.0e308
+    expected = aggregate_robust_absolute_contrast_gradient(
+        _configuration(), baseline, _observations(), _gradients()
+    )
+    actual = aggregate_robust_absolute_contrast_gradient(
+        _configuration(), scaled, _observations(), _gradients()
+    )
+    assert actual["aggregate_gradient"] == pytest.approx(expected["aggregate_gradient"])
+    objective = evaluate_robust_absolute_contrast(_configuration(), scaled, _observations())
+    reference = evaluate_robust_absolute_contrast(_configuration(), baseline, _observations())
+    assert objective["smooth_worst_case_absolute_contrast"] == pytest.approx(
+        reference["smooth_worst_case_absolute_contrast"], rel=1e-12
+    )
+    assert sum(pair["smooth_worst_case_weight"] for pair in objective["pairs"]) == pytest.approx(1)
+
+
 def test_aggregate_gradient_matches_independent_objective_finite_difference():
     observations = _observations()
     gradients = _gradients()

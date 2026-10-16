@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import threading
 import time
@@ -61,6 +62,13 @@ TRANSITIONS = {
 
 _PROCESS_GUARD_REGISTRY_LOCK = threading.Lock()
 _PROCESS_GUARDS: WeakValueDictionary[str, Any] = WeakValueDictionary()
+_RESOURCE_JOURNAL_NAME = re.compile(r"resource(?:-level-\d+|-state-\d+)?\.jsonl\Z")
+
+
+def _validate_resource_journal_name(name: str) -> str:
+    if not isinstance(name, str) or not _RESOURCE_JOURNAL_NAME.fullmatch(name):
+        raise ValueError("resource journal name must be a supported JSONL filename")
+    return name
 
 
 def _process_guard(path: Path) -> Any:
@@ -280,6 +288,9 @@ class JobLock:
                     time.sleep(self.poll_interval)
                     continue
                 except FileExistsError:
+                    if not self.path.is_file() or self.path.is_symlink():
+                        raise TimeoutError("durable job lock path is not a regular file")
+                    observed = None
                     try:
                         observed = self.path.read_bytes()
                         existing = json.loads(observed.decode("utf-8"))
@@ -304,7 +315,7 @@ class JobLock:
                             age_exceeded = (
                                 time.time() - stat.st_mtime >= LOCK_RECOVERY_GRACE_SECONDS
                             )
-                            if age_exceeded and observed_again == observed:
+                            if observed is not None and age_exceeded and observed_again == observed:
                                 self._unlink_with_retry(expected=observed)
                                 continue
                     if time.monotonic() >= deadline:
@@ -386,6 +397,10 @@ class JobStore:
             raise ValueError("Invalid job ID")
         path = self.root / job_id
         if path.parent.resolve() != self.root.resolve():
+            raise ValueError("Job path escapes the runtime root")
+        if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+            raise ValueError("Job directory must not be a symlink or junction")
+        if path.exists() and path.resolve(strict=True).parent != self.root.resolve(strict=True):
             raise ValueError("Job path escapes the runtime root")
         return path
 
@@ -781,10 +796,33 @@ class JobStore:
             state = self.read_state(job_id)
             self._append_event_unlocked(job_id, event, data or {}, str(state["status"]))
 
-    def _read_resource_journal_unlocked(self, job_id: str) -> list[dict[str, Any]]:
+    def record_startup_failure(
+        self, job_id: str, *, attempt: int, error: dict[str, str], event: str
+    ) -> dict[str, Any]:
+        """Publish startup failure only while this attempt still owns startup.
+
+        Cancellation remains owned by its coordinator. A resumed or terminal
+        attempt must not be overwritten by an older worker's validation error.
+        """
+        with self.lock(job_id):
+            state = self.read_state(job_id)
+            if state.get("attempt", 1) != attempt:
+                return {"recorded": False, "reason": "attempt_mismatch"}
+            control = self.read_control(job_id)
+            if state["status"] in {"cancel_requested", "cancelling"} or (
+                cancel_request_targets_attempt(control, attempt)
+            ):
+                return {"recorded": False, "reason": "cancellation_owns_state"}
+            if state["status"] not in {"submitted", "starting"}:
+                return {"recorded": False, "reason": "startup_no_longer_owned"}
+            state.update({"status": "failed", "last_error": error, "updated_at_epoch": time.time()})
+            atomic_write_json(self.job_dir(job_id) / "state.json", state)
+            self._append_event_unlocked(job_id, event, {}, "failed")
+            return {"recorded": True}
+
+    def _read_resource_journal_unlocked_path(self, path: Path) -> list[dict[str, Any]]:
         from .resource_admission import RESOURCE_JOURNAL_MAX_ENTRIES
 
-        path = self.job_dir(job_id) / "resource.jsonl"
         entries: list[dict[str, Any]] = []
         if not path.exists():
             return entries
@@ -797,12 +835,18 @@ class JobStore:
                     raise ValueError("resource journal exceeds the entry limit")
         return entries
 
-    def read_resource_journal(self, job_id: str) -> list[dict[str, Any]]:
+    def read_resource_journal(
+        self, job_id: str, *, journal_name: str = "resource.jsonl"
+    ) -> list[dict[str, Any]]:
         """Read and validate the bounded append-only resource journal."""
         from .resource_admission import replay_resource_journal
 
         with self.lock(job_id):
-            entries = self._read_resource_journal_unlocked(job_id)
+            journal_name = _validate_resource_journal_name(journal_name)
+            path = (self.job_dir(job_id) / journal_name).resolve(strict=False)
+            if path.parent != self.job_dir(job_id).resolve(strict=False):
+                raise ValueError("resource journal path escapes job directory")
+            entries = self._read_resource_journal_unlocked_path(path)
             if entries:
                 admission = next(
                     (item for item in entries if item.get("entry_type") == "admission"),
@@ -822,6 +866,7 @@ class JobStore:
         entries: list[dict[str, Any]],
         *,
         expected_policy: object,
+        journal_name: str = "resource.jsonl",
     ) -> dict[str, Any]:
         """Durably append validated resource transitions for the active attempt."""
         from .resource_admission import replay_resource_journal
@@ -829,7 +874,11 @@ class JobStore:
         if not isinstance(entries, list) or not entries:
             raise ValueError("resource journal append requires a non-empty entry list")
         with self.lock(job_id):
-            current = self._read_resource_journal_unlocked(job_id)
+            journal_name = _validate_resource_journal_name(journal_name)
+            path = (self.job_dir(job_id) / journal_name).resolve(strict=False)
+            if path.parent != self.job_dir(job_id).resolve(strict=False):
+                raise ValueError("resource journal path escapes job directory")
+            current = self._read_resource_journal_unlocked_path(path)
             state = self.read_state(job_id)
             attempt = int(state.get("attempt", 1))
             replay = replay_resource_journal(
@@ -837,7 +886,6 @@ class JobStore:
                 attempt=attempt,
                 expected_policy=expected_policy,
             )
-            path = self.job_dir(job_id) / "resource.jsonl"
             payload = b"".join(
                 json.dumps(
                     entry,
@@ -872,12 +920,13 @@ class JobStore:
     def tail(self, job_id: str, n: int = 20) -> dict[str, Any]:
         count = max(1, min(int(n), 200))
         directory = self.job_dir(job_id)
+        max_line_chars = 65_536
         events: deque[str] = deque(maxlen=count)
         with (directory / "events.jsonl").open("r", encoding="utf-8", errors="replace") as handle:
             for line in handle:
-                events.append(line.rstrip("\r\n"))
+                events.append(line.rstrip("\r\n")[:max_line_chars])
         logs: deque[str] = deque(maxlen=count)
         with (directory / "worker.log").open("r", encoding="utf-8", errors="replace") as handle:
             for line in handle:
-                logs.append(line.rstrip("\r\n"))
+                logs.append(line.rstrip("\r\n")[:max_line_chars])
         return {"job_id": job_id, "limit": count, "events": list(events), "worker_log": list(logs)}

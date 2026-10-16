@@ -73,7 +73,11 @@ def _write_inputs(root):
                         "zz_real": 3.0 + sample_index * 0.1,
                         "zz_imag": -0.2,
                     }
-                    for sample_index, wavelength in enumerate((8e-7, 1e-6, 1.2e-6))
+                    for sample_index, wavelength in enumerate(sorted({
+                        base * (1.0 + offset)
+                        for base in (8e-7, 1e-6, 1.2e-6)
+                        for offset in (-0.01, 0, 0.01)
+                    }))
                 ],
             }
             for index, state in enumerate(("OX", "MR"))
@@ -339,6 +343,30 @@ def test_failed_rerun_preserves_a_preexisting_envelope(ascii_tmp_path):
         )
     assert not manifest.exists()
     assert json.loads(envelope_path.read_text(encoding="utf-8")) == {"sentinel": True}
+
+
+def test_failed_rerun_preserves_a_preexisting_manifest(ascii_tmp_path):
+    source = _write_inputs(ascii_tmp_path)
+    campaign_path = ascii_tmp_path / "campaign.json"
+    campaign = read_json(campaign_path)
+    campaign["resource_policy"]["max_mesh_elements"] -= 1
+    campaign_path.write_text(json.dumps(campaign), encoding="utf-8")
+    manifest = ascii_tmp_path / "licensed-manifest.json"
+    envelope_path = ascii_tmp_path / "licensed-envelope.json"
+    previous = b'{"valid":true}\n'
+    manifest.write_bytes(previous)
+    with pytest.raises(ValueError, match="mesh"):
+        compile_lin2025_robust_submission(
+            source_model=source,
+            fixture_path=ascii_tmp_path / "fixture.json",
+            tree_path=ascii_tmp_path / "tree.json",
+            support_path=ascii_tmp_path / "support.json",
+            pedot_fixture_path=ascii_tmp_path / "pedot.json",
+            campaign_path=campaign_path,
+            manifest_path=manifest,
+            envelope_path=envelope_path,
+        )
+    assert manifest.read_bytes() == previous
 
 
 def test_envelope_write_failure_does_not_leave_an_orphaned_manifest(ascii_tmp_path, monkeypatch):

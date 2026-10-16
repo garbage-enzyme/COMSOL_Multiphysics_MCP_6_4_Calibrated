@@ -118,6 +118,9 @@ def assign_group_disjoint_split(
         assignments.append({"group_id": group_id, "split": "scientific_holdout"})
 
     assignments.sort(key=lambda item: item["group_id"])
+    counts = {name: 0 for name in SPLIT_NAMES}
+    for item in assignments:
+        counts[item["split"]] += 1
     body = {
         "schema": "comsol_mcp.surrogate_split_plan",
         "schema_version": SCHEMA_VERSION,
@@ -127,13 +130,9 @@ def assign_group_disjoint_split(
         "group_count": len(unique_groups),
         "holdout_group_ids": sorted(holdout_set),
         "assignments": assignments,
+        "group_counts": counts,
     }
-    manifest = {**body, "manifest_sha256": canonical_sha256_v1(body)}
-    counts = {name: 0 for name in SPLIT_NAMES}
-    for item in assignments:
-        counts[item["split"]] += 1
-    manifest["group_counts"] = counts
-    return manifest
+    return {**body, "manifest_sha256": canonical_sha256_v1(body)}
 
 
 def validate_split_plan(value: Any) -> dict[str, Any]:
@@ -159,7 +158,7 @@ def validate_split_plan(value: Any) -> dict[str, Any]:
         raise ValueError("unsupported schema_version")
     if value["strategy"] != STRATEGY_VERSION:
         raise ValueError("unsupported split strategy")
-    body = {key: value[key] for key in required if key not in {"manifest_sha256", "group_counts"}}
+    body = {key: value[key] for key in required if key != "manifest_sha256"}
     if value["manifest_sha256"] != canonical_sha256_v1(body):
         raise ValueError("manifest_sha256 mismatch")
     rebuilt = assign_group_disjoint_split(
@@ -168,7 +167,7 @@ def validate_split_plan(value: Any) -> dict[str, Any]:
         proportions=value["proportions"],
         holdout_group_ids=value["holdout_group_ids"],
     )
-    if rebuilt["manifest_sha256"] != value["manifest_sha256"]:
+    if rebuilt != dict(value):
         raise ValueError("split plan is not reproducible from its declared inputs")
     return dict(value)
 
@@ -236,7 +235,10 @@ def detect_leakage(
         "leakage_detected": bool(findings),
         "findings": findings,
         "finding_count": len(findings),
-        "classes_checked": list(LEAKAGE_CLASSES),
+        "classes_checked": ["cross_split_group", "holdout_in_fit"]
+        + (["duplicate_candidate"] if candidate_ids is not None else []),
+        "classes_not_checked": ["normalization_from_non_train", "test_access_before_freeze"]
+        + (["duplicate_candidate"] if candidate_ids is None else []),
         "group_count": len(assignments),
         "row_count": len(row_split),
     }

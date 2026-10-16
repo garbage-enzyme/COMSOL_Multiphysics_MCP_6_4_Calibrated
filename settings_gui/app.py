@@ -545,7 +545,7 @@ class SettingsApplication:
             self.field_widgets[field.key] = [widget]
         elif field.kind == "roots":
             variable = tk.StringVar(value="")
-            self._add_roots(frame, field, list(value))
+            self._add_roots(frame, field, value if isinstance(value, list) else [])
         else:
             variable = tk.StringVar(value="" if value is None else str(value))
             widget = ttk.Entry(
@@ -901,6 +901,7 @@ def run() -> int:
     instance_lock: SettingsGuiInstanceLock | None = None
     try:
         location = resolve_settings_location()
+        ensure_settings_parent(location.writable_path)
         instance_lock = SettingsGuiInstanceLock(location.writable_path).acquire()
     except GuiAlreadyRunning:
         if not publish_handshake("already_running"):

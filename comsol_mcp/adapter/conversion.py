@@ -53,15 +53,20 @@ def require_int(value: Any, *, field: str) -> int:
 def require_float(value: Any, *, field: str) -> float:
     """Return ``value`` as a finite float.
 
-    An ``int`` is accepted because widening to float is exact and intended; a
+    An ``int`` is accepted only when its float representation is exact; a
     string or ``None`` is not, and a non-finite value is refused because it
     cannot be written into a COMSOL property meaningfully.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise _reject(f"{field} must be a number, got {type(value).__name__}")
-    result = float(value)
+    try:
+        result = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise _reject(f"{field} cannot be represented as a finite float") from exc
     if not math.isfinite(result):
         raise _reject(f"{field} must be finite")
+    if isinstance(value, int) and int(result) != value:
+        raise _reject(f"{field} integer is not exactly representable as float64")
     return result
 
 
@@ -87,10 +92,14 @@ def to_matrix_rows(value: Any, *, form: str) -> list[list[Any]]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         raise _reject(f"{form} must be a sequence of rows")
     rows: list[list[Any]] = []
+    total = 0
     for index, row in enumerate(value):
         if isinstance(row, (str, bytes)) or not isinstance(row, Sequence):
             raise _reject(f"{form} row {index} must be a sequence")
+        if len(row) == 0 or total + len(row) > MAX_MATRIX_ELEMENTS:
+            raise _reject(f"{form} exceeds the bounded conversion limit")
         rows.append(list(row))
+        total += len(row)
     if not rows:
         raise _reject(f"{form} must not be empty")
     width = len(rows[0])
@@ -99,8 +108,6 @@ def to_matrix_rows(value: Any, *, form: str) -> list[list[Any]]:
     for index, row in enumerate(rows):
         if len(row) != width:
             raise _reject(f"{form} row {index} is ragged")
-    if len(rows) * width > MAX_MATRIX_ELEMENTS:
-        raise _reject(f"{form} exceeds the bounded conversion limit")
     return rows
 
 

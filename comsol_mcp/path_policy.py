@@ -117,7 +117,10 @@ def read_contained_file_snapshot(
     """Read one contained immutable snapshot with its exact size and digest."""
     from comsol_mcp.durable.io import read_file_bytes_bounded
 
-    pin = validated_read_pin(path, root)
+    requested_path = Path(path)
+    if requested_path.is_symlink():
+        raise ValueError("snapshot requires a regular file without links")
+    pin = validated_read_pin(requested_path, root)
     with pin_validated_reads((pin,)):
         if os.name == "nt":
             payload = read_file_bytes_bounded(pin.path, max_bytes=max_bytes)
@@ -537,6 +540,32 @@ class PathPolicy:
             kind_prefix="artifact_write",
         )
 
+    def validate_artifact_update(self, value: Any) -> PathDecision:
+        """Validate one existing regular artifact for an explicit append or resume."""
+        text = _reject_lexical_path(value, require_ascii=True)
+        target = Path(text)
+        if target.is_symlink() or getattr(target, "is_junction", lambda: False)():
+            raise ValueError("artifact update target must not be a symlink or junction")
+        try:
+            resolved = target.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise ValueError(f"artifact update cannot be resolved: {type(exc).__name__}") from exc
+        root = self.artifact_write_root.resolve(strict=False)
+        if not resolved.is_file() or not _is_relative_to(resolved, root):
+            raise ValueError("artifact update escapes the owned artifact root")
+        return PathDecision(
+            "artifact_update",
+            resolved,
+            _root_id(root),
+            write_pin=ValidatedWritePin(
+                target=resolved,
+                root=root,
+                ancestor=resolved.parent,
+                root_identity=_file_identity(root),
+                ancestor_identity=_file_identity(resolved.parent),
+            ),
+        )
+
     def validate_shared_source(self, value: Any) -> PathDecision:
         """Validate one immutable shared-session source model."""
         decision = self.validate_model_read(value, suffixes=(".mph",))
@@ -633,6 +662,7 @@ _MODEL_READ_ARGUMENTS = {
     "solver_preflight": (("model_path", (".mph",)),),
     "wave_optics_preflight": (("expected_source_path", (".mph",)),),
     "study_staged_parametric_sweep": (("source_model_path", (".mph",)),),
+    "mesh_convergence_study": (("source_model_path", (".mph",)),),
 }
 _SHARED_SOURCE_READ_ARGUMENTS = {
     "shared_model_lock": ("immutable_source_path",),
@@ -676,6 +706,7 @@ _ARTIFACT_WRITE_ARGUMENTS = {
         ("csv_path", False, False),
         ("checkpoint_model_path", False, False),
         ("save_model_path", False, False),
+        ("manifest_path", False, False),
     ),
     "standalone_build": (("output_directory", True, True),),
 }
@@ -763,7 +794,14 @@ def validate_tool_paths(
             if required:
                 raise ValueError(f"{tool_name}.{argument} is required by the contained path policy")
             continue
-        decision = policy.validate_artifact_write(value, directory=directory)
+        continuation = (
+            argument in {"csv_path", "manifest_path"}
+            and bool(bound.arguments.get("append_csv") or bound.arguments.get("resume_csv"))
+        )
+        if continuation and Path(value).exists():
+            decision = policy.validate_artifact_update(value)
+        else:
+            decision = policy.validate_artifact_write(value, directory=directory)
         bound.arguments[argument] = str(decision.normalized_path)
         decisions.append(decision)
     if tool_name == "job_submit":

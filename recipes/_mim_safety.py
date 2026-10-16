@@ -105,12 +105,51 @@ def require_passive_reflection(values: Sequence[float], label: str) -> list[floa
     """Require passive reflection within a small numerical solve tolerance."""
     normalized = [float(value) for value in values]
     if any(
-        value < -PASSIVE_REFLECTION_TOLERANCE
-        or value > 1.0 + PASSIVE_REFLECTION_TOLERANCE
+        value < -PASSIVE_REFLECTION_TOLERANCE or value > 1.0 + PASSIVE_REFLECTION_TOLERANCE
         for value in normalized
     ):
         raise ValueError(f"{label} lies outside the passive reflection range")
     return normalized
+
+
+def require_passive_power(
+    model: object, wavelengths: Sequence[float], label: str, *, opaque_termination: bool = False
+) -> dict[str, list[float]]:
+    """Require finite passive R/T/A values and closure at each wavelength."""
+    dataset = next((node for node in model / "datasets" if str(node.tag()) == "dset1"), None)
+    if dataset is None:
+        raise ValueError(f"{label} requires the explicit dset1 solution dataset")
+    names = ("R", "A") if opaque_termination else ("R", "T", "A")
+    spectra: dict[str, list[float]] = {name: [] for name in names}
+    for index, requested in enumerate(wavelengths, start=1):
+        for name in names:
+            spectra[name].append(
+                require_spectrum(
+                    model.evaluate(f"ewfd.{name}total", dataset=dataset, outer=index),
+                    [requested],
+                    f"{label} {name}",
+                )[0]
+            )
+        for expression in ("wl", "c_const/freq"):
+            observed = require_spectrum(
+                model.evaluate(expression, unit="m", dataset=dataset, outer=index),
+                [requested],
+                f"{label} {expression}",
+            )[0]
+            if not math.isclose(observed, requested, rel_tol=1e-12, abs_tol=1e-15):
+                raise ValueError(f"{label} requested and solved wavelengths differ")
+    if opaque_termination:
+        spectra["T"] = [0.0] * len(wavelengths)
+    for name, values in spectra.items():
+        if any(
+            value < -PASSIVE_REFLECTION_TOLERANCE or value > 1.0 + PASSIVE_REFLECTION_TOLERANCE
+            for value in values
+        ):
+            raise ValueError(f"{label} {name} lies outside the passive power range")
+    for values in zip(spectra["R"], spectra["T"], spectra["A"], strict=True):
+        if not math.isclose(sum(values), 1.0, rel_tol=0.0, abs_tol=PASSIVE_REFLECTION_TOLERANCE):
+            raise ValueError(f"{label} R/T/A closure is outside tolerance")
+    return spectra
 
 
 def require_required_properties(node: object, values: Mapping[str, object]) -> None:
@@ -135,6 +174,30 @@ def require_required_properties(node: object, values: Mapping[str, object]) -> N
                 matches = observed == expected
             if not matches:
                 raise ValueError(f"required property {name!r} readback mismatch")
+
+
+def solve_passive_wavelengths(
+    model: object, wavelengths: Sequence[float], label: str, *, opaque_termination: bool = False
+) -> dict[str, list[float]]:
+    """Solve and verify one explicitly synchronized wavelength at a time."""
+    if not wavelengths or any(
+        isinstance(value, bool) or not math.isfinite(value) or value <= 0 for value in wavelengths
+    ):
+        raise ValueError("requested wavelengths must be finite and positive")
+    study = model.java.study("std1")
+    study.feature("sweep1").active(False)
+    spectra: dict[str, list[float]] = {name: [] for name in ("R", "T", "A")}
+    for wavelength in wavelengths:
+        expression = f"{wavelength:.17g}"
+        model.java.param().set("wl", expression + "[m]")
+        study.feature("step1").set("plist", expression)
+        study.run()
+        point = require_passive_power(
+            model, [wavelength], label, opaque_termination=opaque_termination
+        )
+        for name in spectra:
+            spectra[name].extend(point[name])
+    return spectra
 
 
 def bind_wavelength_step(step: object, parameter_name: str) -> None:
@@ -183,7 +246,7 @@ def save_required(java_model: object, destination: Path) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     staging = target.with_name(f".{target.name}.{uuid.uuid4().hex}.save")
     try:
-        java_model.save(str(staging))
+        java_model.save(str(staging), True)
         if not staging.is_file() or staging.stat().st_size <= 0:
             raise RuntimeError("COMSOL save did not produce a nonempty staging model")
         os.replace(staging, target)

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import os
 import sys
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
+from comsol_mcp.path_policy import pin_validated_reads, validated_read_pin
 from comsol_mcp.research.robust_finalist_evidence import assess_robust_finalist_validation
 from comsol_mcp.research.robust_objectives import evaluate_robust_absolute_contrast
 from comsol_mcp.research.robust_outer_gcmma import (
@@ -362,7 +365,8 @@ def _append_native_gradient_row(
             "iteration_id": iteration_id,
             "gradient_fingerprint": gradient_fingerprint,
             "acceptance_fingerprint": acceptance_fingerprint,
-            "evidence_state": "gradient_validated",
+            # A declared policy is not an independent gradient-check receipt.
+            "evidence_state": "native_unchecked",
         },
     )
 
@@ -774,6 +778,13 @@ def _requests_full_condition_gradients(
     return execution_limit is None or execution_limit >= declared_conditions
 
 
+def _initial_gradient_budget_is_sufficient(
+    max_condition_solves: int, declared_conditions: int
+) -> bool:
+    """Require forward and native-gradient batches before the first solve."""
+    return max_condition_solves >= 2 * declared_conditions
+
+
 def run(root: str, job_id: str) -> int:
     store = JobStore(Path(root))
     spec = store.read_spec(job_id)
@@ -801,7 +812,8 @@ def _run_licensed(root: str, job_id: str) -> int:
     shared_client = None
     previous_temporary_directory = os.environ.get("COMSOL_TMPDIR")
     source = Path(spec["source_model_path"])
-    source_before = source.read_bytes()
+    source_pins = ExitStack()
+    source_before = None
     try:
         store.bind_worker_identity(job_id, process_identity(os.getpid()))
         store.update_state(
@@ -819,6 +831,10 @@ def _run_licensed(root: str, job_id: str) -> int:
             store.update_state(job_id, "starting", event="worker_started")
         elif state["status"] != "starting":
             raise ValueError(f"licensed robust shape worker cannot start from {state['status']}")
+        source_pins.enter_context(pin_validated_reads((validated_read_pin(source, source.parent),)))
+        source_before = source.read_bytes()
+        if hashlib.sha256(source_before).hexdigest() != spec.get("source_model_sha256"):
+            raise RuntimeError("Immutable source SHA-256 changed before robust worker startup")
         _await_licensed_wall_watchdog(store, job_id, spec, attempt)
         telemetry = collect_resource_telemetry(stage="pre_mesh", runtime_path=directory)
         admission = evaluate_robust_startup_admission(spec["startup_admission"], telemetry)
@@ -877,6 +893,13 @@ def _run_licensed(root: str, job_id: str) -> int:
         full_condition_run = _requests_full_condition_gradients(
             execution_limit, declared_conditions
         )
+        if full_condition_run and not _initial_gradient_budget_is_sufficient(
+            int(spec["native_optimizer"]["budget"]["max_solves"]), declared_conditions
+        ):
+            raise ValueError(
+                "licensed robust optimizer budget cannot cover the initial forward and "
+                "gradient batches"
+            )
         result = execute_lin2025_conditions(
             spec,
             directory,
@@ -1226,7 +1249,14 @@ def _run_licensed(root: str, job_id: str) -> int:
             os.environ.pop("COMSOL_TMPDIR", None)
         else:
             os.environ["COMSOL_TMPDIR"] = previous_temporary_directory
-        source_unchanged = source.exists() and source.read_bytes() == source_before
+        source_unchanged = bool(
+            source_before is not None and source.exists() and source.read_bytes() == source_before
+        )
+        try:
+            source_pins.close()
+        except Exception as exc:
+            source_unchanged = False
+            print(f"source_pin_cleanup:{type(exc).__name__}", file=sys.stderr, flush=True)
         cleanup_payload = _finalize_licensed_cleanup(
             directory,
             ownership=ownership,

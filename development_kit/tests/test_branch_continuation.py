@@ -278,6 +278,33 @@ class TestContinuationStateBinding:
         validated = validate_continuation_states(built)
         assert validated == built
 
+    @pytest.mark.parametrize(
+        "field,value",
+        [("fwhm_m", -1.0), ("fwhm_m", 0.0), ("quality_factor", -2.0), ("quality_factor", 0.0)],
+    )
+    def test_hash_consistent_states_reject_nonpositive_width_and_quality(self, field, value):
+        import hashlib
+        import json
+
+        built = build_continuation_states(
+            states_id="angle-sweep", states=_build_dispersive_states(3)
+        )
+        state = built["states"][0]
+        state["candidate"][field] = value
+
+        def rehash(item, field):
+            body = {key: val for key, val in item.items() if key != field}
+            item[field] = hashlib.sha256(
+                json.dumps(
+                    body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+                ).encode()
+            ).hexdigest()
+
+        rehash(state, "state_sha256")
+        rehash(built, "states_sha256")
+        with pytest.raises(ValueError, match="must be positive"):
+            validate_continuation_states(built)
+
     def test_states_sha256_is_deterministic(self):
         states = _build_dispersive_states(3)
         first = build_continuation_states(states_id="angle-sweep", states=states)
@@ -683,7 +710,53 @@ def _measured_continuity_evidence(states, *, row_index=1, tolerance=0.1e-6):
     return {**body, "evidence_sha256": _canonical_hash(body)}
 
 
+def _evidence_for_transition(
+    states, transition_index, row_index=1, tolerance=0.1e-6, previous_peak=None
+):
+    if previous_peak is None:
+        previous_peak = states["states"][transition_index]["candidate"]["peak_wavelength_m"]
+    selected_row = states["states"][transition_index + 1]["spectral_artifacts"]["raw_rows"][row_index]
+    body = {
+        "transition_index": transition_index,
+        "selected_candidate_wavelength_m": selected_row["requested_wavelength_m"],
+        "supporting_raw_row_sha256": selected_row["raw_row_sha256"],
+        "metric_name": "absolute_wavelength_shift_m",
+        "measured_value": abs(selected_row["requested_wavelength_m"] - previous_peak),
+        "tolerance": tolerance,
+    }
+    return {**body, "evidence_sha256": _canonical_hash(body)}
+
+
 class TestBranchContinuationPlanning:
+    def test_consecutive_multi_candidate_evidence_uses_selected_prior_peak(self):
+        normal = _state(0, 5.0e-6, None, coordinate_value=0.0)
+        first = _custom_state(
+            1, [4.9e-6, 4.95e-6, 5.0e-6, 5.05e-6, 5.1e-6],
+            [0.1, 0.8, 0.1, 0.7, 0.1], "coord-0", coordinate_value=5.0,
+            label="multi-one",
+        )
+        second = _custom_state(
+            2, [4.95e-6, 5.0e-6, 5.05e-6, 5.1e-6, 5.15e-6],
+            [0.1, 0.8, 0.1, 0.7, 0.1], "coord-1", coordinate_value=10.0,
+            label="multi-two",
+        )
+        states = build_continuation_states(
+            states_id="consecutive-multi", states=[normal, first, second]
+        )
+        first_evidence = _evidence_for_transition(states, 0, row_index=1)
+        second_evidence = _evidence_for_transition(
+            states, 1, row_index=1, previous_peak=first_evidence["selected_candidate_wavelength_m"]
+        )
+        second_evidence["measured_value"] = abs(
+            second_evidence["selected_candidate_wavelength_m"]
+            - first_evidence["selected_candidate_wavelength_m"]
+        )
+        body = {key: value for key, value in second_evidence.items() if key != "evidence_sha256"}
+        second_evidence["evidence_sha256"] = _canonical_hash(body)
+        plan = plan_branch_continuation(
+            states, _continuation_policy(continuity_evidence=[second_evidence, first_evidence])
+        )
+        assert plan["branch_followed_transition_count"] == 2
     def test_dispersive_branch_followed_is_accepted(self):
         states_input = _build_dispersive_states(4, shift=0.1e-6)
         states = build_continuation_states(states_id="dispersive", states=states_input)

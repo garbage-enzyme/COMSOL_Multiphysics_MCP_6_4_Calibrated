@@ -96,14 +96,13 @@ def test_the_scan_covers_the_runtime_and_the_licensed_probes_but_not_test_double
     """The scope rule is explicit: test doubles are not direct calls."""
     measured = measure_repository(REPO)
     assert any(module.startswith("comsol_mcp/") for module in measured)
-    assert any(
-        module.startswith("development_kit/scripts/")
-        or module.startswith("development_kit/tests/integration/")
-        for module in measured
-    )
+    assert any(module.startswith("development_kit/scripts/") for module in measured)
+    assert any(module.startswith("development_kit/tests/integration/") for module in measured)
     assert EXCLUDED_PREFIXES == ("development_kit/tests/",)
     for module in measured:
-        assert not module.startswith(EXCLUDED_PREFIXES), module
+        assert not module.startswith(EXCLUDED_PREFIXES) or module.startswith(
+            "development_kit/tests/integration/"
+        ), module
 
 
 # ---------------------------------------------------------------------------
@@ -260,10 +259,20 @@ def test_a_declared_probe_prefix_covers_the_probe_modules(tmp_path: Path) -> Non
     assert status["measured_module_count"] == 1
 
 
-def test_the_excluded_test_tree_is_accepted_as_a_declared_probe() -> None:
-    """The probe prefix for integration tests is inside the licensed prefix."""
+def test_integration_probes_are_measured_but_unit_test_doubles_are_not(tmp_path: Path) -> None:
+    root = _tree(
+        tmp_path,
+        {
+            "development_kit/tests/integration/gate.py": DIRECT_SOURCE,
+            "development_kit/tests/test_fake.py": DIRECT_SOURCE,
+            "development_kit/tests/integration/__pycache__/cached.py": DIRECT_SOURCE,
+        },
+    )
+    measured = measure_repository(root)
+    assert set(measured) == {"development_kit/tests/integration/gate.py"}
+    assert measured["development_kit/tests/integration/gate.py"]["java_bridge"] == 1
+    assert inventory_status(root, inventory=())["violations"]
     assert "development_kit/tests/integration".startswith(LICENSED_PROBE_PREFIX)
-    assert not EXCLUDED_PREFIXES[0].startswith("development_kit/tests/integration")
 
 
 @pytest.mark.parametrize("disposition", DISPOSITIONS)

@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -354,6 +355,12 @@ async def _probe_modern(command: Path, workdir: Path) -> dict[str, Any]:
         }
 
 
+def _probe_modern_isolated(command: Path, workdir: Path) -> dict[str, Any]:
+    """Run the modern client in a fresh child directory on every invocation."""
+    with tempfile.TemporaryDirectory(prefix="modern-", dir=workdir) as modern_root:
+        return asyncio.run(_probe_modern(command, Path(modern_root)))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--command", type=Path, required=True)
@@ -365,9 +372,7 @@ def main() -> int:
     workdir.mkdir(parents=True, exist_ok=True)
     stderr_path = workdir / "server-stderr.log"
     result = asyncio.run(_probe(command, workdir, stderr_path))
-    modern_root = workdir / "modern"
-    modern_root.mkdir()
-    result["modern_stdio"] = asyncio.run(_probe_modern(command, modern_root))
+    result["modern_stdio"] = _probe_modern_isolated(command, workdir)
     args.output.write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

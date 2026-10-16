@@ -762,18 +762,28 @@ class SessionManager:
                     client_retirement_attempted = True
                     client_reusable, cleanup_errors = self._retire_client(client)
                 with self._start_lock:
-                    self._client = None
-                    self._client_status = None
-                    self._client_status_client = None
-                    if not client_reusable:
-                        self._reusable_client = None
-                    if release_result is None:
+                    if cleanup_errors:
+                        self._client = client
+                        self._client_status = self._client_status_snapshot(client)
+                        self._client_status_client = client
+                        self._start_cleanup_pending = True
+                    else:
+                        self._client = None
+                        self._client_status = None
+                        self._client_status_client = None
+                        if not client_reusable:
+                            self._reusable_client = None
+                    if not cleanup_errors and release_result is None:
                         release_result = self._release_owned_lease()
-                    self._start_cleanup_pending = False
+                    self._start_cleanup_pending = bool(cleanup_errors) or self._owns_solver_lease
                     self._starting = False
-                    state = "timed_out" if timed_out else "cancelled"
+                    state = (
+                        "cleanup_pending"
+                        if self._start_cleanup_pending
+                        else ("timed_out" if timed_out else "cancelled")
+                    )
                     self._record_startup_phase_locked(
-                        "cleanup_completed",
+                        "cleanup_pending" if self._start_cleanup_pending else "cleanup_completed",
                         state=state,
                         terminal=True,
                         details={
@@ -787,11 +797,15 @@ class SessionManager:
             elif cancelled and release_result is None:
                 with self._start_lock:
                     release_result = self._release_owned_lease()
-                    self._start_cleanup_pending = False
+                    self._start_cleanup_pending = self._owns_solver_lease
                     self._starting = False
                     self._record_startup_phase_locked(
-                        "cleanup_completed",
-                        state="timed_out" if timed_out else "cancelled",
+                        "cleanup_pending" if self._start_cleanup_pending else "cleanup_completed",
+                        state=(
+                            "cleanup_pending"
+                            if self._start_cleanup_pending
+                            else ("timed_out" if timed_out else "cancelled")
+                        ),
                         terminal=True,
                         details={
                             "client_reusable": False,
@@ -1030,9 +1044,7 @@ class SessionManager:
                         "tracking_key": name,
                         "java_tag": self._model_java_tags.get(name),
                         "identity_relation": (
-                            "session_model"
-                            if name in self._model_java_tags
-                            else "label_only"
+                            "session_model" if name in self._model_java_tags else "label_only"
                         ),
                     }
                     model_path = self._model_paths.get(name)
@@ -1217,12 +1229,7 @@ class SessionManager:
                 captured_identity = None
         with self._start_lock:
             if name in self._models:
-                self._notify_model_removed_locked(name)
-            if name in self._model_cleanup_paths:
-                self._cleanup_model_artifact(name)
-            self._model_revisions.pop(name, None)
-            self._model_source_identities.pop(name, None)
-            self._model_java_tags.pop(name, None)
+                raise ValueError(f"A model named {name!r} is already registered")
             self._models[name] = model
             if java_tag is not None:
                 self._model_java_tags[name] = java_tag

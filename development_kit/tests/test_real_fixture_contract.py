@@ -19,6 +19,10 @@ from src.evidence.real_fixture import (
 )
 from src.utils.validation import strict_json_number
 
+from development_kit.tests.integration.reference_power_acceptance import (
+    _capture_loaded_source_identity,
+)
+
 ROOT = Path(__file__).parents[2]
 _PRIVATE_HOME_PATH = re.compile(
     r"(?:^|(?<![a-z0-9_]))(?:~(?:/|$)|(?:[a-z]:)?/"
@@ -303,3 +307,20 @@ def test_private_path_scan_normalizes_drive_case_and_separators(private_path):
 )
 def test_private_path_scan_does_not_classify_public_urls(public_url):
     assert not _contains_private_home_path(public_url)
+
+
+def test_reference_power_worker_source_attestation_binds_exact_loaded_file(tmp_path):
+    source = tmp_path / "reference.mph"
+    source.write_bytes(b"frozen-source")
+    expected_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
+
+    identity = _capture_loaded_source_identity(source, expected_sha256)
+
+    assert identity == {
+        "source_path": str(source.resolve()),
+        "source_sha256": expected_sha256,
+        "capture": "reference_power_worker_load",
+    }
+    source.write_bytes(b"replaced-source")
+    with pytest.raises(ValueError, match="differs from the frozen source hash"):
+        _capture_loaded_source_identity(source, expected_sha256)

@@ -31,6 +31,8 @@ DEFAULT_PDF_DIR = Path(__file__).resolve().parents[2] / "pdf"
 SCHEMA_VERSION = "1"
 SEARCH_TIMEOUT_SECONDS = 2.0
 READ_TIMEOUT_SECONDS = 3.0
+MAX_PAGE_TEXT_BYTES = 65_536
+MAX_READ_RESPONSE_BYTES = 262_144
 QUERY_ALIASES = {
     # ClientAPI identifiers are often rendered as spaced GUI labels in manuals.
     "periodicstructure": '"Periodic Structure"',
@@ -620,7 +622,17 @@ def read_index_pages(
     )
     with closing(_open_index(path, readonly=True)) as connection:
         _validated_index_metadata(connection)
-        rows = [dict(row) for row in connection.execute(sql, [normalized_source, *requested])]
+        rows = []
+        total_bytes = 0
+        for row in connection.execute(sql, [normalized_source, *requested]):
+            text_bytes = len(str(row["text"]).encode("utf-8"))
+            if (
+                text_bytes > MAX_PAGE_TEXT_BYTES
+                or total_bytes + text_bytes > MAX_READ_RESPONSE_BYTES
+            ):
+                raise ValueError("manual page response exceeds the byte limit")
+            total_bytes += text_bytes
+            rows.append(dict(row))
     return {
         "success": True,
         "source": normalized_source,
@@ -658,8 +670,7 @@ def run_bounded(operation: str, arguments: dict, timeout: float) -> dict:
         return {
             "success": False,
             "error_type": "WorkerError",
-            "error": completed.stderr.decode("utf-8", errors="replace").strip()
-            or f"worker exited with code {completed.returncode}",
+            "error": f"manual {operation} worker failed",
         }
     try:
         return json.loads(completed.stdout.decode("utf-8"))

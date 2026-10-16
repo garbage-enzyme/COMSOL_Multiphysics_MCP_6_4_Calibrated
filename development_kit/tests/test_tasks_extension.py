@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +53,103 @@ from comsol_mcp.jobs.tasks_extension import (
 from comsol_mcp.protocol_identity import TASKS_EXTENSION_IDENTIFIER
 
 OPT_IN = {TASKS_EXTENSION_IDENTIFIER: {}}
+
+
+@pytest.mark.parametrize("scenario", ["tail", "owner"])
+def test_mapping_transactions_serialize_independent_processes(tmp_path, scenario):
+    root = tmp_path / "tasks"
+    root.mkdir()
+    if scenario == "tail":
+        (root / "tasks.jsonl").write_bytes(b'{"partial":')
+    code = r"""
+import sys,time
+from pathlib import Path
+import comsol_mcp.jobs.tasks_bridge as module
+from development_kit.tests.test_tasks_extension import FakeEngine, _submit
+root,role,scenario=Path(sys.argv[1]),sys.argv[2],sys.argv[3]
+store=module.TasksMappingStore(root)
+def pause():
+    (root/'paused').write_text('ready')
+    deadline=time.monotonic()+10
+    while not (root/'release').exists():
+        if time.monotonic()>=deadline: raise TimeoutError('parent did not release writer')
+        time.sleep(0.01)
+if role=='a':
+    if scenario=='tail':
+        original=module.read_complete_jsonl
+        def read(*args,**kwargs):
+            result=original(*args,**kwargs)
+            if not (root/'paused').exists(): pause()
+            return result
+        module.read_complete_jsonl=read
+    else:
+        original=store.latest_for_job
+        def latest(*args,**kwargs):
+            result=original(*args,**kwargs)
+            pause()
+            return result
+        store.latest_for_job=latest
+engine=FakeEngine()
+if scenario=='tail':
+    engine.submit=lambda spec: {'job_id':'job-'+role,'status':'submitted'}
+bridge=module.TasksBridge(engine=engine,store=store,owner='owner-'+role)
+if role=='b': (root/'b-started').write_text('ready')
+try:
+    _submit(bridge)
+except module.TasksMappingError as exc:
+    assert role=='b' and scenario=='owner' and exc.code=='task_owner_conflict'
+    (root/(role+'-conflict')).write_text(exc.code)
+else:
+    (root/(role+'-ack')).write_text('acknowledged')
+"""
+    children = []
+    try:
+        children.append(
+            subprocess.Popen(
+                [sys.executable, "-c", code, str(root), "a", scenario],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        )
+        deadline = time.monotonic() + 10
+        while not (root / "paused").exists():
+            assert children[0].poll() is None
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        children.append(
+            subprocess.Popen(
+                [sys.executable, "-c", code, str(root), "b", scenario],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        )
+        deadline = time.monotonic() + 10
+        while not (root / "b-started").exists():
+            assert children[1].poll() is None
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        time.sleep(0.3)
+        assert not (root / "b-ack").exists(), (
+            "second writer acknowledged inside the first transaction"
+        )
+        (root / "release").write_text("release")
+        for child in children:
+            stdout, stderr = child.communicate(timeout=15)
+            assert child.returncode == 0, (stdout, stderr)
+        rows = TasksMappingStore(root).rows()
+        assert (root / "a-ack").exists()
+        if scenario == "owner":
+            assert (root / "b-conflict").exists()
+            assert {row.owner for row in rows} == {"owner-a"}
+        else:
+            assert (root / "b-ack").exists()
+            assert {row.job_id for row in rows} == {"job-a", "job-b"}
+    finally:
+        (root / "release").write_text("release")
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.communicate(timeout=5)
 
 
 class FakeEngine:
@@ -649,7 +749,7 @@ def test_the_mapping_layer_never_writes_outside_its_owned_root(tmp_path: Path) -
     for index in range(5):
         _submit(bridge, {"job_type": "staged_sweep", "parameter_values": [float(index)]})
     written = {path.name for path in root.iterdir()}
-    assert written <= {"tasks.jsonl"}
+    assert written <= {"tasks.jsonl", "..tasks.jsonl.lock.guard"}
     assert (root / "tasks.jsonl").is_file()
 
 

@@ -14,10 +14,16 @@ class FrozenDict(dict):
     documented interpreter-level escape hatch.
     """
 
+    def __new__(cls, *args: Any, **kwargs: Any) -> "FrozenDict":
+        instance = super().__new__(cls)
+        instance._frozen_initialized = False
+        return instance
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        if self:
+        if getattr(self, "_frozen_initialized", False):
             raise TypeError("frozen snapshot cannot be mutated")
         super().__init__(*args, **kwargs)
+        self._frozen_initialized = True
 
     def _immutable(self, *_args: Any, **_kwargs: Any) -> None:
         raise TypeError("frozen snapshot cannot be mutated")

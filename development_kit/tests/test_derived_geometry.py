@@ -189,6 +189,31 @@ def test_block_preview_and_apply_never_run_geometry_or_mesh():
     assert result["after"]["blk1"]["size"][0] == "2[mm]"
 
 
+def test_block_apply_rejects_a_setter_that_silently_ignores_the_request():
+    model, _geom, record, state = fixture()
+    preview = preview_blocks(
+        model,
+        record,
+        expected_state_sha256=state,
+        component_tag="comp1",
+        geometry_tag="geom1",
+        block_edits=edits(),
+    )
+    target = model.java.component().get("comp1").geom().get("geom1").feature().get("blk2")
+    original_set = target.set
+
+    def ignore_size(name, value):
+        if name == "size":
+            return
+        original_set(name, value)
+
+    target.set = ignore_size
+    result = apply_blocks(model, record, preview, "comp1", "geom1")
+    assert result["success"] is False
+    assert "readback mismatch" in result["error"]
+    assert result["rollback_proved"] is True
+
+
 def test_stale_hash_invalid_feature_partial_vectors_and_nonpositive_size_fail():
     model, _geom, record, state = fixture()
     cases = [
@@ -672,3 +697,31 @@ def test_initial_snapshot_uses_the_clone_actual_component_and_geometry_tags(monk
         assert snapshot["state_sha256"] == "c" * 64
     finally:
         _DERIVED.pop(record.derived_model_id, None)
+
+
+@pytest.mark.parametrize("length_scale", [1.0, 0.001])
+def test_block_expressions_survive_numeric_native_storage(length_scale):
+    class NumericBlock(Feature):
+        def getValueType(self, name):
+            return "DoubleArray"
+
+        def getDoubleArray(self, name):
+            return [float(value.split("[")[0]) * length_scale for value in self.props[name]]
+
+    model, geom, record, _state = fixture()
+    original = geom.features.get("blk1")
+    geom.features.items["blk1"] = NumericBlock("Block", original.props)
+    state = _state_hash(record, _snapshot(model, "comp1", "geom1"))
+    preview = preview_blocks(
+        model,
+        record,
+        expected_state_sha256=state,
+        component_tag="comp1",
+        geometry_tag="geom1",
+        block_edits=edits(),
+    )
+    result = apply_blocks(model, record, preview, "comp1", "geom1")
+    assert result["success"] is True
+    assert result["before"]["blk1"]["size"] == original.props["size"]
+    assert result["after"]["blk1"]["size"] == edits()[0]["size"]
+    assert geom.run_count == 0

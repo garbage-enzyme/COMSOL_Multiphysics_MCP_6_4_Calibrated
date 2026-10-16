@@ -189,7 +189,7 @@ def test_discovery_resolves_nested_dataset_references_to_the_terminal_solution()
 
     assert [item["solution_tag"] for item in result["datasets"]] == ["sol1"] * 3
     assert [item["computed_state"] for item in result["datasets"]] == ["verified_computed"] * 3
-    assert result["eligible_dataset_count"] == 3
+    assert result["eligible_dataset_count"] == 1
 
 
 def test_discovery_fixture_preserves_explicit_empty_collections():

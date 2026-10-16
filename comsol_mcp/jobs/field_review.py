@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import shutil
+import zipfile
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -98,6 +99,16 @@ def _verify_descriptor(
 
 def _verify_field_array(path: Path, manifest: Mapping[str, Any]) -> None:
     """Bind the stored NPZ structure to the already validated manifest."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            infos = archive.infolist()
+            total_uncompressed = sum(info.file_size for info in infos)
+            if any(info.file_size > MAX_FIELD_ARRAY_BYTES for info in infos):
+                raise ValueError("field array member exceeds the uncompressed byte limit")
+            if total_uncompressed > MAX_FIELD_ARRAY_BYTES:
+                raise ValueError("field array archive exceeds the uncompressed byte limit")
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ValueError("field array is not a valid bounded NPZ artifact") from exc
     try:
         import numpy as np
     except ImportError as exc:  # pragma: no cover - NumPy is a runtime dependency

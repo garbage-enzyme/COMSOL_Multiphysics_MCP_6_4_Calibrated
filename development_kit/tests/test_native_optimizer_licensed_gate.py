@@ -1,5 +1,9 @@
 """Solver-free contracts for the bounded native optimizer licensed gate."""
 
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -108,6 +112,102 @@ def test_requested_solver_iterations_are_separate_from_budget_cap():
         gate._requested_optimizer_iterations(args, {"max_iterations": 3})
 
 
+def test_total_solve_budget_reserves_baseline_and_fresh_finalist():
+    assert gate._optimizer_solve_budget(3) == 1
+    assert gate._optimizer_solve_budget(150) == 148
+    with pytest.raises(ValueError, match="baseline"):
+        gate._optimizer_solve_budget(2)
+
+
+def test_continuation_reserves_every_declared_finalist_solve():
+    assert gate._optimizer_solve_budget(25, finalist_solves=4) == 20
+    with pytest.raises(ValueError, match="baseline"):
+        gate._optimizer_solve_budget(5, finalist_solves=4)
+
+
+@pytest.mark.parametrize(
+    "value", [[], [0, 1], [0.5, 0.5, 1], [1, 0.5], [0.9], [True], [float("nan"), 1], [1] * 33]
+)
+def test_continuation_rejects_invalid_fixed_paths(value):
+    with pytest.raises(ValueError, match="continuation"):
+        gate._finalist_fractions(value)
+
+
+def test_continuation_preserves_explicit_path_and_direct_default():
+    assert gate._finalist_fractions(None) is None
+    assert gate._finalist_fractions([0.25, 0.5, 0.75, 1]) == [0.25, 0.5, 0.75, 1.0]
+
+
+@pytest.mark.parametrize("width", [2.0, 2.2])
+def test_patch_dimension_probe_checks_solved_shape_and_removes_nodes(monkeypatch, width):
+    active = {}
+    removed = []
+
+    def create(tag, kind):
+        node = SimpleNamespace(
+            selection=lambda: SimpleNamespace(set=lambda domains: None),
+            set=lambda *args: None,
+            getReal=lambda: [[width, 3.0]] if kind == "MaxVolume" else [[0.0, 0.0]],
+        )
+        active[tag] = node
+        return node
+
+    numerical = SimpleNamespace(
+        tags=lambda: list(active),
+        create=create,
+        remove=lambda tag: (removed.append(tag), active.pop(tag)),
+    )
+    model = SimpleNamespace(
+        java=SimpleNamespace(result=lambda: SimpleNamespace(numerical=lambda: numerical))
+    )
+    dataset = SimpleNamespace(tag=lambda: "solved_dataset")
+    monkeypatch.setattr(gate, "_set_vector", lambda *args: None)
+    controls = {"patch_length_x": 2.0, "patch_length_y": 3.0}
+    if width == 2.0:
+        assert gate._patch_dimensions(model, dataset, 9, controls)["measured_si"] == controls
+    else:
+        with pytest.raises(ValueError, match="dimensions differ"):
+            gate._patch_dimensions(model, dataset, 9, controls)
+    assert len(removed) == 2
+    assert active == {}
+
+
+@pytest.mark.parametrize("drift", [False, True])
+def test_continuation_runs_solution_only_after_initialization_readback(drift):
+    values = {}
+    calls = []
+    node = SimpleNamespace(
+        set=lambda key, value: values.__setitem__(key, value),
+        getString=lambda key: "wrong" if drift else values[key],
+    )
+    solution = SimpleNamespace(feature=lambda tag: node, runAll=lambda: calls.append("solve"))
+    model = SimpleNamespace(java=SimpleNamespace(sol=lambda tag: solution))
+    study = SimpleNamespace(
+        createAutoSequences=lambda kind: calls.append(kind),
+        getSolverSequences=lambda kind: ["actual_solution"],
+        run=lambda: pytest.fail("study.run would regenerate initialization"),
+    )
+    if drift:
+        with pytest.raises(ValueError, match="readback drifted"):
+            gate._run_continuation_solution(model, study)
+        assert calls == ["all"]
+    else:
+        tag, initialization = gate._run_continuation_solution(model, study)
+        assert tag == "actual_solution"
+        assert initialization["initsol"] == tag
+        assert calls == ["all", "solve"]
+
+
+def test_runtime_budget_checks_wall_clock_and_disk_usage(tmp_path, monkeypatch):
+    (tmp_path / "payload").write_bytes(b"x" * 10)
+    monkeypatch.setattr(gate.time, "monotonic", lambda: 12.0)
+    gate._check_runtime_budget(10.0, max_wall_time_seconds=3, root=tmp_path, max_disk_bytes=10)
+    with pytest.raises(ValueError, match="disk"):
+        gate._check_runtime_budget(10.0, max_wall_time_seconds=3, root=tmp_path, max_disk_bytes=9)
+    with pytest.raises(TimeoutError, match="wall"):
+        gate._check_runtime_budget(1.0, max_wall_time_seconds=3, root=tmp_path, max_disk_bytes=100)
+
+
 def test_move_limit_is_a_required_positive_caller_input():
     args = type("Args", (), {"move_limit": 0.05})()
     assert gate._requested_move_limit(args) == 0.05
@@ -152,6 +252,49 @@ def test_optimizer_error_classifies_only_proven_deformation_signatures():
         FlException("linear solver failed"), "optimization_solve"
     )
     assert unrelated == ("native_optimizer_failed", None)
+
+
+@pytest.mark.parametrize("minimum", [-21.20224015044302, 0.0, 0.1])
+def test_native_optimizer_geometry_guard_retains_invalid_evidence(minimum):
+    calls = []
+    dataset = type("Dataset", (), {"tag": lambda self: "native-result"})()
+
+    class Model:
+        def evaluate(self, expression, **kwargs):
+            calls.append((expression, kwargs))
+            return np.array([minimum, 1.7])
+
+    policy = {"jacobian_expression": "reldetjac", "minimum_relative_jacobian": 0.1}
+    receipt = {}
+    with pytest.raises(gate.DeformationFeasibilityError, match="native optimizer") as error:
+        gate._check_optimizer_deformation(Model(), dataset, policy, receipt)
+    assert calls == [("reldetjac", {"dataset": dataset, "outer": 1})]
+    assert receipt["optimizer_deformation_feasibility"] == {
+        "sample_count": 2,
+        "minimum_relative_jacobian": minimum,
+        "maximum_relative_jacobian": 1.7,
+        "threshold": 0.1,
+        "passed": False,
+        "dataset_tag": "native-result",
+        "jacobian_expression": "reldetjac",
+    }
+    assert gate._optimizer_error_code(error.value, "optimizer_deformation_feasibility") == (
+        "deformation_feasibility_failed",
+        "optimizer_jacobian_guard",
+    )
+
+
+def test_native_optimizer_geometry_guard_accepts_above_caller_threshold():
+    dataset = type("Dataset", (), {"tag": lambda self: "native-result"})()
+    model = type("Model", (), {"evaluate": lambda self, *args, **kwargs: [0.2, 1.7]})()
+    receipt = {}
+    gate._check_optimizer_deformation(
+        model,
+        dataset,
+        {"jacobian_expression": "reldetjac", "minimum_relative_jacobian": 0.1},
+        receipt,
+    )
+    assert receipt["optimizer_deformation_feasibility"]["passed"] is True
 
 
 def test_gate_parser_has_no_host_resource_defaults():
@@ -223,8 +366,223 @@ def test_every_model_evaluation_pins_one_sweep_point():
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "evaluate"
-            and not any(keyword.arg == "outer" for keyword in node.keywords)
+            and not any(
+                keyword.arg == "outer"
+                and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value == 1
+                for keyword in node.keywords
+            )
         ):
             offenders.append(node.lineno)
 
     assert offenders == []
+
+
+@pytest.mark.parametrize(
+    ("value", "lower", "upper", "passed"),
+    [
+        (8.730985132293282e-7, None, 8.6028e-7, False),
+        (8.6028e-7, None, 8.6028e-7, True),
+        (0.9, 1.0, None, False),
+        (1.0, 1.0, None, True),
+        (1.5, 1.0, 2.0, True),
+    ],
+)
+def test_native_constraints_check_declared_bounds_and_units(value, lower, upper, passed):
+    calls = []
+
+    class Model:
+        def evaluate(self, expression, **kwargs):
+            calls.append((expression, kwargs))
+            return np.array([value])
+
+    support = {
+        "constraints": [
+            {
+                "constraint_id": "active_cap",
+                "expression": "patch_length_x",
+                "unit": "m",
+                "lower": lower,
+                "upper": upper,
+            }
+        ]
+    }
+    evidence = gate._constraint_evidence(Model(), support, "chosen-dataset")
+    assert evidence["passed"] is passed
+    assert evidence["constraints"][0]["value"] == value
+    assert calls == [
+        ("patch_length_x", {"unit": "m", "dataset": "chosen-dataset", "inner": "last", "outer": 1})
+    ]
+
+
+@pytest.mark.parametrize("values", [[float("nan")], [float("inf")], [1 + 1j], [1.0, 2.0], []])
+def test_native_constraints_refuse_invalid_or_ambiguous_values(values):
+    class Model:
+        def evaluate(self, expression, **kwargs):
+            return np.array(values)
+
+    support = {
+        "constraints": [
+            {"constraint_id": "cap", "expression": "x", "unit": "m", "lower": None, "upper": 2.0}
+        ]
+    }
+    with pytest.raises(ValueError):
+        gate._constraint_evidence(Model(), support, "chosen-dataset")
+
+
+def test_unconstrained_evidence_does_not_evaluate_model():
+    assert gate._constraint_evidence(object(), {"constraints": []}, "unused") == {
+        "passed": True,
+        "constraints": [],
+    }
+
+
+def test_constraint_tolerance_preserves_frozen_policy_and_boundary():
+    support = {
+        "constraints": [
+            {"constraint_id": "cap", "expression": "x", "unit": "1", "lower": None, "upper": 0.0}
+        ]
+    }
+
+    class Model:
+        def __init__(self, value):
+            self.value = value
+
+        def evaluate(self, expression, **kwargs):
+            return np.array([self.value])
+
+    assert not gate._constraint_evidence(Model(6.1176046417513215e-6), support, "d")["passed"]
+    for value, expected in [(6.1176046417513215e-6, True), (1e-4, True), (1.00001e-4, False)]:
+        evidence = gate._constraint_evidence(Model(value), support, "d", {"cap": 1e-4})
+        assert evidence["passed"] is expected
+        assert evidence["constraints"][0]["absolute_tolerance"] == 1e-4
+        assert evidence["constraints"][0]["violation"] == value
+
+
+@pytest.mark.parametrize(
+    "supplied",
+    [
+        {},
+        {"wrong": 0.0},
+        {"cap": -1},
+        {"cap": True},
+        {"cap": float("nan")},
+        {"cap": float("inf")},
+        {"cap": "0.1"},
+    ],
+)
+def test_constraint_tolerances_refuse_incomplete_or_invalid_policy(supplied):
+    with pytest.raises(ValueError, match="constraint tolerances"):
+        gate._constraint_tolerances({"constraints": [{"constraint_id": "cap"}]}, supplied)
+
+@pytest.mark.parametrize(
+    "power,expected",
+    [
+        ((0.17265013379749078, 0.8322170340521131, -0.004867167849601107), False),
+        ((-0.01, 0.91, 0.1), False),
+        ((0.1, -0.01, 0.91), False),
+        ((1.01, 0.01, -0.02), False),
+        ((0.2, 0.7, 0.1), True),
+        ((0.2, 0.8000005, -0.0000005), True),
+        ((0.2, 0.7, 0.2), False),
+    ],
+)
+def test_actual_optimizer_gate_rejects_nonpassive_finalist(tmp_path, monkeypatch, power, expected):
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"fixture")
+    calls = []
+
+    class Node:
+        def feature(self, *args):
+            return self
+        def remove(self, *args):
+            pass
+        def set(self, *args):
+            pass
+        def run(self):
+            pass
+
+    node = Node()
+
+    class Model:
+        def __init__(self, index):
+            self.index = index
+            self.java = SimpleNamespace(
+                save=lambda path, *args: Path(path).write_bytes(b"derived"),
+                study=lambda tag: node,
+                param=lambda: node,
+                component=lambda tag: SimpleNamespace(mesh=lambda tag: node),
+            )
+        def parameters(self):
+            return {"x": "1.5[m]"}
+        def evaluate(self, expression, **kwargs):
+            calls.append((self.index, expression, kwargs))
+            if isinstance(expression, list):
+                return [[0.6], [1.5]]
+            values = dict(zip(("ewfd.Rtotal", "ewfd.Ttotal", "ewfd.Atotal"), power))
+            values.update({"wl": 1e-6, "c_const/freq": 1e-6, "reldetjac": 1.0,
+                           "objective": 0.5 if self.index == 2 else 0.6})
+            return [values[expression]]
+
+    class Client:
+        def __init__(self):
+            self.loaded = []
+            self.cleared = False
+        def load(self, path):
+            model = Model(len(self.loaded))
+            self.loaded.append(model)
+            return model
+        def remove(self, model):
+            pass
+        def clear(self):
+            self.cleared = True
+
+    client = Client()
+    monkeypatch.setitem(sys.modules, "mph", SimpleNamespace(Client=lambda **kwargs: client))
+    optimizer = gate.structural.normalize_native_optimizer_configuration({
+        "schema_name": "comsol_mcp.native_optimizer_configuration", "schema_version": "1.0.0",
+        "optimizer_id": "passivity-fixture", "backend": "comsol_native", "method": "gcmma",
+        "move_limit": 0.1, "optimality_tolerance": 0.001, "constraint_tolerance": 0.001,
+        "budget": {"cores": 1, "max_solves": 25, "max_iterations": 20,
+                   "max_wall_time_seconds": 900, "max_disk_bytes": 2147483648,
+                   "max_review_items": 20, "max_commit_fraction": 0.75},
+        "checkpoint_policy": {
+            "every_accepted_iteration": True,
+            "exact_native_resume_required": False,
+            "save_copy": True,
+        },
+        "deterministic_seed": 71004,
+    })
+    support = {"objective": {"expression": "objective", "wavelength_um": 1.0},
+               "variables": [{"variable_id": "x", "unit": "m", "baseline": 1.0}], "constraints": []}
+    spec = {"root": tmp_path, "source": source, "cores": 1,
+            "base_copy": tmp_path / "base.mph", "configured_copy": tmp_path / "configured.mph",
+            "optimizer": optimizer}
+    monkeypatch.setattr(gate.structural, "_spec", lambda args: spec)
+    monkeypatch.setattr(gate.structural, "_support", lambda spec: support)
+    monkeypatch.setattr(gate.structural, "configure_native_adjoint", lambda *args: {})
+    monkeypatch.setattr(gate.gradient, "_configure_selected_sensitivity", lambda *args: None)
+    dataset = SimpleNamespace(tag=lambda: "dset1")
+    monkeypatch.setattr(gate, "_forward_sweep_dataset", lambda model: dataset)
+    monkeypatch.setattr(gate, "_dataset_for_solution", lambda *args: dataset)
+    monkeypatch.setattr(gate, "_mesh_statistics", lambda model: {"element_count": 10,
+        "minimum_quality": 0.5, "mean_quality": 0.6, "quality_measure": "volcircum"})
+    monkeypatch.setattr(gate, "_check_optimizer_deformation", lambda *args: None)
+    monkeypatch.setattr(
+        gate,
+        "_configure_solver_move_limit",
+        lambda *args, **kwargs: {
+            "solution_tag": "sol2",
+            "movelimit": "0.1",
+            "mmamaxiter": "20",
+        },
+    )
+    args = SimpleNamespace(optimizer_iterations=20, move_limit=0.1, max_elements_per_model=100,
+        minimum_element_quality=0.1, deformation_jacobian_expression="reldetjac",
+        minimum_relative_jacobian=0.0, max_disk_bytes=2147483648)
+    receipt = gate.run(args)
+    assert receipt["success"] is expected
+    assert receipt["physical_values"]["ewfd.Atotal"] == power[2]
+    assert client.cleared and receipt["cleanup"]["source_unchanged"]
+    assert [row[1] for row in calls if row[1] in ("ewfd.Rtotal", "ewfd.Ttotal", "ewfd.Atotal")] == [
+        "ewfd.Rtotal", "ewfd.Ttotal", "ewfd.Atotal"]

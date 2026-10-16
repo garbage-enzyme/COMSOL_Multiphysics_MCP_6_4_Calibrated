@@ -706,7 +706,9 @@ def run(
         )
         deadline = time.monotonic() + grace_remaining
         while time.monotonic() < deadline:
-            if inspect_identity(worker)["state"] != "active":
+            if inspect_identity(worker)["state"] != "active" and not any(
+                inspect_identity(descendant)["state"] == "active" for descendant in descendants
+            ):
                 if not _checkpoint(
                     store,
                     job_id,
@@ -770,7 +772,11 @@ def run(
     except ValueError as exc:
         _record_blocker(store, job_id, request_id, identity, str(exc))
         return 0
-    if captured["worker"]["state"] != "active" and resume_phase not in {"terminate", "force_kill"}:
+    if (
+        captured["worker"]["state"] != "active"
+        and resume_phase not in {"terminate", "force_kill"}
+        and not any(inspect_identity(descendant)["state"] == "active" for descendant in descendants)
+    ):
         if not _checkpoint(
             store,
             job_id,

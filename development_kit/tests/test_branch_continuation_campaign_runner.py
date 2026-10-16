@@ -203,7 +203,7 @@ def test_complete_state_artifacts_close_executor_to_row_gap_without_reexecution(
     assert calls.count("angle-0") == 1
 
 
-def test_transient_append_failure_quarantines_and_notifies_fault_hook(tmp_path, monkeypatch):
+def test_transient_append_failure_preserves_state_for_retry(tmp_path, monkeypatch):
     spec = _spec(tmp_path)
     root = tmp_path / "campaign-quarantine"
     calls = []
@@ -227,8 +227,7 @@ def test_transient_append_failure_quarantines_and_notifies_fault_hook(tmp_path, 
         run_branch_continuation_campaign(spec, root, attempt=1, state_executor=execute)
     assert calls == ["angle-0"]
 
-    # A transient OSError while re-appending the complete state directory must
-    # quarantine the directory, notify the fault hook, and recompute the state.
+    # A transient append failure must preserve complete state artifacts.
     invocations = []
 
     def transient_oserror(*_args, **_kwargs):
@@ -240,20 +239,20 @@ def test_transient_append_failure_quarantines_and_notifies_fault_hook(tmp_path, 
     monkeypatch.setattr(
         runner_module, "append_branch_continuation_campaign_state", transient_oserror
     )
-    result = run_branch_continuation_campaign(
-        spec, root, attempt=2, state_executor=execute, fault_hook=fault
-    )
-    assert result["completed"] is True
-    quarantined = [payload for phase, payload in events if phase == "state_row_quarantined"]
-    assert len(quarantined) == 1
-    assert quarantined[0]["state_id"] == "angle-0"
-    assert quarantined[0]["error"].startswith("OSError:")
-    assert calls.count("angle-0") == 2
+    child_root = branch_continuation_state_directory(root, 0)
+    original_rows = (child_root / "spectral_rows.jsonl").read_bytes()
+    with pytest.raises(OSError, match="transient windows file lock"):
+        run_branch_continuation_campaign(
+            spec, root, attempt=2, state_executor=execute, fault_hook=fault
+        )
+    assert (child_root / "spectral_rows.jsonl").read_bytes() == original_rows
+    assert not [payload for phase, payload in events if phase == "state_row_quarantined"]
+    assert calls.count("angle-0") == 1
 
     monkeypatch.setattr(runner_module, "append_branch_continuation_campaign_state", real_append)
     resumed = run_branch_continuation_campaign(spec, root, attempt=3, state_executor=execute)
     assert resumed["completed"] is True
-    assert calls.count("angle-0") == 2
+    assert calls.count("angle-0") == 1
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows legacy generated-path budget")

@@ -1,7 +1,7 @@
 """
 MIM with Drude dispersion + wavelength sweep 1-10 µm.
 Continuous Au film (no patch) first — verify Rtotal<1 at some wavelengths.
-Then patch (spatial-varying lth) for resonance.
+Use mim_patch_partition.py for a patterned metal film.
 """
 import mph, jpype, sys, time
 from _paths import parse_recipe_cores, recipe_output_dir
@@ -10,10 +10,11 @@ from _mim_safety import (
     require_interface_boundaries,
     require_named_domains,
     require_port_pair,
-    require_passive_reflection,
+    require_passive_power,
     require_required_properties,
     require_spectrum,
     save_required,
+    solve_passive_wavelengths,
 )
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -24,7 +25,7 @@ def jarr(v, d=jpype.JDouble): return jpype.JArray(d)(v)
 
 Px=0.6e-6; Py=0.6e-6; t_al2o3=30e-9; H_air=0.83e-6; t_au=30e-9
 # Parametric Drude using wl parameter (avoids ewfd.freq singularity in sweep)
-au_drude_param = "1-(1.37e16)^2/((2*pi*c_const/wl)*((2*pi*c_const/wl)+i*4.1e13))"
+au_drude_param = "1-(1.37e16)^2/((2*pi*c_const/wl)*((2*pi*c_const/wl)-i*4.1e13))"
 
 client = mph.Client(cores=parse_recipe_cores(), version='6.4')
 print('Connected', client.version, flush=True)
@@ -104,9 +105,7 @@ require_required_properties(ltr, {
     'murbnd': '1',
     'lth': str(t_au),
 })
-ax = 0.3e-6; px0 = (Px - ax)/2  # 0.15µm
-patch_lth = f"if(x>{px0} && x<{px0+ax} && y>{px0} && y<{px0+ax}, {t_au}, 1e-15)"
-# Keep the continuous-film baseline until it has been independently solved.
+# The linked global layer defines this continuous film.
 
 # Mesh
 mesh = comp.mesh().create('mesh1')
@@ -125,19 +124,20 @@ study.create('sweep1','Parametric')
 sweep = study.feature('sweep1')
 sweep.set('pname', 'wl')
 sweep.set('plist', ' '.join(str(w) for w in wls))
+sweep.set('pname', jpype.JArray(jpype.JString)(['wl']))
+sweep.set('punit', jpype.JArray(jpype.JString)(['m']))
+sweep.set('plistarr', jpype.JArray(jpype.JString)([' '.join(str(w) for w in wls)]))
+sweep.set('sweeptype', 'sparse')
+sweep.active(True)
 def solve_required(label):
-    t0=time.time(); jm.study('std1').run(); elapsed=time.time()-t0
-    reflection = require_passive_reflection(
-        require_spectrum(m.evaluate('ewfd.Rtotal'), wls, f'{label} Rtotal'),
-        f'{label} Rtotal',
-    )
+    t0=time.time()
+    reflection = solve_passive_wavelengths(m, wls, label)['R']
+    elapsed=time.time()-t0
     print(f'{label} solve OK {elapsed:.2f}s', flush=True)
     return reflection
 
 baseline_reflection = solve_required('continuous baseline')
-sh.set('lth', patch_lth); ltr.set('lth', patch_lth)
-patch_reflection = solve_required('patch')
-for label, reflection in [('baseline', baseline_reflection), ('patch', patch_reflection)]:
+for label, reflection in [('baseline', baseline_reflection)]:
     for wl, value in zip(wls, reflection):
         print(f'  {label} wl={wl*1e6:.1f}um R={value:.6f}', flush=True)
 

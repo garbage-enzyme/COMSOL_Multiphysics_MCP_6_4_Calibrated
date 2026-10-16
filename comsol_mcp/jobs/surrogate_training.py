@@ -14,6 +14,7 @@ from typing import Any, Mapping
 
 from comsol_mcp.build_identity import get_build_identity
 from comsol_mcp.compatibility import module_identity_matches
+from comsol_mcp.surrogate.export import normalize_trained_checksum
 
 from .resource_admission import normalize_resource_policy
 from .store import JOB_SCHEMA_VERSION
@@ -275,9 +276,7 @@ def normalize_surrogate_training_spec(value: object) -> dict[str, Any]:
             "parent_job_id": _require_str(
                 "continue_from.parent_job_id", continue_from.get("parent_job_id")
             ),
-            "trained_chksum": _require_hex64(
-                "continue_from.trained_chksum", continue_from.get("trained_chksum")
-            ),
+            "trained_chksum": normalize_trained_checksum(continue_from.get("trained_chksum")),
             "dataset_manifest_sha256": _require_hex64(
                 "continue_from.dataset_manifest_sha256",
                 continue_from.get("dataset_manifest_sha256"),

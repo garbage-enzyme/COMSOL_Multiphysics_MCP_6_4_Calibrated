@@ -344,6 +344,11 @@ export function createComsolConnection(opts) {
 			// and a scheduled reconnect cannot run beside a live orphan.
 			ready = false;
 			alive = false;
+			// connectOnce can fail while an RPC waiter has already timed out.
+			// In that case the RPC remains pending to preserve single-flight
+			// occupancy until a response or transport loss. Startup teardown is
+			// our transport-loss boundary, so release those queue entries here.
+			rejectAllPending("comsol server startup failed");
 			if (child) {
 				try { child.kill(); } catch { /* already gone */ }
 				child = null;

@@ -105,6 +105,25 @@ if ($Failure.TerminalReason -ne 'COMSOL child exited with code 1 at point p008')
     throw "Runtime failure reason was not preserved: $($Failure.TerminalReason)"
 }
 
+$MisleadingStatus = New-TerminalSnapshot -Name 'not-completed' -Status ([ordered]@{
+    status = 'not_completed'
+    completed = 20
+    planned = 20
+    elapsed_seconds = 100
+})
+if ((Get-DurableTerminalDisposition -Snapshot $MisleadingStatus) -ne 'stopped') {
+    throw 'A status containing the word complete was accepted as success.'
+}
+$FailedAtFullCount = New-TerminalSnapshot -Name 'failed-full-count' -Status ([ordered]@{
+    status = 'failed'
+    completed = 20
+    planned = 20
+    elapsed_seconds = 100
+})
+if ((Get-DurableTerminalDisposition -Snapshot $FailedAtFullCount) -ne 'failed') {
+    throw 'A failed status at the planned count was accepted as success.'
+}
+
 $Paused = New-TerminalSnapshot -Name 'paused' -Status ([ordered]@{
     status = 'paused_after_point'
     completed = 8

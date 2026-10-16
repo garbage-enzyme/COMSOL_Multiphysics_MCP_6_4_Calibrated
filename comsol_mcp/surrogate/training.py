@@ -9,6 +9,7 @@ contract identities.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -57,7 +58,7 @@ def _require_finite(name: str, value: Any) -> float:
 
 
 def _require_hex64(name: str, value: Any) -> str:
-    if not isinstance(value, str) or len(value) != 64:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
         raise ValueError(f"{name} must be a 64-character hex digest")
     try:
         int(value, 16)
@@ -175,9 +176,10 @@ def compute_metrics(
         for index, group in enumerate(group_ids):
             key = _require_str("group_id", group)
             for dimension in range(dimensions):
-                grouped.setdefault(key, []).append(
-                    abs(forecast[index][dimension] - observed[index][dimension])
-                )
+                guess = forecast[index][dimension]
+                truth = observed[index][dimension]
+                if math.isfinite(guess) and math.isfinite(truth):
+                    grouped.setdefault(key, []).append(abs(guess - truth))
         if grouped:
             worst_group_mae = max(sum(values) / len(values) for values in grouped.values())
 
@@ -411,7 +413,7 @@ def evaluate_continuation(
     """
     mismatched: list[str] = []
     for field in CONTINUATION_IDENTITY_FIELDS:
-        if prior.get(field) != current.get(field):
+        if field not in prior or field not in current or prior.get(field) != current.get(field):
             mismatched.append(field)
     if mismatched:
         return {
@@ -462,7 +464,9 @@ def evaluate_seed_stability(
         values.append(_require_finite(f"per_seed_metrics[{index}].{metric}", item.get(metric)))
     worst = max(values)
     best = min(values)
-    median = sorted(values)[len(values) // 2]
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    median = ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2.0
     spread = (worst - best) / median if median > 0.0 else None
     stable = spread is not None and spread <= maximum_spread_fraction
     return {

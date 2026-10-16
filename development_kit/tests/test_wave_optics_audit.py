@@ -218,6 +218,18 @@ def test_air_reference_requires_matching_config_and_field_statistics(tmp_path):
     assert mismatch[0]["code"] == "air_reference_config_mismatch"
 
 
+def test_reference_audit_output_round_trips_as_point_audit_air_reference(tmp_path, monkeypatch):
+    result, _source, _cleanup_calls = _run_reference(tmp_path, monkeypatch)
+
+    reference, warnings = _load_air_reference(
+        result["artifacts"]["manifest"], "unit-reference"
+    )
+
+    assert reference is not None
+    assert reference["component_statistics"]["x"]["complex_mean"]["real"] == 1.0
+    assert warnings == []
+
+
 def test_valid_incident_reference_supports_declared_vector_policy_and_config_gate():
     evidence = _measurement(absorption=0.3, closure=0.0, evidence_level="incident_reference")
     evidence["polarization"]["incident_reference"] = {
@@ -821,6 +833,7 @@ def _run_reference(
     register_error=False,
     name_error=False,
     direct_remove_error=False,
+    field_samples=(1.0, 0.0, 0.0),
 ):
     source = tmp_path / "reference_source.mph"
     source.write_bytes(b"immutable-reference")
@@ -831,6 +844,20 @@ def _run_reference(
         clone_path = tmp_path / f"{new_name}.mph"
         clone_path.write_bytes(b"derived-clone")
         clone = AuditModel(clone_path, name=new_name, absorption=0.0)
+        original_evaluate = clone.evaluate
+
+        def evaluate(expression):
+            if isinstance(expression, list) and expression and expression[-1] == "dom":
+                x, y, z = field_samples
+                return [
+                    np.asarray([x + 0j] * 3), np.asarray([y + 0j] * 3),
+                    np.asarray([z + 0j] * 3), np.array([0.1, 0.2, 0.3]),
+                    np.array([0.1, 0.2, 0.3]), np.array([0.8, 0.85, 0.9]),
+                    np.array([3, 3, 3]),
+                ]
+            return original_evaluate(expression)
+
+        clone.evaluate = evaluate
         model_name = clone.name()
         if name_error:
             clone.name = lambda: (_ for _ in ()).throw(RuntimeError("injected clone-name failure"))
@@ -932,6 +959,19 @@ def test_reference_audit_uses_fresh_clone_and_persists_dominant_component(tmp_pa
     manifest = json.loads(Path(result["artifacts"]["manifest"]).read_text(encoding="utf-8"))
     assert manifest["clone_provenance"]["source_sha256"] == _hash(source)
     assert manifest["source_unchanged"] is True
+
+
+def test_reference_audit_rejects_overflowed_ratio_and_publishes_terminal_manifest(
+    tmp_path, monkeypatch
+):
+    result, _source, _cleanup_calls = _run_reference(
+        tmp_path, monkeypatch, field_samples=(1e308, 1e-308, 0.0)
+    )
+    assert result["audit_status"] == "integrity_blocked"
+    assert result["reference"] is None
+    manifest = json.loads(Path(result["artifacts"]["manifest"]).read_text(encoding="utf-8"))
+    assert manifest["audit_status"] == "integrity_blocked"
+    assert manifest["integrity_errors"][0]["code"] == "nonfinite_reference_evidence"
 
 
 def test_reference_audit_cleans_clone_after_material_error(tmp_path, monkeypatch):

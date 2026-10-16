@@ -1,4 +1,4 @@
-"""Detached exact-attempt wall watchdog for licensed robust shape jobs."""
+"""Detached exact-attempt wall watchdog for licensed shape-optimization jobs."""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def run(
 
     spec = store.read_spec(job_id)
     if (
-        spec.get("job_type") != "robust_shape_optimization"
+        spec.get("job_type") not in {"robust_shape_optimization", "adjoint_optimization"}
         or spec.get("synthetic_mode") is not False
     ):
         _write_outcome(
@@ -91,7 +91,10 @@ def run(
             clock=clock,
         )
         return 2
-    expected_budget = int(spec["native_optimizer"]["budget"]["max_wall_time_seconds"])
+    optimizer_key = (
+        "native_optimizer" if spec["job_type"] == "robust_shape_optimization" else "optimizer"
+    )
+    expected_budget = int(spec[optimizer_key]["budget"]["max_wall_time_seconds"])
     if int(record.get("budget_seconds", -1)) != expected_budget:
         _write_outcome(
             store,

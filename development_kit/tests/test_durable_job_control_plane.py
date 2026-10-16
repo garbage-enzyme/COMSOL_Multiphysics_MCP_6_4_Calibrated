@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import shutil
@@ -29,11 +30,52 @@ from src.jobs.store import (
 )
 
 
+def test_job_store_rejects_symlinked_job_directory(ascii_tmp_path):
+    from development_kit.tests.platform_fixtures import create_directory_link, remove_directory_link
+
+    outside = ascii_tmp_path / "outside"
+    outside.mkdir()
+    root = ascii_tmp_path / "jobs"
+    store = JobStore(root)
+    root.mkdir(parents=True, exist_ok=True)
+    link = root / "job-linked"
+    create_directory_link(str(outside), str(link))
+    try:
+        with pytest.raises(ValueError, match="symlink or junction"):
+            store.job_dir("job-linked")
+    finally:
+        remove_directory_link(link)
+
+
 @pytest.fixture()
 def jobs_root(ascii_tmp_path):
     root = ascii_tmp_path / "jobs"
     root.mkdir()
     return root
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("continue_on_error", "false"),
+        ("record_wavelength_controls", "false"),
+        ("smoke_points", True),
+        ("parameter_values", [1.0, 1.0]),
+    ],
+)
+def test_staged_spec_rejects_ambiguous_types_and_duplicate_points(tmp_path, field, value):
+    source = tmp_path / "source.mph"
+    source.write_bytes(b"immutable source")
+    raw = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "p",
+        "parameter_values": [1.0, 2.0],
+        "expressions": ["p"],
+    }
+    raw[field] = value
+    with pytest.raises(ValueError, match=field):
+        validate_staged_sweep_spec(raw)
 
 
 def wait_for(manager: JobManager, job_id: str, statuses: set[str], timeout: float = 5.0):
@@ -1219,6 +1261,55 @@ def test_live_pid_lock_with_malformed_creation_time_stays_bounded(jobs_root):
     assert lock_path.exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX FIFO lock boundary")
+def test_job_lock_refuses_fifo_without_read_and_releases_guard(tmp_path, monkeypatch):
+    lock_path = tmp_path / "job.lock"
+    os.mkfifo(lock_path)
+    lock = JobLock(lock_path, timeout=0.08)
+    original_read = Path.read_bytes
+
+    def guarded_read(path):
+        assert path != lock_path, "A FIFO must not be read during lock recovery"
+        return original_read(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_bytes", guarded_read)
+        with pytest.raises(TimeoutError, match="not a regular file"):
+            lock.acquire()
+
+    assert lock_path.exists()
+    assert lock._posix_guard is None
+    assert not lock._process_guard_owned
+    lock_path.unlink()
+    with JobLock(lock_path, timeout=0.08):
+        assert lock_path.is_file()
+    assert not lock_path.exists()
+
+
+def test_job_lock_read_failure_does_not_reclaim_unobserved_lock(jobs_root, monkeypatch):
+    lock_path = jobs_root / "job.lock"
+    lock_path.write_bytes(b"partial identity")
+    os.utime(lock_path, (0, 0))
+    lock = JobLock(lock_path, timeout=0.08, poll_interval=0.005)
+    original_read = Path.read_bytes
+
+    def interrupted_read(path):
+        if path == lock_path:
+            raise OSError("lock snapshot unavailable")
+        return original_read(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_bytes", interrupted_read)
+        with pytest.raises(TimeoutError, match="Timed out waiting"):
+            lock.acquire()
+
+    assert lock_path.read_bytes() == b"partial identity"
+    assert not lock._process_guard_owned
+    lock_path.unlink()
+    with JobLock(lock_path, timeout=0.08):
+        assert lock_path.exists()
+
+
 def test_tail_is_bounded(jobs_root):
     store = JobStore(jobs_root)
     job_id = store.create(
@@ -1328,14 +1419,167 @@ def test_resume_preflight_can_read_job_summaries_without_self_lock_delay(jobs_ro
     assert result["attempt"] == 2
 
 
+@pytest.mark.parametrize("during_preflight", [False, True])
+@pytest.mark.parametrize(
+    "job_type", ["staged_sweep", "convergence_campaign", "branch_continuation_campaign"]
+)
+def test_resume_rejects_changed_source_without_launch_or_attempt_change(
+    jobs_root, monkeypatch, during_preflight, job_type
+):
+    source = jobs_root / "baseline.mph"
+    source.write_bytes(b"model")
+    child = validate_staged_sweep_spec(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "wl",
+            "parameter_values": [4.25],
+            "expressions": ["A"],
+        }
+    )
+    spec = child
+    if job_type != "staged_sweep":
+        from comsol_mcp.jobs.manager import _fingerprint
+
+        key = "levels" if job_type == "convergence_campaign" else "states"
+        first = jobs_root / "first.mph"
+        first.write_bytes(b"model")
+        spec = {
+            "job_type": job_type,
+            key: [
+                {"spectral_job": {**child, "source_model_path": str(first)}},
+                {"spectral_job": child},
+            ],
+        }
+        spec["spec_fingerprint"] = _fingerprint(spec)
+    calls = []
+
+    def preflight(**_kwargs):
+        calls.append("preflight")
+        if during_preflight:
+            source.write_bytes(b"changed")
+        return {"ready": True}
+
+    manager = JobManager(jobs_root, preflight=preflight)
+    job_id = manager.store.create(
+        spec,
+        {
+            "schema_version": "1",
+            "status": "interrupted",
+            "attempt": 1,
+            "progress": {"completed": 0, "total": 1},
+        },
+    )
+    before = manager.store.read_state(job_id)
+    monkeypatch.setattr(manager, "_launch_worker", lambda *_args: calls.append("launch"))
+    if not during_preflight:
+        source.write_bytes(b"changed")
+    with pytest.raises(ValueError, match="source SHA-256"):
+        manager.resume(job_id)
+    assert calls == (["preflight"] if during_preflight else [])
+    assert manager.store.read_state(job_id) == before
+
+
+@pytest.mark.parametrize("mutation_stage", ["preflight", "client_startup", "model_load"])
+def test_owned_worker_rechecks_source_after_mutating_startup(
+    jobs_root, monkeypatch, mutation_stage
+):
+    from contextlib import nullcontext
+
+    import src.tools.ownership as ownership_module
+
+    source = jobs_root / "baseline.mph"
+    source.write_bytes(b"model")
+    spec = validate_staged_sweep_spec(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "wl",
+            "parameter_values": [4.25],
+            "expressions": ["A"],
+        }
+    )
+    store = JobStore(jobs_root)
+    job_id = store.create(
+        spec,
+        {
+            "schema_version": "1",
+            "status": "submitted",
+            "attempt": 1,
+            "progress": {"completed": 0, "total": 1},
+        },
+    )
+    calls = []
+
+    class Ownership:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            if mutation_stage == "preflight":
+                source.write_bytes(b"changed")
+            return {"ready": True}
+
+        def acquire(self, **_kwargs):
+            calls.append("acquire")
+            return {"success": True}
+
+        def heartbeat(self, **_kwargs):
+            return True
+
+        def release(self):
+            return {"success": True}
+
+    class Client:
+        port = None
+
+        def __init__(self, **_kwargs):
+            calls.append("client")
+            if mutation_stage == "client_startup":
+                source.write_bytes(b"changed")
+
+        def load(self, _path):
+            calls.append("load")
+            if mutation_stage == "model_load":
+                source.write_bytes(b"changed")
+                assert Path(_path) != source
+                assert Path(_path).read_bytes() == b"model"
+                raise RuntimeError("verified snapshot load")
+            raise AssertionError("Changed source must never load")
+
+        def clear(self):
+            pass
+
+    # Model a platform where read pins detect writes but cannot exclude them.
+    monkeypatch.setattr(production_worker, "pin_validated_reads", lambda *_args: nullcontext())
+    monkeypatch.setattr(ownership_module, "SolverOwnership", Ownership)
+    monkeypatch.setitem(sys.modules, "mph", types.SimpleNamespace(Client=Client))
+    assert production_worker.run(str(jobs_root), job_id) == 1
+    assert calls == (
+        []
+        if mutation_stage == "preflight"
+        else ["acquire", "client", "load"]
+        if mutation_stage == "model_load"
+        else ["acquire", "client"]
+    )
+    state = store.read_state(job_id)
+    assert state["status"] == "failed"
+    assert (
+        "verified snapshot load" if mutation_stage == "model_load" else "source SHA-256 changed"
+    ) in state["last_error"]["message"]
+    assert list(store.job_dir(job_id).glob("worker-source-*")) == []
+
+
 def test_test_jobs_require_explicit_injection(jobs_root):
     with pytest.raises(ValueError, match="disabled"):
         JobManager(jobs_root).submit({"job_type": "test_sequence", "delays": [0.01]})
 
 
-@pytest.mark.parametrize("release_raises", [False, True])
+@pytest.mark.parametrize(
+    "cleanup_failure", [None, "release_raises", "release_refuses", "clear", "disconnect"]
+)
 def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(
-    jobs_root, monkeypatch, release_raises
+    jobs_root, monkeypatch, cleanup_failure
 ):
     import src.tools.ownership as ownership_module
     import src.tools.workflow as workflow_module
@@ -1347,7 +1591,7 @@ def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(
         "spec_fingerprint": "mock-config",
         "job_type": "staged_sweep",
         "source_model_path": str(jobs_root / "source.mph"),
-        "source_model_sha256": "0" * 64,
+        "source_model_sha256": hashlib.sha256(b"mock").hexdigest(),
         "parameter_name": "wl",
         "parameter_values": [1.0, 2.0],
         "expressions": ["A"],
@@ -1383,23 +1627,30 @@ def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(
 
         def release(self):
             lease_events.append("released")
-            if release_raises:
+            assert store.read_state(job_id)["status"] != "completed"
+            if cleanup_failure == "release_raises":
                 raise RuntimeError("injected ownership release failure")
+            if cleanup_failure == "release_refuses":
+                return {"success": False}
             return {"success": True}
 
     class FakeClient:
         def __init__(self, **_kwargs):
             self.disconnected = False
             self.cleared = False
-            self.port = None
+            self.port = 2030 if cleanup_failure == "disconnect" else None
 
         def load(self, _path):
             return object()
 
         def disconnect(self):
+            if cleanup_failure == "disconnect":
+                raise RuntimeError("injected disconnect failure")
             self.disconnected = True
 
         def clear(self):
+            if cleanup_failure == "clear":
+                raise RuntimeError("injected clear failure")
             self.cleared = True
 
     def fake_runner(_model, _parameter, values, _expressions, **kwargs):
@@ -1437,9 +1688,33 @@ def test_production_worker_bridges_smoke_broad_and_lease_with_mocks(
 
     code = production_worker.run(str(jobs_root), job_id)
 
-    assert code == 0
-    assert store.read_state(job_id)["status"] == "completed"
+    assert code == (0 if cleanup_failure is None else 1)
+    state = store.read_state(job_id)
+    assert state["status"] == ("completed" if cleanup_failure is None else "failed")
+    assert state["owned_cleanup"]["success"] is (cleanup_failure is None)
+    expected_errors = {
+        None: [],
+        "release_raises": ["lease_release:RuntimeError"],
+        "release_refuses": ["lease_release_refused"],
+        "clear": ["client_clear:RuntimeError"],
+        "disconnect": ["client_disconnect:RuntimeError"],
+    }
+    assert state["owned_cleanup"]["errors"] == expected_errors[cleanup_failure]
+    assert state["cleanup_pending"] is (cleanup_failure is not None)
+    if cleanup_failure is not None:
+        assert state["last_error"]["type"] == "OwnedCleanupUnverified"
+    events = [
+        json.loads(line)
+        for line in (store.job_dir(job_id) / "events.jsonl").read_text().splitlines()
+    ]
+    assert any(event["event"] == "completed" for event in events) is (cleanup_failure is None)
     assert store.read_state(job_id)["progress"] == {"completed": 2, "total": 2}
+    with (store.job_dir(job_id) / "results.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert [(row["parameter_value"], row["status"]) for row in rows] == [
+        ("1.0", "ok"),
+        ("2.0", "ok"),
+    ]
     assert lease_events[0] == "acquired"
     assert lease_events[-1] == "released"
 
@@ -1457,7 +1732,7 @@ def test_production_worker_rejects_failed_heartbeat_before_model_load(jobs_root,
             "spec_fingerprint": "heartbeat-config",
             "job_type": "staged_sweep",
             "source_model_path": str(source),
-            "source_model_sha256": "0" * 64,
+            "source_model_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
             "parameter_name": "wl",
             "parameter_values": [1.0],
             "expressions": ["A"],
@@ -1529,7 +1804,7 @@ def test_production_worker_resource_gate_interrupts_before_second_solve(jobs_roo
         "spec_fingerprint": "mock-resource-config",
         "job_type": "staged_sweep",
         "source_model_path": str(jobs_root / "source.mph"),
-        "source_model_sha256": "0" * 64,
+        "source_model_sha256": hashlib.sha256(b"mock").hexdigest(),
         "parameter_name": "wl",
         "parameter_values": [1.0, 2.0],
         "expressions": ["A"],
@@ -1908,15 +2183,26 @@ def test_default_reconciliation_includes_an_older_accepted_cancellation(jobs_roo
 
 
 def test_fixture_cleanup_terminates_an_exact_detached_worker(jobs_root):
+    child_code = (
+        "import pathlib, sys, time; "
+        "pathlib.Path(sys.argv[1]).write_text('ready', encoding='ascii'); time.sleep(30)"
+    )
+    worker_ready = jobs_root / "worker.ready"
+    coordinator_ready = jobs_root / "coordinator.ready"
     worker = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"],
+        [sys.executable, "-c", child_code, str(worker_ready)],
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     coordinator = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"],
+        [sys.executable, "-c", child_code, str(coordinator_ready)],
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     try:
+        deadline = time.monotonic() + 5.0
+        while not (worker_ready.exists() and coordinator_ready.exists()):
+            assert worker.poll() is None and coordinator.poll() is None
+            assert time.monotonic() < deadline, "fixture children did not become ready"
+            time.sleep(0.025)
         identity = process_identity(worker.pid)
         coordinator_identity = process_identity(coordinator.pid)
         JobStore(jobs_root).create(
@@ -2074,3 +2360,90 @@ def test_job_tail_window_is_clamped_to_the_documented_bound():
     for bad in (True, "20", 2.5, None):
         with pytest.raises(ValueError, match="n must be an integer between 1 and 200"):
             _clamp_tail_n(bad)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows venv executable redirector")
+@pytest.mark.parametrize("cancel_resume", [False, True])
+def test_windows_venv_worker_binds_executing_process(ascii_tmp_path, monkeypatch, cancel_resume):
+    import venv
+
+    environment = ascii_tmp_path / "venv space"
+    venv.EnvBuilder(with_pip=False, system_site_packages=True).create(environment)
+    monkeypatch.setattr(sys, "executable", str(environment / "Scripts" / "python.exe"))
+    manager = JobManager(ascii_tmp_path / "jobs", allow_test_jobs=True)
+    delays = [0.05, 1.0] if cancel_resume else [0.05]
+    submitted = manager.submit({"job_type": "test_sequence", "delays": delays})
+    if cancel_resume:
+        wait_for(manager, submitted["job_id"], {"running"})
+        assert manager.cancel(submitted["job_id"])["success"] is True
+        wait_for(manager, submitted["job_id"], {"cancelled"})
+        assert manager.resume(submitted["job_id"])["attempt"] == 2
+    terminal = wait_for(
+        manager, submitted["job_id"], {"completed", "interrupted", "failed"}, timeout=10
+    )
+    assert terminal["status"] == "completed", manager.tail(submitted["job_id"], 20)
+    assert terminal["progress"] == {"completed": len(delays), "total": len(delays)}
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        None,
+        "command",
+        "pid",
+        "created",
+        "older",
+        "foreign",
+        "multiple",
+        "reused_launcher",
+        "missing",
+    ],
+)
+def test_venv_redirector_identity_requires_one_exact_child(monkeypatch, failure):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from comsol_mcp.jobs import manager as module
+
+    command = ["python", "-m", "owned-worker"]
+    signature = hashlib.sha256("\0".join(command).encode()).hexdigest()
+    launcher = {"pid": 41, "process_create_time": 1.0, "command_signature": signature}
+    child_identity = {"pid": 42, "process_create_time": 2.0, "command_signature": signature}
+    if failure == "command":
+        child_identity["command_signature"] = "0" * 64
+    elif failure == "pid":
+        child_identity["pid"] = 99
+    elif failure == "created":
+        child_identity["process_create_time"] = 3.0
+    elif failure == "older":
+        child_identity["process_create_time"] = 0.5
+    child = SimpleNamespace(
+        pid=42,
+        ppid=lambda: 99 if failure == "foreign" else 41,
+        create_time=lambda: 0.5 if failure == "older" else 2.0,
+        oneshot=nullcontext,
+    )
+    children = [] if failure == "missing" else [child, child] if failure == "multiple" else [child]
+    root = SimpleNamespace(children=lambda: children)
+    root_reads = []
+
+    def identify(pid):
+        if pid == 41:
+            root_reads.append(pid)
+            if failure == "reused_launcher" and len(root_reads) > 1:
+                return {**launcher, "process_create_time": 9.0}
+            return dict(launcher)
+        assert pid == 42
+        return dict(child_identity)
+
+    monkeypatch.setattr(module, "_uses_windows_venv_redirector", lambda _command: True)
+    monkeypatch.setattr(module, "process_identity", identify)
+    monkeypatch.setattr(
+        module.psutil, "Process", lambda pid: root if pid == 41 else pytest.fail("foreign root")
+    )
+    process = SimpleNamespace(pid=41)
+    if failure is None:
+        assert module._launched_process_identity(process, command) == child_identity
+    else:
+        with pytest.raises(OSError, match="identity"):
+            module._launched_process_identity(process, command)

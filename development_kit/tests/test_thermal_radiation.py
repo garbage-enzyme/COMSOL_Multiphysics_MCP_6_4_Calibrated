@@ -29,7 +29,7 @@ def test_planck_wavelength_contains_tiny_positive_coordinates():
 
 def _kirchhoff(**overrides):
     value = {
-        "absorptivity_evidence_sha256": "a" * 64,
+        "absorptivity_evidence_sha256": "d" * 64,
         "absorptivity_evidence_state": "verified",
         "linearity": "verified",
         "time_invariance": "verified",
@@ -83,6 +83,8 @@ def _request(
         "configuration_sha256": "c" * 64,
         "source_artifact_sha256s": ["d" * 64],
         "artifact_chain_sha256": "e" * 64,
+        "absorptivity_evidence_sha256": "d" * 64 if optical_quantity == "absorptivity" else None,
+        "channel_identity_sha256": "b" * 64 if optical_quantity == "absorptivity" else None,
     }
 
 
@@ -125,6 +127,29 @@ def test_absorptivity_requires_content_bound_applicable_assessment():
                 [1.0, 1.0],
                 optical_quantity="absorptivity",
                 assessment=tampered,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"absorptivity_evidence_sha256": "f" * 64}, "absorption evidence"),
+        ({"propagation_direction": "positive_z"}, "propagation direction"),
+        ({"channel_identity_sha256": "f" * 64}, "channel identity"),
+        ({"polarization_basis": "te_tm"}, "polarization basis"),
+        ({"handedness_convention": "explicit_stokes"}, "handedness"),
+    ],
+)
+def test_absorptivity_rejects_assessment_bound_to_other_request(override, message):
+    assessment = build_kirchhoff_assessment(_kirchhoff(**override))
+    with pytest.raises(ValueError, match=message):
+        evaluate_thermal_radiation(
+            _request(
+                [1.0e-6, 2.0e-6],
+                [1.0, 1.0],
+                optical_quantity="absorptivity",
+                assessment=assessment,
             )
         )
 
@@ -249,7 +274,8 @@ def test_equal_te_tm_reproduces_scalar_unpolarized_output():
     assert te_tm["radiated_power_W_m2"] == pytest.approx(scalar["radiated_power_W_m2"], rel=1e-14)
 
 
-def test_stokes_rotation_preserves_invariants_and_handedness_mismatch_fails():
+@pytest.mark.parametrize("sign", [-1.0, 1.0])
+def test_stokes_rotation_preserves_invariants_and_handedness_mismatch_fails(sign):
     polarization = {
         "mode": "stokes_mueller",
         "channels": ["I", "Q", "U", "V"],
@@ -260,7 +286,7 @@ def test_stokes_rotation_preserves_invariants_and_handedness_mismatch_fails():
         "analyzer_stokes": [1.0, 0.0, 0.0, 0.0],
         "basis_rotation_rad": 0.7,
     }
-    values = [0.8, 0.3, 0.4, 0.1] * 2
+    values = [0.8, sign * 0.3, 0.4, sign * 0.1] * 2
     evidence = evaluate_thermal_radiation(
         _request([2.0e-6, 3.0e-6], values, polarization=polarization)
     )

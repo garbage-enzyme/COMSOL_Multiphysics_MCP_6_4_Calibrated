@@ -17,6 +17,8 @@ _recipe = import_module("recipes.parallel_plate_capacitor")
 build_parallel_plate_capacitor = _recipe.build_parallel_plate_capacitor
 validate_solution = _recipe.validate_solution
 
+from development_kit.tests.integration.acceptance_resources import required_acceptance_cores
+
 
 def _geometry_size_expressions() -> tuple[str, str, str]:
     return _recipe._geometry_size_expressions()
@@ -31,7 +33,7 @@ def main() -> None:
     client = None
     cleanup_errors = []
     try:
-        client = mph.Client(version="6.4")
+        client = mph.Client(cores=required_acceptance_cores(), version="6.4")
         model = client.create("ParallelPlateCap")
         build = build_parallel_plate_capacitor(model)
         validation = validate_solution(model)

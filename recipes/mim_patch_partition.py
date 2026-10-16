@@ -10,17 +10,18 @@ Verified API (2026-07-07 probe):
 Patch = 0.3x0.3µm center rectangle on the Al2O3/air interface (bnd6).
 LayeredTransition + LML only on patch boundary; rest = plain continuity.
 """
-import mph, jpype, sys, time
+import mph, jpype, sys, time, math
 from _paths import parse_recipe_cores, recipe_output_dir
 from _mim_safety import (
     bind_wavelength_step,
     require_named_domains,
     require_partition_result,
     require_port_pair,
-    require_passive_reflection,
+    require_passive_power,
     require_required_properties,
     require_spectrum,
     save_required,
+    solve_passive_wavelengths,
 )
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -34,7 +35,7 @@ def jarr_i(v): return jpype.JArray(jpype.JInt)(v)
 Px=0.6e-6; Py=0.6e-6; t_al2o3=30e-9; H_air=0.83e-6; t_au=30e-9
 ax=0.3e-6; px0=(Px-ax)/2  # 0.15µm, patch lower-left corner
 # Drude Au via wl parameter (avoids ewfd.freq singularity in sweep)
-au_drude = "1-(1.37e16)^2/((2*pi*c_const/wl)*((2*pi*c_const/wl)+i*4.1e13))"
+au_drude = "1-(1.37e16)^2/((2*pi*c_const/wl)*((2*pi*c_const/wl)-i*4.1e13))"
 
 client = mph.Client(cores=parse_recipe_cores(), version='6.4')
 print('Connected', client.version, flush=True)
@@ -59,6 +60,7 @@ b_al2 = g.feature().create('b_al2','Block'); b_al2.set('size',jarr([Px,Py,t_al2o
 b_air = g.feature().create('b_air','Block'); b_air.set('size',jarr([Px,Py,H_air])); b_air.set('pos',jarr([0,0,t_al2o3])); b_air.set('selresult', True)
 g.run()
 print(f'Base: dom={g.getNDomains()} bnd={g.getNBoundaries()}', flush=True)
+before_partition_boundaries = int(g.getNBoundaries())
 
 # --- WorkPlane at z=t_al2o3 (interface) with center rectangle (patch footprint) ---
 wp = g.feature().create('wp1','WorkPlane')
@@ -75,7 +77,6 @@ print(f'After WP: dom={g.getNDomains()} bnd={g.getNBoundaries()}', flush=True)
 # b_air bottom face (z=t_al2o3, facing -z) = bnd5 of b_air object
 pf = g.feature().create('pf1','PartitionFaces')
 pf.set('partitionwith','workplane')
-before_partition_boundaries = int(g.getNBoundaries())
 pf.selection('face').set('b_air', [5])
 g.run()
 after_partition_boundaries = int(g.getNBoundaries())
@@ -86,6 +87,7 @@ print(f'After partition: dom={g.getNDomains()} bnd={g.getNBoundaries()}', flush=
 # Patch xy-extent = ax×ax = 0.3×0.3µm centered, so center=(0.3µm, 0.3µm, t_al2o3)
 # Rest of interface has center offset from (0.3,0.3). Use faceX at param mid.
 patch_candidates = []
+adjacency = [list(row) for row in g.getUpDown()]
 nb = g.getNBoundaries()
 print('\nBoundary centers (z≈t_al2o3):', flush=True)
 JD2 = jpype.JArray(jpype.JArray(jpype.JDouble))
@@ -99,7 +101,13 @@ for bn in range(1, nb+1):
         # Patch boundary: z≈t_al2o3 AND center xy near (Px/2, Py/2)
         if abs(cz - t_al2o3) < 1e-9 and abs(cx - Px/2) < ax/4 and abs(cy - Py/2) < ax/4:
             print(f'  bnd{bn}: center=({cx*1e6:.3f},{cy*1e6:.3f},{cz*1e6:.3f})µm  <- PATCH', flush=True)
-            patch_candidates.append(bn)
+            measure = g.measureFinal()
+            measure.selection().geom(2)
+            measure.selection().set([bn])
+            area = float(measure.getArea())
+            if (adjacency[0][bn-1] > 0 and adjacency[1][bn-1] > 0
+                    and math.isclose(area, ax*ax, rel_tol=1e-6, abs_tol=1e-24)):
+                patch_candidates.append(bn)
         elif abs(cz - t_al2o3) < 1e-9:
             print(f'  bnd{bn}: center=({cx*1e6:.3f},{cy*1e6:.3f},{cz*1e6:.3f})µm  (interface rest)', flush=True)
     except Exception as e:
@@ -177,6 +185,31 @@ except Exception as e:
     # Fallback: plain FreeTet
     try:
         mesh.feature().remove('ftri1'); mesh.feature().remove('sw1')
+        sides = {key: [] for key in ('x_src', 'x_dst', 'y_src', 'y_dst')}
+        for bn in range(1, int(g.getNBoundaries())+1):
+            if adjacency[0][bn-1] > 0 and adjacency[1][bn-1] > 0:
+                continue
+            pr = list(g.faceParamRange(bn))
+            pp = JD2(1)
+            pp[0] = jpype.JArray(jpype.JDouble)([(float(pr[0])+float(pr[1]))/2,
+                                               (float(pr[2])+float(pr[3]))/2])
+            center = [float(v) for v in g.faceX(bn, pp)[0]]
+            normal = [float(v) for v in g.faceNormal(bn, pp)[0]]
+            for axis, prefix, period in ((0, 'x', Px), (1, 'y', Py)):
+                if abs(normal[axis]) > 0.5:
+                    if abs(center[axis]) < 1e-12:
+                        sides[prefix+'_src'].append(bn)
+                    elif abs(center[axis]-period) < 1e-12:
+                        sides[prefix+'_dst'].append(bn)
+        if not all(sides.values()):
+            raise RuntimeError('periodic mesh requires all four exterior side selections')
+        for axis in ('x', 'y'):
+            tri = mesh.feature().create('tri_'+axis, 'FreeTri')
+            tri.selection().set(sides[axis+'_src'])
+        for axis in ('x', 'y'):
+            copy_face = mesh.feature().create('copy_'+axis, 'CopyFace')
+            copy_face.selection('source').set(sides[axis+'_src'])
+            copy_face.selection('destination').set(sides[axis+'_dst'])
         mesh.feature().create('ftet1','FreeTet')
         mesh.run(); print(f'Fallback FreeTet mesh: {mesh.getNumElem()} elements', flush=True)
     except Exception as e2:
@@ -190,9 +223,16 @@ step = study.feature('step1'); bind_wavelength_step(step, 'wl')
 study.create('sweep1','Parametric')
 sweep = study.feature('sweep1'); sweep.set('pname','wl')
 sweep.set('plist', ' '.join(str(w) for w in wls))
+sweep.set('pname', jpype.JArray(jpype.JString)(['wl']))
+sweep.set('punit', jpype.JArray(jpype.JString)(['m']))
+sweep.set('plistarr', jpype.JArray(jpype.JString)([' '.join(str(w) for w in wls)]))
+sweep.set('sweeptype', 'sparse')
+sweep.active(True)
 print(f'Sweeping {len(wls)} wavelengths: {wls}', flush=True)
-t0=time.time(); jm.study('std1').run(); t1=time.time()
-R = require_passive_reflection(require_spectrum(m.evaluate('ewfd.Rtotal'), wls, 'Rtotal'), 'Rtotal')
+t0=time.time()
+# The lower impedance terminates the domain, so no transmitted output port remains.
+R = solve_passive_wavelengths(m, wls, 'patch', opaque_termination=True)['R']
+t1=time.time()
 print(f'Solve OK in {t1-t0:.2f}s', flush=True)
 for wl, value in zip(wls, R):
     print(f'  wl={wl*1e6:.1f}um R={value:.6f}', flush=True)

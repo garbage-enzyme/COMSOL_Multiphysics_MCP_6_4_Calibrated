@@ -43,6 +43,7 @@ from comsol_mcp.evidence.surrogate_evidence import (
     verify_surrogate_document,
 )
 from comsol_mcp.surrogate.export import build_export_manifest
+from comsol_mcp.surrogate.fields import build_field_schema
 from comsol_mcp.surrogate.registry import build_model_card, build_registry_entry
 from development_kit.tests.mcp_test_support import decode_tool_result
 from development_kit.tests.platform_fixtures import platform_test_root
@@ -1105,6 +1106,106 @@ def test_surrogate_tools_do_not_enter_the_frozen_comsolless_profile() -> None:
 
 def _server(owned_root) -> object:
     return create_server("surrogate-dispatch", profile="core")
+
+
+@pytest.mark.parametrize("kind", ["valid", "bad_json", "order", "bounds"])
+def test_public_dataset_validation_enforces_declared_field_schema(owned_root, kind):
+    schema = build_field_schema(
+        schema_id="fields",
+        features=[
+            {"field_id": name, "unit": "1", "lower": 0.0, "upper": 10.0} for name in ("x", "y")
+        ],
+        targets=[
+            {
+                "field_id": "z",
+                "unit": "1",
+                "lower": 0.0,
+                "upper": 10.0,
+                "support": {"coordinates": [1.0], "unit": "1"},
+            }
+        ],
+    )
+    schema_path = _write(owned_root / "fields.json", schema)
+    dataset = owned_root / "fields.csv"
+    dataset.write_text("x,y,z\n1,2,3\n", encoding="utf-8")
+    if kind == "bad_json":
+        schema_path.write_text("{invalid", encoding="utf-8")
+    elif kind == "order":
+        dataset.write_text("y,x,z\n1,2,3\n", encoding="utf-8")
+    elif kind == "bounds":
+        dataset.write_text("x,y,z\n11,2,3\n", encoding="utf-8")
+    result = decode_tool_result(
+        asyncio.run(
+            _server(owned_root).call_tool(
+                "surrogate_dataset_validate",
+                {"dataset_path": str(dataset), "field_schema_path": str(schema_path)},
+            )
+        )
+    )
+    if kind == "bad_json":
+        assert result["success"] is False
+    else:
+        assert result["success"] is True
+        assert result["valid"] is (kind == "valid")
+        assert (
+            result["field_schema_identity"]["sha256"]
+            == hashlib.sha256(schema_path.read_bytes()).hexdigest()
+        )
+    assert result["solver_started"] is False
+
+
+@pytest.mark.parametrize("kind", ["export", "card", "registry"])
+def test_public_inspection_refuses_correctly_sealed_unsupported_versions(owned_root, kind):
+    from comsol_mcp.durable.canonical import canonical_sha256_v1
+
+    document = {
+        "export": _export_manifest,
+        "card": _model_card,
+        "registry": lambda: _registry_entry("c" * 64),
+    }[kind]()
+    document["schema_version"] = "999.0.0"
+    seal = "manifest_sha256" if kind == "export" else "entry_sha256"
+    document[seal] = canonical_sha256_v1({k: v for k, v in document.items() if k != seal})
+    path = _write(owned_root / f"unsupported-{kind}.json", document)
+    result = decode_tool_result(
+        asyncio.run(
+            _server(owned_root).call_tool(
+                "surrogate_model_inspect",
+                {"document_path": str(path)},
+            )
+        )
+    )
+    assert result["success"] is False
+    assert result["reason_code"] == "surrogate_document_field_invalid"
+
+
+@pytest.mark.parametrize("change", ["format", "availability", "extra", "size"])
+def test_public_verification_refuses_semantically_invalid_sealed_export(owned_root, change):
+    from comsol_mcp.durable.canonical import canonical_sha256_v1
+
+    document = _export_manifest()
+    if change == "format":
+        document["artifacts"][0]["export_format"] = "bogus"
+    elif change == "availability":
+        document["onnx_available"] = False
+    elif change == "extra":
+        document["unexpected"] = True
+    else:
+        document["artifacts"][0]["size_bytes"] = True
+    document["manifest_sha256"] = canonical_sha256_v1(
+        {k: v for k, v in document.items() if k != "manifest_sha256"}
+    )
+    path = _write(owned_root / "invalid-export.json", document)
+    result = decode_tool_result(
+        asyncio.run(
+            _server(owned_root).call_tool(
+                "surrogate_model_verify",
+                {"document_path": str(path), "require_consistent_export": True},
+            )
+        )
+    )
+    assert result["success"] is False
+    assert result.get("verified") is not True
 
 
 def test_dispatch_validates_real_documents(owned_root) -> None:

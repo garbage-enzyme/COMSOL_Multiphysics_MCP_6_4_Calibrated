@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -65,7 +66,7 @@ def _require_str(name: str, value: Any, *, max_len: int = 256) -> str:
 
 
 def _require_hex64(name: str, value: Any) -> str:
-    if not isinstance(value, str) or len(value) != 64:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
         raise ValueError(f"{name} must be a 64-character hex digest")
     try:
         int(value, 16)
@@ -190,6 +191,8 @@ def validate_row_provenance(value: Any) -> dict[str, Any]:
     body = {key: value[key] for key in required}
     if value["row_sha256"] != canonical_sha256_v1(body):
         raise ValueError("row_sha256 mismatch")
+    if not isinstance(value["eligible"], bool):
+        raise ValueError("eligible must be a boolean")
     if value["is_surrogate_prediction"] is not False:
         raise ValueError("a dataset label row is never a surrogate prediction")
     if value["upgrades_fem_evidence"] is not False:
@@ -205,6 +208,23 @@ def validate_row_provenance(value: Any) -> dict[str, Any]:
     if value["ineligible_reason"] is not None:
         if value["ineligible_reason"] not in INELIGIBLE_REASON_CODES:
             raise ValueError("unknown ineligible_reason")
+    rebuilt = build_row_provenance(
+        row_id=value["row_id"],
+        candidate_id=value["candidate_id"],
+        source_model_sha256=value["source_model_sha256"],
+        solver_identity_sha256=value["solver_identity_sha256"],
+        study_identity=value["study_identity"],
+        solution_identity=value["solution_identity"],
+        dataset_identity=value["dataset_identity"],
+        fidelity=value["fidelity"],
+        evidence_state=value["evidence_state"],
+        features=value["features"],
+        targets=value["targets"],
+        leakage_group_id=value["leakage_group_id"],
+        ineligible_reason=value["ineligible_reason"],
+    )
+    if rebuilt != dict(value):
+        raise ValueError("row provenance content is not canonical")
     return dict(value)
 
 

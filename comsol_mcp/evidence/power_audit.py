@@ -79,6 +79,13 @@ def _positive(value: Any, label: str) -> float:
     return result
 
 
+def _nonnegative(value: Any, label: str) -> float:
+    result = _finite(value, label)
+    if result < 0.0:
+        raise ValueError(f"{label} must be nonnegative")
+    return result
+
+
 def _selection_ids(value: Any, label: str) -> list[int]:
     if not isinstance(value, list) or not value or len(value) > _MAX_SELECTION_IDS:
         raise ValueError(f"{label} must contain 1..{_MAX_SELECTION_IDS} boundary IDs")
@@ -191,7 +198,9 @@ def normalize_internal_absorption_consistency(
     _reject_unknown(cross, _CROSS_SECTION_FIELDS, "cross_section_absorption")
     normalized_cross = {
         "expression": _text(cross.get("expression"), "cross_section_absorption.expression"),
-        "value_m2": _positive(cross.get("value_m2"), "cross_section_absorption.value_m2"),
+        "value_m2": _nonnegative(
+            cross.get("value_m2"), "cross_section_absorption.value_m2"
+        ),
         "unit": _text(cross.get("unit"), "cross_section_absorption.unit"),
         "unit_cell_area_expression": _text(
             cross.get("unit_cell_area_expression"),
@@ -230,7 +239,7 @@ def normalize_internal_absorption_consistency(
             volume.get("selection_ids"),
             "volume_loss_absorption.selection_ids",
         ),
-        "value_w": _positive(volume.get("value_w"), "volume_loss_absorption.value_w"),
+        "value_w": _nonnegative(volume.get("value_w"), "volume_loss_absorption.value_w"),
         "incident_power_w": _positive(
             volume.get("incident_power_w"),
             "volume_loss_absorption.incident_power_w",

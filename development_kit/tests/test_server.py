@@ -490,3 +490,15 @@ def test_job_read_tools_are_solver_free(ascii_tmp_path, monkeypatch):
         assert tail["success"] is False
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_resource_truncation_marker_stays_inside_utf8_byte_budget():
+    from comsol_mcp.resources.model_resources import _MAX_RESOURCE_BYTES, _bounded_resource
+
+    # The final accepted line fills the body budget exactly. The marker must
+    # displace body content rather than extend the complete response budget.
+    response = _bounded_resource(["x" * n for n in [4096] * 31 + [4064, 4096]])
+    assert "resource output truncated" in response
+    assert len(response.encode("utf-8")) <= _MAX_RESOURCE_BYTES
+    response = _bounded_resource(["测" * 4096] * 2049)
+    assert len(response.encode("utf-8")) <= _MAX_RESOURCE_BYTES

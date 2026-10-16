@@ -1,6 +1,7 @@
 """Synthetic finite-difference gradient evidence tests."""
 
 import copy
+import math
 
 import pytest
 
@@ -121,6 +122,55 @@ def test_directional_gradient_check_records_central_prediction():
     assert receipt["mode"] == "central"
     assert receipt["passed"] is True
     assert len(receipt["directional_check_fingerprint"]) == 64
+
+
+@pytest.mark.parametrize("scale", [1e308, 1e-300])
+def test_directional_gradient_preserves_finite_nonzero_direction_at_extreme_scale(scale):
+    receipt = compare_directional_gradient(
+        _gradient(),
+        normalize_gradient_support(),
+        [scale],
+        step=0.01,
+        plus_objective=0.8,
+        minus_objective=0.8,
+        policy=_policy(),
+    )
+    assert receipt["direction"] == [1.0]
+    assert receipt["predicted"] == pytest.approx(0.002)
+    assert receipt["passed"] is False
+
+
+@pytest.mark.parametrize("scale", [1e308, 1e-300])
+def test_directional_gradient_accepts_correct_derivative_at_extreme_scale(scale):
+    receipt = compare_directional_gradient(
+        _gradient(),
+        normalize_gradient_support(),
+        [scale],
+        step=0.01,
+        plus_objective=0.80002,
+        minus_objective=0.79998,
+        policy=_policy(),
+    )
+    assert receipt["direction"] == [1.0]
+    assert receipt["passed"] is True
+    assert math.isfinite(receipt["relative_error"])
+
+
+@pytest.mark.parametrize("scale", [1e308, 1e-300])
+def test_gradient_cosine_preserves_direction_at_extreme_scale(scale):
+    from comsol_mcp.research.gradient_validation import _cosine
+
+    assert _cosine([scale, scale], [scale, scale]) == pytest.approx(1.0)
+    assert _cosine([scale, -scale], [-scale, scale]) == pytest.approx(-1.0)
+
+
+def test_unit_direction_handles_norm_larger_than_float_range_and_zero_vector():
+    from comsol_mcp.research.gradient_validation import _unit_vector
+
+    direction = _unit_vector([1.7e308, -1.7e308])
+    assert direction == pytest.approx([1 / math.sqrt(2), -1 / math.sqrt(2)])
+    assert math.hypot(*direction) == pytest.approx(1.0)
+    assert _unit_vector([0.0, 0.0]) is None
 
 
 def test_directional_gradient_check_requires_a_base_for_one_sided_evidence():

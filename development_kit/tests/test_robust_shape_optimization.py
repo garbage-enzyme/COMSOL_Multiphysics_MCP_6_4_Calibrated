@@ -300,14 +300,25 @@ def test_manifest_v11_accepts_tagged_lin2025_adapter(ascii_tmp_path):
     payload = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
     manifest.write_bytes(payload)
     envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
+    with pytest.raises(ValueError, match="exactly cover active wavelengths"):
+        expand_robust_shape_manifest(envelope)
+    wavelengths = sorted(
+        {base * (1.0 + offset) for base in (8e-7, 1e-6, 1.2e-6) for offset in (-0.01, 0, 0.01)}
+    )
+    for state in raw["adapter_configuration"]["configuration"]["material_tensor_rows"]["states"]:
+        sample = state["rows"][0]
+        state["rows"] = [{**sample, "wavelength_m": wavelength} for wavelength in wavelengths]
+    payload = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    manifest.write_bytes(payload)
+    envelope["submission_manifest_sha256"] = hashlib.sha256(payload).hexdigest()
     spec = expand_robust_shape_manifest(envelope)
     assert spec["schema_version"] == "1.1.0"
     assert spec["adapter_binding"]["pedot_domain"] == 5
     assert spec["material_tensor_binding"]["active_wavelengths_m"]["OX"] == pytest.approx(
-        [8e-7, 1e-6, 1.2e-6]
+        wavelengths
     )
     assert spec["material_tensor_binding"]["active_wavelengths_m"]["MR"] == pytest.approx(
-        [8e-7, 1e-6, 1.2e-6]
+        wavelengths
     )
     raw["adapter_configuration"]["configuration"]["condition_controls"]["observable_expression"] = (
         "ewfd.Ttotal"
@@ -428,13 +439,13 @@ def test_manifest_rejects_untrusted_adapter_binding(ascii_tmp_path, field, messa
         expand_robust_shape_manifest(envelope)
 
 
-def test_submission_temporary_directory_rechecks_expansion_contract(tmp_path, monkeypatch):
+def test_submission_temporary_directory_rechecks_expansion_contract(ascii_tmp_path, monkeypatch):
     import os
 
     from comsol_mcp.jobs.robust_shape_optimization import normalize_robust_shape_submission
 
-    envelope, _target, _manifest = _write_manifest(tmp_path)
-    expanded = tmp_path / "expanded dir"
+    envelope, _target, _manifest = _write_manifest(ascii_tmp_path)
+    expanded = ascii_tmp_path / "expanded dir"
     expanded.mkdir()
     monkeypatch.setattr(
         os.path,
@@ -447,11 +458,11 @@ def test_submission_temporary_directory_rechecks_expansion_contract(tmp_path, mo
         normalize_robust_shape_submission(envelope)
 
 
-def test_manifest_source_rechecks_expansion_contract(tmp_path, monkeypatch):
+def test_manifest_source_rechecks_expansion_contract(ascii_tmp_path, monkeypatch):
     import os
     from pathlib import Path
 
-    envelope, _target, manifest = _write_manifest(tmp_path)
+    envelope, _target, manifest = _write_manifest(ascii_tmp_path)
     raw = json.loads(manifest.read_text(encoding="utf-8"))
     real_source = Path(raw["source_model_path"])
     assert real_source.is_file()
@@ -462,7 +473,7 @@ def test_manifest_source_rechecks_expansion_contract(tmp_path, monkeypatch):
 
     # pathlib hands only the leading "~" component to os.path.expanduser; map
     # it to an expanded home whose name violates the whitespace contract.
-    expanded_home = tmp_path / "home dir"
+    expanded_home = ascii_tmp_path / "home dir"
     expanded_home.mkdir()
     monkeypatch.setattr(
         os.path,
@@ -474,14 +485,14 @@ def test_manifest_source_rechecks_expansion_contract(tmp_path, monkeypatch):
         expand_robust_shape_manifest(envelope)
 
 
-def test_expanduser_helper_rejects_non_ascii_and_whitespace(tmp_path):
+def test_expanduser_helper_rejects_non_ascii_and_whitespace(ascii_tmp_path):
     from comsol_mcp.jobs.robust_shape_optimization import _require_ascii_without_whitespace
 
-    spaced = tmp_path / "has space"
+    spaced = ascii_tmp_path / "has space"
     with pytest.raises(ValueError, match="without whitespace"):
         _require_ascii_without_whitespace(spaced, "path must be without whitespace")
-    non_ascii = tmp_path / "路径"
+    non_ascii = ascii_tmp_path / "路径"
     with pytest.raises(ValueError, match="without whitespace"):
         _require_ascii_without_whitespace(non_ascii, "path must be without whitespace")
-    plain = tmp_path / "plain"
+    plain = ascii_tmp_path / "plain"
     _require_ascii_without_whitespace(plain, "path must be without whitespace")

@@ -398,7 +398,7 @@ class FakeComsolBackend:
         self._record("node_lookup", phase="remove", kind=kind, tag=tag)
         self._maybe_fail("node_lookup")
         self._require_model("node_lookup")
-        if kind not in {"study", "function"}:
+        if kind not in {"study", "function", "study_step"}:
             raise AdapterError(
                 "node_not_found",
                 f"the fake does not remove {kind!r} nodes",
@@ -406,6 +406,11 @@ class FakeComsolBackend:
             )
         # COMSOL's ``remove`` is tolerant of an absent tag; the fake matches that
         # so a rollback of an already-removed node is not reported as a failure.
+        if kind == "study_step":
+            parent, separator, child = tag.partition("/")
+            if separator and parent in self._containers.get("study", []):
+                self._properties.pop(child, None)
+            return
         if tag in self._containers.get(kind, []):
             self._containers[kind].remove(tag)
         self._properties.pop(tag, None)
@@ -442,7 +447,21 @@ class FakeComsolBackend:
                 rejected=("getString: JException", "getDouble: JException"),
             )
         accessor, value = scripted
-        if form == "string_array" and accessor != "getStringArray":
+        accessors = {
+            "string": "getString",
+            "boolean": "getBoolean",
+            "int": "getInt",
+            "double": "getDouble",
+            "string_array": "getStringArray",
+            "int_array": "getIntArray",
+            "double_array": "getDoubleArray",
+            "string_matrix": "getStringMatrix",
+        }
+        if form != "auto" and form not in accessors:
+            raise AdapterError(
+                "conversion_not_representable", f"unsupported typed read form: {form}"
+            )
+        if form != "auto" and accessor != accessors[form]:
             raise AdapterError(
                 "property_not_found",
                 f"{name!r} on {tag} is not a string-array property",

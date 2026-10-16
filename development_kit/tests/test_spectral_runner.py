@@ -35,6 +35,102 @@ def _executor(spec, calls):
     return execute
 
 
+@pytest.mark.parametrize("max_retries", [1, 3])
+def test_runner_retries_transient_point_failure_with_fresh_admission(tmp_path, max_retries):
+    spec = spectral_job_spec(tmp_path, max_retries=max_retries)
+    calls = Counter()
+    admissions = []
+    healthy = _executor(spec, calls)
+    failures = []
+
+    def collect(point, directory):
+        if len(failures) < max_retries:
+            failures.append(point["point_fingerprint"])
+            raise RuntimeError("temporary failure")
+        return healthy(point, directory)
+
+    def admit(context):
+        admissions.append(context["point"]["point_fingerprint"])
+        return {"action": "continue"}
+
+    root = tmp_path / "job"
+    result = run_spectral_characterization(
+        spec, root, attempt=1, point_executor=collect, control_hook=admit
+    )
+    assert result["completed"] is True
+    assert len(admissions) == sum(calls.values()) + max_retries
+    errors = [
+        json.loads(line) for line in (root / "spectral_errors.jsonl").read_text().splitlines()
+    ]
+    assert len(errors) == max_retries
+    assert [error["retry_index"] for error in errors] == list(range(max_retries))
+    assert all(error["point_fingerprint"] == failures[0] for error in errors)
+
+
+def test_continue_after_exhausted_spectral_point_never_claims_complete_evidence(tmp_path):
+    spec = spectral_job_spec(tmp_path, max_retries=1, continue_on_error=True)
+    calls = Counter()
+    healthy = _executor(spec, Counter())
+    failed_id = []
+
+    def collect(point, directory):
+        fingerprint = point["point_fingerprint"]
+        calls[fingerprint] += 1
+        if not failed_id:
+            failed_id.append(fingerprint)
+        if fingerprint == failed_id[0]:
+            raise RuntimeError("persistent failure")
+        return healthy(point, directory)
+
+    root = tmp_path / "job"
+    result = run_spectral_characterization(spec, root, attempt=1, point_executor=collect)
+    assert result["completed"] is False
+    assert result["stop_reason"] == "point_errors"
+    assert calls[failed_id[0]] == 2
+    assert len(calls) == spec["initial_grid"]["point_count"]
+    rows = read_spectral_rows(root / "spectral_rows.jsonl", spec, artifact_root=root)
+    assert len(rows) == len(calls) - 1
+    assert not (root / "analysis/summary.json").exists()
+
+
+@pytest.mark.parametrize("action", ["stop", "cancel"])
+def test_retry_respects_fresh_control_refusal(tmp_path, action):
+    spec = spectral_job_spec(tmp_path, max_retries=3)
+    calls = []
+
+    def fail(point, _directory):
+        calls.append(point["point_id"])
+        raise RuntimeError("temporary failure")
+
+    def control(_context):
+        return {"action": action if calls else "continue"}
+
+    root = tmp_path / "job"
+    result = run_spectral_characterization(
+        spec, root, attempt=1, point_executor=fail, control_hook=control
+    )
+    assert len(calls) == 1
+    assert result["completed"] is False
+    assert result["stop_reason"] == f"before_solve_{action}"
+    assert not read_spectral_rows(root / "spectral_rows.jsonl", spec, artifact_root=root)
+
+
+def test_exhausted_retry_raises_original_error_after_exact_limit(tmp_path):
+    spec = spectral_job_spec(tmp_path, max_retries=3)
+    calls = []
+
+    def fail(point, _directory):
+        calls.append(point["point_id"])
+        raise RuntimeError("persistent failure")
+
+    root = tmp_path / "job"
+    with pytest.raises(RuntimeError, match="persistent failure"):
+        run_spectral_characterization(spec, root, attempt=1, point_executor=fail)
+    assert len(calls) == 4
+    assert len(set(calls)) == 1
+    assert len((root / "spectral_errors.jsonl").read_text().splitlines()) == 4
+
+
 def test_runner_completes_full_bundle_one_durable_point_at_a_time(tmp_path):
     spec = spectral_job_spec(tmp_path)
     job = tmp_path / "job"

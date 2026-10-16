@@ -44,6 +44,12 @@ Before a release:
 
 5. On a free, licensed, version-pinned host, run the serial real gate explicitly:
 
+   Use an isolated interpreter with the exact accepted wheel installed non-editably.
+   This interpreter also needs the declared development dependencies for pytest.
+   The live-profile probe clears `PYTHONPATH` and starts the installed server outside the checkout.
+   A source-only interpreter cannot satisfy that installed-package check.
+   Set `COMSOL_MCP_ACCEPTANCE_CORES` explicitly for all licensed probes.
+
    ```powershell
    python development_kit/scripts/run_real_release_gate.py --confirm RUN_REAL_COMSOL `
      --fixture-spec D:\path\to\controlled_fixture_spec.json `
@@ -84,6 +90,66 @@ Before a release:
 
 Hosted CI never runs licensed COMSOL integration tests. They remain explicit,
 serial, and unavailable by default.
+
+The native optimizer development gate accepts an explicit fixed loading path for its fresh finalist.
+Use `--finalist-continuation-fractions` with a JSON list of at most 32 strictly increasing fractions.
+The final fraction must equal `1.0`.
+Also supply `--material-jacobian-expression` and `--minimum-material-jacobian`.
+The gate reserves one solve for every fraction, plus the baseline, before allocating optimizer solves.
+Each step checks initialization readback, solved patch dimensions, geometry mapping and material mapping.
+The gate stops on failure without automatic path refinement or a direct-solve fallback.
+Without this option, the gate retains its direct finalist solve.
+These CLI options apply to the development gate.
+Durable adjoint manifests at version `1.1.0` require an explicit `execution_policy`.
+Version `1.0.0` retains its direct finalist path.
+The execution policy declares smoothing, geometry order, adjoint gradients and fixed finalist fractions.
+It also declares geometry and material Jacobian expressions, minimum values and minimum mesh quality.
+Caller passivity and closure tolerances remain explicit.
+For example, a caller can declare this fixed loading policy:
+
+```json
+{
+  "smoothing_type": "hyperelastic",
+  "geometry_shape_order": "1",
+  "gradient_method": "adjoint",
+  "finalist_fractions": [0.25, 0.5, 0.75, 1.0],
+  "geometry_jacobian_expression": "reldetjac",
+  "minimum_geometry_jacobian": 0.0,
+  "material_jacobian_expression": "comp1.material.detF",
+  "minimum_material_jacobian": 0.0,
+  "minimum_element_quality": 0.1,
+  "passivity_absolute_tolerance": 0.000001,
+  "closure_absolute_tolerance": 0.000001
+}
+```
+
+These values are an example, not universal solver or scientific defaults.
+Jacobian minima must strictly exceed their declared limits.
+Mesh quality must meet its declared minimum under the recorded native quality measure.
+The passivity tolerance applies separately to dimensionless R, T and A.
+The closure tolerance applies to the absolute difference between their sum and one.
+Constraint residuals use each declared expression unit and the optimizer configuration tolerance.
+Failed mapping and constraint checks retain their measured values in the runtime receipt.
+The submission resource policy must declare `max_mesh_elements`.
+The runtime reserves every finalist solve and checks each solved dimension and mapping.
+The new durable path requires separate native acceptance before release.
+Fixed loading does not establish adaptive continuation, mesh convergence or physical acceptance.
+Review raw reflectance, transmittance and absorption separately from their algebraic sum.
+The native optimizer development gate checks passive bounds for each component before testing closure.
+A failed power check retains the raw values and refuses successful acceptance.
+For exact-sample material adapters, manifest expansion checks declared finalist wavelength offsets before licensed startup.
+These samples must also lie within the declared material range.
+
+Standalone MIM recipes check each power component and the requested, evaluated and solved wavelengths.
+The dispersive recipes solve one requested wavelength at a time.
+The continuous-film Drude example uses the linked global material loss convention verified for that formulation.
+Use the partitioned-patch example for patterned films.
+Its fallback mesh copies every exterior periodic source face to its paired destination face.
+The partitioned-patch example declares an opaque impedance termination and checks R+A closure.
+Its reported zero transmission is a boundary assumption, not a port measurement.
+The continuous dielectric example retains its measured transmission.
+All examples publish a completed Save Copy without moving a model file that COMSOL still owns.
+These checks do not establish mesh convergence or research-device acceptance.
 
 For the experimental `electro_chemistry` profile, retain the solver-free
 registry/schema/profile tests and a separate exact-version COMSOL 6.4 probe

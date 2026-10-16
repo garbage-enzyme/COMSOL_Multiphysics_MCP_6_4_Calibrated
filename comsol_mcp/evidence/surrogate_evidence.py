@@ -25,6 +25,9 @@ from typing import Any
 from comsol_mcp.contracts.surrogate import parse_dbmodel_uri, validate_source_reference
 from comsol_mcp.durable.canonical import canonical_sha256_v1
 from comsol_mcp.durable.io import read_file_bytes_bounded
+from comsol_mcp.surrogate.export import validate_export_manifest
+from comsol_mcp.surrogate.fields import validate_field_schema
+from comsol_mcp.surrogate.registry import validate_model_card, validate_registry_entry
 
 SURROGATE_EVIDENCE_SCHEMA_NAME = "comsol_mcp.surrogate_evidence_verdict"
 SURROGATE_EVIDENCE_SCHEMA_VERSION = "1.0.0"
@@ -158,6 +161,7 @@ def validate_export_manifest_document(document: Mapping[str, Any]) -> dict[str, 
         raise SurrogateEvidenceError(
             "surrogate_document_field_invalid", "An export manifest must list its artifacts."
         )
+    _validate_document_contract(validate_export_manifest, document)
     checked: list[dict[str, Any]] = []
     for index, artifact in enumerate(artifacts):
         if not isinstance(artifact, Mapping):
@@ -231,6 +235,7 @@ def validate_model_card_document(document: Mapping[str, Any]) -> dict[str, Any]:
         raise SurrogateEvidenceError(
             "surrogate_document_field_invalid", "A model card must declare its identities."
         )
+    _validate_document_contract(validate_model_card, document)
     return {
         "document_kind": "model_card",
         "entry_sha256": declared,
@@ -273,6 +278,7 @@ def validate_registry_entry_document(document: Mapping[str, Any]) -> dict[str, A
     artifact_hashes: list[str] = []
     for name, value in (artifacts or {}).items():
         artifact_hashes.append(_require_hex64(f"artifacts.{name}", value))
+    _validate_document_contract(validate_registry_entry, document)
     return {
         "document_kind": "registry_entry",
         "entry_sha256": declared,
@@ -307,6 +313,15 @@ def _collect_artifact_hashes(document: Mapping[str, Any]) -> list[str]:
             if isinstance(value, str) and len(value) == 64:
                 observed.append(value)
     return observed
+
+
+def _validate_document_contract(validator: Any, document: Mapping[str, Any]) -> None:
+    try:
+        validator(document)
+    except (ValueError, TypeError, KeyError, OverflowError) as exc:
+        raise SurrogateEvidenceError(
+            "surrogate_document_field_invalid", "The surrogate document contract is invalid."
+        ) from exc
 
 
 _DOCUMENT_VALIDATORS = {
@@ -525,6 +540,7 @@ def validate_dataset_document(
     expected_row_count: int | None = None,
     expected_feature_names: Sequence[str] | None = None,
     expected_target_names: Sequence[str] | None = None,
+    field_schema_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Validate one surrogate dataset file's shape and content identity.
 
@@ -581,6 +597,21 @@ def validate_dataset_document(
 
     feature_names = list(expected_feature_names or ())
     target_names = list(expected_target_names or ())
+    field_schema = None
+    field_schema_identity = None
+    if field_schema_path is not None:
+        field_schema, field_schema_identity = read_bounded_document(
+            field_schema_path, max_bytes=max_bytes
+        )
+        _validate_document_contract(validate_field_schema, field_schema)
+        if (
+            expected_feature_names is not None and feature_names != field_schema["feature_order"]
+        ) or (expected_target_names is not None and target_names != field_schema["target_order"]):
+            raise SurrogateEvidenceError(
+                "surrogate_field_schema_conflict", "Declared names disagree with the field schema."
+            )
+        feature_names = list(field_schema["feature_order"])
+        target_names = list(field_schema["target_order"])
     declared_names = feature_names + target_names
 
     checks: list[dict[str, Any]] = []
@@ -619,6 +650,21 @@ def validate_dataset_document(
     else:
         checks.append({"name": "column_names", "state": "not_checked"})
 
+    if field_schema is not None:
+        fields = field_schema["features"] + field_schema["targets"]
+        values_match = width == len(fields)
+        if values_match:
+            for row in data_rows:
+                for cell, field in zip(row, fields, strict=True):
+                    if not _is_number(cell) or not field["lower"] <= float(cell) <= field["upper"]:
+                        values_match = False
+                        break
+                if not values_match:
+                    break
+        checks.append(
+            {"name": "field_values", "state": "matched" if values_match else "mismatched"}
+        )
+
     mismatched = [check["name"] for check in checks if check["state"] == "mismatched"]
     unavailable = [check["name"] for check in checks if check["state"] == "unavailable"]
     checked = [check for check in checks if check["state"] != "not_checked"]
@@ -632,6 +678,7 @@ def validate_dataset_document(
             "byte_count": len(payload),
             "sha256": content_sha256,
         },
+        "field_schema_identity": field_schema_identity,
         "row_count": len(data_rows),
         "column_count": width,
         "header_present": header is not None,

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from typing import Any, Protocol
 
 from comsol_mcp.durable.canonical import canonical_sha256_v1
@@ -54,6 +55,7 @@ STUDY_TAG = "std1"
 STUDY_STEP_TAG = "smt1"
 SURROGATE_STUDY_STEP_TYPE = "SurrogateModelTraining"
 DNN_FUNCTION_TYPE = "DNN"
+_MISSING_EXISTING_PROPERTY = object()
 
 # COMSOL-owned defaults that S0 read back and that must never stay implicit.
 # Values are the exact strings the licensed probe returned, not normalised
@@ -475,6 +477,8 @@ class SurrogateDnnBackend(Protocol):
 
     def remove_study(self, tag: str) -> None: ...
 
+    def remove_study_step(self, study_tag: str, step_tag: str) -> None: ...
+
     def remove_function(self, tag: str) -> None: ...
 
     def write_scalar(self, feature: Any, name: str, value: Any, kind: str) -> None: ...
@@ -521,7 +525,36 @@ def apply_surrogate_configuration(
     """
     plan = build_write_plan(configuration, data_source_bound=data_source_bound)
     created: list[tuple[str, str]] = []
+    rollback_created: list[tuple[str, str, str | None]] = []
+    rollback_existing: list[tuple[Any, str, Any, str, Any]] = []
+    snapshots: list[tuple[Any, str, Any, str, Any]] = []
     readback: dict[str, Any] = {}
+
+    def restore_existing() -> list[str]:
+        errors: list[str] = []
+        for feature, name, value, writer, kind in reversed(rollback_existing):
+            try:
+                if value is _MISSING_EXISTING_PROPERTY:
+                    errors.append(f"existing:{name}:pre_state_unavailable")
+                    continue
+                if writer == "stringMap":
+                    backend.write_string_map(feature, name, value)
+                elif writer == "entries":
+                    backend.write_entries(feature, name, value)
+                else:
+                    backend.write_scalar(feature, name, value, kind)
+                snapshot_reader = getattr(backend, "snapshot_property", None)
+                read = (
+                    snapshot_reader(feature, name, writer=writer, kind=kind)
+                    if callable(snapshot_reader)
+                    else backend.read_property(feature, name)
+                )
+                if read.get("readable") is not True or read.get("value") != value:
+                    errors.append(f"existing:{name}:readback_mismatch")
+            except Exception as rollback_exc:
+                errors.append(f"existing:{name}:{type(rollback_exc).__name__}")
+        return errors
+
     try:
         existing_studies = set(backend.study_tags())
         existing_functions = set(backend.func_tags())
@@ -533,13 +566,16 @@ def apply_surrogate_configuration(
 
             backend.create_study(plan["study_tag"])
             created.append(("study", plan["study_tag"]))
+            rollback_created.append(("study", plan["study_tag"], None))
             if create_study_step:
                 backend.create_study_step(
                     plan["study_tag"], plan["study_step_tag"], SURROGATE_STUDY_STEP_TYPE
                 )
                 created.append(("study_step", plan["study_step_tag"]))
+                rollback_created.append(("study_step", plan["study_tag"], plan["study_step_tag"]))
             backend.create_dnn_function(plan["dnn_function_tag"])
             created.append(("function", plan["dnn_function_tag"]))
+            rollback_created.append(("function", plan["dnn_function_tag"], None))
         else:
             if plan["dnn_function_tag"] not in existing_functions:
                 raise ValueError(
@@ -548,6 +584,36 @@ def apply_surrogate_configuration(
                 )
 
         dnn = backend.get_dnn_function(plan["dnn_function_tag"])
+
+        def snapshot_existing(feature: Any, name: str, writer: str, kind: str) -> None:
+            if create_nodes:
+                return
+            snapshot_reader = getattr(backend, "snapshot_property", None)
+            read = (
+                snapshot_reader(feature, name, writer=writer, kind=kind)
+                if callable(snapshot_reader)
+                else backend.read_property(feature, name)
+            )
+            if not isinstance(read, Mapping) or read.get("readable") is not True:
+                raise ValueError(
+                    f"cannot snapshot existing DNN property {name!r}; no writes applied"
+                )
+            snapshots.append(
+                (
+                    feature,
+                    name,
+                    deepcopy(read.get("value")),
+                    read.get("writer", "entries" if writer == "setEntry" else writer),
+                    read.get("kind", kind),
+                )
+            )
+
+        for write in plan["scalar_writes"]:
+            snapshot_existing(dnn, write["property"], "scalar", write["kind"])
+        for write in plan["entry_writes"]:
+            snapshot_existing(dnn, write["property"], write["writer"], "")
+        rollback_existing.extend(snapshots)
+
         for write in plan["scalar_writes"]:
             try:
                 backend.write_scalar(dnn, write["property"], write["value"], write["kind"])
@@ -615,15 +681,24 @@ def apply_surrogate_configuration(
         for name in ("activation", "optmethod", "loss", "validation", "test"):
             allowed[name] = backend.read_allowed_values(dnn, name)
     except Exception as exc:
-        rollback_errors: list[str] = []
-        for kind, tag in reversed(created):
+        rollback_errors: list[str] = restore_existing()
+        for item in reversed(rollback_created):
             try:
+                kind = item[0]
                 if kind == "function":
+                    tag = item[1]
                     backend.remove_function(tag)
+                elif kind == "study_step":
+                    if item[2] is None:
+                        raise ValueError("study-step rollback identity is missing")
+                    backend.remove_study_step(item[1], item[2])
                 else:
-                    backend.remove_study(tag)
+                    backend.remove_study(item[1])
             except Exception as rollback_exc:  # pragma: no cover - defensive
-                rollback_errors.append(f"{kind}:{tag}:{type(rollback_exc).__name__}")
+                rollback_errors.append(
+                    f"{kind}:{'/'.join(str(value) for value in item[1:])}:"
+                    f"{type(rollback_exc).__name__}"
+                )
         return {
             "success": False,
             "error": f"{type(exc).__name__}: {exc}",

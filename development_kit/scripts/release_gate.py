@@ -52,6 +52,7 @@ def _run(
     cwd: Path = ROOT,
     env: dict[str, str] | None = None,
 ) -> None:
+    print(f"Running: {subprocess.list2cmdline(command)}", flush=True)
     subprocess.run(
         command,
         cwd=cwd,
@@ -59,6 +60,29 @@ def _run(
         check=True,
         creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
     )
+
+
+def _run_release_tests(artifact_root: Path) -> dict[str, object]:
+    """Use the declared local split without changing hosted serial execution."""
+    hosted = os.environ.get("GITHUB_ACTIONS", "").casefold() == "true"
+    suffix = uuid.uuid4().hex[:6]
+    main_root = artifact_root.parent / f"rpt{suffix}"
+    serial_root = artifact_root.parent / f"rst{suffix}"
+    main_root.mkdir()
+    serial_root.mkdir()
+    main = [sys.executable, "-m", "pytest", "-q"]
+    if not hosted:
+        main.extend(["-n", "4", "--dist", "loadscope"])
+    target = "development_kit/tests/test_control_plane_startup.py"
+    main.extend(["--basetemp", str(main_root), "--ignore", target])
+    serial = [sys.executable, "-m", "pytest", "-q", target, "--basetemp", str(serial_root)]
+    try:
+        _run(main)
+        _run(serial)
+    finally:
+        shutil.rmtree(main_root, ignore_errors=True)
+        shutil.rmtree(serial_root, ignore_errors=True)
+    return {"main_workers": 1 if hosted else 4, "serial_targets": [target], "hosted": hosted}
 
 
 def _sanitized_probe_environment() -> dict[str, str]:
@@ -342,14 +366,10 @@ def main() -> int:
             "development_kit",
         ]
     )
-    if not args.skip_tests:
-        pytest_root = artifact_root.parent / f"rpt{uuid.uuid4().hex[:6]}"
-        pytest_root.mkdir()
-        try:
-            _run([sys.executable, "-m", "pytest", "-q", "--basetemp", str(pytest_root)])
-        finally:
-            shutil.rmtree(pytest_root, ignore_errors=True)
-    build_python = args.build_python.resolve() if args.build_python is not None else Path(sys.executable)
+    test_execution = _run_release_tests(artifact_root) if not args.skip_tests else None
+    build_python = (
+        args.build_python.resolve() if args.build_python is not None else Path(sys.executable)
+    )
     if not build_python.is_file():
         raise SystemExit(f"build interpreter does not exist: {build_python}")
     build_command = [str(build_python), "-m", "build", "--outdir", str(dist_dir)]
@@ -457,6 +477,7 @@ def main() -> int:
         "dirty_entry_count": len(dirty),
         "compile_passed": True,
         "tests_run": not args.skip_tests,
+        "test_execution": test_execution,
         "package_build_passed": True,
         "distribution_artifacts": distributions,
         "non_editable_install_run": not args.skip_install,

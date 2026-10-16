@@ -215,6 +215,57 @@ def _create_job(tmp_path, *, second_grid=None, mutate_field_manifest=None):
     return directory
 
 
+@pytest.mark.parametrize(
+    "damage", ["missing_array", "changed_array", "missing_manifest", "changed_point"]
+)
+def test_matrix_resume_checks_the_complete_field_evidence_chain(tmp_path, damage):
+    from src.jobs.validation_rows import completed_point_fingerprints
+
+    directory = _create_job(tmp_path)
+    spec = json.loads((directory / "spec.json").read_text(encoding="utf-8"))
+    rows = read_validation_rows(directory / "matrix_rows.jsonl", spec)
+    assert (
+        len(
+            completed_point_fingerprints(
+                directory / "matrix_rows.jsonl", spec, artifact_root=directory
+            )
+        )
+        == 2
+    )
+    row = deepcopy(rows[0])
+    summary = next(
+        item
+        for item in row["collector_summaries"]
+        if item["collector"] == "wave_optics_field_evidence"
+    )
+    wrapper_path = directory / summary["manifest_relative_path"]
+    wrapper = json.loads(wrapper_path.read_text(encoding="utf-8"))
+    array = wrapper_path.parent / wrapper["array_artifact"]["relative_path"]
+    manifest = wrapper_path.parent / wrapper["field_manifest"]["relative_path"]
+    if damage == "missing_array":
+        array.unlink()
+    elif damage == "changed_array":
+        array.write_bytes(b"changed")
+    elif damage == "missing_manifest":
+        manifest.unlink()
+    else:
+        wrapper["point"]["point_id"] = "other"
+        atomic_write_json(wrapper_path, wrapper)
+        summary["manifest_sha256"] = _sha256(wrapper_path)
+        summary["manifest_size_bytes"] = wrapper_path.stat().st_size
+    replay = directory / "replay_rows.jsonl"
+    append_validation_row(
+        replay,
+        spec,
+        attempt=1,
+        point_id=row["point_id"],
+        status="ok",
+        collector_summaries=row["collector_summaries"],
+    )
+    with pytest.raises(ValueError, match="field"):
+        completed_point_fingerprints(replay, spec, artifact_root=directory)
+
+
 def test_pair_assembler_verifies_rows_and_renders_shared_scale_bundle(tmp_path):
     directory = _create_job(tmp_path)
 
@@ -489,6 +540,20 @@ def test_field_review_proves_npz_shape_against_the_manifest(tmp_path):
 
     with pytest.raises(ValueError, match="quantity_abs_ex differs from the manifest grid"):
         field_review_module._load_point_field(directory, spec, row)
+    # Matching file digests do not prove the NPZ has the declared grid.
+    from src.jobs.validation_rows import completed_point_fingerprints
+
+    replay = directory / "semantic_replay.jsonl"
+    append_validation_row(
+        replay,
+        spec,
+        attempt=1,
+        point_id=row["point_id"],
+        status="ok",
+        collector_summaries=row["collector_summaries"],
+    )
+    with pytest.raises(ValueError, match="quantity_abs_ex differs from the manifest grid"):
+        completed_point_fingerprints(replay, spec, artifact_root=directory)
 
 
 def test_pair_assembler_cleans_owned_output_if_bundle_commit_fails(tmp_path, monkeypatch):

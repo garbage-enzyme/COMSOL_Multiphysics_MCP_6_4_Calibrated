@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -38,8 +39,13 @@ def _require_str(name: str, value: Any, *, max_len: int = 256) -> str:
     return value
 
 
+def normalize_trained_checksum(value: Any) -> str:
+    """Preserve the bounded opaque COMSOL checksum separately from artifact SHA-256."""
+    return _require_str("trained_chksum", value, max_len=64)
+
+
 def _require_hex64(name: str, value: Any) -> str:
-    if not isinstance(value, str) or len(value) != 64:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
         raise ValueError(f"{name} must be a 64-character hex digest")
     try:
         int(value, 16)
@@ -172,7 +178,7 @@ def build_export_manifest(
         "schema": "comsol_mcp.surrogate_export_manifest",
         "schema_version": SCHEMA_VERSION,
         "export_id": _require_str("export_id", export_id),
-        "trained_chksum": _require_str("trained_chksum", trained_chksum, max_len=64),
+        "trained_chksum": normalize_trained_checksum(trained_chksum),
         "architecture_sha256": _require_hex64("architecture_sha256", architecture_sha256),
         "artifacts": normalized,
         "required_formats": sorted(required_formats),
@@ -223,6 +229,23 @@ def validate_export_manifest(value: Any) -> dict[str, Any]:
     missing_required = set(value["required_formats"]) - present
     if missing_required:
         raise ValueError(f"missing required export formats: {sorted(missing_required)}")
+    if any(
+        not isinstance(item, Mapping)
+        or set(item) != {"export_format", "artifact_name", "size_bytes", "sha256"}
+        or isinstance(item["size_bytes"], bool)
+        or not isinstance(item["size_bytes"], int)
+        for item in value["artifacts"]
+    ):
+        raise ValueError("export artifact records must use the closed typed contract")
+    rebuilt = build_export_manifest(
+        export_id=value["export_id"],
+        trained_chksum=value["trained_chksum"],
+        architecture_sha256=value["architecture_sha256"],
+        artifacts=value["artifacts"],
+        required_formats=value["required_formats"],
+    )
+    if rebuilt != dict(value):
+        raise ValueError("export manifest does not match the canonical export contract")
     return dict(value)
 
 

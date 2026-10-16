@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -156,6 +157,114 @@ def test_error_rows_are_durable_but_never_resume_skips(tmp_path):
     )
     assert recovered["attempt"] == 2
     assert len(read_validation_rows(path, spec)) == 2
+
+
+def test_completed_rows_require_existing_bounded_manifest_snapshot(tmp_path):
+    spec = _spec(tmp_path)
+    path = tmp_path / "rows.jsonl"
+    artifact = tmp_path / "artifacts" / "artifact-off" / "manifest.json"
+    artifact.parent.mkdir(parents=True)
+    payload = b'{"valid":"manifest"}'
+    artifact.write_bytes(payload)
+    summary = _summary("off", digest=hashlib.sha256(payload).hexdigest())
+    summary["manifest_size_bytes"] = len(payload)
+    append_validation_row(
+        path,
+        spec,
+        attempt=1,
+        point_id="off",
+        status="ok",
+        collector_summaries=[summary],
+        created_at_epoch=1.0,
+    )
+    assert completed_point_fingerprints(path, spec, artifact_root=tmp_path) == {
+        spec["points"][0]["point_fingerprint"]
+    }
+    artifact.write_bytes(b"changed")
+    with pytest.raises(ValueError, match="hash|size"):
+        completed_point_fingerprints(path, spec, artifact_root=tmp_path)
+
+
+def test_completed_rows_require_existing_nested_collector_manifest(tmp_path):
+    spec = _spec(tmp_path)
+    path = tmp_path / "rows.jsonl"
+    artifact = tmp_path / "artifacts" / "artifact-off"
+    artifact.mkdir(parents=True)
+    inner = artifact / "inner.json"
+    inner.write_text('{"measurement":"complete"}', encoding="utf-8")
+    wrapper_payload = {
+        "schema_name": "comsol_mcp.validation_matrix_collector",
+        "inner_manifest": {
+            "relative_path": "inner.json",
+            "sha256": hashlib.sha256(inner.read_bytes()).hexdigest(),
+            "size_bytes": inner.stat().st_size,
+        },
+    }
+    wrapper = artifact / "manifest.json"
+    wrapper.write_text(json.dumps(wrapper_payload), encoding="utf-8")
+    summary = _summary("off", digest=hashlib.sha256(wrapper.read_bytes()).hexdigest())
+    summary["manifest_size_bytes"] = wrapper.stat().st_size
+    append_validation_row(
+        path, spec, attempt=1, point_id="off", status="ok", collector_summaries=[summary]
+    )
+    assert completed_point_fingerprints(path, spec, artifact_root=tmp_path)
+    inner.unlink()
+    with pytest.raises(ValueError, match="inner manifest"):
+        completed_point_fingerprints(path, spec, artifact_root=tmp_path)
+
+
+def test_completed_rows_reject_changed_nested_collector_manifest(tmp_path):
+    spec = _spec(tmp_path)
+    path = tmp_path / "rows.jsonl"
+    artifact = tmp_path / "artifacts" / "artifact-off"
+    artifact.mkdir(parents=True)
+    inner = artifact / "inner.json"
+    inner.write_text('{"measurement":"complete"}', encoding="utf-8")
+    wrapper_payload = {
+        "schema_name": "comsol_mcp.validation_matrix_collector",
+        "inner_manifest": {
+            "relative_path": "inner.json",
+            "sha256": hashlib.sha256(inner.read_bytes()).hexdigest(),
+            "size_bytes": inner.stat().st_size,
+        },
+    }
+    wrapper = artifact / "manifest.json"
+    wrapper.write_text(json.dumps(wrapper_payload), encoding="utf-8")
+    summary = _summary("off", digest=hashlib.sha256(wrapper.read_bytes()).hexdigest())
+    summary["manifest_size_bytes"] = wrapper.stat().st_size
+    append_validation_row(
+        path, spec, attempt=1, point_id="off", status="ok", collector_summaries=[summary]
+    )
+    inner.write_text('{"measurement":"tampered"}', encoding="utf-8")
+    with pytest.raises(ValueError, match="inner manifest hash"):
+        completed_point_fingerprints(path, spec, artifact_root=tmp_path)
+
+
+def test_completed_rows_reject_manifest_symlink(tmp_path):
+    spec = _spec(tmp_path)
+    path = tmp_path / "rows.jsonl"
+    outside = tmp_path / "outside.json"
+    outside.write_bytes(b"outside")
+    artifact = tmp_path / "artifacts" / "artifact-off" / "manifest.json"
+    artifact.parent.mkdir(parents=True)
+    try:
+        artifact.symlink_to(outside)
+    except OSError, NotImplementedError:
+        pytest.skip("symlink creation is unavailable")
+    payload = outside.read_bytes()
+    summary = _summary("off", digest=hashlib.sha256(payload).hexdigest())
+    summary["manifest_size_bytes"] = len(payload)
+    append_validation_row(
+        path,
+        spec,
+        attempt=1,
+        point_id="off",
+        status="ok",
+        collector_summaries=[summary],
+        created_at_epoch=1.0,
+    )
+    with pytest.raises(ValueError, match="symlink|regular|snapshot|manifest"):
+        completed_point_fingerprints(path, spec, artifact_root=tmp_path)
 
 
 def test_duplicate_complete_exact_identity_is_refused(tmp_path):

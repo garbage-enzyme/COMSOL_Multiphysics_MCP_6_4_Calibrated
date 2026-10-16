@@ -160,7 +160,13 @@ def add_boundary_condition(
         tag = feature_tag
     else:
         tag = _make_tag(feature_prefix or feature_type.lower(), feature_list)
-    feature = feature_list.create(tag, feature_type, boundary_dim)
+    try:
+        feature = feature_list.create(tag, feature_type, boundary_dim)
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"Boundary feature creation failed: {type(exc).__name__}",
+        }
     try:
         feature.selection().set(boundaries)
         for name, value in normalized_properties.items():
@@ -340,6 +346,14 @@ def assign_material(
             material.label(material_name)
         if domains:
             material.selection().set(domains)
+            selected_domains: list[int] | str = domains
+        else:
+            select_all = getattr(material.selection(), "all", None)
+            if callable(select_all):
+                select_all()
+                selected_domains = "all"
+            else:
+                raise RuntimeError("material selection cannot be set to all domains")
         if normalized_properties:
             group = material.propertyGroup("def")
             for name, value in normalized_properties.items():
@@ -374,7 +388,7 @@ def assign_material(
         "material_tag": material_tag,
         "physics": physics_name,
         "component": str(comp.tag()),
-        "domain_selection": domains or "all",
+        "domain_selection": selected_domains,
         "created": created,
         "message": f"Material '{material_name}' assigned to physics '{physics_name}'",
     }
@@ -847,6 +861,7 @@ def remove_physics_interface(model, physics_name: str) -> dict:
     """Remove a physics interface by tag or label through clientapi."""
     jm = model.java
     available = []
+    matches = []
     for raw_component_tag in list(jm.component().tags()):
         component_tag = str(raw_component_tag)
         component = jm.component().get(component_tag)
@@ -860,13 +875,26 @@ def remove_physics_interface(model, physics_name: str) -> dict:
                 label = tag
             available.append({"component": component_tag, "tag": tag, "label": label})
             if physics_name in {tag, label}:
-                physics_list.remove(tag)
-                return {
-                    "success": True,
-                    "removed": tag,
-                    "label": label,
-                    "component": component_tag,
-                }
+                matches.append((component_tag, tag, label, physics_list))
+    if len(matches) > 1:
+        return {
+            "success": False,
+            "error": f"Physics interface name is ambiguous: {physics_name}",
+            "matches": [
+                {"component": component, "tag": tag, "label": label}
+                for component, tag, label, _physics_list in matches
+            ],
+            "available": available,
+        }
+    if matches:
+        component_tag, tag, label, physics_list = matches[0]
+        physics_list.remove(tag)
+        return {
+            "success": True,
+            "removed": tag,
+            "label": label,
+            "component": component_tag,
+        }
     return {
         "success": False,
         "error": f"Physics interface not found: {physics_name}",

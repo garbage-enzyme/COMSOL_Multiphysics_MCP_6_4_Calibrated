@@ -88,7 +88,7 @@ def test_linux_real_solver_lease_mutation_is_refused_before_artifacts(tmp_path):
     assert not target.parent.exists()
 
 
-def test_registered_linux_preflight_is_refused_before_callback(monkeypatch):
+def test_registered_linux_preflight_is_refused_before_callback(monkeypatch, tmp_path):
     from comsol_mcp.server import create_server
     from comsol_mcp.tools import ownership
     from development_kit.tests.mcp_test_support import decode_tool_result
@@ -96,6 +96,8 @@ def test_registered_linux_preflight_is_refused_before_callback(monkeypatch):
     monkeypatch.setattr(platform, "native_solver_enabled", lambda: False)
 
     class Forbidden:
+        runtime_dir = tmp_path / "runtime"
+
         def preflight(self, **kwargs):
             raise AssertionError("Linux must not probe Windows solver readiness")
 
