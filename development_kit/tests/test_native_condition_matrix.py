@@ -410,6 +410,25 @@ def test_midpoint_cancel_preserves_raw_forward_and_removes_clone(ascii_tmp_path)
 
 
 def _stored_native_job(root, raw):
+    """Create a stored job whose watchdog window still contains the current time.
+
+    The worker loop runs inside the pytest process, and the product measures the
+    deadline from the worker's own creation time. On a machine that reaches this
+    test later than the declared budget, the window has already closed and the
+    worker refuses with "native wall watchdog deadline is invalid or expired".
+    That is a property of the harness, not of the behaviour under test, so the
+    stored spec declares a budget that still covers the elapsed time. The product
+    validates the deadline against the same spec, so nothing is bypassed; the
+    fixture only stops asserting that CI is fast.
+    """
+    budget = max(
+        120.5,
+        __import__("time").time() - process_identity(__import__("os").getpid())[
+            "process_create_time"
+        ] + 600.0,
+    )
+    raw = json.loads(json.dumps(raw))
+    raw["resource_policy"]["wall_time_budget_seconds"] = budget
     spec = normalize_validation_matrix_spec(raw)
     store = JobStore(root)
     identity = process_identity(__import__("os").getpid())
@@ -423,7 +442,6 @@ def _stored_native_job(root, raw):
             "worker_command_signature": identity["command_signature"],
         },
     )
-    budget = spec["resource_policy"]["rules"]["wall_time_budget_seconds"]
     atomic_write_json(
         store.job_dir(job_id) / "wall-watchdog.json",
         {
