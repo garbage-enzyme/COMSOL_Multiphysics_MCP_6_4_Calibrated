@@ -423,9 +423,9 @@ def _stored_native_job(root, raw):
     """
     budget = max(
         120.5,
-        __import__("time").time() - process_identity(__import__("os").getpid())[
-            "process_create_time"
-        ] + 600.0,
+        __import__("time").time()
+        - process_identity(__import__("os").getpid())["process_create_time"]
+        + 600.0,
     )
     raw = json.loads(json.dumps(raw))
     raw["resource_policy"]["wall_time_budget_seconds"] = budget
