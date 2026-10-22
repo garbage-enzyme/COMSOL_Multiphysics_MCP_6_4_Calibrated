@@ -99,10 +99,75 @@ def _wait_for_launched_identity(process: subprocess.Popen, command: list[str]) -
 
 logger = logging.getLogger(__name__)
 
-REMOVED_RESEARCH_JOB_TYPES = frozenset({
-    "spectral_characterization", "convergence_campaign", "branch_continuation_campaign",
-    "robust_shape_optimization",
-})
+REMOVED_RESEARCH_JOB_TYPES = frozenset(
+    {
+        "spectral_characterization",
+        "convergence_campaign",
+        "branch_continuation_campaign",
+        "robust_shape_optimization",
+    }
+)
+
+_DUPLICATE_INDEX_NAME = "duplicate-index.json"
+_DUPLICATE_INDEX_JOB_TYPES = frozenset(
+    {
+        "validation_matrix",
+        "thermo_optomechanical_replay",
+        "adjoint_optimization",
+        "surrogate_training",
+    }
+)
+
+
+def _rebuild_duplicate_index(root: Path) -> dict[str, str]:
+    """Rebuild the duplicate index from retained job evidence.
+
+    Retained job directories are immutable evidence, so the rebuild reads
+    each spec and never deletes a job. It runs once when the index is absent
+    or corrupt; every subsequent submission is a bounded index lookup instead
+    of a directory scan whose cost grew with retained history.
+    """
+    entries: dict[str, str] = {}
+    for path in sorted(root.iterdir()):
+        if not path.is_dir() or not path.name.startswith("job-"):
+            continue
+        spec_path = path / "spec.json"
+        if not spec_path.is_file():
+            continue
+        try:
+            existing = read_json(spec_path)
+        except OSError, ValueError, RuntimeError:
+            continue
+        if not isinstance(existing, dict):
+            continue
+        if existing.get("job_type") not in _DUPLICATE_INDEX_JOB_TYPES:
+            continue
+        fingerprint = existing.get("spec_fingerprint")
+        if isinstance(fingerprint, str) and fingerprint:
+            entries[fingerprint] = path.name
+    atomic_write_json(root / _DUPLICATE_INDEX_NAME, {"entries": entries})
+    return entries
+
+
+def _load_duplicate_index(root: Path) -> dict[str, str]:
+    """Load the duplicate index, rebuilding it from evidence when unusable."""
+    try:
+        payload = read_json(root / _DUPLICATE_INDEX_NAME)
+        entries = payload.get("entries") if isinstance(payload, dict) else None
+        if isinstance(entries, dict) and all(
+            isinstance(key, str) and isinstance(value, str) for key, value in entries.items()
+        ):
+            return dict(entries)
+    except OSError, ValueError, RuntimeError:
+        pass
+    return _rebuild_duplicate_index(root)
+
+
+def _append_duplicate_index_entry(root: Path, fingerprint: str, job_id: str) -> None:
+    """Record one admitted job; callers hold the submit lock."""
+    entries = _load_duplicate_index(root)
+    entries[fingerprint] = job_id
+    atomic_write_json(root / _DUPLICATE_INDEX_NAME, {"entries": entries})
 
 
 def _refuse_removed_job(job_type: object) -> None:
@@ -504,6 +569,7 @@ class JobManager:
                         ),
                     }
                 job_id = self.store.create(spec, state)
+                _append_duplicate_index_entry(self.store.root, spec["spec_fingerprint"], job_id)
         else:
             job_id = self.store.create(spec, state)
         try:
@@ -553,24 +619,25 @@ class JobManager:
             ) from exc
         return {"success": True, "job_id": job_id, "status": "submitted"}
 
-    def _find_validation_duplicate(self, spec_fingerprint: str) -> str | None:
-        return self._find_exact_duplicate("validation_matrix", spec_fingerprint)
-
     def _find_exact_duplicate(self, job_type: str, spec_fingerprint: str) -> str | None:
-        directories = sorted(
-            path
-            for path in self.store.root.iterdir()
-            if path.is_dir() and path.name.startswith("job-") and (path / "spec.json").is_file()
-        )
-        if len(directories) > 1000:
-            raise RuntimeError("Durable job root exceeds the duplicate-scan bound")
-        for directory in directories:
-            existing = read_json(directory / "spec.json")
-            if (
-                existing.get("job_type") == job_type
-                and existing.get("spec_fingerprint") == spec_fingerprint
-            ):
-                return directory.name
+        entries = _load_duplicate_index(self.store.root)
+        job_id = entries.get(spec_fingerprint)
+        if job_id is None:
+            return None
+        try:
+            existing = read_json(self.store.root / job_id / "spec.json")
+        except OSError, ValueError, RuntimeError:
+            existing = None
+        if (
+            isinstance(existing, dict)
+            and existing.get("job_type") == job_type
+            and existing.get("spec_fingerprint") == spec_fingerprint
+        ):
+            return job_id
+        # The recorded job no longer matches or is gone; drop the stale entry
+        # instead of refusing future submissions against dead history.
+        entries.pop(spec_fingerprint, None)
+        atomic_write_json(self.store.root / _DUPLICATE_INDEX_NAME, {"entries": entries})
         return None
 
     def _run_preflight(self, spec: dict[str, Any]) -> dict[str, Any]:
@@ -1145,9 +1212,7 @@ class JobManager:
         if spec["job_type"] != "test_sequence":
             preflight = self._run_preflight(spec)
             if not preflight.get("ready", preflight.get("success", False)):
-                raise ValueError(
-                    f"Job preflight failed: {preflight.get('blockers') or preflight}"
-                )
+                raise ValueError(f"Job preflight failed: {preflight.get('blockers') or preflight}")
 
         with self.store.lock(job_id):
             state = self.store.read_state(job_id)
@@ -1222,9 +1287,15 @@ class JobManager:
         if legacy_spec.get("job_type") in REMOVED_RESEARCH_JOB_TYPES:
             state = self.store.read_state(job_id)
             return {
-                **state, "success": True, "job_id": job_id,
-                "legacy_execution": {"supported": False, "reason_code": "research_job_removed",
-                                     "legacy_version": "0.7.8", "analysis_replayed": False},
+                **state,
+                "success": True,
+                "job_id": job_id,
+                "legacy_execution": {
+                    "supported": False,
+                    "reason_code": "research_job_removed",
+                    "legacy_version": "0.7.8",
+                    "analysis_replayed": False,
+                },
             }
         # A cancellation coordinator must be able to acquire the durable lock
         # promptly.  Atomic state replacement makes this terminal observation

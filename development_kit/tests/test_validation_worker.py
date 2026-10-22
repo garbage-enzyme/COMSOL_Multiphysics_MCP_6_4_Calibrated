@@ -494,3 +494,113 @@ def test_native_cancel_monitor_failure_is_recorded_durably(tmp_path, ascii_root,
         "message": "injected native monitor failure",
         "cleanup_errors": [],
     }
+
+
+def test_duplicate_admission_works_beyond_the_old_scan_bound(
+    tmp_path, ascii_root, monkeypatch
+):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda job_id, module: launches.append((job_id, module)) or identity,
+    )
+    for index in range(1200):
+        directory = ascii_root / "jobs" / f"job-hist{index:05d}"
+        directory.mkdir()
+        (directory / "spec.json").write_text(
+            json.dumps(
+                {
+                    "job_type": "validation_matrix",
+                    "spec_fingerprint": f"{index:064x}",
+                }
+            ),
+            encoding="ascii",
+        )
+
+    first = manager.submit(_raw_spec(source))
+
+    other = tmp_path / "other.mph"
+    other.write_bytes(b"different-model")
+    second = manager.submit(_raw_spec(other))
+    assert second["job_id"] != first["job_id"]
+    assert len(launches) == 2
+
+    historical = manager._find_exact_duplicate("validation_matrix", f"{7:064x}")
+    assert historical == "job-hist00007"
+
+    duplicate = manager.submit(_raw_spec(source))
+    assert duplicate["duplicate"] is True
+    assert duplicate["job_id"] == first["job_id"]
+    assert len(launches) == 2
+
+
+def test_duplicate_index_recovers_from_corruption_deletion_and_stale_entries(
+    tmp_path, ascii_root, monkeypatch
+):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    jobs_root = ascii_root / "jobs"
+    manager = JobManager(jobs_root, preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    monkeypatch.setattr(manager, "_launch_worker", lambda job_id, module: identity)
+    first = manager.submit(_raw_spec(source))
+    index_path = jobs_root / "duplicate-index.json"
+
+    index_path.write_text("{corrupt", encoding="ascii")
+    rebuilt = manager.submit(_raw_spec(source))
+    assert rebuilt["duplicate"] is True
+    assert rebuilt["job_id"] == first["job_id"]
+
+    index_path.unlink()
+    after_restart = JobManager(jobs_root, preflight=lambda **_kwargs: {"ready": True})
+    monkeypatch.setattr(after_restart, "_launch_worker", lambda job_id, module: identity)
+    restarted = after_restart.submit(_raw_spec(source))
+    assert restarted["duplicate"] is True
+    assert restarted["job_id"] == first["job_id"]
+
+    stale = jobs_root / "job-removed0000000000000000000000000001"
+    stale.mkdir()
+    index_path.write_text(
+        json.dumps({"entries": {("a" * 64): stale.name}}),
+        encoding="ascii",
+    )
+    assert manager._find_exact_duplicate("validation_matrix", "a" * 64) is None
+    other = tmp_path / "other.mph"
+    other.write_bytes(b"different-model")
+    admitted = manager.submit(_raw_spec(other))
+    assert admitted.get("duplicate") is not True
+
+
+def test_concurrent_identical_submissions_admit_exactly_one_job(
+    tmp_path, ascii_root, monkeypatch
+):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda job_id, module: launches.append(job_id) or identity,
+    )
+    results = []
+
+    def submit_once():
+        results.append(manager.submit(_raw_spec(source)))
+
+    threads = [threading.Thread(target=submit_once) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    job_ids = {result["job_id"] for result in results}
+    assert len(job_ids) == 1
+    assert sum(1 for result in results if result.get("duplicate")) == 1
+    assert len(launches) == 1
