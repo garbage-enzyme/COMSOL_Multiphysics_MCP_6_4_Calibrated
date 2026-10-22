@@ -613,8 +613,9 @@ def test_contained_profile_still_requires_an_explicit_revision_token(tmp_path, m
 
 
 def test_path_policy_refusal_reports_the_actual_enforcement_decision(tmp_path, monkeypatch):
-    from development_kit.tests.platform_fixtures import platform_test_root
     from src.path_policy import ARTIFACT_WRITE_ROOT_ENV, MODEL_READ_ROOTS_ENV
+
+    from development_kit.tests.platform_fixtures import platform_test_root
 
     base = platform_test_root("arbiter-policy")
     base.mkdir(parents=True, exist_ok=True)
