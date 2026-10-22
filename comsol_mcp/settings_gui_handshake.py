@@ -14,6 +14,8 @@ HANDSHAKE_ENV = "COMSOL_MCP_SETTINGS_GUI_HANDSHAKE"
 HANDSHAKE_SCHEMA = "comsol_mcp.settings_gui_handshake"
 HANDSHAKE_VERSION = "1.0.0"
 MAX_HANDSHAKE_BYTES = 2048
+HANDSHAKE_PUBLISH_RETRY_SECONDS = 2.0
+HANDSHAKE_PUBLISH_RETRY_INTERVAL_SECONDS = 0.02
 _HANDSHAKE_NAME = re.compile(r"^\.settings-gui-[0-9a-f]{32}\.json$")
 _STATES = frozenset(
     {
@@ -125,8 +127,21 @@ def publish_handshake(
         if read_handshake(path) != handshake_payload("pending"):
             temporary.unlink(missing_ok=True)
             return False
-        os.replace(temporary, path)
-        return path.read_bytes() == raw
+        deadline = time.monotonic() + HANDSHAKE_PUBLISH_RETRY_SECONDS
+        while True:
+            try:
+                os.replace(temporary, path)
+            except PermissionError:
+                # A GUI reader can briefly hold the pending handshake open;
+                # Windows denies replacing a file with an open handle. Retry
+                # within one bounded window so a short reader overlap cannot
+                # stall the launch handshake, and give up permanently after
+                # the deadline instead of blocking the launcher forever.
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(HANDSHAKE_PUBLISH_RETRY_INTERVAL_SECONDS)
+                continue
+            return path.read_bytes() == raw
     except OSError, RuntimeError, ValueError:
         return False
     finally:
