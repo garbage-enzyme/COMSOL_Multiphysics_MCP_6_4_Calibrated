@@ -244,8 +244,7 @@ def _validate_persisted_receipt(
         or normalized.get("schema_version") != CONDITION_GRADIENT_RECEIPT_SCHEMA_VERSION
         or normalized.get("condition_id") != condition["condition_id"]
         or normalized.get("condition_order") != condition["order"]
-        or normalized.get("disposition")
-        not in {"measured", "measured_gate_failed"}
+        or normalized.get("disposition") not in {"measured", "measured_gate_failed"}
         or supplied != expected
     ):
         raise ValueError("persisted native condition gradient receipt is invalid")
@@ -336,9 +335,7 @@ def collect_native_condition_gradients(
             # The finite raw values and the gate verdict are already durable
             # in the persisted receipt; refuse here so a gate-failed raw
             # measurement never becomes gradient acceptance evidence.
-            raise ValueError(
-                "native condition gradient scientific measurement gate failed"
-            )
+            raise ValueError("native condition gradient scientific measurement gate failed")
         condition_gradients.append(
             {
                 "condition_id": condition["condition_id"],

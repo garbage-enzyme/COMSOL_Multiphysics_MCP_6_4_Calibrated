@@ -151,9 +151,7 @@ def test_native_condition_gradient_rejects_out_of_range_power_channels(ascii_tmp
             observations=observations,
             cancel_requested=lambda: False,
         )
-    persisted = json.loads(
-        (target / "condition-gradient-0000.json").read_text(encoding="utf-8")
-    )
+    persisted = json.loads((target / "condition-gradient-0000.json").read_text(encoding="utf-8"))
     assert persisted["disposition"] == "measured_gate_failed"
     assert persisted[field] == 1.5
     assert persisted["scientific_gate"]["range_checks"][field] is False
