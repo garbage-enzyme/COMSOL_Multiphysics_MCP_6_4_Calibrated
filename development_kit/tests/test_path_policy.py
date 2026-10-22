@@ -729,3 +729,132 @@ def test_configured_reparse_root_is_rejected(tmp_path, ascii_root):
                 ARTIFACT_WRITE_ROOT_ENV: str(ascii_root / "artifacts"),
             }
         )
+
+
+def test_job_spec_nested_paths_are_contained_before_admission(tmp_path, ascii_root, monkeypatch):
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    manifest = write_root / "adjoint.manifest.json"
+    manifest.write_text("{}", encoding="ascii")
+
+    def job_submit(*, spec=None):
+        pass
+
+    _args, normalized, _evidence, read_pins, _write_pins = validate_tool_paths(
+        job_submit,
+        (),
+        {
+            "spec": {
+                "job_type": "adjoint_optimization",
+                "submission_manifest_path": str(manifest),
+            }
+        },
+        tool_name="job_submit",
+        profile_name="experimental",
+    )
+
+    assert normalized["spec"]["submission_manifest_path"] == str(manifest.resolve())
+    assert {pin.path for pin in read_pins} == {manifest.resolve()}
+
+    outside = tmp_path / "outside.manifest.json"
+    outside.write_text("{}", encoding="ascii")
+    with pytest.raises(ValueError):
+        validate_tool_paths(
+            job_submit,
+            (),
+            {
+                "spec": {
+                    "job_type": "adjoint_optimization",
+                    "submission_manifest_path": str(outside),
+                }
+            },
+            tool_name="job_submit",
+            profile_name="experimental",
+        )
+
+    with pytest.raises(ValueError):
+        validate_tool_paths(
+            job_submit,
+            (),
+            {
+                "spec": {
+                    "job_type": "thermo_optomechanical_replay",
+                    "specification_path": str(outside),
+                }
+            },
+            tool_name="job_submit",
+            profile_name="core",
+        )
+
+
+def test_job_spec_temporary_directory_must_stay_inside_the_write_root(
+    tmp_path, ascii_root, monkeypatch
+):
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    scratch = write_root / "scratch"
+    scratch.mkdir()
+
+    def job_submit(*, spec=None):
+        pass
+
+    _args, normalized, _evidence, _read_pins, _write_pins = validate_tool_paths(
+        job_submit,
+        (),
+        {"spec": {"job_type": "validation_matrix", "comsol_temporary_directory": str(scratch)}},
+        tool_name="job_submit",
+        profile_name="experimental",
+    )
+
+    assert normalized["spec"]["comsol_temporary_directory"] == str(scratch.resolve())
+
+    outside_directory = tmp_path / "outside-scratch"
+    outside_directory.mkdir()
+    with pytest.raises(ValueError):
+        validate_tool_paths(
+            job_submit,
+            (),
+            {
+                "spec": {
+                    "job_type": "validation_matrix",
+                    "comsol_temporary_directory": str(outside_directory),
+                }
+            },
+            tool_name="job_submit",
+            profile_name="experimental",
+        )
+
+
+def test_job_spec_symlink_indirection_is_refused(tmp_path, ascii_root, monkeypatch):
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    try:
+        escape = tmp_path / "escape.manifest.json"
+        escape.write_text("{}", encoding="ascii")
+        linked = write_root / "linked.manifest.json"
+        linked.symlink_to(escape)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    def job_submit(*, spec=None):
+        pass
+
+    with pytest.raises(ValueError):
+        validate_tool_paths(
+            job_submit,
+            (),
+            {
+                "spec": {
+                    "job_type": "adjoint_optimization",
+                    "submission_manifest_path": str(linked),
+                }
+            },
+            tool_name="job_submit",
+            profile_name="experimental",
+        )

@@ -667,6 +667,14 @@ _MODEL_READ_ARGUMENTS = {
 _SHARED_SOURCE_READ_ARGUMENTS = {
     "shared_model_lock": ("immutable_source_path",),
 }
+# Nested path fields that ride inside a job_submit spec mapping, keyed by the
+# spec's job_type. Each entry names the field and the containment kind the
+# policy applies before admission reads, job creation or worker launch.
+_JOB_SPEC_PATH_FIELDS: dict[str, tuple[tuple[str, str], ...]] = {
+    "adjoint_optimization": (("submission_manifest_path", "artifact_read"),),
+    "thermo_optomechanical_replay": (("specification_path", "artifact_read"),),
+    "validation_matrix": (("comsol_temporary_directory", "artifact_write_directory"),),
+}
 _ARTIFACT_READ_ARGUMENTS = {
     "wave_optics_point_audit": ("air_reference_artifact_path",),
     # B04: offline export manifest must stay inside the owned artifact root.
@@ -794,9 +802,8 @@ def validate_tool_paths(
             if required:
                 raise ValueError(f"{tool_name}.{argument} is required by the contained path policy")
             continue
-        continuation = (
-            argument in {"csv_path", "manifest_path"}
-            and bool(bound.arguments.get("append_csv") or bound.arguments.get("resume_csv"))
+        continuation = argument in {"csv_path", "manifest_path"} and bool(
+            bound.arguments.get("append_csv") or bound.arguments.get("resume_csv")
         )
         if continuation and Path(value).exists():
             decision = policy.validate_artifact_update(value)
@@ -806,12 +813,30 @@ def validate_tool_paths(
         decisions.append(decision)
     if tool_name == "job_submit":
         spec = bound.arguments.get("spec")
-        if isinstance(spec, Mapping) and spec.get("source_model_path") is not None:
-            decision = policy.validate_model_read(spec["source_model_path"], suffixes=(".mph",))
+        if isinstance(spec, Mapping):
             normalized_spec = dict(spec)
-            normalized_spec["source_model_path"] = str(decision.normalized_path)
+            if spec.get("source_model_path") is not None:
+                decision = policy.validate_model_read(spec["source_model_path"], suffixes=(".mph",))
+                normalized_spec["source_model_path"] = str(decision.normalized_path)
+                decisions.append(decision)
+            # Nested paths ride inside the job spec mapping, so the declared
+            # per-tool argument tables above never see them. Each supported
+            # job type names its nested path fields and the containment kind;
+            # routing them here rejects outside-root indirection before any
+            # admission read, job creation or worker launch.
+            for field, kind in _JOB_SPEC_PATH_FIELDS.get(str(spec.get("job_type")), ()):
+                value = spec.get(field)
+                if value is None:
+                    continue
+                if kind == "artifact_read":
+                    decision = policy.validate_artifact_read(value)
+                elif kind == "artifact_write_directory":
+                    decision = policy.validate_artifact_write(value, directory=True)
+                else:  # pragma: no cover - table entries are internal constants
+                    raise ValueError(f"unsupported nested path kind for job spec field {field}")
+                normalized_spec[field] = str(decision.normalized_path)
+                decisions.append(decision)
             bound.arguments["spec"] = normalized_spec
-            decisions.append(decision)
     evidence = {
         **policy.capability(enforced=True),
         "validated_input_count": len(decisions),
