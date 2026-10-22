@@ -334,6 +334,35 @@ def test_recovery_refuses_active_foreign_lease(runtime_dir):
     assert observer.lease_path.exists()
 
 
+def test_shared_runtime_domain_still_refuses_a_second_owner(runtime_dir):
+    # Synthetic tests get isolated runtime roots per worker, but the exclusion
+    # contract itself is unchanged: two owners on one shared domain must not
+    # both hold the lease.
+    first_command = ["python.exe", "owner-a"]
+    first_process = process(61, 601.0, first_command)
+    first = owner(runtime_dir, 61, 601.0, first_command, [first_process])
+    assert first.acquire(mode="local-client")["success"] is True
+
+    second_command = ["python.exe", "owner-b"]
+    second_process = process(62, 602.0, second_command)
+    second = owner(
+        runtime_dir,
+        62,
+        602.0,
+        second_command,
+        [first_process, second_process],
+    )
+    refused = second.acquire(mode="local-client")
+
+    assert refused["success"] is False
+    assert second.lease_path.exists()
+
+
+def test_non_ascii_runtime_dir_error_names_the_configuration_variable(tmp_path):
+    with pytest.raises(ValueError, match="set COMSOL_MCP_RUNTIME_DIR"):
+        SolverOwnership(tmp_path / "用户")
+
+
 def test_lease_is_active_for_same_os_process_identity(runtime_dir):
     command = ["python.exe", "-m", "src.server"]
     own_process = process(41, 401.0, command)
