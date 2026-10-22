@@ -739,6 +739,18 @@ _ALWAYS_ENFORCED_TOOLS = frozenset(
 )
 
 
+def path_policy_enforced(tool_name: str, profile_name: str) -> bool:
+    """Report the authoritative enforcement decision for one tool call.
+
+    This is the single condition ``validate_tool_paths`` applies: contained
+    profiles validate every tool, and the full profile exempts only tools that
+    are not on the always-enforced list. Failure evidence must report this
+    decision instead of guessing from the profile name alone, because an
+    always-enforced tool stays enforced under the full profile.
+    """
+    return profile_name != "full" or tool_name in _ALWAYS_ENFORCED_TOOLS
+
+
 def validate_tool_paths(
     function: Any,
     args: tuple[Any, ...],
@@ -754,7 +766,7 @@ def validate_tool_paths(
     tuple[ValidatedWritePin, ...],
 ]:
     """Validate and normalize known caller-selected path arguments."""
-    if profile_name == "full" and tool_name not in _ALWAYS_ENFORCED_TOOLS:
+    if not path_policy_enforced(tool_name, profile_name):
         return (
             args,
             kwargs,
@@ -860,6 +872,7 @@ __all__ = [
     "ReadPinError",
     "ValidatedReadPin",
     "ValidatedWritePin",
+    "path_policy_enforced",
     "validated_read_pin",
     "read_contained_file_snapshot",
     "pin_validated_reads",

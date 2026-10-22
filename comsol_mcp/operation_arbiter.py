@@ -390,7 +390,10 @@ def guard_tool_call(
     def guarded(*args: Any, **kwargs: Any) -> Any:
         from comsol_mcp.evidence.integrity_controls import annotate_tool_response
         from comsol_mcp.path_policy import (
+            PATH_POLICY_SCHEMA,
+            PATH_POLICY_VERSION,
             ReadPinError,
+            path_policy_enforced,
             pin_validated_reads,
             pin_validated_writes,
             validate_tool_paths,
@@ -417,9 +420,9 @@ def guard_tool_call(
                     "success": False,
                     "error": str(exc),
                     "path_policy": {
-                        "schema_name": "comsol_mcp.path_policy",
-                        "schema_version": "1.0.0",
-                        "enforced": profile_name != "full",
+                        "schema_name": PATH_POLICY_SCHEMA,
+                        "schema_version": PATH_POLICY_VERSION,
+                        "enforced": path_policy_enforced(tool_name, profile_name),
                         "accepted": False,
                         "error_type": type(exc).__name__,
                     },
@@ -589,7 +592,10 @@ def _guard_async_tool_call(
     async def guarded(*args: Any, **kwargs: Any) -> Any:
         from comsol_mcp.evidence.integrity_controls import annotate_tool_response
         from comsol_mcp.path_policy import (
+            PATH_POLICY_SCHEMA,
+            PATH_POLICY_VERSION,
             ReadPinError,
+            path_policy_enforced,
             pin_validated_reads,
             pin_validated_writes,
             validate_tool_paths,
@@ -614,9 +620,9 @@ def _guard_async_tool_call(
                     "success": False,
                     "error": str(exc),
                     "path_policy": {
-                        "schema_name": "comsol_mcp.path_policy",
-                        "schema_version": "1.0.0",
-                        "enforced": profile_name != "full",
+                        "schema_name": PATH_POLICY_SCHEMA,
+                        "schema_version": PATH_POLICY_VERSION,
+                        "enforced": path_policy_enforced(tool_name, profile_name),
                         "accepted": False,
                         "error_type": type(exc).__name__,
                     },

@@ -563,9 +563,9 @@ def test_full_profile_honors_a_supplied_stale_revision_token(tmp_path, monkeypat
     assert stale["success"] is False
     assert "does not match current model state" in stale["error"]
     assert calls == []
-    assert session_manager.get_model_revision("model")["revision_sha256"] == initial[
-        "revision_sha256"
-    ]
+    assert (
+        session_manager.get_model_revision("model")["revision_sha256"] == initial["revision_sha256"]
+    )
 
     fresh = guarded(expected_model_revision=initial["revision_sha256"])
     assert fresh["success"] is True
@@ -610,3 +610,67 @@ def test_contained_profile_still_requires_an_explicit_revision_token(tmp_path, m
     assert omitted["success"] is False
     assert "expected_model_revision is required" in omitted["error"]
     assert calls == []
+
+
+def test_path_policy_refusal_reports_the_actual_enforcement_decision(tmp_path, monkeypatch):
+    from development_kit.tests.platform_fixtures import platform_test_root
+    from src.path_policy import ARTIFACT_WRITE_ROOT_ENV, MODEL_READ_ROOTS_ENV
+
+    base = platform_test_root("arbiter-policy")
+    base.mkdir(parents=True, exist_ok=True)
+    write_root = base / "artifacts"
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(base / "models"))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    arbiter = OperationArbiter(
+        tmp_path,
+        pid=100,
+        process_create_time=10.0,
+        process_probe=lambda pid: 10.0,
+    )
+    monkeypatch.setattr("src.operation_arbiter.get_operation_arbiter", lambda: arbiter)
+
+    def offline_export_validate(*, manifest_path=None):
+        return {"success": True}
+
+    # An always-enforced tool stays enforced under the full profile.
+    enforced_guard = guard_tool_call(
+        offline_export_validate,
+        tool_name="offline_export_validate",
+        side_effect_class="read_only",
+        concurrency_class="process_local",
+        profile_name="full",
+    )
+    refused = enforced_guard(manifest_path=str(tmp_path / "outside.json"))
+    assert refused["success"] is False
+    assert refused["path_policy"]["enforced"] is True
+    assert refused["path_policy"]["schema_version"] == "1.1.0"
+
+    # A contained-profile refusal reports enforcement truthfully.
+    contained_guard = guard_tool_call(
+        offline_export_validate,
+        tool_name="offline_export_validate",
+        side_effect_class="read_only",
+        concurrency_class="process_local",
+        profile_name="core",
+    )
+    contained = contained_guard(manifest_path=str(tmp_path / "outside.json"))
+    assert contained["success"] is False
+    assert contained["path_policy"]["enforced"] is True
+
+    # A non-listed tool under the full profile is legacy: its evidence must
+    # report the policy as not enforced rather than guessing from the profile.
+    def mesh_create(**_kwargs):
+        return {"success": True}
+
+    legacy_guard = guard_tool_call(
+        mesh_create,
+        tool_name="mesh_create",
+        side_effect_class="read_only",
+        concurrency_class="process_local",
+        profile_name="full",
+    )
+    legacy = legacy_guard(manifest_path=str(tmp_path / "outside.json"))
+    assert legacy["success"] is True
+    assert legacy["path_policy"]["enforced"] is False
+    assert legacy["path_policy"]["compatibility_mode"] == "legacy_broad_paths"
