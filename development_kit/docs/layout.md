@@ -362,6 +362,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/tests/test_runtime_paths.py` — The tests cover shared ASCII-safe runtime and lease paths.
 - `development_kit/tests/test_schema_registry.py` — The tests cover named schema coverage and version support resolution.
 - `development_kit/tests/test_security_gate.py` — The tests cover vulnerability report parsing and expiring allowlist policy.
+- `development_kit/tests/test_worker_runtime_isolation.py` — The tests cover per-worker synthetic runtime-root isolation and shared-default exclusion.
 - `development_kit/tests/test_progressive_discovery.py` — The tests cover the cold-start byte budget, catalog, and cursor paging boundaries.
 - `development_kit/tests/test_semantic_contracts.py` — The tests cover semantic benchmark contracts, limits, and import safety.
 - `development_kit/tests/test_semantic_index.py` — The tests cover immutable semantic index construction and publication.

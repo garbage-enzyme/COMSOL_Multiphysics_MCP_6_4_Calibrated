@@ -1018,9 +1018,11 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         if isinstance(step, dict)
     )
 
-    assert "serial_test_shards.py" in dependency_commands
-    assert " -n " not in dependency_commands
-    assert 'os.environ.get("GITHUB_ACTIONS", "").casefold() == "true"' in quality_gate
+    assert " -n " in dependency_commands
+    assert "serial_test_shards.py" not in dependency_commands
+    assert "dist loadscope" in dependency_commands
+    assert "_verify_execution_partition" in quality_gate
+    assert "_collection_count" in quality_gate
     assert "python -m build" in unit_commands
     assert "release_gate.py --skip-tests" in unit_commands
     action_references = [
@@ -1106,7 +1108,9 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
     assert '"pydantic==2.13.5"' in preview_commands
     assert "pydantic_core-2.46.5.tar.gz#sha256=" in preview_commands
     assert "installed_stdio_probe.py" in preview_commands
-    assert "serial_test_shards.py" in preview_commands
+    assert " -n " in preview_commands
+    assert "dist loadscope" in preview_commands
+    assert "serial_test_shards.py" not in preview_commands
     assert "test_control_plane_startup.py" in preview_commands
     assert "settings_gui/tests" in preview_commands
     assert "-W error -W" in preview_commands
@@ -1126,7 +1130,7 @@ def test_hosted_ci_is_dependency_only_and_real_gate_is_explicit():
         step for step in dependency_steps if "PYTHONUNBUFFERED" in step.get("env", {})
     )
     assert dependency_run_step["env"]["PYTHONUNBUFFERED"] == "1"
-    assert "--basetemp-root D:\\comsol_pytest\\dependency-main" in dependency_commands
+    assert "--basetemp D:\\comsol_pytest\\dependency-main" in dependency_commands
     assert "New-Item -ItemType Directory -Force -Path D:\\comsol_pytest" in dependency_commands
     assert "--ignore development_kit/tests/test_control_plane_startup.py" in dependency_commands
     assert "test_control_plane_startup.py --basetemp" in dependency_commands

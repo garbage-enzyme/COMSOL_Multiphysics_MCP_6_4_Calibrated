@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -335,16 +336,26 @@ def validate_quality_target_inventory(root: Path = ROOT) -> dict[str, Any]:
     }
 
 
-def _main_pytest_command(pytest_root: Path, *, hosted_ci: bool) -> list[str]:
-    """Build the main-suite command, keeping hosted Python 3.14 execution serial."""
+def _main_pytest_command(pytest_root: Path, *, hosted_ci: bool, junit_path: Path) -> list[str]:
+    """Build the main-suite command; the same parallel lane runs everywhere.
+
+    The hosted lane used to fall back to serial shards because parallel
+    workers contended for one shared solver-lease runtime directory. Test
+    workers now derive isolated synthetic runtime roots before any ownership
+    object exists, so the hosted lane runs the identical parallel command as
+    the local lane. The junit report feeds the exact-partition check.
+    ``hosted_ci`` is retained only so callers keep a single command builder.
+    """
+    del hosted_ci
     command = [sys.executable, "-m", "pytest", "-q"]
-    if not hosted_ci:
-        command.extend(["-n", str(PARALLEL_TEST_WORKERS), "--dist", "loadscope"])
+    command.extend(["-n", str(PARALLEL_TEST_WORKERS), "--dist", "loadscope"])
     command.extend(
         [
             "--basetemp",
             str(pytest_root),
             *(argument for target in SERIAL_TEST_TARGETS for argument in ("--ignore", target)),
+            "--junitxml",
+            str(junit_path),
             "--cov=comsol_mcp",
             "--cov-branch",
             "--cov-report=",
@@ -370,20 +381,60 @@ def _serial_pytest_command(pytest_root: Path) -> list[str]:
     ]
 
 
-def _hosted_serial_shard_command(basetemp_root: Path, coverage_root: Path) -> list[str]:
-    """Build the no-xdist hosted runner command for isolated serial shards."""
-    return [
+def _collection_count() -> int:
+    """Count the collected main-suite tests for the exact-partition check."""
+    command = [
         sys.executable,
-        "development_kit/scripts/serial_test_shards.py",
-        "--basetemp-root",
-        str(basetemp_root),
-        "--coverage-root",
-        str(coverage_root),
-        "--shards",
-        "2",
-        "--ignore",
-        SERIAL_TEST_TARGETS[0],
+        "-m",
+        "pytest",
+        "--collect-only",
+        "-q",
+        *(argument for target in SERIAL_TEST_TARGETS for argument in ("--ignore", target)),
     ]
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
+    )
+    # ``-m`` filters can deselect collected items; the summary then reads
+    # "selected/total tests collected (N deselected)". The partition check
+    # compares against what the run executes, so take the selected count.
+    match = re.search(r"(\d+)(?:/\d+)? tests? collected", result.stdout)
+    if not match:
+        raise ValueError("collection summary line not found for the partition check")
+    return int(match.group(1))
+
+
+def _verify_execution_partition(junit_path: Path, collected: int) -> dict[str, Any]:
+    """Prove the parallel run executed the collected set exactly once."""
+    import xml.etree.ElementTree as ElementTree
+
+    try:
+        # The gate itself writes this junit report from its own pytest run;
+        # it is trusted self-produced evidence, not untrusted input.
+        root = ElementTree.parse(junit_path).getroot()  # noqa: S314
+    except (OSError, ElementTree.ParseError) as exc:
+        raise ValueError(f"partition check cannot read the junit report: {exc}") from exc
+    cases = list(root.iter("testcase"))
+    identities = [(case.get("classname"), case.get("name")) for case in cases]
+    duplicates = sorted({name for name in identities if identities.count(name) > 1})
+    if duplicates:
+        raise ValueError(
+            f"parallel suite executed {len(duplicates)} test identities more than once"
+        )
+    executed = len(cases)
+    if executed != collected:
+        raise ValueError(
+            f"parallel suite executed {executed} tests but collection counted {collected}"
+        )
+    return {
+        "collected": collected,
+        "executed": executed,
+        "exact_partition": True,
+    }
 
 
 def _sha256(path: Path) -> str:
@@ -668,6 +719,7 @@ def run_quality_gate(
     environment = dict(os.environ)
     environment["COVERAGE_FILE"] = str(coverage_data)
     run_id = run_root.name
+    execution_partition: dict[str, Any] | None = None
 
     try:
         validate_quality_target_inventory()
@@ -695,25 +747,19 @@ def run_quality_gate(
             stage="coverage_erase",
             environment=environment,
         )
-        hosted_ci = os.environ.get("GITHUB_ACTIONS", "").casefold() == "true"
-        if hosted_ci:
-            shard_coverage_root = run_root / "shard-coverage"
-            _run(
-                _hosted_serial_shard_command(main_pytest_root, shard_coverage_root),
-                stage="hosted_serial_shards",
-                environment=environment,
-            )
-            coverage_inputs = [
-                shard_coverage_root / ".coverage-shard-0",
-                shard_coverage_root / ".coverage-shard-1",
-            ]
-        else:
-            _run(
-                _main_pytest_command(main_pytest_root, hosted_ci=False),
-                stage="parallel_tests",
-                environment=environment,
-            )
-            coverage_inputs = [coverage_data]
+        collected = _collection_count()
+        junit_report = run_root / "main-junit.xml"
+        _run(
+            _main_pytest_command(
+                main_pytest_root,
+                hosted_ci=os.environ.get("GITHUB_ACTIONS", "").casefold() == "true",
+                junit_path=junit_report,
+            ),
+            stage="parallel_tests",
+            environment=environment,
+        )
+        execution_partition = _verify_execution_partition(junit_report, collected)
+        coverage_inputs = [coverage_data]
         serial_coverage_data = run_root / ".coverage-serial"
         serial_environment = dict(environment)
         serial_environment["COVERAGE_FILE"] = str(serial_coverage_data)
@@ -772,6 +818,7 @@ def run_quality_gate(
             "dependency_licenses": None,
             "coverage_policy_sha256": _sha256(POLICY_PATH),
             "solver_started": False,
+            "execution_partition": execution_partition,
         }
         _write_quality_receipt(run_root, receipt)
         return receipt
@@ -794,6 +841,7 @@ def run_quality_gate(
             "dependency_licenses": None,
             "coverage_policy_sha256": _sha256(POLICY_PATH),
             "solver_started": False,
+            "execution_partition": execution_partition,
         }
         _write_quality_receipt(run_root, receipt)
         return receipt
@@ -827,6 +875,7 @@ def run_quality_gate(
             "dependency_licenses": None,
             "coverage_policy_sha256": _sha256(POLICY_PATH),
             "solver_started": False,
+            "execution_partition": execution_partition,
         }
         _write_quality_receipt(run_root, receipt)
         return receipt
@@ -858,6 +907,7 @@ def run_quality_gate(
         "dependency_licenses": license_receipt,
         "coverage_policy_sha256": _sha256(POLICY_PATH),
         "solver_started": False,
+        "execution_partition": execution_partition,
     }
     _write_quality_receipt(run_root, receipt)
     return receipt

@@ -109,7 +109,8 @@ jobs:
       - name: Run preview solver-free regression and GUI tests
         shell: pwsh
         run: |
-          python development_kit/scripts/serial_test_shards.py --basetemp-root D:\mcp_tests\py315main --shards 2 --ignore development_kit/tests/test_control_plane_startup.py
+          # Per-worker synthetic runtime isolation makes the parallel lane safe here.
+          python -m pytest -q -n 4 --dist loadscope --basetemp D:\mcp_tests\py315main --ignore development_kit/tests/test_control_plane_startup.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q development_kit/tests/test_control_plane_startup.py --basetemp D:\mcp_tests\py315serial
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -185,7 +186,8 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: |
           New-Item -ItemType Directory -Force -Path D:\comsol_pytest | Out-Null
-          python development_kit/scripts/serial_test_shards.py --basetemp-root D:\comsol_pytest\dependency-main --shards 2 --ignore development_kit/tests/test_control_plane_startup.py
+          # Per-worker synthetic runtime isolation makes the parallel lane safe here.
+          python -m pytest -q -n 4 --dist loadscope --basetemp D:\comsol_pytest\dependency-main --ignore development_kit/tests/test_control_plane_startup.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -u -m pytest -vv -o faulthandler_timeout=120 development_kit/tests/test_control_plane_startup.py --basetemp D:\comsol_pytest\dependency-serial
       - name: Upload dependency test evidence
