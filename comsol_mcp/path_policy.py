@@ -350,6 +350,23 @@ def _root_id(path: Path) -> str:
     return hashlib.sha256(normalized).hexdigest()[:16]
 
 
+def _lexically_valid_artifact_path(value: Any) -> bool:
+    """Report whether a continuation target passes the lexical gate.
+
+    Continuation used to be decided by probing the filesystem directly, so a
+    UNC or device path was looked up on the network or host before the policy
+    refused it. The lexical gate now decides whether a probe may happen at
+    all; only a lexically valid target is probed for existence, and a
+    rejected value falls through to the write validator, which raises the
+    same stable refusal shape without touching the filesystem.
+    """
+    try:
+        _reject_lexical_path(value, require_ascii=True)
+    except ValueError:
+        return False
+    return True
+
+
 def _is_relative_to(path: Path, root: Path) -> bool:
     try:
         return os.path.commonpath(
@@ -817,7 +834,7 @@ def validate_tool_paths(
         continuation = argument in {"csv_path", "manifest_path"} and bool(
             bound.arguments.get("append_csv") or bound.arguments.get("resume_csv")
         )
-        if continuation and Path(value).exists():
+        if continuation and _lexically_valid_artifact_path(value):
             decision = policy.validate_artifact_update(value)
         else:
             decision = policy.validate_artifact_write(value, directory=directory)

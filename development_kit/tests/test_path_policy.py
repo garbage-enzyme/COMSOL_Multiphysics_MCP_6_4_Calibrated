@@ -858,3 +858,77 @@ def test_job_spec_symlink_indirection_is_refused(tmp_path, ascii_root, monkeypat
             tool_name="job_submit",
             profile_name="experimental",
         )
+
+
+def test_continuation_rejects_lexically_invalid_paths_without_any_probe(
+    tmp_path, ascii_root, monkeypatch
+):
+    import src.path_policy as path_policy_module
+
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+
+    probes = []
+
+    class ProbingPath(path_policy_module.Path):
+        def exists(self, *args, **kwargs):
+            probes.append(str(self))
+            return super().exists(*args, **kwargs)
+
+        def stat(self, *args, **kwargs):
+            probes.append(str(self))
+            return super().stat(*args, **kwargs)
+
+    monkeypatch.setattr(path_policy_module, "Path", ProbingPath)
+
+    def staged_sweep(*, source_model_path=None, csv_path=None, resume_csv=False):
+        pass
+
+    for bad_value, message in (
+        ("\\\\fileserver\\share\\rows.csv", "UNC paths are not allowed"),
+        ("\\\\.\\PHYSICALDRIVE0\\rows.csv", "device and extended-length paths"),
+        ("C:\\artifacts\\..\\escape\\rows.csv", "path traversal escapes"),
+        ("", "nonempty bounded string"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            validate_tool_paths(
+                staged_sweep,
+                (),
+                {"csv_path": bad_value, "resume_csv": True},
+                tool_name="study_staged_parametric_sweep",
+                profile_name="experimental",
+            )
+    # Resolving the configured roots legitimately stats the roots themselves;
+    # the invariant is that nothing ever probes the rejected input or any
+    # remote/device target it names.
+    joined = "\n".join(probes)
+    assert "fileserver" not in joined
+    assert "PHYSICALDRIVE" not in joined
+    assert "escape" not in joined
+
+
+def test_valid_continuation_still_routes_through_artifact_update(
+    tmp_path, ascii_root, monkeypatch
+):
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    csv_path = write_root / "rows.csv"
+    csv_path.write_text("old rows", encoding="ascii")
+
+    def staged_sweep(*, source_model_path=None, csv_path=None, resume_csv=False):
+        pass
+
+    _args, normalized, _evidence, _read_pins, write_pins = validate_tool_paths(
+        staged_sweep,
+        (),
+        {"csv_path": str(csv_path), "resume_csv": True},
+        tool_name="study_staged_parametric_sweep",
+        profile_name="experimental",
+    )
+
+    assert normalized["csv_path"] == str(csv_path.resolve())
+    assert write_pins and write_pins[0].target == csv_path.resolve()
