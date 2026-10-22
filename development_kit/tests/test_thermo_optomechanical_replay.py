@@ -27,6 +27,7 @@ from src.jobs.thermo_optomechanical_replay_execution import (
     ThermoOptomechanicalComsolExecutor,
 )
 from src.jobs.thermo_optomechanical_replay_rows import (
+    _validate_stage_payload,
     append_thermo_optomechanical_stage_row,
     build_stage_evidence,
     read_thermo_optomechanical_stage_rows,
@@ -249,6 +250,21 @@ def _raw_spec(root: Path) -> dict:
     }
 
 
+_SYNTHETIC_CONTROL_LABELS = {
+    "wrong_selection": ("structural", "structural_assertion"),
+    "missing_material_state": ("structural", "structural_assertion"),
+    "convection": ("declared", "declared_value"),
+    "temperature_unit": ("declared", "declared_value"),
+}
+
+
+def _synthetic_control_provenance(control_id):
+    provenance, disposition = _SYNTHETIC_CONTROL_LABELS.get(
+        control_id, ("measured", "executed_control")
+    )
+    return {"provenance": provenance, "disposition": disposition}
+
+
 def _payload(stage_id: str, spec: dict) -> dict:
     contract = spec["model_contract"]
     if stage_id == "preflight":
@@ -345,7 +361,12 @@ def _payload(stage_id: str, spec: dict) -> dict:
     return {
         "rows": rows,
         "control_results": [
-            {"control_id": item, "passed": True, "reason_code": "synthetic_control_passed"}
+            {
+                "control_id": item,
+                "passed": True,
+                "reason_code": "synthetic_control_passed",
+                **_synthetic_control_provenance(item),
+            }
             for item in spec["validation_controls"]
         ],
         "source_unchanged": True,
@@ -1641,3 +1662,59 @@ def test_spec_size_bound_includes_the_persisted_fingerprint(ascii_tmp_path, monk
 
     with pytest.raises(ValueError, match="exceeds its bound"):
         replay_spec_module.normalize_thermo_optomechanical_replay_spec(raw)
+
+
+def test_summary_separates_executed_structural_and_declared_control_counts(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "counts"))
+    root = ascii_tmp_path / "counts-artifacts"
+    result = run_thermo_optomechanical_replay(
+        spec, root, attempt=1, stage_executor=lambda stage, d, s: _payload(stage, s)
+    )
+    summary = result["summary"]
+
+    structural = {"wrong_selection", "missing_material_state"}
+    declared = {"convection", "temperature_unit"}
+    executed = set(spec["validation_controls"]) - structural - declared
+    assert summary["control_count"] == len(spec["validation_controls"])
+    assert summary["executed_control_count"] == len(executed)
+    assert summary["structural_assertion_count"] == len(
+        structural & set(spec["validation_controls"])
+    )
+    assert summary["declared_value_count"] == len(declared & set(spec["validation_controls"]))
+    assert (
+        summary["executed_control_count"]
+        + summary["structural_assertion_count"]
+        + summary["declared_value_count"]
+        == summary["control_count"]
+    )
+
+
+def test_a_failing_structural_or_declared_control_fails_the_run(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "mut"))
+    for broken in ("convection", "fixed_boundary", "wrong_selection"):
+        payload = _payload("optical_replay", spec)
+        for row in payload["control_results"]:
+            if row["control_id"] == broken:
+                row["passed"] = False
+        with pytest.raises(ValueError, match="control matrix is incomplete"):
+            _validate_stage_payload("optical_replay", payload, spec)
+
+
+def test_control_rows_without_provenance_are_rejected(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "oldshape"))
+    payload = _payload("optical_replay", spec)
+    legacy = [
+        {
+            "control_id": item["control_id"],
+            "passed": item["passed"],
+            "reason_code": item["reason_code"],
+        }
+        for item in payload["control_results"]
+    ]
+    with pytest.raises(ValueError, match="control matrix is incomplete"):
+        _validate_stage_payload("optical_replay", {**payload, "control_results": legacy}, spec)
+
+    invalid = [dict(item) for item in payload["control_results"]]
+    invalid[0]["provenance"] = "guessed"
+    with pytest.raises(ValueError, match="control matrix is incomplete"):
+        _validate_stage_payload("optical_replay", {**payload, "control_results": invalid}, spec)

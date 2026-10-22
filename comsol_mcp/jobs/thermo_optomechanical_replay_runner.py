@@ -83,6 +83,9 @@ def build_thermo_optomechanical_summary(
                 break
     if any(item["passed"] is not True for item in optical["control_results"]):
         reasons.append("control_matrix_failed")
+    control_dispositions = [
+        item.get("disposition", "executed_control") for item in optical["control_results"]
+    ]
     body = {
         "schema_name": THERMO_OPTOMECHANICAL_SUMMARY_SCHEMA_NAME,
         "schema_version": THERMO_OPTOMECHANICAL_SUMMARY_SCHEMA_VERSION,
@@ -104,6 +107,15 @@ def build_thermo_optomechanical_summary(
         "minimum_mesh_quality": state["mesh"]["minimum_quality"],
         "optical_row_count": len(optical["rows"]),
         "control_count": len(optical["control_results"]),
+        "executed_control_count": sum(
+            1 for disposition in control_dispositions if disposition == "executed_control"
+        ),
+        "structural_assertion_count": sum(
+            1 for disposition in control_dispositions if disposition == "structural_assertion"
+        ),
+        "declared_value_count": sum(
+            1 for disposition in control_dispositions if disposition == "declared_value"
+        ),
         "source_unchanged": optical["source_unchanged"],
     }
     return {**body, "summary_sha256": _fingerprint(body)}

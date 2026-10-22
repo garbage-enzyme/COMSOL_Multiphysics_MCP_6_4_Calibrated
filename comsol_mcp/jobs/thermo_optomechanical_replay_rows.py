@@ -422,10 +422,13 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             != set(spec["validation_controls"])
             or any(
                 not isinstance(item, Mapping)
-                or set(item) != {"control_id", "passed", "reason_code"}
+                or set(item) != {"control_id", "passed", "reason_code", "provenance", "disposition"}
                 or item["passed"] is not True
                 or not isinstance(item["reason_code"], str)
                 or not item["reason_code"]
+                or item["provenance"] not in {"measured", "structural", "declared"}
+                or item["disposition"]
+                not in {"executed_control", "structural_assertion", "declared_value"}
                 for item in controls
             )
         ):

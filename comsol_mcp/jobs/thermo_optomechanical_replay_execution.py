@@ -622,6 +622,12 @@ class ThermoOptomechanicalComsolExecutor:
                 - self.spec["thermal_expansion"]["reference_temperature_K"]
             )
         )
+        # Each control carries its provenance: "measured" values are computed
+        # from live observations of this run, "structural" values come from
+        # reading model structure or the closed contract, and "declared"
+        # values restate a spec field. An unconditional contract guarantee is
+        # a structural assertion - it must never be reported as an executed
+        # control observation.
         controls = {
             "positive_expansion": (
                 expansion_error
@@ -631,37 +637,71 @@ class ThermoOptomechanicalComsolExecutor:
                     * self.spec["acceptance_policy"]["expansion_relative_tolerance"],
                 ),
                 "analytic_expansion_matches",
+                "measured",
+                "executed_control",
             ),
-            "zero_cte": (zero_cte <= tolerance, "zero_cte_preserves_geometry"),
+            "zero_cte": (
+                zero_cte <= tolerance,
+                "zero_cte_preserves_geometry",
+                "measured",
+                "executed_control",
+            ),
             "zero_temperature_rise": (
                 zero_temperature <= tolerance,
                 "zero_temperature_rise_preserves_geometry",
+                "measured",
+                "executed_control",
             ),
             "fixed_boundary": (
                 self._selection_count(self.spec["model_contract"]["fixed_boundary_selection"]) > 0,
                 "fixed_boundary_read_back",
+                "structural",
+                "executed_control",
             ),
             "convection": (
                 self.spec["thermal_load"]["convection_coefficient_W_per_m2_K"] > 0.0,
                 "convection_is_explicit",
+                "declared",
+                "declared_value",
             ),
-            "wrong_selection": (True, "undeclared_selection_rejected_by_closed_contract"),
+            "wrong_selection": (
+                True,
+                "undeclared_selection_rejected_by_closed_contract",
+                "structural",
+                "structural_assertion",
+            ),
             "temperature_unit": (
                 self.spec["thermal_load"]["temperature_unit"] == "K",
                 "kelvin_contract_enforced",
+                "declared",
+                "declared_value",
             ),
-            "missing_material_state": (True, "missing_state_rejected_before_launch"),
+            "missing_material_state": (
+                True,
+                "missing_state_rejected_before_launch",
+                "structural",
+                "structural_assertion",
+            ),
             "bad_mesh": (
                 mesh_quality >= self.spec["acceptance_policy"]["minimum_mesh_quality"],
                 "mesh_quality_gate_applied",
+                "measured",
+                "executed_control",
             ),
-            "rollback": (rollback_ok, "parameter_rollback_readback_exact"),
+            "rollback": (
+                rollback_ok,
+                "parameter_rollback_readback_exact",
+                "measured",
+                "executed_control",
+            ),
         }
         control_results = [
             {
                 "control_id": control,
                 "passed": bool(controls[control][0]),
                 "reason_code": controls[control][1],
+                "provenance": controls[control][2],
+                "disposition": controls[control][3],
             }
             for control in self.spec["validation_controls"]
         ]
