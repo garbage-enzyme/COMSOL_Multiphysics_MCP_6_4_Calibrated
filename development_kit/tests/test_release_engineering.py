@@ -349,6 +349,31 @@ def test_distribution_private_path_scan_is_case_insensitive():
         release_gate_module._reject_private_user_text("m/x.py", "url http://host/c:/users/bob")
 
 
+def test_shipped_package_source_rejects_internal_evidence_root_paths():
+    # Package source must not embed private receipt paths under the internal
+    # evidence root, in either separator spelling, regardless of case.
+    for poisoned in (
+        "see D:\\mcp_tests\\a75s4inv\\receipt.json",
+        "see d:/mcp_tests/a75s4inv/receipt.json",
+        "docstring ``D:\\\\mcp_tests\\\\a75s4inv\\\\receipt.md``",
+    ):
+        with pytest.raises(RuntimeError, match="internal evidence-root path"):
+            release_gate_module._reject_internal_evidence_root_text("comsol_mcp/x.py", poisoned)
+
+
+def test_evidence_root_scan_is_scoped_to_shipped_package_source():
+    # Governance documents and hosted CI legitimately name the shared evidence
+    # root for scratch and output directories; only members inside the shipped
+    # packages carry the receipt-path refusal.
+    release_gate_module._reject_internal_evidence_root_text(
+        "AGENTS.md", "--basetemp D:\\mcp_tests\\main"
+    )
+    assert release_gate_module._inside_shipped_package("comsol_mcp-0.8.0/comsol_mcp/a.py")
+    assert release_gate_module._inside_shipped_package("settings_gui/app.py")
+    assert not release_gate_module._inside_shipped_package("comsol_mcp-0.8.0/AGENTS.md")
+    assert not release_gate_module._inside_shipped_package("docs/guide.md")
+
+
 def test_compatibility_git_gate_fails_closed_without_determinable_state():
     for git in (
         {"commit": None, "dirty_entry_count": None, "error_type": "CalledProcessError"},
@@ -929,6 +954,14 @@ def test_distribution_inventory_enforces_frozen_planning_codes_and_private_paths
         archive.writestr("comsol_mcp/config.json", '{"path":"C:/Users/example/private"}\n')
     with pytest.raises(RuntimeError, match="private user path"):
         _distribution_inventory(private)
+
+    evidence_root = tmp_path / "evidence_root.whl"
+    with zipfile.ZipFile(evidence_root, "w") as archive:
+        archive.writestr(
+            "comsol_mcp/config.json", '{"evidence":"D:\\\\mcp_tests\\\\a75s4inv\\\\r.json"}\n'
+        )
+    with pytest.raises(RuntimeError, match="internal evidence-root path"):
+        _distribution_inventory(evidence_root)
 
     model = tmp_path / "model.whl"
     with zipfile.ZipFile(model, "w") as archive:

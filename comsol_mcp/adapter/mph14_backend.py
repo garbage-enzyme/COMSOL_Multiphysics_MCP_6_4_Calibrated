@@ -12,7 +12,7 @@ under two settings.
 The measured behavioural differences this backend exists for
 -----------------------------------------------------------
 
-See ``D:\\mcp_tests\\a75s4inv\\mph_131_140_differences.md``.
+Both differences below were measured on the shipped MPh 1.3.1 and 1.4.0 lanes.
 
 1. ``Client.load()`` accepts ``dbmodel://`` URIs on 1.4.0; on 1.3.1 the argument
    is unconditionally resolved as a filesystem path. This is a client-library

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -265,6 +266,36 @@ def _reject_private_user_text(name: str, text: str) -> None:
         raise RuntimeError(f"distribution text contains a private user path: {name}")
 
 
+_SHIPPED_PACKAGE_DIRECTORIES = frozenset({"comsol_mcp", "settings_gui"})
+
+
+def _inside_shipped_package(name: str) -> bool:
+    """Report whether a distribution member lives inside a shipped package."""
+    parts = PurePosixPath(name).parts
+    return any(part in _SHIPPED_PACKAGE_DIRECTORIES for part in parts[:-1])
+
+
+_INTERNAL_EVIDENCE_ROOT_TEXT = re.compile(r"d:[\\/]+mcp_tests", re.IGNORECASE)
+
+
+def _reject_internal_evidence_root_text(name: str, text: str) -> None:
+    """Fail shipped package source embedding an internal evidence-root path.
+
+    Repository governance documents and hosted CI legitimately name the shared
+    evidence root for scratch and output directories, so the distribution-wide
+    scan cannot forbid that root outright; the refusal is scoped to members
+    inside the shipped packages, which have no functional need for such a path.
+    A reference to a private receipt path under the evidence root in package
+    source is a provenance leak. Windows paths are case-insensitive and accept
+    either separator, and docstrings carry escaped doubled backslashes, so the
+    pattern case-folds and tolerates any run of separators.
+    """
+    if not _inside_shipped_package(name):
+        return
+    if _INTERNAL_EVIDENCE_ROOT_TEXT.search(text):
+        raise RuntimeError(f"package source embeds an internal evidence-root path: {name}")
+
+
 def _distribution_inventory(path: Path) -> dict:
     normalized, files = _distribution_files(path)
     offenders = []
@@ -288,6 +319,7 @@ def _distribution_inventory(path: Path) -> dict:
         except UnicodeDecodeError as exc:
             raise RuntimeError(f"distribution text member is not UTF-8: {name}") from exc
         _reject_private_user_text(name, text)
+        _reject_internal_evidence_root_text(name, text)
         texts[name] = text
     planning_receipt = verify_planning_code_texts(
         texts,

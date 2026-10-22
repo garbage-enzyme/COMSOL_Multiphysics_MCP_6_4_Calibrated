@@ -28,7 +28,7 @@ coerce values implicitly.  Concretely:
 Verified version differences this design absorbs
 ------------------------------------------------
 
-Reconnaissance (`D:\\mcp_tests\\a75s4inv\\mph_131_140_differences.md`) measured
+Reconnaissance of both shipped MPh lanes measured
 that MPh 1.3.1 and 1.4.0 expose an **identical** public class/method surface, but
 differ in two ways the plan predicts:
 

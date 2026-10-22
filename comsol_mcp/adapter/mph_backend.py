@@ -362,9 +362,8 @@ class MphBackendBase:
         this localized COMSOL install. ``model.components()`` returns the localized
         label ``组件 1`` rather than the tag ``comp1``, ``Node.exists()`` is False
         even for a created component, and ``Node.children()`` raises
-        ``AttributeError: 'NoneType' object has no attribute 'tags'``. See
-        ``D:\\mcp_tests\\a75s4api\\node_api.json`` and
-        ``D:\\mcp_tests\\a75s4res\\resolution.json``.
+        ``AttributeError: 'NoneType' object has no attribute 'tags'``. Both the
+        broken node view and its resolution were measured on this install.
 
         The repository already resolves nested nodes through the Java accessor
         chain used by its runtime jobs (``component(tag).geom(tag).feature(tag)``),
