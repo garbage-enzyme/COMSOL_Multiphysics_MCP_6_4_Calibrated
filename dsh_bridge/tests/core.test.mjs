@@ -47,10 +47,22 @@ test("aborted signal rejects the call", async () => {
 	assert.ok(res.text.includes("package_version"));
 });
 
-test("per-call timeout rejects and leaves the connection usable", async () => {
-	await assert.rejects(conn.callTool("capabilities", {}, { timeoutMs: 5 }), /timed out/);
-	const res = await conn.callTool("capabilities", {});
-	assert.ok(res.text.includes("package_version"));
+test("per-call timeout rejects and leaves the connection usable", { timeout: 10000 }, async () => {
+	// Keep the response well beyond Windows timer granularity. The default
+	// 10ms response and a 5ms timeout can become ready in the same timer tick.
+	const delayed = spawnFakeServer({ FAKE_DELAY_MS: "250" });
+	const timed = makeConnection(delayed, {});
+	try {
+		await timed.connect();
+		await assert.rejects(timed.callTool("capabilities", {}, { timeoutMs: 25 }), /timed out/);
+		const res = await timed.callTool("capabilities", {});
+		assert.ok(res.text.includes("package_version"));
+		const stats = JSON.parse((await timed.callTool("stats", {})).text);
+		assert.equal(stats.maxInFlight, 1, "a timeout must preserve single-flight occupancy");
+	} finally {
+		timed.dispose();
+		await delayed.close();
+	}
 });
 
 test("dispose rejects pending and subsequent calls", async () => {

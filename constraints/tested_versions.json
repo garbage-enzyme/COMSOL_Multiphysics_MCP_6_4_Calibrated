@@ -2,7 +2,7 @@
   "schema_name": "comsol_mcp.tested_versions",
   "schema_version": "2.0.0",
   "description": "Human-reviewed runtime and optional dependency versions for the Python 3.14 production lane. Package metadata in pyproject.toml governs compatible ranges; the complete transitive release lock governs the accepted Windows environment.",
-  "last_reviewed": "2026-10-22",
+  "last_reviewed": "2026-10-23",
   "dependency_lane_policy": {
     "mcp": "newest stable SDK minor line only; MCP 1.x stays a client wire-compatibility requirement, not a second server lane",
     "runtime": "at most two reviewed lanes per library where behavior changes across them (newest minor plus the oldest supported line)",
@@ -119,11 +119,11 @@
   },
   "release_lock": {
     "path": "constraints/release_locked_py314.txt",
-    "sha256": "1de35f7f614cefabf378bdd5ba8d2e65661eafb480ba12751de9a053ac006df2",
+    "sha256": "b4c6344dc5fcdda1e2416b47bd9a63a4153e11fae9324045635ded47bc32c221",
     "requirement_count": 44,
     "scope": "complete transitive default runtime dependencies",
     "install_mode": "pip --require-hashes followed by local wheel --no-deps",
-    "state": "pillow_12_3_0_to_13_0_0_upgrade_20261022_pending_exact_sha_ci"
+    "state": "opentelemetry_api_1_45_1_upgrade_20261023_pending_exact_sha_ci"
   },
   "mph_lanes": {
     "policy": "two reviewed lanes: the retained 1.3.1 reference lane and the 1.4.x line",
