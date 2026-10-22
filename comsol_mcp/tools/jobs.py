@@ -51,6 +51,11 @@ _TASK_CANCEL_EXPECTED_ATTEMPT: ContextVar[int | None] = ContextVar(
 
 def _job_point_inventory(spec: dict[str, Any]) -> dict[str, Any]:
     job_type = spec["job_type"]
+    if job_type == "adjoint_optimization":
+        return {
+            "stages": ["native_adjoint_optimization"],
+            "limits": "caller_declared_manifest_budget",
+        }
     if job_type == "staged_sweep":
         return {
             "maximum_points": len(spec["parameter_values"]),
@@ -63,11 +68,6 @@ def _job_point_inventory(spec: dict[str, Any]) -> dict[str, Any]:
             "maximum_points": spec["point_limit"],
             "declared_points": len(spec["points"]),
             "stages": ["matrix"],
-        }
-    if job_type == "spectral_characterization":
-        return {
-            "maximum_points": spec["maximum_points"],
-            "stages": ["initial", "refinement", "expansion"],
         }
     if job_type == "thermo_optomechanical_replay":
         return {
@@ -84,17 +84,15 @@ def _job_point_inventory(spec: dict[str, Any]) -> dict[str, Any]:
             * len(spec["optical_replay"]["branches"]),
             "control_count": len(spec["validation_controls"]),
         }
-    return {
-        "maximum_points": spec["maximum_total_points"],
-        "declared_items": len(
-            spec["levels"] if job_type == "convergence_campaign" else spec["states"]
-        ),
-        "stages": ["campaign"],
-    }
+    raise ValueError("Unsupported public job type")
 
 
 def _preview_job_spec(spec: JobSubmissionSpec | dict[str, Any]) -> dict[str, Any]:
     normalized = validate_job_submission(spec)
+    if normalized["job_type"] == "adjoint_optimization":
+        from comsol_mcp.jobs.adjoint_optimization import expand_adjoint_optimization_manifest
+
+        normalized = expand_adjoint_optimization_manifest(normalized)
     if normalized["job_type"] == "thermo_optomechanical_replay":
         from comsol_mcp.jobs.thermo_optomechanical_replay import (
             normalize_thermo_optomechanical_replay_spec,

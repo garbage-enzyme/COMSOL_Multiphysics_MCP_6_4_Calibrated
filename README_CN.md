@@ -1,13 +1,13 @@
 # COMSOL 6.4 MCP Server
 
-0.7.8 包含缺陷扫描修复，并保留[无求解器 Ubuntu 实验支持](docs/experimental_linux/README_CN.md)和[显式严格波长验证](docs/strict_wavelength/README_CN.md)。Windows 仍是原生求解平台。调用工具前请先阅读平台限制。
+0.8.0 将研究策略与原生执行分离，保留训练和 surrogate/ONNX，以及[无求解器 Ubuntu 实验支持](docs/experimental_linux/README_CN.md)和[显式严格波长验证](docs/strict_wavelength/README_CN.md)。Windows 仍是原生求解平台。调用工具前请先阅读平台限制。
 
 [English](README.md) | 中文
 
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.7.8](https://img.shields.io/badge/release-0.7.8-blue)
+![Release: 0.8.0](https://img.shields.io/badge/release-0.8.0-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -125,7 +125,7 @@ fake-server 测试只证明 bridge 行为，真实 DSH discovery、cleanup 和 l
   selection、Pressure Acoustics、Coefficient/General/Weak Form PDE，以及具有
   精确类型和属性白名单的原子边界批量配置。
 - **安全的求解器所有权。** ASCII 路径租约、进程身份核验、外部客户端检测、状态和预检可避免意外启动并发 COMSOL 客户端。
-- **持久化后台任务。** 分段扫描和自适应光谱表征在独立 worker 中执行，具有不可变规格、原子状态、经 `fsync` 的证据行、检查点、校验后的恢复，以及已验证的同主机取消能力。可复用的[本地启动器](launcher/README_CN.md)为项目驱动提供相同的逐点运行方式。
+- **持久化后台任务。** 独立 worker 执行调用方声明的分段扫描和 validation matrix，保留不可变规格、原子状态、持久化证据行、检查点、校验后的恢复与已验证的取消清理。[本地启动器](launcher/README_CN.md)支持项目驱动。
 - **有界原生伴随优化（实验性）。** `adjoint_optimization` 持久化任务仅支持一个
   allowlist 固定拓扑周期 MIM adapter，并使用已验证的 COMSOL 原生梯度与 GCMMA。
   每次请求必须显式声明 cores、solve/iteration/wall/commit/disk/review budgets。
@@ -199,36 +199,36 @@ GUI 打开期间不要同时编辑 JSON。只有用户明确要求 agent 管理�
 | `experimental` | 显式选择的通用创建、异步、属性逃生口和项目辅助工具。 |
 | `full` | 宽兼容/发现界面，包含全部非 feature-gated 工具。 |
 
-`experimental` 和 `full` profile 提供三个 solver-free 的 alpha7 research
-准备工具。`research_campaign_compile` 将完整目标、冻结设计空间和显式批准编译为带
-fingerprint 的 manifest，且不会启动求解器。`research_robustness_plan` 创建以候选点为
-中心的单轴正负扰动矩阵，并拒绝任何需要越界 clipping 的候选。它们只用于安全准备，
-不会自行启动自主 campaign、改变材料、在缺少调用方阈值时宣称成功，也不会在独立
-adapter 不适用时强制要求 RCWA。`research_optimizer_advance` 是无状态的
-checkpoint/feedback 步骤。客户端负责保存返回的 checkpoint，因此重启后仍可恢复
-完全一致的 proposal。
+0.8 版本从工具发现中移除研究 campaign、优化器、鲁棒规划、谱分析、收敛、
+热分析和 robust-shape 工具，不提供兼容包装。仍依赖这些工具的工作流可使用已验收的
+0.7.8 包。分析、候选选择、聚合目标与科学验收由调用方负责；训练与 surrogate/ONNX
+工具保留在 MCP。
 
-这两个 profile 还通过四个有界实验工具提供 alpha7.2 鲁棒形状工作流：
-`robust_shape_plan_preview` 在不 admission、不启动求解器的情况下验证并摘要 hash-pinned
-manifest。`robust_shape_job_submit` 只通过 durable job authority 提交。
-`robust_shape_evidence_inspect` 返回隐藏路径的有界 journal 摘要。
-`robust_shape_evidence_verify` 核验不可变规格、hash-chain 顺序、condition 完整性、已验证
-gradient、optimizer 的 fresh-forward 证据、finalist、checkpoint 与 cleanup。它们不提供
-通用 Java 属性修改，并且不会出现在 `core`、`basic_fem` 或 `wave_optics` 中。
+| 移除的职责 | 移除的工具 |
+| --- | --- |
+| 热分析 | `thermal_kirchhoff_assess`, `thermal_material_evaluate`, `thermal_material_validate`, `thermal_radiation_evaluate` |
+| 谱分析 | `spectral_characterize`, `spectral_model_compare` |
+| 收敛与延续 | `convergence_evaluate`, `branch_continuation_plan` |
+| 研究策略 | `research_campaign_compile`, `research_robustness_plan`, `research_optimizer_advance` |
+| 鲁棒 campaign | `robust_shape_plan_preview`, `robust_shape_job_submit`, `robust_shape_evidence_inspect`, `robust_shape_evidence_verify` |
 
-finalist validation policy schema `1.1.0` 保持 `1.0.0` 可读，并新增由调用方声明的
-baseline/finer mesh reference 与 independent-COMSOL 最大 condition delta。licensed
-finalist 会用全新的 derived model 分别执行 24 个 baseline、24 个 finer-mesh 和 96 个
-明确声明的 off-design conditions。external-fidelity receipt 会单独持久化并绑定到防篡改
-finalist receipt。只有 finalist、checkpoint 与当前 attempt 的 cleanup 证据一致时，任务
-才能进入 completed 状态。
+保留的 `job_spec_preview` 和 `job_submit` 支持带
+`native_condition_forward` 或 `native_condition_gradient` collector 的 `validation_matrix` 点。
+两者的 `inputs` 分别使用 `comsol_mcp.native_condition_forward_request` 或
+`comsol_mcp.native_condition_gradient_request`，版本均为 `1.0.0`：
+`support`、`shape_policy`、`adapter_configuration`、`condition_table` 和
+`initial_values` 绑定一个显式条件与候选。点的波长、入射、源哈希、observable 和网格上限
+必须与请求一致。目前原生 adapter 为 `lin2025_pedot_cylinder_v1`。
+前向采集保留 condition-controls 的 `1.0.0` 至 `1.5.0`；梯度采集要求
+`1.4.0` 或 `1.5.0` 的显式 sensitivity 控制。前向采集不会执行梯度求解。
 
-执行 licensed 鲁棒任务时，optimizer configuration schema `1.1.0` 仍由 COMSOL
-完成每个 condition 的 forward/adjoint，并用显式外循环 GCMMA 状态驱动聚合目标。
-调用方提供单独取得的纯 Python `mmapy 0.3.1` wheel 的 ASCII 绝对路径和精确 SHA-256。
-系统仅在该实验执行路径中核验并加载它，不安装、不打包、不在普通 discovery 时导入，
-也不会静默改用 MMA/CCSAQ。每个 proposal、非保守 inner revision、fresh-forward 接受结果、
-move limit 与真实 condition-solve 预算均持久化并绑定指纹。
+原生执行必须显式声明 COMSOL 版本、启动 RAM/磁盘策略及资源策略。out-of-core 执行还须
+提供调用方已存在的 ASCII 绝对目录 `comsol_temporary_directory`，worker 会验证 Java
+回读的 `COMSOL_TMPDIR`。MCP 保留源快照、独占求解器所有权、wall watchdog、取消、恢复
+检查和派生模型清理。两种 collector 均持久化前向观测、控制回读与清理证据；
+梯度 collector 还保存原始复数梯度。
+manifest 状态为 `native_unchecked` 和 `UNVALIDATED`。调用方须独立验证梯度与科学结果
+后才能验收。
 
 鲁棒 condition-controls schema `1.4.0` 保持对 `1.3.0` mesh-reference 控制的可读
 兼容，并进一步绑定原生 Sensitivity study feature、重新生成的 solver topology、direct
@@ -348,30 +348,6 @@ resume 或 append 时必须提供 `source_model_path`。只有源文件哈希、
 参数设置、mesh identity 以及每个 level 的精确 properties 全部一致，已完成 level
 才会被跳过。CSV 或 checkpoint 持久化失败是该 level 的终止结果，不会再次求解。
 
-自适应光谱任务使用 `job_type: "spectral_characterization"`，并显式声明
-源模型/配置身份、初始波长网格、扩展与细化 policy、collector 配置、科学容差，
-以及点数、stage 和资源上限。worker 每次只求解一个波长。完整 point audit 及其
-哈希链证据行持久化后才进入下一点。每个请求 stage 都会冻结，因此精确恢复不会
-重新生成计划，也不会重复已完成波长。只有规范化规格、collector、源模型和精确
-worker driver 身份均相同时，重新提交才会观察到已有任务。
-
-执行状态与科学解释彼此独立。任务可以以 `status: "completed"` 完成，同时
-`scientific_disposition` 为 `residual` 或
-`unresolved_at_declared_cap`。边界峰、缺少有效 bracket、fit sensitivity 和扩展
-预算耗尽属于科学未验收结果，而不是 worker 执行失败。`accepted` 必须具有完整且
-可由哈希解析的原始证据。中断或取消前留下的部分行仍是 diagnostic。只有 worker、
-后代进程、端口、租约与清理证据全部通过，取消才进入终态。在声明的 collector 与
-证据支持相应量时，光谱 summary 会保留原始 R/T/A、闭合误差、波长同步、网格计数、
-own peak、FWHM、Q、stage 哈希及精确 artifact 引用。
-
-solver-free 的 `spectral_model_compare` 会让两到三个声明的标量线形模型使用完全相同的
-光谱行、support、baseline、response、polarity、拟合坐标和质量 policy。它支持在
-wavelength、frequency、angular-frequency 或 energy 坐标下比较局部多项式、
-Lorentzian 与 Fano 拟合，并把 peak 和 half-prominence crossings 映射回原始波长证据。
-输出包含拟合诊断、窗口敏感性、AIC、可定义时的 AICc、BIC、差值和描述性 Akaike
-权重。这些结果只表示数据对模型的相对支持，不证明 Lorentzian/Fano 物理机制、模式
-身份或科学验收。
-
 三个 solver-free 预览工具把 COMSOL admission 或模型修改前的配置审查变成显式契约。
 `simulation_configuration_validate` 只接受封闭的 typed 字段，包括 source/producer
 identity、几何语义、层顺序、材料状态与损耗符号、入射与偏振、mesh dependency、
@@ -382,30 +358,9 @@ label-only 或 unavailable，标签不会被提升为物理身份。`job_spec_pr
 路径与资源检查、需求及提交时副作用，不做 admission、ownership、文件写入、进程创建或
 solver 启动。
 
-solver-free 的 `thermal_kirchhoff_assess` 只有在同一方向、频率和偏振通道的线性、
-时不变、互易、局域平衡及通道匹配证据全部验证后，才允许把 directional absorptivity
-当作 emissivity。未知事实保持 conditional/unavailable，非互易通道为 not applicable。
-`thermal_radiation_evaluate` 使用 SI Planck 定律和显式 wavelength/frequency/
-wavenumber Jacobian，执行含投影固体角的积分，支持 scalar、非相干 TE/TM 或
-Stokes/Mueller 偏振，并可应用受限的气体、孔径、光学、analyzer 和 detector kernel。
-哈希绑定输出保留 coverage、积分 policy、extrapolation 状态、不确定度、source artifact
-以及 detector/reference/background signal。它不替代 COMSOL Surface-to-Surface
-Radiation solver。
-
-使用 absorptivity 时，请求必须提供 `absorptivity_evidence_sha256` 和
-`channel_identity_sha256`。吸收证据哈希必须对应一个 source artifact。
-Kirchhoff 回执必须匹配这两个哈希、传播方向、偏振基和源手性约定。
-Stokes Q、U、V 可以为负值，其合成模长不能超过 I。scalar 与 TE/TM 值仍限制在 [0, 1]。
-
-solver-free 的 `thermal_material_validate` 与 `thermal_material_evaluate` 使用
-versioned ledger，而不是内置第二套材料数据库。每个 state 都绑定 material/sample
-identity、phase/fabrication state、source、光谱与温度有效域、不确定度、测量条件以及
-measured/fitted/assumed 分类。typed entry 支持 n/k 与复介电常数表，以及 Drude、
-Lorentz、TOLO 和 thermo-optic 模型。不同 carrier density、mobility、effective mass
-与 phase fraction 的 state 保持独立，声明的 phase/discontinuity boundary 不会被通用
-插值跨越。内部约定为 `exp(-i*omega*t)` 且被动介质 `Im(epsilon)>=0`。COMSOL 输出只
-提供 mutation-free 的 `exp(+i*omega*t)` 转换预览，包含精确 property/function tag、
-单位、插值/外推 policy、table hash、readback 期望和 rollback 要求。
+0.8.0 移除独立的热辐射和热材料分析工具。
+需要这些旧工具的用户请在独立环境中保留 0.7.8。
+COMSOL 材料操作和原生热到光执行能力继续保留。
 
 需要许可证的持久化热到光重放任务使用
 `job_type: "thermo_optomechanical_replay"`，并提供 ASCII JSON
@@ -424,29 +379,6 @@ licensed gate，之后才可用于研究模型。
 用 `model_contract.expressions.transfer_displacement_max` 声明传递 study 数据集中的网格传递位移表达式。
 省略时，传递 stage 在同一数据集中读取已声明的 `displacement_max`。
 表达式无法计算时，该 stage 失败。执行器不会用旧结构解代替传递结果。
-
-持久化收敛任务使用 `job_type: "convergence_campaign"`，并声明 2–8 个严格排序的
-exact source 或预先构建并验证的 derived model identity。每个 level 都复用已验收的
-自适应光谱任务，完整持久化哈希绑定 artifacts，并且只以各 level 自己 bracketed
-own peak 进入离线 convergence evaluator。调用方必须声明 metrics、units、容差、
-governing-pair 与 declared-cap 规则、总 point/wall-time 上限及任何 early-acceptance
-权限。整个 campaign 只使用一个 solver owner 和一个 client，不会自行增加 level。
-resume 只复用验证完整的 level rows。当前版本不会在 campaign 内应用任意 parameter
-setter。derived model level 必须在提交前完成构建和验证。
-
-持久化 branch-continuation 任务使用
-`job_type: "branch_continuation_campaign"`，并声明 2–16 个严格排序的 exact
-source 或预先构建并验证的 derived model states。每个 state 都绑定一个 coordinate
-值、polarization/material identity、精确 source/configuration hash，以及 periodic
-parent 和两个 ports 的实测 incidence readback。每个 coordinate 独立运行自己的
-自适应光谱。只有完整光谱已写入 hash-chain state row，离线 continuation planner
-才会使用它。调用方 policy 必须限制 guard window、绝对波长域、扩展次数、总 window、
-request grid、总 point、wall time，以及是否在第一个 unresolved transition 停止。
-boundary-high 和 competing-candidate 结果只能保持为 residual 或
-`unresolved_at_declared_cap`。campaign 不会宣称物理 branch disappearance，也不会
-启动未声明的 coordinate。整个 campaign 只使用一个 solver owner 和一个 client，
-resume 只复用验证完整的 state spectra。当前版本仅支持 exact/prebuilt models，
-不会在 campaign 内应用任意 incidence 或 geometry setter。
 
 ### Wave Optics 超表面
 
@@ -503,6 +435,8 @@ python -m pytest -q -m integration development_kit/tests/integration
 真实 COMSOL 验证包括：本地化 JSON 传输、Circle/Union 几何、DXF 导入、参数扫描属性、多物理场耦合、模型克隆清理、Unicode 路径保存、求解器所有权、持久化中断/重启/恢复/取消、profile 发现、Wave Optics 预检与单点审计，以及有界手册检索。
 
 Python 3.14 licensed 平行板回归结果为 **1.8593794419540677 pF**。理论值为 **1.8593794406880002 pF**，COMSOL 精确版本为 **6.4.0.293**。
+
+以下光谱、收敛与延续收据仅记录 0.7.8 的历史能力，不代表 0.8.0 验收，也不恢复已移除工具。
 
 同一 COMSOL build 上的 licensed 自适应光谱验收采用中性的空气—介质—空气周期
 port slab，网格为 4,798 个单元和 1,039 个顶点。通过验收的 10 行光谱得到插值
@@ -627,7 +561,7 @@ MCP 客户端配置示例：
 | COMSOL API 目标 | 假定直接使用 `com.comsol.model.Model` API。 | 适配 MPh 1.3.1 standalone 的 `model.java` clientapi 包装层，包括不同的方法重载、tag、列表和 Java 字符串传输。 |
 | 工具界面 | 默认提供较宽的功能发现面。 | 默认采用紧凑 `core`。较大的构建和兼容界面须显式选择 profile。 |
 | 求解器并发 | 没有同主机所有权协议。 | 通过进程感知租约、外部客户端检测、状态、预检和过期租约恢复来防止冲突。不会终止不属于本服务器的进程。 |
-| 长任务 | 以交互式/当前进程工作流为主。 | 使用独立的持久化扫描和自适应光谱任务：不可变规格、经 `fsync` 的证据行、冻结 stage、校验恢复和已验证的取消清理。 |
+| 长任务 | 以交互式/当前进程工作流为主。 | 独立扫描和 validation matrix，保留不可变规格、持久化证据行、校验恢复和已验证的取消清理。 |
 | Wave Optics | 只有通用工具。 | 提供周期性超表面专用的预检和单点证据审计，原始证据与调用方 policy 分离。 |
 | 手册检索 | 无有界手册检索。 | 提供默认关闭、可独立启用的有界词法手册检索。实验性语义检索被隔离且明确未晋级。旧式进程内 ChromaDB 路径已移除。 |
 | Windows 路径 | 不特别保证 Unicode 保存路径。 | 通过 clientapi Java 保存 Unicode `.mph`。原生/持久化 runtime 和索引使用 ASCII-only 根目录。 |
@@ -637,10 +571,9 @@ MCP 客户端配置示例：
 ## 许可证
 
 本仓库采用 [MIT License](LICENSE)。COMSOL、授权手册、第三方模型、论文和数据集
-不因本仓库许可证而被重新授权。外部可选的 `mmapy` GCMMA/MMA wheel 仍采用
-GPL-3.0-or-later，本包不复制或分发它。感谢 Krister Svanberg 提出 MMA/GCMMA，
-并感谢 Arjen Deetman 提供本项目核验的 Python 实现。使用该执行路径时应保留其许可证
-与引用声明。
+不因本仓库许可证而被重新授权。0.8.0 移除外部 `mmapy` 执行路径。
+历史可选 wheel 采用 GPL-3.0-or-later，本包不分发它。
+感谢 Krister Svanberg 提出 MMA/GCMMA，以及 Arjen Deetman 提供 Python 实现。
 
 ## 相关论文与引用
 

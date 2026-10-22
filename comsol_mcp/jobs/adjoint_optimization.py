@@ -7,16 +7,16 @@ import json
 from pathlib import Path
 from typing import Any
 
-from comsol_mcp.durable import validate_finite_json
-from comsol_mcp.jobs.resource_admission import normalize_resource_policy
-from comsol_mcp.research.adjoint_adapter import _native_objective_type
-from comsol_mcp.research.derivative_support import (
+from comsol_mcp.adapter.adjoint import _native_objective_type
+from comsol_mcp.contracts.derivative_support import (
     _finite,
     _object,
     _text,
     normalize_derivative_support,
 )
-from comsol_mcp.research.gradient_contracts import normalize_native_optimizer_configuration
+from comsol_mcp.contracts.gradient_contracts import normalize_native_optimizer_configuration
+from comsol_mcp.durable import validate_finite_json
+from comsol_mcp.jobs.resource_admission import normalize_resource_policy
 
 ADJOINT_MANIFEST_SCHEMA_NAME = "comsol_mcp.adjoint_optimization_manifest"
 ADJOINT_MANIFEST_SCHEMA_VERSION = "1.1.0"

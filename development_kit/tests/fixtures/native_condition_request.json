@@ -1,0 +1,657 @@
+{
+  "schema_name": "comsol_mcp.native_condition_gradient_request",
+  "schema_version": "1.0.0",
+  "support": {
+    "schema_name": "comsol_mcp.derivative_support",
+    "schema_version": "1.0.0",
+    "contract_id": "lin2025-pedot-adjoint-v1",
+    "comsol_version": "6.4",
+    "comsol_build": "6.4.0.293",
+    "required_products": [
+      "Wave Optics",
+      "Optimization"
+    ],
+    "adapter_id": "lin2025_pedot_cylinder_v1",
+    "adapter_version": "1.0.0",
+    "source_identity": "cda06f114ca5b95df9f7de32e09e3fc39354c4825620797745d1664b98499801",
+    "study_identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "derivative_method": "adjoint",
+    "variables": [
+      {
+        "variable_id": "pedot_cylinder_radius_x",
+        "order": 0,
+        "kind": "continuous",
+        "meaning": "patch length",
+        "unit": "nm",
+        "baseline": 260.0,
+        "lower": 200.0,
+        "upper": 320.0,
+        "scale": 260.0,
+        "mapping": {
+          "feature_tag": "pedot_pedot72",
+          "feature_type": "PrescribedMeshDisplacement",
+          "property_name": "dx",
+          "property_index": 0,
+          "readback_expression": "pedot_cylinder_radius_x"
+        },
+        "dependency_class": "geometry",
+        "step_policy": {
+          "relative_steps": [
+            0.01,
+            0.003,
+            0.001
+          ],
+          "absolute_floor": 1e-09,
+          "central_difference": true,
+          "near_bound_mode": "one_sided"
+        },
+        "active_bound_semantics": "projected_zero"
+      },
+      {
+        "variable_id": "pedot_cylinder_radius_y",
+        "order": 1,
+        "kind": "continuous",
+        "meaning": "patch length",
+        "unit": "nm",
+        "baseline": 260.0,
+        "lower": 200.0,
+        "upper": 320.0,
+        "scale": 260.0,
+        "mapping": {
+          "feature_tag": "pedot_pedot72",
+          "feature_type": "PrescribedMeshDisplacement",
+          "property_name": "dx",
+          "property_index": 1,
+          "readback_expression": "pedot_cylinder_radius_y"
+        },
+        "dependency_class": "geometry",
+        "step_policy": {
+          "relative_steps": [
+            0.01,
+            0.003,
+            0.001
+          ],
+          "absolute_floor": 1e-09,
+          "central_difference": true,
+          "near_bound_mode": "one_sided"
+        },
+        "active_bound_semantics": "projected_zero"
+      }
+    ],
+    "objective": {
+      "objective_id": "pedot_contrast",
+      "expression": "ewfd.Tport1",
+      "direction": "maximize",
+      "unit": "1",
+      "wavelength_um": 1.717657785,
+      "study_tag": "std1",
+      "solution_tag": "sol1",
+      "dataset_tag": "dset1",
+      "evidence_paths": [
+        "forward.transmission"
+      ]
+    },
+    "constraints": [],
+    "mesh_policy": {
+      "topology": "fixed",
+      "selection": "preserve",
+      "quality_expression": "mesh.minqual",
+      "finalist_remesh": true
+    },
+    "nondifferentiable_events": [
+      "topology_changed",
+      "branch_switch_unresolved"
+    ],
+    "result_identity": {
+      "study_tag": "std1",
+      "solution_tag": "sol1",
+      "dataset_tag": "dset1",
+      "derivative_expression": "real(fsens(pedot_cylinder_radius_x))",
+      "derivative_units": "1/nm"
+    },
+    "support_state": "structurally_supported"
+  },
+  "shape_policy": {
+    "adapter_id": "lin2025_pedot_cylinder_v1",
+    "geometry_guards": {
+      "minimum_radius_m": null,
+      "minimum_thickness_m": 2e-08,
+      "preserve_selections": true,
+      "preserve_topology": true,
+      "reject_self_intersection": true,
+      "require_positive_dimensions": true
+    },
+    "mesh_admission": {
+      "check_after_build": true,
+      "check_after_remesh": true,
+      "check_before_solve": true,
+      "max_elements_per_model": 300000,
+      "minimum_element_quality": 0.1,
+      "quality_measure": "volcircum"
+    },
+    "minimum_gap": {
+      "explicit_value_m": null,
+      "geometry_reference_length_m": 1e-06,
+      "geometry_relative_floor": 0.05,
+      "mesh_multiplier": 3.0,
+      "mesh_resolution_m": 2e-08,
+      "mode": "recommended"
+    },
+    "model_retention": {
+      "max_retained_models": 1,
+      "mode": "finalist_only"
+    },
+    "policy_id": "pedot-shape-policy",
+    "schema_name": "comsol_mcp.shape_support_policy",
+    "schema_version": "1.0.0"
+  },
+  "condition_table": {
+    "schema_name": "comsol_mcp.optimization_condition_table",
+    "schema_version": "1.0.0",
+    "table_id": "pedot-acceptance-24",
+    "material_states": [
+      {
+        "schema_name": "comsol_mcp.optimization_material_state",
+        "schema_version": "1.0.0",
+        "state_id": "OX",
+        "material_ledger_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "optical_property_source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "optical_property_mapping": {
+          "schema_name": "comsol_mcp.optimization_optical_property_mapping",
+          "schema_version": "1.0.0",
+          "mapping_id": "pedot-ox-tensor",
+          "active_domain_id": "active_material_domain",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "independent_variable": {
+            "kind": "vacuum_wavelength",
+            "source_column": "wavelength_nm",
+            "source_unit": "nm",
+            "valid_min": 500.0,
+            "valid_max": 1500.0,
+            "interpolation_method": "linear",
+            "extrapolation": "forbidden"
+          },
+          "tensor": {
+            "basis": "model_cartesian",
+            "form": "diagonal",
+            "off_diagonal_zero": true,
+            "components": [
+              {
+                "component": "xx",
+                "source_axis_id": "epsilon1",
+                "real_column": "epsilon1_real",
+                "imaginary_column": "comsol_epsilon1_imag"
+              },
+              {
+                "component": "yy",
+                "source_axis_id": "epsilon1",
+                "real_column": "epsilon1_real",
+                "imaginary_column": "comsol_epsilon1_imag"
+              },
+              {
+                "component": "zz",
+                "source_axis_id": "epsilon2",
+                "real_column": "epsilon2_real",
+                "imaginary_column": "comsol_epsilon2_imag"
+              }
+            ]
+          },
+          "time_harmonic_convention": "exp_positive_i_omega_t",
+          "mapping_fingerprint": "9eba520c01f6a267f1817980e20fba3b357009aa774e2dd3eae86cc9854c5455"
+        },
+        "temperature_k": 300.0,
+        "provenance_disposition": "private_input_hash_bound",
+        "state_fingerprint": "e9ad123b32178b666480a6cb8826ee7c5fcd0fa20f16960694d46db5b556b7fa"
+      },
+      {
+        "schema_name": "comsol_mcp.optimization_material_state",
+        "schema_version": "1.0.0",
+        "state_id": "MR",
+        "material_ledger_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "optical_property_source_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "optical_property_mapping": {
+          "schema_name": "comsol_mcp.optimization_optical_property_mapping",
+          "schema_version": "1.0.0",
+          "mapping_id": "pedot-mr-tensor",
+          "active_domain_id": "active_material_domain",
+          "source_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "independent_variable": {
+            "kind": "vacuum_wavelength",
+            "source_column": "wavelength_nm",
+            "source_unit": "nm",
+            "valid_min": 500.0,
+            "valid_max": 1500.0,
+            "interpolation_method": "linear",
+            "extrapolation": "forbidden"
+          },
+          "tensor": {
+            "basis": "model_cartesian",
+            "form": "diagonal",
+            "off_diagonal_zero": true,
+            "components": [
+              {
+                "component": "xx",
+                "source_axis_id": "epsilon1",
+                "real_column": "epsilon1_real",
+                "imaginary_column": "comsol_epsilon1_imag"
+              },
+              {
+                "component": "yy",
+                "source_axis_id": "epsilon1",
+                "real_column": "epsilon1_real",
+                "imaginary_column": "comsol_epsilon1_imag"
+              },
+              {
+                "component": "zz",
+                "source_axis_id": "epsilon2",
+                "real_column": "epsilon2_real",
+                "imaginary_column": "comsol_epsilon2_imag"
+              }
+            ]
+          },
+          "time_harmonic_convention": "exp_positive_i_omega_t",
+          "mapping_fingerprint": "ecd39abd7f770fddbb13b77eb87ba7de6d915b8062adc8abb0942ecfb9872f1e"
+        },
+        "temperature_k": 300.0,
+        "provenance_disposition": "private_input_hash_bound",
+        "state_fingerprint": "8eb911878af095cec6018b79cc786b4e789b41fe43c2488325c2e7d50813f6b9"
+      }
+    ],
+    "conditions": [
+      {
+        "condition_id": "condition-00",
+        "order": 0,
+        "wavelength_m": 8e-07,
+        "incidence_elevation_deg": 0.0,
+        "incidence_azimuth_deg": 0.0,
+        "polarization_basis_id": "declared_s",
+        "excitation_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "material_state_id": "OX",
+        "objective_role": "validation",
+        "observable_id": "transmission_order_0_0",
+        "weight": 1.0,
+        "target": null,
+        "scale": 1.0,
+        "active": true
+      }
+    ],
+    "completeness": {
+      "mode": "cartesian_complete",
+      "sparse_justification": null
+    }
+  },
+  "initial_values": [
+    260.0,
+    260.0
+  ],
+  "adapter_configuration": {
+    "schema_name": "comsol_mcp.robust_shape_adapter_configuration",
+    "schema_version": "1.0.0",
+    "adapter_id": "lin2025_pedot_cylinder_v1",
+    "configuration": {
+      "fixture": {
+        "schema_name": "comsol_mcp.lin2025_pedot_cylinder_fixture",
+        "schema_version": "1.0.0",
+        "adapter_id": "lin2025_pedot_cylinder_v1",
+        "source_identity": {
+          "source_sha256": "cda06f114ca5b95df9f7de32e09e3fc39354c4825620797745d1664b98499801",
+          "tree_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "comsol_build": "6.4.0.293"
+        },
+        "geometry": {
+          "lattice": "hexagonal_primitive",
+          "period_um": 1.7,
+          "pedot_height_um": 0.2,
+          "air_above": true,
+          "substrate_n": 1.5
+        },
+        "domains": {
+          "substrate": 1,
+          "pedot_cylinder": 5,
+          "air": 4
+        },
+        "material_states": [
+          {
+            "state_id": "OX"
+          },
+          {
+            "state_id": "MR"
+          }
+        ],
+        "mutable_variables": [
+          {
+            "variable_id": "pedot_cylinder_radius_x"
+          },
+          {
+            "variable_id": "pedot_cylinder_radius_y"
+          }
+        ],
+        "temperature_k": 300.0
+      },
+      "tree_readback": {
+        "source_sha256": "cda06f114ca5b95df9f7de32e09e3fc39354c4825620797745d1664b98499801",
+        "domain_map": {
+          "substrate": 1,
+          "pedot_cylinder": 5,
+          "air": 4
+        },
+        "domain_z_bounds_um": {
+          "5": [
+            0.0,
+            0.2
+          ]
+        },
+        "material_tags": {
+          "pedot_cylinder": "OX"
+        },
+        "feature_tags": [
+          "ewfd",
+          "mesh1"
+        ],
+        "domain_count": 6,
+        "boundary_count": 32,
+        "exterior_boundaries": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          7,
+          8,
+          10,
+          11,
+          13,
+          14,
+          15,
+          16,
+          17,
+          29,
+          30,
+          31,
+          32
+        ],
+        "pedot_boundaries": [
+          18,
+          19,
+          20,
+          23,
+          25,
+          27
+        ],
+        "pedot_lateral_boundaries": [
+          18,
+          19,
+          25,
+          27
+        ],
+        "pedot_cap_boundaries": [
+          20,
+          23
+        ],
+        "baseline_radius_um": 0.26,
+        "center_um": [
+          0.85,
+          0.0
+        ]
+      },
+      "material_tensor_rows": {
+        "schema_name": "comsol_mcp.robust_material_tensor_rows",
+        "schema_version": "1.0.0",
+        "source_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "states": [
+          {
+            "state_id": "OX",
+            "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "rows": [
+              {
+                "wavelength_m": 7.92e-07,
+                "xx_real": 2.0,
+                "xx_imag": -0.1,
+                "yy_real": 2.0,
+                "yy_imag": -0.1,
+                "zz_real": 3.0,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 8e-07,
+                "xx_real": 2.1,
+                "xx_imag": -0.1,
+                "yy_real": 2.1,
+                "yy_imag": -0.1,
+                "zz_real": 3.1,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 8.079999999999999e-07,
+                "xx_real": 2.2,
+                "xx_imag": -0.1,
+                "yy_real": 2.2,
+                "yy_imag": -0.1,
+                "zz_real": 3.2,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 9.9e-07,
+                "xx_real": 2.3,
+                "xx_imag": -0.1,
+                "yy_real": 2.3,
+                "yy_imag": -0.1,
+                "zz_real": 3.3,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 1e-06,
+                "xx_real": 2.4,
+                "xx_imag": -0.1,
+                "yy_real": 2.4,
+                "yy_imag": -0.1,
+                "zz_real": 3.4,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 1.0099999999999999e-06,
+                "xx_real": 2.5,
+                "xx_imag": -0.1,
+                "yy_real": 2.5,
+                "yy_imag": -0.1,
+                "zz_real": 3.5,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 1.1879999999999999e-06,
+                "xx_real": 2.6,
+                "xx_imag": -0.1,
+                "yy_real": 2.6,
+                "yy_imag": -0.1,
+                "zz_real": 3.6,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 1.2e-06,
+                "xx_real": 2.7,
+                "xx_imag": -0.1,
+                "yy_real": 2.7,
+                "yy_imag": -0.1,
+                "zz_real": 3.7,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 1.212e-06,
+                "xx_real": 2.8,
+                "xx_imag": -0.1,
+                "yy_real": 2.8,
+                "yy_imag": -0.1,
+                "zz_real": 3.8,
+                "zz_imag": -0.2
+              }
+            ]
+          },
+          {
+            "state_id": "MR",
+            "source_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "rows": [
+              {
+                "wavelength_m": 7.92e-07,
+                "xx_real": 2.0,
+                "xx_imag": -0.1,
+                "yy_real": 2.0,
+                "yy_imag": -0.1,
+                "zz_real": 3.0,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 8e-07,
+                "xx_real": 2.1,
+                "xx_imag": -0.1,
+                "yy_real": 2.1,
+                "yy_imag": -0.1,
+                "zz_real": 3.1,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 8.079999999999999e-07,
+                "xx_real": 2.2,
+                "xx_imag": -0.1,
+                "yy_real": 2.2,
+                "yy_imag": -0.1,
+                "zz_real": 3.2,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 9.9e-07,
+                "xx_real": 2.3,
+                "xx_imag": -0.1,
+                "yy_real": 2.3,
+                "yy_imag": -0.1,
+                "zz_real": 3.3,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 1e-06,
+                "xx_real": 2.4,
+                "xx_imag": -0.1,
+                "yy_real": 2.4,
+                "yy_imag": -0.1,
+                "zz_real": 3.4,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 1.0099999999999999e-06,
+                "xx_real": 2.5,
+                "xx_imag": -0.1,
+                "yy_real": 2.5,
+                "yy_imag": -0.1,
+                "zz_real": 3.5,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 1.1879999999999999e-06,
+                "xx_real": 2.6,
+                "xx_imag": -0.1,
+                "yy_real": 2.6,
+                "yy_imag": -0.1,
+                "zz_real": 3.6,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 1.2e-06,
+                "xx_real": 2.7,
+                "xx_imag": -0.1,
+                "yy_real": 2.7,
+                "yy_imag": -0.1,
+                "zz_real": 3.7,
+                "zz_imag": -0.2
+              },
+              {
+                "wavelength_m": 1.212e-06,
+                "xx_real": 2.8,
+                "xx_imag": -0.1,
+                "yy_real": 2.8,
+                "yy_imag": -0.1,
+                "zz_real": 3.8,
+                "zz_imag": -0.2
+              }
+            ]
+          }
+        ]
+      },
+      "condition_controls": {
+        "schema_name": "comsol_mcp.robust_condition_controls",
+        "schema_version": "1.4.0",
+        "component_tag": "comp1",
+        "geometry_tag": "geom1",
+        "physics_tag": "ewfd",
+        "periodic_structure_tag": "ps1",
+        "periodic_port_tags": [
+          "pport1",
+          "pport2"
+        ],
+        "reference_direction_tag": "rdir1",
+        "wavelength_parameter": "wl",
+        "elevation_parameter": "theta",
+        "azimuth_parameter": "phi",
+        "study_tag": "std1",
+        "study_step_tag": "wl_step",
+        "study_step_property": "plist",
+        "study_step_array_property": null,
+        "solution_tag": "sol1",
+        "stationary_solver_tag": "s1",
+        "linear_solver_tag": "d1",
+        "out_of_core_property": "ooc",
+        "out_of_core_value": "off",
+        "dataset_tag": "dset1",
+        "angle_property": "alpha1_inc",
+        "azimuth_property": "alpha2_inc",
+        "polarization_property": "Polarization",
+        "linear_polarization_property": "LinearPol",
+        "polarization_values": {
+          "x_linear": "S",
+          "y_linear": "P"
+        },
+        "observable_expression": "ewfd.Tport1",
+        "reflectance_expression": "ewfd.Rtotal",
+        "transmittance_expression": "ewfd.Ttotal",
+        "absorption_expression": "ewfd.Atotal",
+        "evaluated_wavelength_expression": "wl",
+        "solved_wavelength_expression": "c_const/ewfd.freq",
+        "mesh_tag": "mesh1",
+        "selected_linear_solver_tag": "d1",
+        "inactive_linear_solver_tags": [
+          "i1"
+        ],
+        "mesh_reference_parameter": "mesh_ref_wl",
+        "mesh_reference_value": "1600[nm]",
+        "sensitivity_parametric_sweep_tag": "sweep_pedot72",
+        "sensitivity_feature_tag": "sens_pedot72",
+        "sensitivity_solver_tag": "sn1",
+        "sensitivity_segregated_solver_tag": "se1",
+        "sensitivity_direct_solver_tags": [
+          "dDef",
+          "d1"
+        ],
+        "sensitivity_solution_tags": [
+          "sol1",
+          "sol2",
+          "sol3"
+        ],
+        "sensitivity_dataset_tags": [
+          "dset1",
+          "dset2"
+        ],
+        "derivative_solution_tag": "sol2",
+        "derivative_dataset_tag": "dset2",
+        "sensitivity_gradient_method": "adjoint",
+        "sensitivity_solver_regeneration": "replace_existing_auto_sequence",
+        "sensitivity_stationary_nonlinearity": "auto",
+        "sensitivity_segregated_step_tags": [
+          "ss1",
+          "ss2"
+        ],
+        "sensitivity_merged_step_tag": "ss1",
+        "sensitivity_removed_step_tag": "ss2",
+        "sensitivity_merged_linear_solver_tag": "d1",
+        "sensitivity_constraint_group_policy": "merge_material_coordinates_into_wave_optics"
+      }
+    }
+  }
+}

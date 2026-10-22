@@ -1,0 +1,133 @@
+{
+  "schema_name": "comsol_mcp.thermal_material_ledger",
+  "schema_version": "1.0.0",
+  "material_identity_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sample_identity_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "internal_phasor_convention": "exp(-i*omega*t)",
+  "internal_passive_loss_convention": "positive_imaginary_permittivity",
+  "states": [
+    {
+      "state_id": "synthetic_glass",
+      "phase_id": "solid",
+      "fabrication_state": "generated analytic fixture",
+      "classification": "assumed",
+      "source": {
+        "source_kind": "citation",
+        "citation": "Generated analytic thermo-optomechanical material fixture",
+        "file_sha256": null,
+        "source_state_description": "lossless isotropic synthetic solid; assumed 1% relative uncertainty, not measured material data"
+      },
+      "validity": {
+        "wavelength_min_m": 1e-06,
+        "wavelength_max_m": 2.5e-06,
+        "temperature_min_K": 250.0,
+        "temperature_max_K": 500.0
+      },
+      "uncertainty": {
+        "kind": "relative",
+        "n_abs": 0.0,
+        "k_abs": 0.0,
+        "epsilon_real_abs": 0.0,
+        "epsilon_imag_abs": 0.0,
+        "relative_fraction": 0.01
+      },
+      "measurement_conditions": {
+        "method": "analytic",
+        "ambient": "vacuum",
+        "pressure_Pa": null,
+        "crystallographic_orientation": null
+      },
+      "carrier_state": null,
+      "state_variables": [],
+      "phase_fraction": null,
+      "optical_model": {
+        "model_kind": "thermo_optic",
+        "reference_temperature_K": 300.0,
+        "refractive_index_at_reference": 1.5,
+        "extinction_coefficient_at_reference": 0.0,
+        "dn_dT_per_K": 0.0,
+        "dk_dT_per_K": 0.0,
+        "extrapolation": {
+          "mode": "none",
+          "policy_source_sha256": null,
+          "maximum_fraction_outside_domain": 0.0,
+          "uncertainty_growth_per_fraction": 0.0
+        }
+      }
+    }
+  ],
+  "phase_boundaries": [],
+  "comsol_target": {
+    "component_tag": "comp1",
+    "material_tag": "mat1",
+    "property_group_tag": "def",
+    "relative_permittivity_property_key": "relpermittivity",
+    "function_tag_prefix": "tm"
+  },
+  "ledger_sha256": "f2971afa676c10b13207cd43b558907574a4ca693f9458fac973d05a67c8cca7",
+  "comsol_conversion_preview": [
+    {
+      "state_id": "synthetic_glass",
+      "model_kind": "thermo_optic",
+      "function_type": "analytic",
+      "function_tags": [
+        "tm_synthetic_glass_eps_re",
+        "tm_synthetic_glass_eps_loss"
+      ],
+      "argument_names": [
+        "lambda0",
+        "T"
+      ],
+      "argument_units": [
+        "m",
+        "K"
+      ],
+      "function_unit": "1",
+      "internal_to_comsol_conversion": {
+        "internal": "exp(-i*omega*t), passive Im(epsilon)>=0",
+        "comsol_target": "exp(+i*omega*t), epsilon_comsol=epsilon_real-i*epsilon_loss"
+      },
+      "relative_permittivity_expression": "tm_synthetic_glass_eps_re(lambda0,T)-i*tm_synthetic_glass_eps_loss(lambda0,T)",
+      "interpolation_and_extrapolation": {
+        "analytic_model": "thermo_optic",
+        "extrapolation": {
+          "mode": "none",
+          "policy_source_sha256": null,
+          "maximum_fraction_outside_domain": 0.0,
+          "uncertainty_growth_per_fraction": 0.0
+        }
+      },
+      "discontinuity_or_phase_boundaries": {
+        "wavelength_m": [],
+        "temperature_K": []
+      },
+      "table_sha256": null,
+      "target_property": {
+        "component_tag": "comp1",
+        "material_tag": "mat1",
+        "property_group_tag": "def",
+        "property_key": "relpermittivity"
+      },
+      "post_apply_readback": {
+        "expected_expression": "tm_synthetic_glass_eps_re(lambda0,T)-i*tm_synthetic_glass_eps_loss(lambda0,T)",
+        "expected_function_tags": [
+          "tm_synthetic_glass_eps_re",
+          "tm_synthetic_glass_eps_loss"
+        ],
+        "exact_match_required": true
+      },
+      "rollback": {
+        "snapshot_property_before_apply": true,
+        "remove_created_functions_on_failure": true,
+        "solve_required": false
+      }
+    }
+  ],
+  "application_contract": {
+    "derived_model_required": true,
+    "exact_readback_required": true,
+    "rollback_required": true,
+    "mutation_performed": false,
+    "solver_started": false
+  }
+}

@@ -6,86 +6,53 @@ from copy import deepcopy
 from typing import Any
 
 from comsol_mcp import __version__
-from comsol_mcp.durable import canonical_sha256_v1
-from comsol_mcp.research import (
-    CAMPAIGN_MANIFEST_SCHEMA_NAME,
-    CAMPAIGN_MANIFEST_SCHEMA_VERSION,
-    CANDIDATE_RECORD_SCHEMA_NAME,
-    CANDIDATE_RECORD_SCHEMA_VERSION,
-    DECISION_RECORD_SCHEMA_NAME,
-    DECISION_RECORD_SCHEMA_VERSION,
-    DESIGN_SPACE_SCHEMA_NAME,
-    DESIGN_SPACE_SCHEMA_VERSION,
-    EVALUATION_RECORD_SCHEMA_NAME,
-    EVALUATION_RECORD_SCHEMA_VERSION,
-    EXTERNAL_VALIDATION_RECEIPT_SCHEMA_NAME,
-    EXTERNAL_VALIDATION_RECEIPT_SCHEMA_VERSION,
-    MATERIAL_CATALOG_SCHEMA_NAME,
-    MATERIAL_CATALOG_SCHEMA_VERSION,
-    MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME,
-    MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION,
-    OBJECTIVE_SCORE_SCHEMA_NAME,
-    OBJECTIVE_SCORE_SCHEMA_VERSION,
-    OPTICAL_PROPERTY_MAPPING_SCHEMA_NAME,
-    OPTICAL_PROPERTY_MAPPING_SCHEMA_VERSION,
-    OPTIMIZATION_CONDITION_TABLE_SCHEMA_NAME,
-    OPTIMIZATION_CONDITION_TABLE_SCHEMA_VERSION,
-    OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
-    OPTIMIZER_CHECKPOINT_SCHEMA_VERSION,
-    OPTIMIZER_EXPLANATION_SCHEMA_NAME,
-    OPTIMIZER_EXPLANATION_SCHEMA_VERSION,
-    OPTIMIZER_PROPOSAL_SCHEMA_NAME,
-    OPTIMIZER_PROPOSAL_SCHEMA_VERSION,
-    OPTIMIZER_STATE_SCHEMA_NAME,
-    OPTIMIZER_STATE_SCHEMA_VERSION,
-    PORTFOLIO_SCHEMA_NAME,
-    PORTFOLIO_SCHEMA_VERSION,
-    RESEARCH_GOAL_SCHEMA_NAME,
-    RESEARCH_GOAL_SCHEMA_VERSION,
-    RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
-    RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
-    ROBUST_CONDITION_CONTROLS_SCHEMA_NAME,
-    ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION,
-    ROBUST_FINALIST_VALIDATION_POLICY_READABLE_VERSIONS,
-    ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME,
-    ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION,
-    ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_NAME,
-    ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_VERSION,
-    ROBUST_GRADIENT_POLICY_SCHEMA_NAME,
-    ROBUST_GRADIENT_POLICY_SCHEMA_VERSION,
-    ROBUST_GRADIENT_RECEIPT_SCHEMA_NAME,
-    ROBUST_GRADIENT_RECEIPT_SCHEMA_VERSION,
-    ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_NAME,
-    ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_VERSION,
-    ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME,
-    ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION,
-    ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_NAME,
-    ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_VERSION,
-    ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME,
-    ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION,
-    ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_NAME,
-    ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_VERSION,
-    ROBUST_OPTIMIZER_POLICY_SCHEMA_NAME,
-    ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION,
+from comsol_mcp.adapter.shape_controls import (
     ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,
     ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION,
-    ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_NAME,
-    ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_VERSION,
     ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_NAME,
     ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_VERSION,
-    ROBUST_SMOOTHING_COMPARISON_SCHEMA_NAME,
-    ROBUST_SMOOTHING_COMPARISON_SCHEMA_VERSION,
-    SHAPE_SUPPORT_POLICY_SCHEMA_NAME,
-    SHAPE_SUPPORT_POLICY_SCHEMA_VERSION,
+)
+from comsol_mcp.adapter.structure import (
     STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME,
     STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION,
     STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME,
     STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION,
     STRUCTURE_TREE_AUDIT_SCHEMA_NAME,
     STRUCTURE_TREE_AUDIT_SCHEMA_VERSION,
-    WORKFLOW_CAPSULE_SCHEMA_NAME,
-    WORKFLOW_CAPSULE_SCHEMA_VERSION,
 )
+from comsol_mcp.contracts.condition_adapter import (
+    SCHEMA_NAME as ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_NAME,
+)
+from comsol_mcp.contracts.condition_adapter import (
+    SCHEMA_VERSION as ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_VERSION,
+)
+from comsol_mcp.contracts.condition_controls import (
+    SCHEMA_NAME as ROBUST_CONDITION_CONTROLS_SCHEMA_NAME,
+)
+from comsol_mcp.contracts.condition_controls import (
+    SCHEMA_VERSION as ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION,
+)
+from comsol_mcp.contracts.condition_table import (
+    MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME,
+    MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION,
+    OPTIMIZATION_CONDITION_TABLE_SCHEMA_NAME,
+    OPTIMIZATION_CONDITION_TABLE_SCHEMA_VERSION,
+)
+from comsol_mcp.contracts.material_mapping import (
+    OPTICAL_PROPERTY_MAPPING_SCHEMA_NAME,
+    OPTICAL_PROPERTY_MAPPING_SCHEMA_VERSION,
+)
+from comsol_mcp.contracts.material_tensor_rows import (
+    SCHEMA_NAME as ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_NAME,
+)
+from comsol_mcp.contracts.material_tensor_rows import (
+    SCHEMA_VERSION as ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_VERSION,
+)
+from comsol_mcp.contracts.shape_support import (
+    SHAPE_SUPPORT_POLICY_SCHEMA_NAME,
+    SHAPE_SUPPORT_POLICY_SCHEMA_VERSION,
+)
+from comsol_mcp.durable import canonical_sha256_v1
 from comsol_mcp.settings_gui_handshake import HANDSHAKE_SCHEMA, HANDSHAKE_VERSION
 
 OPERATION_LOCK_SCHEMA, OPERATION_LOCK_VERSION = "comsol_mcp.operation_lock", "1.0.0"
@@ -286,57 +253,45 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="configuration",
         ),
         _entry(
-            "comsol_mcp.robust_shape_optimization_manifest",
-            "1.1.0",
-            "comsol_mcp.jobs.robust_shape_optimization",
-            artifact_kind="configuration",
-            readable_versions=("1.0.0", "1.1.0"),
-        ),
-        _entry(
             "comsol_mcp.robust_condition_receipt",
             "1.0.0",
-            "comsol_mcp.jobs.robust_condition_runtime",
+            "comsol_mcp.jobs.native_condition_receipts",
         ),
         _entry(
             "comsol_mcp.robust_condition_gradient_receipt",
             "1.0.0",
-            "comsol_mcp.jobs.robust_gradient_runtime",
+            "comsol_mcp.jobs.native_condition_gradients",
             artifact_kind="durable_artifact",
         ),
         _entry(
-            "comsol_mcp.robust_licensed_cleanup_receipt",
+            "comsol_mcp.native_condition_gradient_request",
             "1.0.0",
-            "comsol_mcp.jobs.robust_shape_worker",
+            "comsol_mcp.contracts.native_condition",
+            artifact_kind="configuration",
         ),
         _entry(
-            "comsol_mcp.robust_shape_plan_preview",
+            "comsol_mcp.native_condition_forward_request",
             "1.0.0",
-            "comsol_mcp.tools.robust_shape",
-            artifact_kind="public_response",
+            "comsol_mcp.contracts.native_condition",
+            artifact_kind="configuration",
         ),
         _entry(
-            "comsol_mcp.robust_shape_evidence_summary",
+            "comsol_mcp.native_condition_forward_manifest",
             "1.0.0",
-            "comsol_mcp.tools.robust_shape",
-            artifact_kind="public_response",
+            "comsol_mcp.jobs.native_condition_collector",
+            artifact_kind="durable_artifact",
         ),
         _entry(
-            "comsol_mcp.robust_shape_evidence_verification",
+            "comsol_mcp.native_condition_gradient_manifest",
             "1.0.0",
-            "comsol_mcp.tools.robust_shape",
-            artifact_kind="public_response",
+            "comsol_mcp.jobs.native_condition_collector",
+            artifact_kind="durable_artifact",
         ),
         _entry(
             "comsol_mcp.robust_wall_watchdog",
             "1.0.0",
-            "comsol_mcp.jobs.robust_wall_watchdog",
+            "comsol_mcp.jobs.native_wall_watchdog",
             artifact_kind="durable_artifact",
-        ),
-        _entry(
-            "comsol_mcp.robust_shape_optimization_submission",
-            "1.0.0",
-            "comsol_mcp.jobs.robust_shape_optimization",
-            artifact_kind="configuration",
         ),
         _entry(
             "comsol_mcp.robust_pedot_fixture_manifest",
@@ -347,42 +302,30 @@ def _entries() -> list[dict[str, Any]]:
         _entry(
             "comsol_mcp.lin2025_pedot_cylinder_fixture",
             "1.0.0",
-            "comsol_mcp.research.lin2025_pedot_cylinder",
+            "comsol_mcp.contracts.optical_cylinder_fixture",
             artifact_kind="configuration",
         ),
         _entry(
             "comsol_mcp.lin2025_pedot_cylinder_fixture.binding",
             "1.0.0",
-            "comsol_mcp.research.lin2025_pedot_cylinder",
+            "comsol_mcp.contracts.optical_cylinder_fixture",
             artifact_kind="configuration",
         ),
         _entry(
             "comsol_mcp.lin2025_pedot_cylinder_control_receipt",
             "1.0.0",
-            "comsol_mcp.research.lin2025_pedot_backend",
-        ),
-        _entry(
-            "comsol_mcp.lin2025_robust_campaign_inputs",
-            "1.0.0",
-            "development_kit.scripts.lin2025_robust_manifest",
-            artifact_kind="configuration",
+            "comsol_mcp.adapter.optical_cylinder",
         ),
         _entry(
             "comsol_mcp.robust_startup_admission_policy",
             "1.0.0",
-            "comsol_mcp.research.robust_startup_admission",
+            "comsol_mcp.contracts.startup_admission",
             artifact_kind="configuration",
         ),
         _entry(
             "comsol_mcp.robust_startup_admission_receipt",
             "1.0.0",
-            "comsol_mcp.research.robust_startup_admission",
-        ),
-        _entry(
-            "comsol_mcp.robust_shape_optimization_row",
-            "1.0.0",
-            "comsol_mcp.jobs.robust_shape_rows",
-            artifact_kind="durable_artifact",
+            "comsol_mcp.contracts.startup_admission",
         ),
         _entry("comsol_mcp.artifact_chain", "1.0.0", "comsol_mcp.artifact_chain"),
         _entry(
@@ -403,40 +346,6 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.shared_session.cleanup",
         ),
         _entry(
-            CANDIDATE_RECORD_SCHEMA_NAME,
-            CANDIDATE_RECORD_SCHEMA_VERSION,
-            "comsol_mcp.research.records",
-            artifact_kind="durable_artifact",
-        ),
-        _entry(
-            CAMPAIGN_MANIFEST_SCHEMA_NAME,
-            CAMPAIGN_MANIFEST_SCHEMA_VERSION,
-            "comsol_mcp.research.compiler",
-            artifact_kind="configuration",
-        ),
-        _entry(
-            BRANCH_CONTINUATION_PLAN_SCHEMA,
-            BRANCH_CONTINUATION_SCHEMA_VERSION,
-            "comsol_mcp.evidence.branch_continuation",
-        ),
-        _entry(
-            BRANCH_CONTINUATION_STATES_SCHEMA,
-            BRANCH_CONTINUATION_SCHEMA_VERSION,
-            "comsol_mcp.evidence.branch_continuation",
-        ),
-        _entry(
-            BRANCH_CONTINUATION_CAMPAIGN_STATE_SCHEMA_NAME,
-            BRANCH_CONTINUATION_CAMPAIGN_STATE_SCHEMA_VERSION,
-            "comsol_mcp.jobs.branch_continuation_campaign_rows",
-            artifact_kind="durable_artifact",
-        ),
-        _entry(
-            BRANCH_CONTINUATION_CAMPAIGN_SUMMARY_SCHEMA_NAME,
-            BRANCH_CONTINUATION_CAMPAIGN_SUMMARY_SCHEMA_VERSION,
-            "comsol_mcp.jobs.branch_continuation_campaign_runner",
-            artifact_kind="durable_artifact",
-        ),
-        _entry(
             THERMO_OPTOMECHANICAL_MANIFEST_SCHEMA_NAME,
             THERMO_OPTOMECHANICAL_MANIFEST_SCHEMA_VERSION,
             "comsol_mcp.contracts.thermo_optomechanical",
@@ -454,49 +363,15 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="durable_artifact",
         ),
         _entry(
-            CONVERGENCE_LADDER_SCHEMA,
-            CONVERGENCE_SCHEMA_VERSION,
-            "comsol_mcp.evidence.convergence_evaluation",
-        ),
-        _entry(
-            CONVERGENCE_CAMPAIGN_LEVEL_SCHEMA_NAME,
-            CONVERGENCE_CAMPAIGN_LEVEL_SCHEMA_VERSION,
-            "comsol_mcp.jobs.convergence_campaign_rows",
-            artifact_kind="durable_artifact",
-        ),
-        _entry(
-            CONVERGENCE_CAMPAIGN_SUMMARY_SCHEMA_NAME,
-            CONVERGENCE_CAMPAIGN_SUMMARY_SCHEMA_VERSION,
-            "comsol_mcp.jobs.convergence_campaign_runner",
-            artifact_kind="durable_artifact",
-        ),
-        _entry(
-            CONVERGENCE_EVALUATION_SCHEMA,
-            CONVERGENCE_SCHEMA_VERSION,
-            "comsol_mcp.evidence.convergence_evaluation",
-        ),
-        _entry(
             "comsol_mcp.deployment_identity",
             "1.2.0",
             "comsol_mcp.tools.capabilities",
             readable_versions=("1.0.0", "1.1.0", "1.2.0"),
         ),
         _entry(
-            DECISION_RECORD_SCHEMA_NAME,
-            DECISION_RECORD_SCHEMA_VERSION,
-            "comsol_mcp.research.decisions",
-            artifact_kind="durable_artifact",
-        ),
-        _entry(
-            DESIGN_SPACE_SCHEMA_NAME,
-            DESIGN_SPACE_SCHEMA_VERSION,
-            "comsol_mcp.research.contracts",
-            artifact_kind="configuration",
-        ),
-        _entry(
             "comsol_mcp.derivative_support",
             "1.0.0",
-            "comsol_mcp.research.derivative_support",
+            "comsol_mcp.contracts.derivative_support",
             artifact_kind="configuration",
         ),
         _entry(
@@ -575,17 +450,6 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.evidence.integrity_verifier",
         ),
         _entry(
-            EVALUATION_RECORD_SCHEMA_NAME,
-            EVALUATION_RECORD_SCHEMA_VERSION,
-            "comsol_mcp.research.evaluations",
-            artifact_kind="durable_artifact",
-        ),
-        _entry(
-            EXTERNAL_VALIDATION_RECEIPT_SCHEMA_NAME,
-            EXTERNAL_VALIDATION_RECEIPT_SCHEMA_VERSION,
-            "comsol_mcp.research.external_validation",
-        ),
-        _entry(
             "comsol_mcp.execution_evidence_outcome",
             "1.0.0",
             "comsol_mcp.evidence.outcome_contract",
@@ -606,14 +470,9 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.evidence.field_bundle",
         ),
         _entry(
-            "comsol_mcp.gradient_check",
-            "1.0.0",
-            "comsol_mcp.research.gradient_validation",
-        ),
-        _entry(
             "comsol_mcp.gradient_record",
             "1.0.0",
-            "comsol_mcp.research.gradient_contracts",
+            "comsol_mcp.contracts.gradient_contracts",
         ),
         _entry(
             "comsol_mcp.model_version_metadata",
@@ -805,26 +664,20 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="public_response",
         ),
         _entry(
-            MATERIAL_CATALOG_SCHEMA_NAME,
-            MATERIAL_CATALOG_SCHEMA_VERSION,
-            "comsol_mcp.research.materials",
-            artifact_kind="configuration",
-        ),
-        _entry(
             MATERIAL_STATE_CONFIGURATION_SCHEMA_NAME,
             MATERIAL_STATE_CONFIGURATION_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_conditions",
+            "comsol_mcp.contracts.condition_table",
             artifact_kind="configuration",
         ),
         _entry(
             "comsol_mcp.native_adjoint_adapter_receipt",
             "1.0.0",
-            "comsol_mcp.research.adjoint_adapter",
+            "comsol_mcp.adapter.adjoint",
         ),
         _entry(
             "comsol_mcp.native_optimizer_configuration",
-            "1.1.0",
-            "comsol_mcp.research.gradient_contracts",
+            "1.0.0",
+            "comsol_mcp.contracts.gradient_contracts",
             artifact_kind="configuration",
         ),
         _entry(
@@ -835,7 +688,7 @@ def _entries() -> list[dict[str, Any]]:
         _entry(
             OPTIMIZATION_CONDITION_TABLE_SCHEMA_NAME,
             OPTIMIZATION_CONDITION_TABLE_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_conditions",
+            "comsol_mcp.contracts.condition_table",
             artifact_kind="configuration",
         ),
         _entry(
@@ -856,91 +709,31 @@ def _entries() -> list[dict[str, Any]]:
         _entry(
             OPTICAL_PROPERTY_MAPPING_SCHEMA_NAME,
             OPTICAL_PROPERTY_MAPPING_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_material_mapping",
+            "comsol_mcp.contracts.material_mapping",
             artifact_kind="configuration",
-        ),
-        _entry(
-            ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_NAME,
-            ROBUST_OBJECTIVE_CONFIGURATION_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_objectives",
-            artifact_kind="configuration",
-        ),
-        _entry(
-            ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_NAME,
-            ROBUST_FINALIST_VALIDATION_POLICY_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_finalist_validation",
-            artifact_kind="configuration",
-            readable_versions=ROBUST_FINALIST_VALIDATION_POLICY_READABLE_VERSIONS,
-        ),
-        _entry(
-            ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_NAME,
-            ROBUST_FINALIST_VALIDATION_RECEIPT_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_finalist_evidence",
-        ),
-        _entry(
-            ROBUST_GRADIENT_POLICY_SCHEMA_NAME,
-            ROBUST_GRADIENT_POLICY_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_gradient_acceptance",
-            artifact_kind="configuration",
-        ),
-        _entry(
-            ROBUST_GRADIENT_RECEIPT_SCHEMA_NAME,
-            ROBUST_GRADIENT_RECEIPT_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_gradient_acceptance",
-        ),
-        _entry(
-            ROBUST_OBJECTIVE_RECEIPT_SCHEMA_NAME,
-            ROBUST_OBJECTIVE_RECEIPT_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_objectives",
-        ),
-        _entry(
-            ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_NAME,
-            ROBUST_OBJECTIVE_GRADIENT_RECEIPT_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_objectives",
-        ),
-        _entry(
-            ROBUST_OPTIMIZER_POLICY_SCHEMA_NAME,
-            ROBUST_OPTIMIZER_POLICY_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_optimizer_policy",
-            artifact_kind="configuration",
-        ),
-        _entry(
-            ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_NAME,
-            ROBUST_OPTIMIZER_EXECUTION_RECEIPT_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_optimizer_policy",
-        ),
-        _entry(
-            "comsol_mcp.robust_outer_gcmma_proposal",
-            "1.0.0",
-            "comsol_mcp.research.robust_outer_gcmma",
-        ),
-        _entry(
-            "comsol_mcp.robust_outer_gcmma_state",
-            "1.0.0",
-            "comsol_mcp.research.robust_outer_gcmma",
         ),
         _entry(
             ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME,
             ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_shape_adapter",
+            "comsol_mcp.adapter.shape_controls",
             artifact_kind="configuration",
         ),
         _entry(
             ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_NAME,
             ROBUST_SHAPE_ADAPTER_CONFIGURATION_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_adapter_configuration",
+            "comsol_mcp.contracts.condition_adapter",
             artifact_kind="configuration",
         ),
         _entry(
             ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_NAME,
             ROBUST_MATERIAL_TENSOR_ROWS_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_material_tensor_rows",
+            "comsol_mcp.contracts.material_tensor_rows",
             artifact_kind="configuration",
         ),
         _entry(
             ROBUST_CONDITION_CONTROLS_SCHEMA_NAME,
             ROBUST_CONDITION_CONTROLS_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_condition_controls",
+            "comsol_mcp.contracts.condition_controls",
             artifact_kind="configuration",
             readable_versions=(
                 "1.0.0",
@@ -954,28 +747,23 @@ def _entries() -> list[dict[str, Any]]:
         _entry(
             ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_NAME,
             ROBUST_SHAPE_CONTROL_RECEIPT_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_shape_adapter",
+            "comsol_mcp.adapter.shape_controls",
         ),
         _entry(
             "comsol_mcp.robust_forward_shape_stage",
             "1.0.0",
-            "comsol_mcp.jobs.robust_shape_native_runtime",
+            "comsol_mcp.adapter.condition_backend",
         ),
         _entry(
             "comsol_mcp.robust_shape_application",
             "1.1.0",
-            "comsol_mcp.jobs.robust_shape_native_runtime",
+            "comsol_mcp.adapter.condition_backend",
             readable_versions=("1.0.0", "1.1.0"),
-        ),
-        _entry(
-            ROBUST_SMOOTHING_COMPARISON_SCHEMA_NAME,
-            ROBUST_SMOOTHING_COMPARISON_SCHEMA_VERSION,
-            "comsol_mcp.research.robust_smoothing_selection",
         ),
         _entry(
             SHAPE_SUPPORT_POLICY_SCHEMA_NAME,
             SHAPE_SUPPORT_POLICY_SCHEMA_VERSION,
-            "comsol_mcp.research.shape_support",
+            "comsol_mcp.contracts.shape_support",
             artifact_kind="configuration",
         ),
         _entry(
@@ -995,45 +783,19 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="durable_artifact",
         ),
         _entry(
-            OBJECTIVE_SCORE_SCHEMA_NAME,
-            OBJECTIVE_SCORE_SCHEMA_VERSION,
-            "comsol_mcp.research.objectives",
-        ),
-        _entry(
-            OPTIMIZER_CHECKPOINT_SCHEMA_NAME,
-            OPTIMIZER_CHECKPOINT_SCHEMA_VERSION,
-            "comsol_mcp.research.state",
-            artifact_kind="durable_artifact",
-        ),
-        _entry(
-            OPTIMIZER_PROPOSAL_SCHEMA_NAME,
-            OPTIMIZER_PROPOSAL_SCHEMA_VERSION,
-            "comsol_mcp.research.optimizers",
-        ),
-        _entry(
-            OPTIMIZER_STATE_SCHEMA_NAME,
-            OPTIMIZER_STATE_SCHEMA_VERSION,
-            "comsol_mcp.research.optimizers",
-        ),
-        _entry(
-            OPTIMIZER_EXPLANATION_SCHEMA_NAME,
-            OPTIMIZER_EXPLANATION_SCHEMA_VERSION,
-            "comsol_mcp.research.optimizers",
-        ),
-        _entry(
             STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME,
             STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION,
-            "comsol_mcp.research.adapters",
+            "comsol_mcp.adapter.structure",
         ),
         _entry(
             STRUCTURE_ADAPTER_APPLICATION_SCHEMA_NAME,
             STRUCTURE_ADAPTER_APPLICATION_SCHEMA_VERSION,
-            "comsol_mcp.research.adapters",
+            "comsol_mcp.adapter.structure",
         ),
         _entry(
             STRUCTURE_TREE_AUDIT_SCHEMA_NAME,
             STRUCTURE_TREE_AUDIT_SCHEMA_VERSION,
-            "comsol_mcp.research.adapters",
+            "comsol_mcp.adapter.structure",
         ),
         _entry(
             PATH_POLICY_SCHEMA,
@@ -1054,35 +816,9 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.evidence.portfolio_verifier",
         ),
         _entry(
-            PORTFOLIO_SCHEMA_NAME,
-            PORTFOLIO_SCHEMA_VERSION,
-            "comsol_mcp.research.state",
-            artifact_kind="durable_artifact",
-        ),
-        _entry(
             "comsol_mcp.portfolio_evidence_verification",
             "1.0.0",
             "comsol_mcp.evidence.portfolio_verifier",
-        ),
-        _entry(
-            SPECTRAL_DECISION_SCHEMA,
-            SPECTRAL_SCHEMA_VERSION,
-            "comsol_mcp.evidence.spectral_characterization",
-        ),
-        _entry(
-            SPECTRAL_BUNDLE_SCHEMA,
-            SPECTRAL_SCHEMA_VERSION,
-            "comsol_mcp.evidence.spectral_characterization",
-        ),
-        _entry(
-            SPECTRAL_CHARACTERIZATION_SCHEMA,
-            SPECTRAL_SCHEMA_VERSION,
-            "comsol_mcp.evidence.spectral_characterization",
-        ),
-        _entry(
-            SPECTRAL_MODEL_COMPARISON_SCHEMA_NAME,
-            SPECTRAL_MODEL_COMPARISON_SCHEMA_VERSION,
-            "comsol_mcp.evidence.spectral_model_comparison",
         ),
         _entry(
             SIMULATION_CONFIGURATION_SCHEMA_NAME,
@@ -1101,71 +837,9 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.tools.jobs",
         ),
         _entry(
-            KIRCHHOFF_ASSESSMENT_SCHEMA_NAME,
-            THERMAL_RADIATION_SCHEMA_VERSION,
-            "comsol_mcp.evidence.thermal_radiation",
-        ),
-        _entry(
-            THERMAL_RADIATION_REQUEST_SCHEMA_NAME,
-            THERMAL_RADIATION_SCHEMA_VERSION,
-            "comsol_mcp.contracts.thermal_radiation",
-        ),
-        _entry(
-            THERMAL_RADIATION_EVIDENCE_SCHEMA_NAME,
-            THERMAL_RADIATION_SCHEMA_VERSION,
-            "comsol_mcp.evidence.thermal_radiation",
-        ),
-        _entry(
-            THERMAL_MATERIAL_LEDGER_SCHEMA_NAME,
-            THERMAL_MATERIAL_SCHEMA_VERSION,
-            "comsol_mcp.evidence.thermal_material",
-            artifact_kind="configuration",
-        ),
-        _entry(
-            THERMAL_MATERIAL_EVALUATION_SCHEMA_NAME,
-            THERMAL_MATERIAL_SCHEMA_VERSION,
-            "comsol_mcp.evidence.thermal_material",
-        ),
-        _entry(
-            SPECTRAL_PROGRESS_SCHEMA_NAME,
-            SPECTRAL_PROGRESS_SCHEMA_VERSION,
-            "comsol_mcp.jobs.spectral_progress",
-            artifact_kind="durable_artifact",
-        ),
-        _entry(
-            SPECTRAL_ROW_SCHEMA_NAME,
-            SPECTRAL_ROW_SCHEMA_VERSION,
-            "comsol_mcp.jobs.spectral_rows",
-            artifact_kind="durable_artifact",
-        ),
-        _entry(
-            SPECTRAL_STAGE_SCHEMA_NAME,
-            SPECTRAL_STAGE_SCHEMA_VERSION,
-            "comsol_mcp.jobs.spectral_stages",
-            artifact_kind="durable_artifact",
-        ),
-        _entry(
-            SPECTRAL_SUMMARY_SCHEMA_NAME,
-            SPECTRAL_SUMMARY_SCHEMA_VERSION,
-            "comsol_mcp.jobs.spectral_runner",
-            artifact_kind="durable_artifact",
-        ),
-        _entry(
             "comsol_mcp.resource_calibration_report",
             "1.0.0",
             "comsol_mcp.jobs.resource_admission",
-        ),
-        _entry(
-            RESEARCH_GOAL_SCHEMA_NAME,
-            RESEARCH_GOAL_SCHEMA_VERSION,
-            "comsol_mcp.research.contracts",
-            artifact_kind="configuration",
-        ),
-        _entry(
-            RESEARCH_JOURNAL_RECORD_SCHEMA_NAME,
-            RESEARCH_JOURNAL_RECORD_SCHEMA_VERSION,
-            "comsol_mcp.research.journal",
-            artifact_kind="durable_artifact",
         ),
         _entry(
             "comsol_mcp.resource_journal_entry",
@@ -1264,12 +938,6 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.visual_reviewer_capability",
             "1.0.0",
             "comsol_mcp.evidence.visual_review",
-        ),
-        _entry(
-            WORKFLOW_CAPSULE_SCHEMA_NAME,
-            WORKFLOW_CAPSULE_SCHEMA_VERSION,
-            "comsol_mcp.research.workflow",
-            artifact_kind="configuration",
         ),
         _entry(
             legacy_point_audit,

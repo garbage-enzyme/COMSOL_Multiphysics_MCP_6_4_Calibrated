@@ -361,7 +361,7 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
 
     assert result["profile"] == "core"
     assert result["active_profile"] == "core"
-    assert result["tool_count"] == 56
+    assert result["tool_count"] == 52
     assert result["profile_source"]["default_used"] is True
     assert [item["name"] for item in result["available_profiles"]] == [
         "core",
@@ -382,6 +382,8 @@ def test_capabilities_report_risky_operations_without_starting_comsol(monkeypatc
     assert result["session"] == {"connected": False, "starting": False}
     assert result["long_jobs"]["real_cancellation"] is True
     assert result["long_jobs"]["durable_background_jobs"] is True
+    assert result["long_jobs"]["job_types"] == ["staged_sweep", "validation_matrix"]
+    assert not {"spectral_characterization", "convergence_campaign", "branch_continuation_campaign"}.intersection(result["long_jobs"])
     assert "exact-identity owned-process fallback" in result["long_jobs"]["cancellation_strategy"]
     assert result["long_jobs"]["cross_host_cancellation"] is False
     assert "semantic_search" in result["disabled_by_default"]
@@ -448,11 +450,11 @@ def test_startup_capability_summary_is_compact_and_truthful(monkeypatch):
     summary = startup_capability_summary()
 
     assert "profile=core" in summary
-    assert "tools=56" in summary
+    assert "tools=52" in summary
     assert "lexical_manual=disabled" in summary
     assert "semantic_docs=disabled" in summary
     assert "durable_jobs=staged_sweep" in summary
-    assert "convergence_campaign" in summary
+    assert "convergence_campaign" not in summary
     assert "durable_job_cancellation=verified" in summary
 
 

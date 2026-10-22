@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from comsol_mcp.research.derivative_support import (
+from comsol_mcp.contracts.derivative_support import (
     _finite,
     normalize_derivative_support,
     normalize_derivative_variable,

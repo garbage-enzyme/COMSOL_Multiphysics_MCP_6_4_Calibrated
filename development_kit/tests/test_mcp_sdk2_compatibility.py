@@ -203,14 +203,14 @@ async def _legacy_stdio_exchange(protocol_version: str, runtime_root: Path) -> d
 
 def test_mcp_dependency_and_package_identity_are_the_conservative_2_0_lane() -> None:
     assert "mcp>=2.2.0,<2.3" in _runtime_dependencies()
-    assert __version__ == "0.7.8"
+    assert __version__ == "0.8.0"
 
 
 def test_server_uses_official_mcpserver_and_preserves_wire_schema_aliases() -> None:
     server = create_server("MCP SDK 2 compatibility", profile="core")
     assert isinstance(server, MCPServer)
     tools = asyncio.run(server.list_tools())
-    assert len(tools) == 56
+    assert len(tools) == 52
     capabilities = next(tool for tool in tools if tool.name == "capabilities")
     serialized = capabilities.model_dump(mode="json", by_alias=True, exclude_none=True)
     assert serialized["inputSchema"] == capabilities.input_schema
@@ -236,16 +236,16 @@ def test_sdk2_server_preserves_legacy_stdio_protocols(
     assert initialized["protocolVersion"] == protocol_version
     assert initialized["serverInfo"] == {
         "name": "COMSOL MCP legacy compatibility",
-        "version": "0.7.8",
+        "version": "0.8.0",
     }
     assert initialized["instructions"] == SERVER_INSTRUCTIONS
 
     listed = exchange["listed"]["result"]
-    assert len(listed["tools"]) == 56
+    assert len(listed["tools"]) == 52
     assert {tool["name"] for tool in listed["tools"]} >= {
         "capabilities",
         "solver_preflight",
-        "spectral_characterize",
+        "job_spec_preview",
     }
     assert all("inputSchema" in tool for tool in listed["tools"])
     assert "resultType" not in listed
@@ -264,7 +264,7 @@ def test_sdk2_server_preserves_legacy_stdio_protocols(
     assert "resultType" not in called
     capabilities = _response_payload(called)
     assert capabilities["profile"] == "core"
-    assert capabilities["tool_count"] == 56
+    assert capabilities["tool_count"] == 52
     assert capabilities["session"] == {"connected": False, "starting": False}
 
     resources = exchange["resources"]["result"]

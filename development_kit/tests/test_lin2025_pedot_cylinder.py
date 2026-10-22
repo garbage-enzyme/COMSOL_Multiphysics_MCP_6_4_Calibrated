@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from comsol_mcp.research.lin2025_pedot_cylinder import (
+from comsol_mcp.contracts.optical_cylinder_fixture import (
     SCHEMA_NAME,
     compile_lin2025_pedot_cylinder_binding,
     compile_lin2025_pedot_shape_support,

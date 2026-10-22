@@ -178,7 +178,7 @@ def test_semantic_acceptance_profile_counts_match_frozen_snapshot():
     assert semantic_gate.PROFILE_COUNTS == {
         name: len(frozen[name]) for name in semantic_gate.PROFILE_COUNTS
     }
-    assert semantic_gate.SEMANTIC_CORE_COUNT == 64
+    assert semantic_gate.SEMANTIC_CORE_COUNT == 60
 
 
 def test_semantic_acceptance_base_discovery_does_not_inject_deployment(monkeypatch, tmp_path):

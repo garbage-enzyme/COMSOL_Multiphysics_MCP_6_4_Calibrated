@@ -12,9 +12,9 @@ from typing import Any
 
 from comsol_mcp.durable import domain_sha256_v2
 from comsol_mcp.jobs.store import atomic_write_json
-from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
-from comsol_mcp.research.robust_material_mapping import normalize_optical_property_mapping
-from comsol_mcp.research.robust_material_tensor_rows import normalize_robust_material_tensor_rows
+from comsol_mcp.contracts.condition_table import normalize_optimization_condition_table
+from comsol_mcp.contracts.material_mapping import normalize_optical_property_mapping
+from comsol_mcp.contracts.material_tensor_rows import normalize_robust_material_tensor_rows
 
 PEDOT_FIXTURE_SCHEMA_NAME = "comsol_mcp.robust_pedot_fixture_manifest"
 PEDOT_FIXTURE_SCHEMA_VERSION = "1.0.0"

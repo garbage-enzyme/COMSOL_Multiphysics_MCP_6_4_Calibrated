@@ -60,13 +60,6 @@ VISUAL_CAPABILITY_SCHEMA = "comsol_mcp.visual_reviewer_capability"
 VISUAL_REQUEST_SCHEMA = "comsol_mcp.visual_review_request"
 VISUAL_RECEIPT_SCHEMA = "comsol_mcp.visual_review_receipt"
 VISUAL_REVIEW_SCHEMA_VERSION = "1.0.0"
-MAX_SPECTRAL_POINTS = 1024
-MAX_REFINEMENT_STAGES = 8
-MAX_WINDOW_EXPANSIONS = 8
-MAX_CONVERGENCE_CAMPAIGN_LEVELS = 8
-MAX_CONVERGENCE_CAMPAIGN_POINTS = 512
-MAX_BRANCH_CONTINUATION_STATES = 16
-MAX_BRANCH_CONTINUATION_POINTS = 512
 _PORTABLE_POLICY_NAMES = (
     "declared_flux_closure",
     "mesh_evidence_presence",
@@ -291,7 +284,6 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "solver_ownership_and_preflight",
             "durable_background_staged_sweep_jobs",
             "durable_background_validation_matrix_jobs",
-            "durable_adaptive_spectral_characterization_jobs",
             "durable_job_real_cancellation_and_resume",
             "wave_optics_read_only_preflight",
             "wave_optics_one_point_policy_separated_audit",
@@ -448,9 +440,6 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
             "job_types": [
                 "staged_sweep",
                 "validation_matrix",
-                "spectral_characterization",
-                "convergence_campaign",
-                "branch_continuation_campaign",
             ],
             "control_tools": [
                 "job_spec_preview",
@@ -461,9 +450,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
                 "job_resume",
             ],
             "cancellation_scope": (
-                "same-host durable staged_sweep, validation_matrix, and "
-                "spectral_characterization, convergence_campaign, and "
-                "branch_continuation_campaign jobs "
+                "same-host durable staged_sweep and validation_matrix jobs "
                 "owned by this runtime root"
             ),
             "cancellation_strategy": (
@@ -485,44 +472,6 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
                 "wave_optics_field_evidence",
             ],
             "field_collector_requires_preceding_point_audit": True,
-            "spectral_characterization": {
-                "one_wavelength_per_solve": True,
-                "complete_audit_fsync_before_next_point": True,
-                "exact_identity_resume": True,
-                "maximum_points_server_cap": MAX_SPECTRAL_POINTS,
-                "maximum_refinement_stages_server_cap": MAX_REFINEMENT_STAGES,
-                "maximum_expansions_server_cap": MAX_WINDOW_EXPANSIONS,
-                "scientific_tolerances": "caller_declared_and_hash_bound",
-                "normal_nonacceptance": [
-                    "no_candidate",
-                    "boundary_high_at_declared_cap",
-                    "unbracketed_fwhm",
-                    "fit_sensitive",
-                ],
-            },
-            "convergence_campaign": {
-                "composes_spectral_characterization": True,
-                "composes_offline_convergence_evaluation": True,
-                "exact_model_levels_only": True,
-                "maximum_levels_server_cap": MAX_CONVERGENCE_CAMPAIGN_LEVELS,
-                "maximum_total_points_server_cap": MAX_CONVERGENCE_CAMPAIGN_POINTS,
-                "one_solver_owner_per_campaign": True,
-                "own_peak_comparison": True,
-                "early_acceptance_requires_explicit_policy": True,
-                "undeclared_level_creation": False,
-            },
-            "branch_continuation_campaign": {
-                "composes_spectral_characterization": True,
-                "composes_offline_branch_continuation_planning": True,
-                "exact_model_states_only": True,
-                "maximum_states_server_cap": MAX_BRANCH_CONTINUATION_STATES,
-                "maximum_total_points_server_cap": MAX_BRANCH_CONTINUATION_POINTS,
-                "one_solver_owner_per_campaign": True,
-                "own_peak_continuation": True,
-                "exact_incidence_readback_required": True,
-                "branch_disappearance_claimed": False,
-                "undeclared_coordinate_creation": False,
-            },
         },
         "restart_required_after_source_changes": True,
         "server_safety": {
@@ -605,8 +554,7 @@ def startup_capability_summary(selection: ProfileSelection | None = None) -> str
         f"{'active' if capabilities['manual_search']['feature_enabled'] else 'disabled'}; "
         "semantic_docs="
         f"{'active' if capabilities['semantic_search']['feature_enabled'] else 'disabled'}; "
-        "durable_jobs=staged_sweep,validation_matrix,spectral_characterization,"
-        "convergence_campaign,branch_continuation_campaign; "
+        "durable_jobs=staged_sweep,validation_matrix; "
         "solver_ownership=enforced; durable_job_cancellation=verified"
     )
 

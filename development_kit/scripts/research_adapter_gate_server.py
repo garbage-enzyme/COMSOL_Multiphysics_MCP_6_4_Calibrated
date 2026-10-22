@@ -13,7 +13,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-_adapters = import_module("comsol_mcp.research.adapters")
+_adapters = import_module("comsol_mcp.adapter.structure")
 ClientapiPeriodicMimPatchBackend = _adapters.ClientapiPeriodicMimPatchBackend
 adapter_state_sha256 = _adapters.adapter_state_sha256
 apply_periodic_mim_patch_candidate = _adapters.apply_periodic_mim_patch_candidate

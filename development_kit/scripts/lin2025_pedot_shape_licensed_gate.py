@@ -18,8 +18,8 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 _durable = import_module("comsol_mcp.durable")
-_backend = import_module("comsol_mcp.research.lin2025_pedot_backend")
-_fixture = import_module("comsol_mcp.research.lin2025_pedot_cylinder")
+_backend = import_module("comsol_mcp.adapter.optical_cylinder")
+_fixture = import_module("comsol_mcp.contracts.optical_cylinder_fixture")
 _ownership = import_module("comsol_mcp.tools.ownership")
 atomic_write_json = _durable.atomic_write_json
 ClientapiLin2025PedotControlBackend = _backend.ClientapiLin2025PedotControlBackend

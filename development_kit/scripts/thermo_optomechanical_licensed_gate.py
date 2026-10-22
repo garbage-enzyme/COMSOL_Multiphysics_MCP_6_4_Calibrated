@@ -21,13 +21,11 @@ _replay = importlib.import_module("comsol_mcp.jobs.thermo_optomechanical_replay"
 _execution = importlib.import_module("comsol_mcp.jobs.thermo_optomechanical_replay_execution")
 _runner = importlib.import_module("comsol_mcp.jobs.thermo_optomechanical_replay_runner")
 _ownership = importlib.import_module("comsol_mcp.tools.ownership")
-_thermal_material = importlib.import_module("comsol_mcp.evidence.thermal_material")
 THERMO_OPTOMECHANICAL_CONTROLS = _replay.THERMO_OPTOMECHANICAL_CONTROLS
 normalize_thermo_optomechanical_replay_spec = _replay.normalize_thermo_optomechanical_replay_spec
 ThermoOptomechanicalComsolExecutor = _execution.ThermoOptomechanicalComsolExecutor
 run_thermo_optomechanical_replay = _runner.run_thermo_optomechanical_replay
 SolverOwnership = _ownership.SolverOwnership
-normalize_thermal_material_ledger = _thermal_material.normalize_thermal_material_ledger
 
 SCHEMA_NAME = "comsol_mcp.thermo_optomechanical_licensed_acceptance"
 SCHEMA_VERSION = "1.0.0"
@@ -590,8 +588,17 @@ def _ledger() -> dict[str, Any]:
     }
 
 
+def _frozen_material_ledger() -> dict[str, Any]:
+    path = ROOT / "development_kit/tests/fixtures/thermo_material_ledger.json"
+    data = path.read_bytes().replace(b"\r\n", b"\n")
+    expected = "64b9cf77e17c03d11eb9e41b5104088286a251a9d41a37f1f2c9c6b1522a44ad"
+    if hashlib.sha256(data).hexdigest() != expected:
+        raise ValueError("Frozen synthetic material input hash differs")
+    return json.loads(data)
+
+
 def _material_state_reference(source_path: Path) -> dict[str, Any]:
-    ledger = normalize_thermal_material_ledger(_ledger())
+    ledger = _frozen_material_ledger()
     state = ledger["states"][0]
     target = ledger["comsol_target"]
     source_sha256 = _sha256(source_path)

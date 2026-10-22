@@ -10,8 +10,7 @@ Measured basis
 
 MPh 1.3.1 keeps its matrix conversion in ``model.py``; MPh 1.4.0 moved the matrix
 datatype dispatch into ``node.py``, where ``DoubleRowMatrix`` is handled by
-calling ``getDoubleMatrix`` and reshaping (see
-``D:\\mcp_tests\\a75s4inv\\mph_131_140_differences.md``).  Neither lane's helper
+calling ``getDoubleMatrix`` and reshaping.  Neither lane's helper
 is therefore a contract.  This module owns the conversion so the project does
 not inherit either lane's private decision.
 """
@@ -114,8 +113,7 @@ def to_matrix_rows(value: Any, *, form: str) -> list[list[Any]]:
 #: Java proxy types COMSOL returns from `getString`/`getDouble`/... mapped to the
 #: Python primitive each unwraps to. Measured on COMSOL 6.4.0.293: `getString`
 #: returns a JPype `java.lang.String` proxy (`jpype._jstring`), so
-#: `isinstance(value, str)` is False even though the value prints as a string. See
-#: ``D:\\mcp_tests\\a75s4type\\java_types.json``.
+#: `isinstance(value, str)` is False even though the value prints as a string.
 _JAVA_PROXY_KINDS: dict[str, str] = {
     "java.lang.String": "str",
     "java.lang.Character": "str",
@@ -199,8 +197,7 @@ def normalize_evaluation_result(raw: Any) -> ConvertedValue:
     Measured reality, not assumption: MPh returns a **numpy array** from
     ``model.evaluate`` even for a scalar expression — ``array(1.5)`` for a
     parameter, and an empty ``array([], dtype=float64)`` when the expression
-    cannot be evaluated (for example an operator the model does not define). See
-    ``D:\\mcp_tests\\a75s4ev\\eval_shape.json``.
+    cannot be evaluated (for example an operator the model does not define).
 
     The result is duck-typed through ``tolist`` rather than by importing numpy, so
     this module stays dependency-free and the same code handles a plain Python

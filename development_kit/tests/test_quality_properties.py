@@ -37,7 +37,6 @@ from comsol_mcp.durable import (
     read_complete_jsonl,
 )
 from comsol_mcp.evidence.material_expressions import preview_material_expression
-from comsol_mcp.jobs.spectral_stages import inclusive_wavelength_grid
 from comsol_mcp.path_policy import PathPolicy
 from comsol_mcp.schema_registry import check_schema_support
 from comsol_mcp.tools.catalog import (
@@ -912,29 +911,6 @@ def test_wavelength_units_map_to_the_same_meter_coordinate(
         [points[0]["epsilon"]["imag"]] * 3,
         rel=1e-13,
     )
-
-
-@seed(20260724)
-@settings(max_examples=100, deadline=None, print_blob=True)
-@given(
-    lower_m=st.floats(min_value=1e-9, max_value=1e-4, width=64),
-    span_m=st.floats(min_value=1e-10, max_value=1e-4, width=64),
-    count=st.integers(min_value=2, max_value=128),
-)
-def test_inclusive_coordinate_grids_preserve_endpoints_and_order(
-    lower_m: float,
-    span_m: float,
-    count: int,
-) -> None:
-    upper_m = lower_m + span_m
-    assume(math.isfinite(upper_m) and upper_m > lower_m)
-
-    values = inclusive_wavelength_grid(lower_m, upper_m, count)
-
-    assert len(values) == count
-    assert values[0] == pytest.approx(lower_m, rel=1e-14)
-    assert values[-1] == pytest.approx(upper_m, rel=1e-14)
-    assert all(left < right for left, right in zip(values, values[1:]))
 
 
 def _invalid_tool_specs(case: str) -> object:

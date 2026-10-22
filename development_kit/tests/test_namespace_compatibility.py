@@ -91,62 +91,6 @@ print(json.dumps({{'same': first is second is canonical, 'before': before, 'afte
     assert result["after"]["spec_cached"].endswith(f"session.{sys.implementation.cache_tag}.pyc")
 
 
-def test_canonical_driver_writers_and_legacy_readers_agree():
-    from comsol_mcp.jobs.branch_continuation_campaign import (
-        current_branch_continuation_campaign_driver_identity,
-        validate_branch_continuation_campaign_driver_identity,
-    )
-    from comsol_mcp.jobs.convergence_campaign import (
-        current_convergence_campaign_driver_identity,
-        validate_convergence_campaign_driver_identity,
-    )
-    from comsol_mcp.jobs.spectral_characterization import (
-        current_spectral_driver_identity,
-        validate_spectral_driver_identity,
-    )
-
-    cases = (
-        (
-            current_spectral_driver_identity,
-            validate_spectral_driver_identity,
-        ),
-        (
-            current_convergence_campaign_driver_identity,
-            validate_convergence_campaign_driver_identity,
-        ),
-        (
-            current_branch_continuation_campaign_driver_identity,
-            validate_branch_continuation_campaign_driver_identity,
-        ),
-    )
-    for writer, reader in cases:
-        expected = writer()
-        legacy = {
-            **expected,
-            "implementation": expected["implementation"].replace("comsol_mcp.", "src.", 1),
-        }
-        assert reader({"driver_identity": legacy}) == expected
-
-
-def test_new_driver_identities_are_canonical():
-    from comsol_mcp.jobs.branch_continuation_campaign import (
-        current_branch_continuation_campaign_driver_identity,
-    )
-    from comsol_mcp.jobs.convergence_campaign import (
-        current_convergence_campaign_driver_identity,
-    )
-    from comsol_mcp.jobs.spectral_characterization import (
-        current_spectral_driver_identity,
-    )
-
-    for writer in (
-        current_spectral_driver_identity,
-        current_convergence_campaign_driver_identity,
-        current_branch_continuation_campaign_driver_identity,
-    ):
-        assert writer()["implementation"].startswith("comsol_mcp.")
-
-
 def test_canonical_implementation_has_no_legacy_imports():
     matches = []
     for path in sorted((ROOT / "comsol_mcp").rglob("*.py")):

@@ -385,6 +385,11 @@ def test_non_parameter_wavelength_driver_rejects_residual_parameter_name():
 )
 def test_job_preview_is_side_effect_free_and_content_bound(spec):
     original = deepcopy(spec)
+    if spec["job_type"] in {"spectral_characterization", "convergence_campaign", "branch_continuation_campaign"}:
+        with pytest.raises(ValidationError):
+            _preview_job_spec(spec)
+        assert spec == original
+        return
     first = _preview_job_spec(spec)
     second = _preview_job_spec(deepcopy(spec))
     assert spec == original
@@ -444,13 +449,11 @@ def test_public_f0_dispatch_is_solver_free():
                 "job_spec_preview",
                 {
                     "spec": {
-                        "job_type": "convergence_campaign",
-                        "campaign_id": "c",
-                        "levels": [{"level": 1}],
-                        "convergence_policy": {},
-                        "stop_policy": {},
-                        "maximum_total_points": 5,
-                        "wall_time_budget_seconds": 60,
+                        "job_type": "staged_sweep",
+                        "source_model_path": "D:/fixtures/model.mph",
+                        "parameter_name": "p",
+                        "parameter_values": [1.0, 2.0],
+                        "expressions": ["ewfd.Rorder_0"],
                     }
                 },
             )

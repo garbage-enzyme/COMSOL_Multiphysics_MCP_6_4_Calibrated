@@ -663,7 +663,7 @@ def test_native_runtime_passes_manifest_initial_values_to_adapter(ascii_tmp_path
 
 
 def test_freeze_wavelength_preserves_caller_initial_vector(monkeypatch):
-    from comsol_mcp.research.derivative_support import normalize_derivative_support
+    from comsol_mcp.contracts.derivative_support import normalize_derivative_support
 
     values = {}
     nodes = {

@@ -7,10 +7,9 @@ import itertools
 
 import pytest
 
-from comsol_mcp.jobs.robust_finalist_runtime import _off_design_table
-from comsol_mcp.research.robust_conditions import normalize_optimization_condition_table
-from comsol_mcp.research.robust_material_mapping import normalize_optical_property_mapping
-from comsol_mcp.research.robust_material_tensor_rows import bind_robust_material_tensor_rows
+from comsol_mcp.contracts.condition_table import normalize_optimization_condition_table
+from comsol_mcp.contracts.material_mapping import normalize_optical_property_mapping
+from comsol_mcp.contracts.material_tensor_rows import bind_robust_material_tensor_rows
 
 
 def _mapping(marker: str = "a", state: str = "OX") -> dict:
@@ -274,54 +273,48 @@ def test_tensor_rows_refuse_unknown_material_wavelength_unit():
 
 
 @pytest.mark.parametrize("offset", [-0.01, 0.01])
-def test_tensor_rows_refuse_finalist_wavelength_outside_material_range(offset):
-    table = normalize_optimization_condition_table(_condition_table())
+def test_tensor_rows_refuse_explicit_wavelengths_outside_material_range(offset):
+    raw = _condition_table()
+    for condition in raw["conditions"]:
+        condition["wavelength_m"] *= 1.0 + offset
+    table = normalize_optimization_condition_table(raw)
     with pytest.raises(ValueError, match="outside.*material.*range"):
-        bind_robust_material_tensor_rows(
-            _tensor_rows(), table, expected_temperature_k=300.0,
-            finalist_wavelength_relative_offsets=(offset,),
-        )
+        bind_robust_material_tensor_rows(_tensor_rows(), table, expected_temperature_k=300.0)
 
 
 @pytest.mark.parametrize("missing_state", [None, "OX", "MR"])
-def test_tensor_rows_bind_exact_finalist_samples_and_refuse_missing_state(missing_state):
+def test_tensor_rows_bind_exact_explicit_samples_and_refuse_missing_state(missing_state):
     raw = _condition_table()
     for state in raw["material_states"]:
         state["optical_property_mapping"]["independent_variable"].update(
             valid_min=7000.0, valid_max=11000.0
         )
-    table = normalize_optimization_condition_table(raw)
-    tensors = _tensor_rows()
+    nominal_table = normalize_optimization_condition_table(raw)
     wavelengths = sorted(
         {base * (1.0 + offset) for base in (8e-6, 9e-6, 10e-6) for offset in (-0.01, 0, 0.01)}
     )
+    explicit_rows = []
+    for condition in raw["conditions"]:
+        for index, offset in enumerate((-0.01, 0, 0.01)):
+            explicit_rows.append({
+                **condition,
+                "condition_id": condition["condition_id"] + f"-sample-{index}",
+                "order": len(explicit_rows),
+                "wavelength_m": condition["wavelength_m"] * (1.0 + offset),
+            })
+    expanded_table = normalize_optimization_condition_table({**raw, "conditions": explicit_rows})
+    tensors = _tensor_rows()
     for state in tensors["states"]:
         template = state["rows"][0]
         state["rows"] = [{**template, "wavelength_m": value} for value in wavelengths]
         if state["state_id"] == missing_state:
             state["rows"].pop(0)
-
-    def bind(offsets):
-        return bind_robust_material_tensor_rows(
-            tensors, table, expected_temperature_k=300.0,
-            finalist_wavelength_relative_offsets=offsets,
-        )
-
-    nominal = bind(())
+    nominal = bind_robust_material_tensor_rows(tensors, nominal_table, expected_temperature_k=300.0)
     assert nominal["active_wavelengths_m"]["OX"] == [8e-6, 9e-6, 10e-6]
     if missing_state is not None:
         with pytest.raises(ValueError, match="exactly cover active wavelengths"):
-            bind((-0.01, 0.01))
+            bind_robust_material_tensor_rows(tensors, expanded_table, expected_temperature_k=300.0)
     else:
-        expanded = bind((-0.01, 0.01))
+        expanded = bind_robust_material_tensor_rows(tensors, expanded_table, expected_temperature_k=300.0)
         assert expanded["active_wavelengths_m"] == {state: wavelengths for state in ("OX", "MR")}
         assert expanded["binding_fingerprint"] != nominal["binding_fingerprint"]
-        execution_table, _ = _off_design_table(
-            table, {"wavelength_relative_offsets": [-0.01, 0.01], "angle_offsets_deg": [-2.0, 2.0]}
-        )
-        for state in ("OX", "MR"):
-            execution_wavelengths = sorted({
-                row["wavelength_m"] for row in execution_table["conditions"]
-                if row["material_state_id"] == state
-            })
-            assert expanded["active_wavelengths_m"][state] == execution_wavelengths

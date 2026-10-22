@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from comsol_mcp.research.adjoint_adapter import (
+from comsol_mcp.adapter.adjoint import (
     ClientapiAdjointStudyBackend,
     _deformation_selections,
     configure_native_adjoint,

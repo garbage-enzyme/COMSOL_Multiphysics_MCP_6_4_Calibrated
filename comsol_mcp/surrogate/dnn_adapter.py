@@ -21,7 +21,7 @@ from comsol_mcp.durable.canonical import canonical_sha256_v1
 SCHEMA_VERSION = "1.0.0"
 
 # Allowed values proven by the S0 licensed capability probe
-# (D:\mcp_tests\a75s0p06, receipt sha256 9581c9ef32...).
+# (licensed receipt sha256 9581c9ef32...).
 ALLOWED_ACTIVATIONS = frozenset(
     {"none", "relu", "elu", "sigmoid", "tanh", "softplus", "leakyrelu", "gelu"}
 )

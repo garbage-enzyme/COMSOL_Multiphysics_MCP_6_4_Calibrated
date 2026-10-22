@@ -33,11 +33,11 @@ ARTIFACT_DIR = RUNTIME / "live_profile"
 #: artifact it is supposed to check. ``test_integration_boundaries`` fails if these
 #: drift from that frozen snapshot, so they cannot rot silently again.
 PROFILE_COUNTS = {
-    "core": 56,
-    "basic_fem": 118,
-    "wave_optics": 85,
-    "experimental": 110,
-    "full": 166,
+    "core": 52,
+    "basic_fem": 110,
+    "wave_optics": 77,
+    "experimental": 98,
+    "full": 151,
 }
 COLD_START_RESPONSE_LIMIT_SECONDS = 5.0
 CONTROL_PLANE_READ_LIMIT_SECONDS = 15.0

@@ -19,9 +19,9 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 _durable = import_module("comsol_mcp.durable")
-_adapters = import_module("comsol_mcp.research.adapters")
-_adjoint = import_module("comsol_mcp.research.adjoint_adapter")
-_robust = import_module("comsol_mcp.research.robust_shape_adapter")
+_adapters = import_module("comsol_mcp.adapter.structure")
+_adjoint = import_module("comsol_mcp.adapter.adjoint")
+_robust = import_module("comsol_mcp.adapter.shape_controls")
 _ownership = import_module("comsol_mcp.tools.ownership")
 atomic_write_json = _durable.atomic_write_json
 normalize_structure_adapter_manifest = _adapters.normalize_structure_adapter_manifest

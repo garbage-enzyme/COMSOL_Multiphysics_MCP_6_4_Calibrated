@@ -7,7 +7,7 @@ import math
 
 import pytest
 
-from comsol_mcp.research.robust_shape_adapter import (
+from comsol_mcp.adapter.shape_controls import (
     compile_robust_shape_adapter_binding,
     prepare_robust_shape_controls,
 )

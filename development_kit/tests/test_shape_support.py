@@ -6,7 +6,7 @@ import copy
 
 import pytest
 
-from comsol_mcp.research.shape_support import normalize_shape_support_policy
+from comsol_mcp.contracts.shape_support import normalize_shape_support_policy
 
 
 def _policy() -> dict:

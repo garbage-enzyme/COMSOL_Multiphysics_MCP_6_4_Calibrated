@@ -409,8 +409,17 @@ def execute_validation_collector(
     session_state: Mapping[str, Any],
     ownership_preflight: Mapping[str, Any],
     active_profile: str = "wave_optics",
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Dispatch one immutable validation-matrix collector."""
+    if collector.get("name") in {"native_condition_gradient", "native_condition_forward"}:
+        from .native_condition_collector import execute_native_condition_collector
+
+        if session_state.get("connected") is not True or ownership_preflight.get("ready") is not True:
+            raise ValueError("native collection requires the admitted matrix worker session")
+        if cancel_requested is None:
+            raise ValueError("native collection requires the worker cancellation callback")
+        return execute_native_condition_collector(point, collector, artifact_dir, model=model, client=client, expected_source_sha256=expected_source_sha256, cancel_requested=cancel_requested)
     if collector.get("name") == MATRIX_FIELD_COLLECTOR:
         return execute_field_evidence_collector(
             point,

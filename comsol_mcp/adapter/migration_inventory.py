@@ -300,7 +300,7 @@ LICENSED_PROBES = (
 #: Deferred sites, grouped by the slice that will own the migration.
 DEFERRALS = (
     Deferral(
-        modules=("comsol_mcp/jobs/robust_shape_native_runtime.py",),
+        modules=("comsol_mcp/adapter/condition_backend.py",),
         target_slice="S4A steps 2-4",
         reason=(
             "The largest single consumer: it drives the ClientAPI directly through the "
@@ -311,7 +311,7 @@ DEFERRALS = (
         ),
     ),
     Deferral(
-        modules=("comsol_mcp/research/adapters.py",),
+        modules=("comsol_mcp/adapter/structure.py",),
         target_slice="S4A step 3",
         reason=(
             "The research ClientAPI helper layer wraps scalar, string, array, and "
@@ -323,7 +323,7 @@ DEFERRALS = (
     Deferral(
         modules=(
             "comsol_mcp/jobs/native_adjoint_runtime.py",
-            "comsol_mcp/research/adjoint_adapter.py",
+            "comsol_mcp/adapter/adjoint.py",
         ),
         target_slice="S4A steps 2 and 4",
         reason=(
@@ -378,11 +378,7 @@ DEFERRALS = (
             "comsol_mcp/shared_session/lifecycle.py",
             "comsol_mcp/tools/session.py",
             "comsol_mcp/jobs/worker.py",
-            "comsol_mcp/jobs/robust_shape_worker.py",
-            "comsol_mcp/jobs/spectral_worker.py",
             "comsol_mcp/jobs/validation_worker.py",
-            "comsol_mcp/jobs/convergence_campaign_worker.py",
-            "comsol_mcp/jobs/branch_continuation_campaign_worker.py",
             "comsol_mcp/jobs/thermo_optomechanical_replay_worker.py",
         ),
         target_slice="S4A step 1",
@@ -395,7 +391,8 @@ DEFERRALS = (
     ),
     Deferral(
         modules=(
-            "comsol_mcp/research/lin2025_pedot_backend.py",
+            "comsol_mcp/adapter/optical_cylinder.py",
+            "comsol_mcp/jobs/native_condition_collector.py",
             "comsol_mcp/tools/derived_geometry.py",
             "comsol_mcp/tools/model.py",
         ),

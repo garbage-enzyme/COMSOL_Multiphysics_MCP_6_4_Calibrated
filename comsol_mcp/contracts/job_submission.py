@@ -93,64 +93,35 @@ class StagedSweepInput(_JobInput):
         return self
 
 
+class AdjointOptimizationInput(_JobInput):
+    job_type: Literal["adjoint_optimization"]
+    submission_manifest_path: BoundedPath
+    submission_manifest_sha256: Annotated[str, Field(pattern="^[0-9a-fA-F]{64}$")]
+    cores: Annotated[int, Field(ge=1, le=1024)]
+    version: Annotated[str, Field(min_length=1, max_length=32)]
+    resource_policy: BoundedObject
+    schema_name: Literal["comsol_mcp.adjoint_optimization_submission"] | None = None
+    schema_version: Literal["1.0.0"] | None = None
+
+
 class ValidationMatrixInput(_JobInput):
     job_type: Literal["validation_matrix"]
     source_model_path: BoundedPath
     points: BoundedObjectList
     point_limit: Annotated[int, Field(ge=1, le=MAX_JOB_COLLECTION)]
     resource_policy: BoundedObject
+    startup_admission: BoundedObject | None = None
+    comsol_temporary_directory: BoundedPath | None = None
     cores: Annotated[int, Field(ge=1, le=1024)]
     version: BoundedText | None = None
     max_retries: Annotated[int, Field(ge=0, le=3)] | None = None
     continue_on_error: bool | None = None
-
-
-class SpectralCharacterizationInput(_JobInput):
-    job_type: Literal["spectral_characterization"]
-    source_model_path: BoundedPath
-    source_model_relative_identity: BoundedPath
-    configuration_sha256: Annotated[str, Field(pattern=r"^[0-9a-fA-F]{64}$")]
-    parameter_state: BoundedObject
-    wavelength_parameter: BoundedText
-    initial_grid: BoundedObject
-    refinement_policy: BoundedObject
-    expansion_policy: BoundedObject
-    maximum_points: Annotated[int, Field(ge=3, le=MAX_JOB_COLLECTION)]
-    collector: BoundedObject
-    analysis_policy: BoundedObject
-    measurement_configuration: BoundedObject
-    resource_policy: BoundedObject
-    cores: Annotated[int, Field(ge=1, le=1024)]
-    version: BoundedText | None = None
-    max_retries: Annotated[int, Field(ge=0, le=3)] | None = None
-    continue_on_error: bool | None = None
-
-
-class ConvergenceCampaignInput(_JobInput):
-    job_type: Literal["convergence_campaign"]
-    campaign_id: BoundedText
-    levels: BoundedObjectList
-    convergence_policy: BoundedObject
-    stop_policy: BoundedObject
-    maximum_total_points: Annotated[int, Field(ge=1, le=MAX_JOB_COLLECTION)]
-    wall_time_budget_seconds: Annotated[int, Field(ge=1, le=31_536_000)]
-
-
-class BranchContinuationCampaignInput(_JobInput):
-    job_type: Literal["branch_continuation_campaign"]
-    campaign_id: BoundedText
-    states: BoundedObjectList
-    continuation_policy: BoundedObject
-    maximum_total_points: Annotated[int, Field(ge=1, le=MAX_JOB_COLLECTION)]
-    wall_time_budget_seconds: Annotated[int, Field(ge=1, le=31_536_000)]
 
 
 JobSubmissionSpec: TypeAlias = Annotated[
     StagedSweepInput
     | ValidationMatrixInput
-    | SpectralCharacterizationInput
-    | ConvergenceCampaignInput
-    | BranchContinuationCampaignInput
+    | AdjointOptimizationInput
     | ThermoOptomechanicalReplayInput,
     Field(discriminator="job_type"),
 ]
@@ -177,10 +148,8 @@ def validate_job_submission(value: object) -> dict[str, Any]:
 
 
 __all__ = [
-    "BranchContinuationCampaignInput",
-    "ConvergenceCampaignInput",
+    "AdjointOptimizationInput",
     "JobSubmissionSpec",
-    "SpectralCharacterizationInput",
     "StagedSweepInput",
     "ThermoOptomechanicalReplayInput",
     "ValidationMatrixInput",

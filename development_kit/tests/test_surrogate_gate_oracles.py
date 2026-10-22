@@ -191,7 +191,8 @@ def test_mph14_runner_binds_real_test_process_and_propagates_failure(
     report = json.loads(output.read_text())
     assert report["success"] is (returncode == 0)
     assert len(report["mph_module_sha256"]) == 64
-    assert len(report["suite_sha256"]) == 7
+    assert set(report["suite_sha256"]) == set(runner.SUITES)
+    assert len(report["suite_sha256"]) == 8
     assert len(calls) == 3
 
 

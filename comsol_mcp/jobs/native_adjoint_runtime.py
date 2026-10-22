@@ -9,13 +9,13 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from comsol_mcp.durable import atomic_write_json
-from comsol_mcp.jobs.adjoint_optimization import normalize_native_execution_policy
-from comsol_mcp.research.adjoint_adapter import (
+from comsol_mcp.adapter.adjoint import (
     ClientapiAdjointStudyBackend,
     _native_objective_type,
     configure_native_adjoint,
 )
+from comsol_mcp.durable import atomic_write_json
+from comsol_mcp.jobs.adjoint_optimization import normalize_native_execution_policy
 from comsol_mcp.tools.derived_geometry import _set_vector
 
 
@@ -85,7 +85,7 @@ def _forward_sweep_dataset(model: Any) -> Any:
 def _freeze_wavelength(
     model: Any, support: Mapping[str, Any], initial_values: object | None = None
 ) -> None:
-    from comsol_mcp.research.adjoint_adapter import _variable_strings
+    from comsol_mcp.adapter.adjoint import _variable_strings
 
     initial = _variable_strings(support, initial_values)["values"]
     study = model.java.study("std1")
