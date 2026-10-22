@@ -523,3 +523,90 @@ def test_full_profile_tracks_revision_without_enforcing_expected_token(tmp_path,
     result = guarded()
     assert result["success"] is True
     assert result["model_revision"]["sequence"] == 1
+
+
+def test_full_profile_honors_a_supplied_stale_revision_token(tmp_path, monkeypatch):
+    from src.tools.session import session_manager
+
+    class FakeModel:
+        pass
+
+    monkeypatch.setattr(session_manager, "_models", {"model": FakeModel()})
+    monkeypatch.setattr(session_manager, "_model_paths", {})
+    monkeypatch.setattr(session_manager, "_model_revisions", {})
+    monkeypatch.setattr(session_manager, "_current_model", "model")
+    initial = session_manager.get_model_revision("model")
+    arbiter = OperationArbiter(
+        tmp_path,
+        pid=100,
+        process_create_time=10.0,
+        process_probe=lambda pid: 10.0,
+    )
+    monkeypatch.setattr("src.operation_arbiter.get_operation_arbiter", lambda: arbiter)
+    calls = []
+
+    def param_set(model_name=None):
+        calls.append(model_name)
+        return {"success": True}
+
+    guarded = guard_tool_call(
+        param_set,
+        tool_name="param_set",
+        side_effect_class="model_mutation",
+        concurrency_class="comsol_bound",
+        profile_name="full",
+        requires_model_revision=True,
+        advances_model_revision=True,
+    )
+
+    stale = guarded(expected_model_revision="0" * 64)
+    assert stale["success"] is False
+    assert "does not match current model state" in stale["error"]
+    assert calls == []
+    assert session_manager.get_model_revision("model")["revision_sha256"] == initial[
+        "revision_sha256"
+    ]
+
+    fresh = guarded(expected_model_revision=initial["revision_sha256"])
+    assert fresh["success"] is True
+    assert calls == [None]
+    assert fresh["model_revision"]["sequence"] == initial["sequence"] + 1
+
+
+def test_contained_profile_still_requires_an_explicit_revision_token(tmp_path, monkeypatch):
+    from src.tools.session import session_manager
+
+    class FakeModel:
+        pass
+
+    monkeypatch.setattr(session_manager, "_models", {"model": FakeModel()})
+    monkeypatch.setattr(session_manager, "_model_paths", {})
+    monkeypatch.setattr(session_manager, "_model_revisions", {})
+    monkeypatch.setattr(session_manager, "_current_model", "model")
+    arbiter = OperationArbiter(
+        tmp_path,
+        pid=100,
+        process_create_time=10.0,
+        process_probe=lambda pid: 10.0,
+    )
+    monkeypatch.setattr("src.operation_arbiter.get_operation_arbiter", lambda: arbiter)
+    calls = []
+
+    def param_set(model_name=None):
+        calls.append(model_name)
+        return {"success": True}
+
+    guarded = guard_tool_call(
+        param_set,
+        tool_name="param_set",
+        side_effect_class="model_mutation",
+        concurrency_class="comsol_bound",
+        profile_name="core",
+        requires_model_revision=True,
+        advances_model_revision=True,
+    )
+
+    omitted = guarded()
+    assert omitted["success"] is False
+    assert "expected_model_revision is required" in omitted["error"]
+    assert calls == []

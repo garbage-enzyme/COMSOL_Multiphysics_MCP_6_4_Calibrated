@@ -472,7 +472,24 @@ def guard_tool_call(
                     or session_manager.current_model
                 )
                 current_revision = session_manager.get_model_revision(revision_model_name)
-                if current_revision is None and profile_name == "full":
+                if expected_model_revision is not None and current_revision is None:
+                    result = {
+                        "success": False,
+                        "error": (
+                            "expected_model_revision cannot be verified: "
+                            "the model has no tracked revision."
+                        ),
+                    }
+                elif (
+                    expected_model_revision is not None
+                    and expected_model_revision != current_revision["revision_sha256"]
+                ):
+                    result = {
+                        "success": False,
+                        "error": "expected_model_revision does not match current model state.",
+                        "model_revision": current_revision,
+                    }
+                elif current_revision is None and profile_name == "full":
                     with pin_validated_reads(read_pins):
                         with pin_validated_writes(write_pins):
                             result = function(*normalized_args, **normalized_kwargs)
@@ -481,14 +498,10 @@ def guard_tool_call(
                         "success": False,
                         "error": "A tracked model revision is required for this operation.",
                     }
-                elif (
-                    profile_name != "full"
-                    and expected_model_revision != current_revision["revision_sha256"]
-                ):
+                elif expected_model_revision is None and profile_name != "full":
                     result = {
                         "success": False,
-                        "error": "expected_model_revision does not match current model state.",
-                        "model_revision": current_revision,
+                        "error": "expected_model_revision is required for this operation.",
                     }
                 else:
                     with pin_validated_reads(read_pins):
