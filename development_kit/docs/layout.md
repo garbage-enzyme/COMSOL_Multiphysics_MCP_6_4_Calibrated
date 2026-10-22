@@ -748,3 +748,4 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/scripts/native_gradient_gate_checks.py` — The repository-only helper checks numerical native gate receipts; it is excluded from runtime packages.
 
 - `development_kit/scripts/native_optimizer_gate_checks.py` — The repository-only helper checks numerical native gate receipts; it is excluded from runtime packages.
+- `development_kit/tests/test_tasks_owner_binding.py` — The tests cover binding Tasks to the normalized effective owner.

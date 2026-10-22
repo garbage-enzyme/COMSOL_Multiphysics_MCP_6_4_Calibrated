@@ -2,7 +2,6 @@
 
 import logging
 import multiprocessing as mp
-import os
 from weakref import WeakKeyDictionary, WeakSet
 
 from mcp.server.mcpserver import MCPServer
@@ -123,12 +122,17 @@ def _tasks_extensions(engine) -> list:
     """
     from comsol_mcp.jobs.tasks_bridge import TasksBridge, TasksMappingStore
     from comsol_mcp.jobs.tasks_extension import build_tasks_extension
-    from comsol_mcp.settings import OWNER_ENV
+    from comsol_mcp.tools.ownership import _agent_owner_label
     from comsol_mcp.utils.runtime_paths import default_runtime_dir
 
-    owner = os.environ.get(OWNER_ENV) or "local"
+    # Bind Tasks to the same normalized effective owner as the ordinary
+    # ownership tools: settings-configured, environment-overridden, or the
+    # derived agent label. A settings-only owner or a derived label used to be
+    # silently collapsed to "local", splitting the Tasks mapping store from
+    # every other ownership surface. No authentication model is inferred from
+    # request metadata; the owner is a local configuration identity.
     store = TasksMappingStore(default_runtime_dir() / "tasks")
-    bridge = TasksBridge(engine=engine, store=store, owner=owner)
+    bridge = TasksBridge(engine=engine, store=store, owner=_agent_owner_label())
     return [build_tasks_extension(bridge)]
 
 
