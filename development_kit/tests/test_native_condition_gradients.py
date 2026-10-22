@@ -142,7 +142,7 @@ def test_native_condition_gradient_rejects_out_of_range_power_channels(ascii_tmp
     backend.evaluate_condition_gradient = evaluate_with_bad_channel
     target = ascii_tmp_path / f"overshoot-{field}"
     target.mkdir()
-    with pytest.raises(ValueError, match=f"{field} must be within"):
+    with pytest.raises(ValueError, match="scientific measurement gate failed"):
         collect_native_condition_gradients(
             spec,
             target,
@@ -151,6 +151,12 @@ def test_native_condition_gradient_rejects_out_of_range_power_channels(ascii_tmp
             observations=observations,
             cancel_requested=lambda: False,
         )
+    persisted = json.loads(
+        (target / "condition-gradient-0000.json").read_text(encoding="utf-8")
+    )
+    assert persisted["disposition"] == "measured_gate_failed"
+    assert persisted[field] == 1.5
+    assert persisted["scientific_gate"]["range_checks"][field] is False
 
 
 def test_native_condition_gradient_rejects_tampered_replay(ascii_tmp_path):

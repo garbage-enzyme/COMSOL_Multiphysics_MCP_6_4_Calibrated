@@ -9,7 +9,7 @@ from typing import Any, Protocol
 
 from comsol_mcp.durable import atomic_write_json, domain_sha256_v2
 
-from .native_condition_receipts import condition_tensor_expressions
+from .native_condition_receipts import condition_tensor_expressions, evaluate_scientific_gate
 from .store import read_json
 
 CONDITION_GRADIENT_RECEIPT_SCHEMA_NAME = "comsol_mcp.robust_condition_gradient_receipt"
@@ -133,16 +133,8 @@ def _normalize_backend_result(
     reflectance = _finite(raw["reflectance"], "reflectance")
     transmittance = _finite(raw["transmittance"], "transmittance")
     absorption = _finite(raw["absorption"], "absorption")
-    for name, value in (
-        ("reflectance", reflectance),
-        ("transmittance", transmittance),
-        ("absorption", absorption),
-    ):
-        if not 0.0 <= value <= 1.0:
-            raise ValueError(f"native condition gradient {name} must be within [0, 1]")
+    scientific_gate = evaluate_scientific_gate(reflectance, transmittance, absorption)
     closure = reflectance + transmittance + absorption
-    if not math.isclose(closure, 1.0, rel_tol=0.0, abs_tol=1e-4):
-        raise ValueError("native condition gradient power closure failed")
     elements = raw["mesh_elements"]
     if isinstance(elements, bool) or not isinstance(elements, int) or elements < 1:
         raise ValueError("native condition gradient mesh element count is invalid")
@@ -196,7 +188,8 @@ def _normalize_backend_result(
         "accepted_real_gradients": normalized_accepted,
         "gradient_unit": expected_unit,
         "identity_fingerprints": normalized_identities,
-        "disposition": "measured",
+        "scientific_gate": scientific_gate,
+        "disposition": "measured" if scientific_gate["passed"] else "measured_gate_failed",
     }
     return {
         **body,
@@ -241,6 +234,7 @@ def _validate_persisted_receipt(
         "accepted_real_gradients",
         "gradient_unit",
         "identity_fingerprints",
+        "scientific_gate",
         "disposition",
     }
     expected = domain_sha256_v2(CONDITION_GRADIENT_RECEIPT_SCHEMA_NAME, normalized)
@@ -250,7 +244,8 @@ def _validate_persisted_receipt(
         or normalized.get("schema_version") != CONDITION_GRADIENT_RECEIPT_SCHEMA_VERSION
         or normalized.get("condition_id") != condition["condition_id"]
         or normalized.get("condition_order") != condition["order"]
-        or normalized.get("disposition") != "measured"
+        or normalized.get("disposition")
+        not in {"measured", "measured_gate_failed"}
         or supplied != expected
     ):
         raise ValueError("persisted native condition gradient receipt is invalid")
@@ -337,6 +332,13 @@ def collect_native_condition_gradients(
                 observation_by_id[condition["condition_id"]],
             )
             atomic_write_json(path, receipt)
+        if receipt["disposition"] != "measured":
+            # The finite raw values and the gate verdict are already durable
+            # in the persisted receipt; refuse here so a gate-failed raw
+            # measurement never becomes gradient acceptance evidence.
+            raise ValueError(
+                "native condition gradient scientific measurement gate failed"
+            )
         condition_gradients.append(
             {
                 "condition_id": condition["condition_id"],
