@@ -6,6 +6,7 @@ The module name keeps the historical cancellation-determinism scope.
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -152,9 +153,13 @@ def _install_fakes(
     *,
     solver_cleanup: dict[str, Any] | None = None,
 ) -> None:
-    monkeypatch.setattr(cancel_worker.time, "time", clock.time)
-    monkeypatch.setattr(cancel_worker.time, "monotonic", clock.monotonic)
-    monkeypatch.setattr(cancel_worker.time, "sleep", clock.sleep)
+    # Bind the fake clock to cancel_worker's own module attribute, not the
+    # global time module: patching time.sleep globally also fakes the sleeps
+    # of every durable store lock wait in the process, so a real lock
+    # contention under parallel load inflated the scripted elapsed time and
+    # turned this suite intermittent on hosted runners.
+    fake_time = SimpleNamespace(time=clock.time, monotonic=clock.monotonic, sleep=clock.sleep)
+    monkeypatch.setattr(cancel_worker, "time", fake_time)
     monkeypatch.setattr(cancel_worker, "process_identity", lambda _pid: processes.coordinator)
     monkeypatch.setattr(cancel_worker, "inspect_identity", processes.inspect)
     monkeypatch.setattr(cancel_worker, "capture_owned_descendants", processes.capture)
