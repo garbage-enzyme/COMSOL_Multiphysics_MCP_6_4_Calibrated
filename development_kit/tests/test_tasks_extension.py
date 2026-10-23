@@ -17,6 +17,7 @@ import asyncio
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -1030,3 +1031,107 @@ def test_journal_size_bound_refuses_appends_without_dropping_rows(tmp_path: Path
     finally:
         module.TASKS_FILE_MAX_BYTES = original
     assert store.journal_path.read_text(encoding="ascii") == '{"kept": true}\n'
+
+
+def test_blocking_submit_does_not_stall_the_event_loop(tmp_path: Path) -> None:
+    import asyncio
+
+    release = threading.Event()
+    submitted = threading.Event()
+    engine = FakeEngine()
+
+    original_submit = engine.submit
+
+    def slow_submit(spec):
+        submitted.set()
+        assert release.wait(timeout=5), "test never released the blocked submit"
+        return original_submit(spec)
+
+    engine.submit = slow_submit
+    bridge = TasksBridge(engine=engine, store=TasksMappingStore(tmp_path / "tasks"), owner="o")
+    extension = build_tasks_extension(bridge)
+    interceptor = extension.intercept_tool_call
+
+    class _Params:
+        name = "job_submit"
+        arguments = {
+            "job_type": "staged_sweep",
+            "parameter_name": "wl",
+            "parameter_values": [1.0],
+        }
+
+    class _Ctx:
+        protocol_version = TASKS_WIRE_GENERATION
+        meta = {"io.modelcontextprotocol/clientCapabilities": {"extensions": OPT_IN}}
+
+    async def scenario():
+        submit_task = asyncio.create_task(
+            interceptor(_Params(), _Ctx(), lambda _ctx: (_ for _ in ()).throw(AssertionError()))
+        )
+
+        async def await_submitted():
+            while not submitted.is_set():
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(await_submitted(), timeout=2)
+        # While the submit is blocked in its worker thread, another coroutine
+        # must still make progress on the same loop.
+        progressed = []
+
+        async def heartbeat():
+            progressed.append(True)
+
+        await asyncio.wait_for(heartbeat(), timeout=0.5)
+        assert progressed == [True]
+        assert not submit_task.done()
+        release.set()
+        handle = await asyncio.wait_for(submit_task, timeout=5)
+        return handle
+
+    handle = asyncio.run(scenario())
+    assert handle["resultType"] == "task"
+
+
+def test_context_scoping_survives_the_worker_thread_boundary(tmp_path: Path) -> None:
+    """Expected-attempt cancellation contextvars must cross the executor."""
+    import asyncio
+    import contextvars
+
+    marker = contextvars.ContextVar("tasks_test_marker", default="unset")
+    engine = FakeEngine()
+    bridge = TasksBridge(engine=engine, store=TasksMappingStore(tmp_path / "t2"), owner="o")
+    extension = build_tasks_extension(bridge)
+    observed = {}
+
+    original = bridge.submit_task
+
+    def recording_submit(*args, **kwargs):
+        observed["marker"] = marker.get()
+        return original(*args, **kwargs)
+
+    bridge.submit_task = recording_submit
+
+    class _Params:
+        name = "job_submit"
+        arguments = {
+            "job_type": "staged_sweep",
+            "parameter_name": "wl",
+            "parameter_values": [1.0],
+        }
+
+    class _Ctx:
+        protocol_version = TASKS_WIRE_GENERATION
+        meta = {"io.modelcontextprotocol/clientCapabilities": {"extensions": OPT_IN}}
+
+    async def scenario():
+        token = marker.set("request-scoped")
+        try:
+            return await extension.intercept_tool_call(
+                _Params(), _Ctx(), lambda _ctx: (_ for _ in ()).throw(AssertionError())
+            )
+        finally:
+            marker.reset(token)
+
+    handle = asyncio.run(scenario())
+    assert handle["resultType"] == "task"
+    assert observed["marker"] == "request-scoped"

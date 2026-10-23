@@ -44,6 +44,7 @@ keep working unchanged for clients that never opt in.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -174,22 +175,34 @@ def build_tasks_extension(bridge: TasksBridge) -> Any:
 
         async def _handle_get(self, ctx: Any, params: Any) -> dict[str, Any]:
             self._require_declared(ctx)
+            loop = asyncio.get_running_loop()
             try:
-                return bridge.get_task(params.task_id)
+                return await loop.run_in_executor(
+                    None, _run_blocking(lambda: bridge.get_task(params.task_id))
+                )
             except TaskNotFound as exc:
                 raise _invalid_params(exc) from exc
 
         async def _handle_cancel(self, ctx: Any, params: Any) -> dict[str, Any]:
             self._require_declared(ctx)
+            loop = asyncio.get_running_loop()
             try:
-                return bridge.cancel_task(params.task_id)
+                return await loop.run_in_executor(
+                    None, _run_blocking(lambda: bridge.cancel_task(params.task_id))
+                )
             except TaskNotFound as exc:
                 raise _invalid_params(exc) from exc
 
         async def _handle_update(self, ctx: Any, params: Any) -> dict[str, Any]:
             self._require_declared(ctx)
+            loop = asyncio.get_running_loop()
             try:
-                return bridge.update_task(params.task_id, params.input_responses)
+                return await loop.run_in_executor(
+                    None,
+                    _run_blocking(
+                        lambda: bridge.update_task(params.task_id, params.input_responses)
+                    ),
+                )
             except TaskNotFound as exc:
                 raise _invalid_params(exc) from exc
 
@@ -222,12 +235,18 @@ def build_tasks_extension(bridge: TasksBridge) -> Any:
                 )
             capabilities = _declared_capabilities(getattr(ctx, "meta", None))
             extensions = capabilities.get("extensions")
+            loop = asyncio.get_running_loop()
             try:
-                return bridge.submit_task(
-                    arguments,
-                    client_extensions=extensions,
-                    request_client=_request_client(ctx),
-                    ttl_ms=_requested_ttl(capabilities),
+                return await loop.run_in_executor(
+                    None,
+                    _run_blocking(
+                        lambda: bridge.submit_task(
+                            arguments,
+                            client_extensions=extensions,
+                            request_client=_request_client(ctx),
+                            ttl_ms=_requested_ttl(capabilities),
+                        )
+                    ),
                 )
             except TasksGenerationRefused as exc:
                 raise _invalid_params(exc) from exc
@@ -235,6 +254,26 @@ def build_tasks_extension(bridge: TasksBridge) -> Any:
                 raise _invalid_params(exc) from exc
 
     return TasksExtension()
+
+
+def _run_blocking(call):
+    """Run one blocking bridge call off the event loop, preserving context.
+
+    The bridge methods are synchronous: they take journal locks, hash specs
+    and may wait out bounded cancellation grace windows. Running them inline
+    in the async handlers blocked the event loop for that whole window, so
+    status and control scheduling stalled behind a single submit or cancel.
+    The call runs on the loop's default executor thread instead; the current
+    context is copied into the thread so expected-attempt cancellation and
+    any other contextvar keep their request scoping, and the serialized
+    solver owner and operation locks are unchanged - moving the call off the
+    loop never introduces parallel Java calls.
+    """
+    import contextvars
+    import functools
+
+    context = contextvars.copy_context()
+    return functools.partial(context.run, call)
 
 
 def _declared_capabilities(meta: object) -> Mapping[str, Any]:
