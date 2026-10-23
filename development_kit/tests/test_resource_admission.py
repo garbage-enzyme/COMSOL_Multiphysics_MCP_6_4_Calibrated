@@ -1172,6 +1172,13 @@ def test_windows_reports_pagefile_io_as_unknown_not_measured_zero(monkeypatch, t
         ),
     )
     real_os_name = module.os.name
+    real_path = module.Path
+    # Patching os.name globally also flips pathlib's dynamic Path selector,
+    # which would raise UnsupportedOperation when the telemetry re-instantiates
+    # the runtime path on a posix host; pin the module's Path to the native
+    # class first so only the branch selection follows the patched name.
+    native_path = type(tmp_path)
+    monkeypatch.setattr(module, "Path", lambda value: native_path(value), raising=False)
     try:
         monkeypatch.setattr(module.os, "name", "nt", raising=False)
         sample = module.collect_resource_telemetry(
@@ -1185,12 +1192,17 @@ def test_windows_reports_pagefile_io_as_unknown_not_measured_zero(monkeypatch, t
         )
 
         monkeypatch.setattr(module.os, "name", "posix", raising=False)
+        # The posix branch needs a real PosixPath instantiation; on a Windows
+        # host that raises UnsupportedOperation and the source-level contract
+        # is asserted instead.
+        monkeypatch.setattr(module, "Path", real_path, raising=False)
         try:
             posix = module.collect_resource_telemetry(
                 stage="pre_mesh", runtime_path=tmp_path, process_id=1
             )
         except Exception:
             posix = None
+        monkeypatch.setattr(module, "Path", lambda value: native_path(value), raising=False)
         # Path instantiation is platform-typed, so the posix branch is only
         # exercisable where a PosixPath can exist; on a Windows host the
         # source-level contract is asserted instead.
