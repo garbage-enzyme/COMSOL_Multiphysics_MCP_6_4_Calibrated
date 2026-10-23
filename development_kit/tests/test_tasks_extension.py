@@ -865,3 +865,97 @@ def test_tasks_payload_agrees_with_the_ordinary_job_path_and_survives_restart(
     )
     again = restarted.get_task(handle["taskId"])
     assert again["result"]["structuredContent"] == structured
+
+
+def test_terminal_task_expiry_enforces_declared_retention(tmp_path: Path) -> None:
+    now = {"ms": 1_000_000}
+    bridge = TasksBridge(
+        engine=FakeEngine(),
+        store=TasksMappingStore(tmp_path / "tasks"),
+        owner="owner-a",
+        clock_ms=lambda: now["ms"],
+    )
+    handle = _submit(bridge, ttl_ms=60_000)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    _engine(bridge).set_state(row.job_id, "completed")
+
+    now["ms"] += 59_999
+    assert bridge.get_task(handle["taskId"])["status"] == "completed"
+
+    # The boundary instant itself counts as expired.
+    now["ms"] += 1
+    with pytest.raises(TaskNotFound):
+        bridge.get_task(handle["taskId"])
+
+    # A restarted bridge enforces the same retention from the same row.
+    restarted = TasksBridge(
+        engine=FakeEngine(),
+        store=TasksMappingStore(tmp_path / "tasks"),
+        owner="owner-a",
+        clock_ms=lambda: now["ms"],
+    )
+    with pytest.raises(TaskNotFound):
+        restarted.get_task(handle["taskId"])
+
+
+def test_expiry_never_cancels_a_running_job_or_deletes_evidence(tmp_path: Path) -> None:
+    now = {"ms": 1_000_000}
+    engine = FakeEngine()
+    bridge = TasksBridge(
+        engine=engine,
+        store=TasksMappingStore(tmp_path / "tasks"),
+        owner="owner-a",
+        clock_ms=lambda: now["ms"],
+    )
+    handle = _submit(bridge, ttl_ms=60_000)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    engine.set_state(row.job_id, "running")
+
+    now["ms"] += 10 * 60_000
+    detail = bridge.get_task(handle["taskId"])
+
+    assert detail["status"] == "working"
+    assert engine.cancel_calls == []
+    assert bridge._store.latest_for_task(handle["taskId"]) is not None
+
+
+def test_null_ttl_retains_the_mapping_forever(tmp_path: Path) -> None:
+    now = {"ms": 1_000_000}
+    bridge = TasksBridge(
+        engine=FakeEngine(),
+        store=TasksMappingStore(tmp_path / "tasks"),
+        owner="owner-a",
+        clock_ms=lambda: now["ms"],
+    )
+    handle = _submit(bridge, ttl_ms=None)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    _engine(bridge).set_state(row.job_id, "completed")
+
+    now["ms"] += 10 * 365 * 24 * 60 * 60 * 1000
+    assert bridge.get_task(handle["taskId"])["status"] == "completed"
+
+
+def test_duplicate_submit_keeps_the_original_mapping_metadata(tmp_path: Path) -> None:
+    bridge = TasksBridge(
+        engine=FakeEngine(),
+        store=TasksMappingStore(tmp_path / "tasks"),
+        owner="owner-a",
+    )
+    spec = {
+        "job_type": "staged_sweep",
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+    }
+    first = bridge.submit_task(spec, client_extensions=OPT_IN, ttl_ms=60_000)
+    rows_after_first = list(bridge._store.rows())
+
+    second = bridge.submit_task(spec, client_extensions=OPT_IN, ttl_ms=9_000_000)
+
+    assert second["taskId"] == first["taskId"]
+    assert second["ttlMs"] == first["ttlMs"] == 60_000
+    assert second["pollIntervalMs"] == first["pollIntervalMs"]
+    assert second["duplicate_submission"] is True
+    assert list(bridge._store.rows()) == rows_after_first

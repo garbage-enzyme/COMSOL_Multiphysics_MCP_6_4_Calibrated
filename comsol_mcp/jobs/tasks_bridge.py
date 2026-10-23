@@ -80,9 +80,8 @@ MAX_TASK_ROWS = 4096
 #: Bound on the serialized size of one persisted mapping row.
 MAX_TASK_ROW_BYTES = 64 * 1024
 
-#: Default retention. TTL limits *addressability*, never evidence.
-DEFAULT_TASK_TTL_MS = 24 * 60 * 60 * 1000
-
+#: Retention is caller-declared through ttlMs and limits *addressability*,
+#: never evidence; an omitted or null ttlMs retains the mapping forever.
 #: Default poll interval advertised to a client.
 DEFAULT_POLL_INTERVAL_MS = 1000
 
@@ -447,40 +446,44 @@ class TasksBridge:
                     "an identical durable job belongs to another task owner",
                 )
 
-            created = self._clock_ms()
             if existing is not None:
-                task_id = existing.task_id
-                created = existing.created_at_ms
+                # A duplicate submission reuses the original mapping unchanged:
+                # the same task id, retention, poll interval and recorded
+                # client, with no appended row, so a retry can never silently
+                # change retention or split the task identity.
+                row = existing
             else:
                 # Pre-generate the id so the durable mapping row is written *before*
                 # any task-shaped result is returned.
-                task_id = self._new_task_id()
-            row = TaskRow(
-                task_id=task_id,
-                job_id=job_id,
-                created_at_ms=created,
-                ttl_ms=ttl,
-                poll_interval_ms=interval,
-                spec_fingerprint=fingerprint,
-                owner=self._owner,
-                request_client=request_client,
-            )
-            self._store.append(row)
-            persisted = self._store.latest_for_task(task_id)
+                row = TaskRow(
+                    task_id=self._new_task_id(),
+                    job_id=job_id,
+                    created_at_ms=self._clock_ms(),
+                    ttl_ms=ttl,
+                    poll_interval_ms=interval,
+                    spec_fingerprint=fingerprint,
+                    owner=self._owner,
+                    request_client=request_client,
+                )
+                self._store.append(row)
+            persisted = self._store.latest_for_task(row.task_id)
             if persisted is None:
                 raise TasksMappingError(
                     "mapping_not_durable",
                     "the task mapping row was not durable after writing; refusing to acknowledge",
                 )
         task_status = task_status_from_job_state(submission.get("status"))
+        # The handle echoes the durable mapping's own metadata, so a duplicate
+        # submission reports the original retention and poll interval rather
+        # than the retry's requested values.
         return {
             "resultType": "task",
-            "taskId": task_id,
+            "taskId": row.task_id,
             "status": task_status,
-            "createdAt": _iso_ms(created),
-            "lastUpdatedAt": _iso_ms(created),
-            "ttlMs": ttl,
-            "pollIntervalMs": interval,
+            "createdAt": _iso_ms(row.created_at_ms),
+            "lastUpdatedAt": _iso_ms(row.created_at_ms),
+            "ttlMs": row.ttl_ms,
+            "pollIntervalMs": row.poll_interval_ms,
             "duplicate_submission": bool(submission.get("duplicate")),
             "jobStatus": submission.get("status"),
         }
@@ -598,7 +601,29 @@ class TasksBridge:
         if row.owner != self._owner:
             # A task id is only controllable by the owner that created it.
             raise TaskNotFound("task_not_found", f"unknown or expired task id {identifier!r}")
+        if self._task_expired(row):
+            raise TaskNotFound("task_not_found", f"unknown or expired task id {identifier!r}")
         return row
+
+    def _task_expired(self, row: TaskRow) -> bool:
+        """Enforce the declared addressability retention.
+
+        The retention origin is the mapping row's creation instant and the
+        boundary instant itself counts as expired. Expiry applies only to
+        terminal tasks: a running job stays addressable whatever its age, so
+        expiry can never cancel a job, delete evidence or force a
+        resubmission. A null ttlMs retains the mapping forever, and an
+        unreadable durable job cannot extend addressability either.
+        """
+        if row.ttl_ms is None:
+            return False
+        if self._clock_ms() - row.created_at_ms < row.ttl_ms:
+            return False
+        try:
+            state = self._job_state(row.job_id)
+        except TaskNotFound:
+            return True
+        return task_status_from_job_state(state.get("status")) in TERMINAL_TASK_STATUSES
 
     def _job_state(self, job_id: str) -> dict[str, Any]:
         try:
@@ -726,7 +751,6 @@ OWNED_FILES = ("tasks.jsonl",)
 
 __all__ = [
     "DEFAULT_POLL_INTERVAL_MS",
-    "DEFAULT_TASK_TTL_MS",
     "JOB_STATE_TO_TASK_STATUS",
     "MAX_TASK_ROWS",
     "MAX_TASK_ROW_BYTES",
