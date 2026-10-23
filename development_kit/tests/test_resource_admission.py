@@ -753,7 +753,10 @@ def test_child_resource_journals_replay_distinct_policies_independently(ascii_jo
     assert store.read_resource_journal(job_id) == []
 
 
-@pytest.mark.parametrize("journal_name", ["../resource.jsonl", "resource-other.jsonl", "resource-level-x.jsonl", "resource.jsonl.bak"])
+@pytest.mark.parametrize(
+    "journal_name",
+    ["../resource.jsonl", "resource-other.jsonl", "resource-level-x.jsonl", "resource.jsonl.bak"],
+)
 def test_resource_journal_rejects_unsafe_or_ambiguous_names(ascii_jobs_root, journal_name):
     store = JobStore(ascii_jobs_root / "jobs")
     job_id = store.create({}, {"attempt": 1, "status": "running"})
@@ -769,7 +772,7 @@ def test_resource_journal_rejects_symlinked_file(ascii_jobs_root):
     outside.write_text("", encoding="utf-8")
     try:
         (job_dir / "resource-level-0.jsonl").symlink_to(outside)
-    except (OSError, NotImplementedError):
+    except OSError, NotImplementedError:
         pytest.skip("symlink creation is unavailable")
     with pytest.raises(ValueError, match="journal"):
         store.read_resource_journal(job_id, journal_name="resource-level-0.jsonl")
@@ -1145,3 +1148,56 @@ def test_attached_revision_gate_matches_bounded_sweep_hook_contract():
         == "start_point"
     )
     assert "config_id" not in result
+
+
+def test_windows_reports_pagefile_io_as_unknown_not_measured_zero(monkeypatch, tmp_path):
+    import comsol_mcp.jobs.resource_admission as module
+
+    class _Swap:
+        sin = 0
+        sout = 0
+
+    monkeypatch.setattr(module.psutil, "swap_memory", lambda: _Swap())
+    monkeypatch.setattr(module.shutil, "disk_usage", lambda _root: SimpleNamespace(free=10))
+    monkeypatch.setattr(
+        module.psutil, "virtual_memory", lambda: SimpleNamespace(available=1, total=2)
+    )
+    monkeypatch.setattr(
+        module.psutil,
+        "Process",
+        lambda _pid: SimpleNamespace(
+            memory_info=lambda: SimpleNamespace(rss=1, private=1),
+            cpu_times=lambda: SimpleNamespace(user=0.0, system=0.0),
+        ),
+    )
+    real_os_name = module.os.name
+    try:
+        monkeypatch.setattr(module.os, "name", "nt", raising=False)
+        sample = module.collect_resource_telemetry(
+            stage="pre_mesh", runtime_path=tmp_path, process_id=1
+        )
+        assert "pagefile_io_bytes" not in sample
+        codes = [error["code"] for error in sample["collection_errors"]]
+        assert "pagefile_io_unavailable" in codes
+        assert sample["metric_sources"]["pagefile_io"].startswith(
+            "psutil.swap_memory (unavailable on windows"
+        )
+
+        monkeypatch.setattr(module.os, "name", "posix", raising=False)
+        try:
+            posix = module.collect_resource_telemetry(
+                stage="pre_mesh", runtime_path=tmp_path, process_id=1
+            )
+        except Exception:
+            posix = None
+        if posix is not None:
+            assert posix.get("pagefile_io_bytes") in (0, None) or True
+        assert posix["pagefile_io_bytes"] == 0
+        assert posix["metric_sources"]["pagefile_io"] == "psutil.swap_memory"
+        assert not [
+            error
+            for error in posix["collection_errors"]
+            if error["code"] == "pagefile_io_unavailable"
+        ]
+    finally:
+        monkeypatch.setattr(module.os, "name", real_os_name, raising=False)

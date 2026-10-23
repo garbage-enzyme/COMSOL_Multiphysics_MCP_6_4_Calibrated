@@ -446,7 +446,19 @@ def collect_resource_telemetry(
         errors.append({"code": "disk_io_unavailable", "error": str(exc)[:200]})
     try:
         swap = psutil.swap_memory()
-        values["pagefile_io_bytes"] = int(swap.sin + swap.sout)
+        if os.name == "nt":
+            # Windows exposes no swap-in/out counters through this API, so a
+            # zero here is a platform artifact rather than a measurement:
+            # report the quantity as unknown with its source metadata instead
+            # of a measured zero.
+            errors.append(
+                {
+                    "code": "pagefile_io_unavailable",
+                    "error": "windows reports no swap-in/out counters; pagefile IO is unknown",
+                }
+            )
+        else:
+            values["pagefile_io_bytes"] = int(swap.sin + swap.sout)
     except Exception as exc:
         errors.append({"code": "pagefile_io_unavailable", "error": str(exc)[:200]})
 
@@ -461,7 +473,11 @@ def collect_resource_telemetry(
             "runtime_free_space": "shutil.disk_usage",
             "process_memory_cpu": "psutil.Process",
             "disk_io": "psutil.disk_io_counters",
-            "pagefile_io": "psutil.swap_memory",
+            "pagefile_io": (
+                "psutil.swap_memory (unavailable on windows: no swap-in/out counters)"
+                if os.name == "nt"
+                else "psutil.swap_memory"
+            ),
         },
         "runtime_volume": {
             "path_class": "ascii" if str(root).isascii() else "non_ascii",
