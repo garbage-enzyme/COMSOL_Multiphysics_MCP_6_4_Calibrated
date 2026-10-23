@@ -745,7 +745,8 @@ def _completed_payload(state: Mapping[str, Any]) -> dict[str, Any]:
     that no producer records. Absolute path locators are stripped from error
     text so a Tasks payload stays free of private host locations.
     """
-    progress = state.get("progress") if isinstance(state.get("progress"), Mapping) else {}
+    raw_progress = state.get("progress")
+    progress: Mapping[str, Any] = raw_progress if isinstance(raw_progress, Mapping) else {}
     completed_rows = progress.get("completed")
     total_rows = progress.get("total")
     last_error = _bounded_error_detail(state.get("last_error"))
@@ -776,7 +777,8 @@ def _completed_payload(state: Mapping[str, Any]) -> dict[str, Any]:
 
 def _failed_payload(state: Mapping[str, Any]) -> dict[str, Any]:
     """A protocol-level fault, kept separate from a completed tool error."""
-    progress = state.get("progress") if isinstance(state.get("progress"), Mapping) else {}
+    raw_progress = state.get("progress")
+    progress: Mapping[str, Any] = raw_progress if isinstance(raw_progress, Mapping) else {}
     completed_rows = progress.get("completed")
     total_rows = progress.get("total")
     return {

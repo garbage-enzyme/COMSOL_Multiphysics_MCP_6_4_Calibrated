@@ -45,7 +45,7 @@ keep working unchanged for clients that never opt in.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -256,7 +256,7 @@ def build_tasks_extension(bridge: TasksBridge) -> Any:
     return TasksExtension()
 
 
-def _run_blocking(call):
+def _run_blocking(call: Callable[[], Any]) -> Callable[[], Any]:
     """Run one blocking bridge call off the event loop, preserving context.
 
     The bridge methods are synchronous: they take journal locks, hash specs
