@@ -1587,10 +1587,10 @@ def test_development_kit_advisory_gate_refuses_non_allowlisted_locators():
     with pytest.raises(RuntimeError, match="without an allowlist entry"):
         release_gate_module._reject_internal_evidence_root_text(
             "sdist/development_kit/tests/test_some_new_test.py",
-            "receipt at D:\mcp_tests\a99new\gate.json",
+            "receipt at D:\\mcp_tests\\a99new\\gate.json",
         )
     # The gate's own self-test fixtures stay allowlisted.
     release_gate_module._reject_internal_evidence_root_text(
         "sdist/development_kit/tests/test_release_engineering.py",
-        "see D:\mcp_tests\a75s4inv\receipt.json",
+        "see D:\\mcp_tests\\a75s4inv\\receipt.json",
     )
