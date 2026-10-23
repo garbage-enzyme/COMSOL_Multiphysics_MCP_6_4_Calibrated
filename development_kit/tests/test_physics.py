@@ -1159,8 +1159,11 @@ def test_setup_heat_boundaries_creates_all_requested_types():
     assert [item[1] for item in physics.features.created] == [
         "HeatFluxBoundary",
         "TemperatureBoundary",
-        "ConvectiveHeatFlux",
+        "HeatFluxBoundary",
     ]
+    # The convection feature is a HeatFluxBoundary whose HeatFluxType selects
+    # convection; ConvectiveHeatFlux is a type value, not a feature type.
+    assert physics.features.created[2][3].properties["HeatFluxType"] == "ConvectiveHeatFlux"
 
 
 def test_setup_heat_boundaries_rolls_back_partial_property_failure():

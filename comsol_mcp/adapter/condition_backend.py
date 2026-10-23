@@ -728,8 +728,13 @@ class ClientapiLin2025ConditionBackend:
             ]
             evaluator.set("expr", JArray(JString)(expressions))
             values = _flatten_real(evaluator.computeResult())
-            if len(values) < len(expressions):
-                raise ValueError("COMSOL condition evaluator returned too few values")
+            if len(values) != len(expressions):
+                # Exact arity: extra values mean the evaluation scope widened
+                # (extra solutions or parameters), and silently reporting the
+                # first six would read the wrong solution's numbers.
+                raise ValueError(
+                    "COMSOL condition evaluator must return exactly one value per expression"
+                )
             mesh = _get(self.model.java.component(), self.controls["component_tag"]).mesh(
                 self.controls["mesh_tag"]
             )

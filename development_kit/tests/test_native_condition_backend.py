@@ -1590,3 +1590,143 @@ def test_native_incidence_rejects_parent_or_port_readback_drift(
                 "polarization_basis_id": "x_linear",
             }
         )
+
+
+def test_condition_evaluator_requires_exact_arity(monkeypatch):
+    """Excess EvalGlobal values mean a widened scope; they must not pass."""
+    import jpype
+
+    monkeypatch.setattr(jpype, "JArray", lambda *_args: lambda values: values)
+
+    def build(value_count):
+        backend = object.__new__(condition_backend.ClientapiLin2025ConditionBackend)
+        backend._counter = 0
+        backend.controls = {
+            "wavelength_parameter": "wl",
+            "study_step_property": "plist",
+            "study_step_array_property": None,
+            "component_tag": "comp1",
+            "mesh_tag": "mesh1",
+            "dataset_tag": "dset1",
+            "solution_tag": "sol1",
+            "observable_expression": "obs",
+            "reflectance_expression": "R",
+            "transmittance_expression": "T",
+            "absorption_expression": "A",
+            "evaluated_wavelength_expression": "wl_eval",
+            "solved_wavelength_expression": "wl_sol",
+        }
+        backend.material = type("Material", (), {"apply_material_state": lambda *_: None})()
+        backend._set_incidence = lambda _condition: None
+        backend._set_solver_memory_policy = lambda: {
+            "property": "ooc",
+            "requested": "on",
+            "observed": "on",
+        }
+        backend._set_solver_selection = lambda: None
+        backend._admit_mesh = lambda _boundary: None
+
+        class Parameters:
+            def set(self, _name, _value):
+                return None
+
+        class Java(Parameters):
+            removed = []
+
+            def __init__(self):
+                self.param_handle = Parameters()
+
+            def param(self):
+                return self.param_handle
+
+            def save(self, _path):
+                return None
+
+            def component(self):
+                java = self
+
+                class Component:
+                    def get(self, _tag):
+                        return self
+
+                    def mesh(self, _tag):
+                        class Statistics:
+                            def getNumElem(self):
+                                return 12
+
+                            def getMinQuality(self):
+                                return 0.9
+
+                        class Mesh:
+                            def stat(self):
+                                return Statistics()
+
+                        return Mesh()
+
+                return Component()
+
+        class StudyStep:
+            value = None
+
+            def set(self, _name, value):
+                self.value = value
+
+            def getString(self, _name):
+                return self.value
+
+        class Evaluator:
+            def set(self, _name, _value):
+                return None
+
+            def computeResult(self):
+                return [float(index) for index in range(value_count)]
+
+        class Numerical:
+            def __init__(self):
+                self.created = []
+
+            def create(self, _tag, _kind):
+                return Evaluator()
+
+            def remove(self, _tag):
+                return None
+
+        class Study:
+            def run(self):
+                return None
+
+        class Model:
+            def __init__(self):
+                self.java = Java()
+
+        backend.study_step = StudyStep()
+        backend.numerical = Numerical()
+        backend.study = Study()
+        backend.model = Model()
+        backend.working_model_path = "unused.mph"
+        return backend
+
+    excess = build(7)
+    with pytest.raises(ValueError, match="exactly one value per expression"):
+        excess.evaluate_condition(
+            {
+                "condition_id": "condition-0",
+                "observable_id": "obs-0",
+                "material_state_id": "OX",
+                "wavelength_m": 8e-7,
+            },
+            ["1"] * 9,
+        )
+
+    exact = build(6)
+    receipt = exact.evaluate_condition(
+        {
+            "condition_id": "condition-0",
+            "observable_id": "obs-0",
+            "material_state_id": "OX",
+            "wavelength_m": 8e-7,
+        },
+        ["1"] * 9,
+    )
+    assert receipt["observable_value"] == 0.0
+    assert receipt["mesh_elements"] == 12

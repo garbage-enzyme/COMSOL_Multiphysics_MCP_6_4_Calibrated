@@ -1255,3 +1255,40 @@ def test_torn_tail_is_not_corruption_and_bad_middle_row_fails_closed(tmp_path: P
         "stopped_at_damage": True,
     }
     assert [row.job_id for row in store.rows()] == ["job-tail"]
+
+
+def test_terminal_job_with_unverified_owned_cleanup_reports_pending(bridge: TasksBridge) -> None:
+    """A terminal job's own cleanup_pending evidence must not be contradicted."""
+    handle = _submit(bridge)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    # A native job commits failure and cleanup_pending in one durable write.
+    _engine(bridge).set_state(
+        row.job_id,
+        "failed",
+        cleanup_pending=True,
+        owned_cleanup={"success": False, "errors": ["lease_release_refused"]},
+    )
+
+    receipt = bridge.cleanup_receipt(handle["taskId"])
+
+    assert receipt["taskStatus"] == "failed"
+    assert receipt["cleanupComplete"] is False
+    assert receipt["pendingReason"] == "owned_cleanup_unverified"
+
+
+def test_terminal_job_with_clean_owned_cleanup_reports_complete(bridge: TasksBridge) -> None:
+    handle = _submit(bridge)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    _engine(bridge).set_state(
+        row.job_id,
+        "completed",
+        cleanup_pending=False,
+        owned_cleanup={"success": True, "errors": []},
+    )
+
+    receipt = bridge.cleanup_receipt(handle["taskId"])
+
+    assert receipt["cleanupComplete"] is True
+    assert receipt["pendingReason"] is None

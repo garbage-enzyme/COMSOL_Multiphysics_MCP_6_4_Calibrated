@@ -662,12 +662,24 @@ class TasksBridge:
         """Report cleanup separately from protocol cancellation.
 
         Cancellation completes only when the owned job is terminal. A protocol
-        acknowledgement alone never yields a completed cleanup receipt.
+        acknowledgement alone never yields a completed cleanup receipt, and a
+        terminal job whose own durable record says its owned cleanup is
+        unverified never reports a completed cleanup either: the receipt must
+        not contradict the job's own evidence.
         """
         row = self._require_row(task_id)
         state = self._job_state(row.job_id)
         status = _task_status_for(row, state)
         terminal = status in TERMINAL_TASK_STATUSES
+        cleanup_pending = bool(state.get("cleanup_pending"))
+        owned_cleanup = state.get("owned_cleanup")
+        if isinstance(owned_cleanup, Mapping) and owned_cleanup.get("success") is False:
+            cleanup_pending = True
+        pending_reason = None
+        if not terminal:
+            pending_reason = "job_not_terminal"
+        elif cleanup_pending:
+            pending_reason = "owned_cleanup_unverified"
         body = {
             "schema_name": "comsol_mcp.task_cleanup_receipt",
             "schema_version": "1.0.0",
@@ -676,8 +688,8 @@ class TasksBridge:
             "owner": row.owner,
             "taskStatus": status,
             "jobState": state.get("status"),
-            "cleanupComplete": terminal,
-            "pendingReason": None if terminal else "job_not_terminal",
+            "cleanupComplete": pending_reason is None,
+            "pendingReason": pending_reason,
             "protocolAcknowledgementIsNotCleanup": True,
         }
         return {**body, "cleanup_receipt_sha256": canonical_sha256_v1(body)}

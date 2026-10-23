@@ -585,9 +585,13 @@ def setup_heat_boundaries(
         (
             "convection",
             convection_boundaries,
-            "ConvectiveHeatFlux",
+            "HeatFluxBoundary",
             "conv",
-            {"h": convection_coeff, "Text": ambient_temp},
+            {
+                "HeatFluxType": "ConvectiveHeatFlux",
+                "h": convection_coeff,
+                "Text": ambient_temp,
+            },
             {"h": convection_coeff, "T_amb": ambient_temp},
         ),
     )
@@ -1235,7 +1239,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
         Common boundary conditions for Heat Transfer:
         - "Temperature": Fixed temperature
         - "HeatFlux": Heat flux boundary
-        - "ConvectiveHeatFlux": Convection cooling
+        - "HeatFluxBoundary" with "HeatFluxType" "ConvectiveHeatFlux": Convection cooling
         - "ThermalInsulation": Thermal insulation (adiabatic)
 
         Common for Solid Mechanics:
@@ -1676,7 +1680,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
                 "boundary_condition_types": {
                     "TemperatureBoundary": "Fixed temperature (heat sink/source)",
                     "HeatFluxBoundary": "Prescribed heat flux (heat source)",
-                    "ConvectiveHeatFlux": "Convection cooling/heating",
+                    "HeatFluxBoundary/ConvectiveHeatFlux": "Convection cooling/heating",
                     "Symmetry": "Symmetry plane (adiabatic)",
                     "ThermalInsulation": "Thermal insulation (default)",
                 },
@@ -1780,9 +1784,9 @@ def register_physics_tools(mcp: MCPServer) -> None:
         Common boundary condition types by physics:
 
         Heat Transfer (ht):
-        - Temperature: Set T0 (temperature)
-        - HeatFlux: Set q0 (heat flux)
-        - ConvectiveHeatFlux: Set h (coefficient), Text (ambient temp)
+        - TemperatureBoundary: Set T0 (temperature)
+        - HeatFluxBoundary: Set q0 (heat flux)
+        - HeatFluxBoundary/ConvectiveHeatFlux: Set h (coefficient), Text (ambient)
 
         Laminar Flow (spf):
         - Inlet: Set U0 (velocity)
