@@ -110,6 +110,25 @@ def test_licensed_fixture_manifest_is_valid_before_comsol_start(ascii_tmp_path):
     assert spec["model_contract"]["expressions"]["displacement_max"] == "umaxH1"
 
 
+def test_omitted_unit_defaults_are_materialized_into_the_spec(ascii_tmp_path):
+    submission = _raw_spec(ascii_tmp_path / "unit-defaults")
+    manifest_path = Path(submission["specification_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for unit_key in ("temperature_unit", "heat_source_unit", "convection_coefficient_unit"):
+        del manifest["thermal_load"][unit_key]
+    payload = json.dumps(manifest).encode("utf-8")
+    manifest_path.write_bytes(payload)
+    submission["specification_sha256"] = hashlib.sha256(payload).hexdigest()
+
+    spec = normalize_thermo_optomechanical_replay_spec(submission)
+
+    # The executor indexes these unit literals; a caller legitimately omitting
+    # them must receive the contract defaults instead of a KeyError mid-replay.
+    assert spec["thermal_load"]["temperature_unit"] == "K"
+    assert spec["thermal_load"]["heat_source_unit"] == "W/m^3"
+    assert spec["thermal_load"]["convection_coefficient_unit"] == "W/(m^2*K)"
+
+
 def test_licensed_gate_cleanup_failure_preserves_verdict_and_writes_fallback(tmp_path, monkeypatch):
     class BrokenOwner:
         def status(self, *, require_fresh_inventory):
@@ -895,6 +914,67 @@ def test_transfer_uses_declared_mesh_displacement_without_structural_fallback(
     else:
         assert executor._deformation_transfer()["readback_exact"] is True
         assert calls == ["transfer_displacement_max", "transfer_displacement_max"]
+
+
+def test_interrupted_transfer_restarts_from_the_pretransfer_checkpoint(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "transfer-resume")
+    )
+    executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
+    loaded = []
+    executor._load_derived = lambda: loaded.append("derived")
+    executor._load_checkpoint = lambda: loaded.append("checkpoint")
+    executor._set_moving_mesh_active = lambda _enabled: None
+    executor._study = lambda _key: None
+    executor._bind_study_dataset = lambda _tag: None
+    executor._evaluate = lambda _key: 1.0e-6
+
+    def save(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"model")
+
+    executor._save = save
+
+    # First pass: no checkpoint exists, so the pre-transfer derived model is
+    # loaded, checkpointed, and reloaded after the transfer rebind.
+    executor._deformation_transfer()
+    assert loaded == ["derived", "derived"]
+    assert executor.checkpoint_path.is_file()
+
+    # Interrupted resume: the checkpoint now exists and derived.mph holds the
+    # already-deformed model; the transfer must restart from the checkpoint
+    # instead of stacking a second deformation. The trailing derived reload is
+    # the post-transfer rebind.
+    executor._deformation_transfer()
+    assert loaded == ["derived", "derived", "checkpoint", "derived"]
+
+
+def test_thermal_rerun_deletes_a_stale_transfer_checkpoint(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "thermal-invalidate")
+    )
+    executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
+    executor.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    executor.checkpoint_path.write_bytes(b"stale checkpoint")
+    executor.derived_path.write_bytes(b"derived")
+    executor._verify_source = lambda: None
+    executor._load_source = lambda: None
+    executor._load_derived = lambda: None
+    executor._apply_positive_parameters = lambda: None
+    executor._set_moving_mesh_active = lambda _enabled: None
+    executor._study = lambda _key: None
+    executor._bind_study_dataset = lambda _tag: None
+    executor._evaluate = lambda _key: 0.0
+    executor._save = lambda path: (
+        path.parent.mkdir(parents=True, exist_ok=True),
+        path.write_bytes(b"model"),
+    )
+
+    executor._thermal_structural()
+
+    # Rebuilding the pre-transfer state invalidated the stale checkpoint, so
+    # the next transfer cannot restart from a state that predates this solve.
+    assert not executor.checkpoint_path.exists()
 
 
 def test_displacement_readback_tolerates_last_ulp_but_not_material_drift():

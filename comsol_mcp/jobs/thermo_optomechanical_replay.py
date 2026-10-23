@@ -125,7 +125,11 @@ def normalize_thermo_optomechanical_replay_spec(value: object) -> dict[str, Any]
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError("thermo-optomechanical specification JSON is invalid") from exc
     parsed = ThermoOptomechanicalReplayManifest.model_validate(manifest_value)
-    raw = parsed.model_dump(mode="python", exclude_unset=True)
+    # Materialize contract defaults: the executor indexes the declared unit
+    # literals (temperature, heat source, convection), and exclude_unset would
+    # drop them whenever the caller legitimately omits them, turning a valid
+    # manifest into a KeyError mid-replay.
+    raw = parsed.model_dump(mode="python")
     source = Path(raw["source_model_path"]).expanduser().resolve()
     if not source.is_file() or source.suffix.casefold() != ".mph":
         raise ValueError("source_model_path must name an existing MPH file")

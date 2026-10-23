@@ -129,6 +129,15 @@ class ThermoOptomechanicalComsolExecutor:
         self._active_dataset = None
         return self.model
 
+    def _load_checkpoint(self) -> Any:
+        """Reload the pre-transfer state saved by an earlier transfer attempt."""
+        if not self.checkpoint_path.is_file():
+            raise RuntimeError("pre-transfer checkpoint is missing")
+        self.client.clear()
+        self.model = self.client.load(str(self.checkpoint_path))
+        self._active_dataset = None
+        return self.model
+
     def _save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         current_path = str(self.model.java.getFilePath())
@@ -395,6 +404,11 @@ class ThermoOptomechanicalComsolExecutor:
 
     def _thermal_structural(self) -> Mapping[str, Any]:
         self._verify_source()
+        # Rebuilding the pre-transfer state invalidates any checkpoint an
+        # earlier transfer attempt left behind: the next transfer must start
+        # from this fresh state, not from a stale checkpoint.
+        if self.checkpoint_path.is_file():
+            self.checkpoint_path.unlink()
         if not self.derived_path.is_file():
             if self.model is None:
                 self._load_source()
@@ -494,7 +508,14 @@ class ThermoOptomechanicalComsolExecutor:
         }
 
     def _deformation_transfer(self) -> Mapping[str, Any]:
-        self._load_derived()
+        if self.checkpoint_path.is_file():
+            # An interrupted transfer attempt left the pre-transfer state
+            # checkpointed and possibly wrote the deformed derived model.
+            # Restarting from the checkpoint never stacks a second
+            # deformation onto the already-deformed geometry.
+            self._load_checkpoint()
+        else:
+            self._load_derived()
         self._save(self.checkpoint_path)
         checkpoint_sha = _sha256_file(self.checkpoint_path)
         source_geometry = _fingerprint(
