@@ -8,13 +8,13 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp.contracts.job_submission import MAX_VALIDATION_MATRIX_POINTS
 from comsol_mcp.contracts.native_condition import (
     NATIVE_CONDITION_COLLECTOR,
     NATIVE_CONDITION_COLLECTORS,
     NATIVE_FORWARD_COLLECTOR,
     normalize_native_condition_request,
 )
-from comsol_mcp.contracts.job_submission import MAX_VALIDATION_MATRIX_POINTS
 from comsol_mcp.contracts.startup_admission import normalize_robust_startup_policy
 from comsol_mcp.evidence.field_matrix import (
     MATRIX_FIELD_COLLECTOR,
