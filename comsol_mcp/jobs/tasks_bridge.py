@@ -80,6 +80,11 @@ MAX_TASK_ROWS = 4096
 #: Bound on the serialized size of one persisted mapping row.
 MAX_TASK_ROW_BYTES = 64 * 1024
 
+#: Bound on the serialized size of the whole mapping journal. Admission
+#: refuses before the durable engine is touched, so reaching this bound
+#: never discards a retained mapping.
+TASKS_FILE_MAX_BYTES = 32 * 1024 * 1024
+
 #: Retention is caller-declared through ttlMs and limits *addressability*,
 #: never evidence; an omitted or null ttlMs retains the mapping forever.
 #: Default poll interval advertised to a client.
@@ -269,6 +274,14 @@ class TasksMappingStore:
         if report.get("state") == "incomplete":
             with self.journal_path.open("r+b") as handle:
                 handle.truncate(int(report["complete_byte_count"]))
+        try:
+            journal_bytes = self.journal_path.stat().st_size
+        except OSError:
+            journal_bytes = 0
+        if journal_bytes + len(encoded) > TASKS_FILE_MAX_BYTES:
+            raise TasksMappingError(
+                "tasks_file_capacity", "task mapping journal exceeds its size bound"
+            )
         append_jsonl_record(self.journal_path, payload)
 
     def rows(self) -> list[TaskRow]:
@@ -432,6 +445,20 @@ class TasksBridge:
         ttl = normalize_ttl_ms(ttl_ms)
         interval = _finite_int(poll_interval_ms, "pollIntervalMs", minimum=1, maximum=2**53 - 1)
         fingerprint = spec_fingerprint(raw_spec)
+
+        # Capacity admission runs before the durable engine is touched: at the
+        # row bound a brand-new task is refused without creating a job or
+        # appending a mapping, so no retained or unexpired task is ever
+        # silently evicted by the reader's tail bound. A duplicate retry may
+        # still pass, because it reuses an existing mapping row.
+        if len(self._store.rows()) >= MAX_TASK_ROWS and not any(
+            row.spec_fingerprint == fingerprint and row.owner == self._owner
+            for row in self._store.rows_for_owner(self._owner)
+        ):
+            raise TasksMappingError(
+                "tasks_store_capacity",
+                "task mapping store is at its row capacity; refuse a new task",
+            )
 
         # Reuse an existing durable job for an identical retry so a duplicate
         # submission cannot launch a second simulation.
@@ -754,6 +781,7 @@ __all__ = [
     "JOB_STATE_TO_TASK_STATUS",
     "MAX_TASK_ROWS",
     "MAX_TASK_ROW_BYTES",
+    "TASKS_FILE_MAX_BYTES",
     "OWNED_FILES",
     "REFUSED_TASKS_GENERATIONS",
     "SCHEMA_NAME",

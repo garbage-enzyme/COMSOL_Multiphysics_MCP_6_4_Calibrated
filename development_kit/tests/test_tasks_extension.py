@@ -76,12 +76,11 @@ def pause():
         time.sleep(0.01)
 if role=='a':
     if scenario=='tail':
-        original=module.read_complete_jsonl
-        def read(*args,**kwargs):
-            result=original(*args,**kwargs)
+        original=module.append_jsonl_record
+        def append(*args,**kwargs):
             if not (root/'paused').exists(): pause()
-            return result
-        module.read_complete_jsonl=read
+            return original(*args,**kwargs)
+        module.append_jsonl_record=append
     else:
         original=store.latest_for_job
         def latest(*args,**kwargs):
@@ -955,3 +954,79 @@ def test_duplicate_submit_keeps_the_original_mapping_metadata(tmp_path: Path) ->
     assert second["pollIntervalMs"] == first["pollIntervalMs"]
     assert second["duplicate_submission"] is True
     assert list(bridge._store.rows()) == rows_after_first
+
+
+def test_capacity_admission_refuses_new_tasks_before_the_engine(tmp_path: Path) -> None:
+    engine = FakeEngine()
+    store = TasksMappingStore(tmp_path / "tasks")
+    bridge = TasksBridge(engine=engine, store=store, owner="owner-a")
+    for index in range(8):
+        bridge.submit_task(
+            {
+                "job_type": "staged_sweep",
+                "parameter_name": "wl",
+                "parameter_values": [float(index)],
+            },
+            client_extensions=OPT_IN,
+        )
+    import comsol_mcp.jobs.tasks_bridge as module
+
+    original_max = module.MAX_TASK_ROWS
+    module.MAX_TASK_ROWS = 8
+    try:
+        with pytest.raises(TasksMappingError) as excinfo:
+            bridge.submit_task(
+                {
+                    "job_type": "staged_sweep",
+                    "parameter_name": "wl",
+                    "parameter_values": [99.0],
+                },
+                client_extensions=OPT_IN,
+            )
+        assert excinfo.value.code == "tasks_store_capacity"
+        # The durable engine was never touched for the refused task.
+        assert len(engine._jobs) == 8
+        assert len(store.rows()) == 8
+
+        # A duplicate retry still passes at capacity: it reuses a mapping row
+        # instead of appending one.
+        retry = bridge.submit_task(
+            {
+                "job_type": "staged_sweep",
+                "parameter_name": "wl",
+                "parameter_values": [0.0],
+            },
+            client_extensions=OPT_IN,
+        )
+        assert retry["duplicate_submission"] is True
+        assert len(store.rows()) == 8
+    finally:
+        module.MAX_TASK_ROWS = original_max
+
+
+def test_journal_size_bound_refuses_appends_without_dropping_rows(tmp_path: Path) -> None:
+    import comsol_mcp.jobs.tasks_bridge as module
+
+    store = TasksMappingStore(tmp_path / "tasks")
+    store.root.mkdir(parents=True, exist_ok=True)
+    store.journal_path.write_text('{"kept": true}\n', encoding="ascii")
+    original = module.TASKS_FILE_MAX_BYTES
+    module.TASKS_FILE_MAX_BYTES = 16
+    try:
+        with pytest.raises(TasksMappingError) as excinfo:
+            store.append(
+                module.TaskRow(
+                    task_id="t" * 8,
+                    job_id="job" + "0" * 29,
+                    created_at_ms=1,
+                    ttl_ms=None,
+                    poll_interval_ms=1000,
+                    spec_fingerprint="f" * 64,
+                    owner="owner-a",
+                    request_client=None,
+                )
+            )
+        assert excinfo.value.code == "tasks_file_capacity"
+    finally:
+        module.TASKS_FILE_MAX_BYTES = original
+    assert store.journal_path.read_text(encoding="ascii") == '{"kept": true}\n'
