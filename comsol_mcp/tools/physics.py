@@ -507,7 +507,7 @@ def setup_flow_boundaries(
         result = add_boundary_condition(
             model,
             physics_name,
-            "InletBoundary",
+            "Inlet",
             [boundary],
             properties={"U0": inlet_velocity},
             feature_prefix="inl",
@@ -526,7 +526,7 @@ def setup_flow_boundaries(
         result = add_boundary_condition(
             model,
             physics_name,
-            "OutletBoundary",
+            "Outlet",
             [boundary],
             properties={"p0": outlet_pressure},
             feature_prefix="out",
@@ -1566,20 +1566,20 @@ def register_physics_tools(mcp: MCPServer) -> None:
                     "step3": "Use physics_configure_boundary to set conditions",
                 },
                 "boundary_condition_types": {
-                    "InletBoundary": "Set inlet velocity (U0 parameter)",
-                    "OutletBoundary": "Set outlet pressure (p0 parameter, default 0)",
+                    "Inlet": "Set inlet velocity (U0 parameter)",
+                    "Outlet": "Set outlet pressure (p0 parameter, default 0)",
                     "Wall": "No-slip wall (default for unspecified boundaries)",
                     "Symmetry": "Symmetry plane",
                 },
                 "example_usage": {
                     "inlet": (
                         "physics_configure_boundary(physics_name='Laminar Flow', "
-                        "boundary_condition='InletBoundary', boundary_selection=[1, 2], "
+                        "boundary_condition='Inlet', boundary_selection=[1, 2], "
                         "properties={'U0': '1[mm/s]'})"
                     ),
                     "outlet": (
                         "physics_configure_boundary(physics_name='Laminar Flow', "
-                        "boundary_condition='OutletBoundary', boundary_selection=[3])"
+                        "boundary_condition='Outlet', boundary_selection=[3])"
                     ),
                 },
                 "next_step": (
@@ -1785,8 +1785,8 @@ def register_physics_tools(mcp: MCPServer) -> None:
         - ConvectiveHeatFlux: Set h (coefficient), Text (ambient temp)
 
         Laminar Flow (spf):
-        - InletBoundary: Set U0 (velocity)
-        - OutletBoundary: Set p0 (pressure)
+        - Inlet: Set U0 (velocity)
+        - Outlet: Set p0 (pressure)
         - Wall: No-slip wall
 
         Solid Mechanics (solid):
