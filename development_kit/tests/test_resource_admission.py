@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+from types import SimpleNamespace
 import json
 import os
 from pathlib import Path
