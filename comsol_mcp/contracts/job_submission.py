@@ -14,6 +14,10 @@ from .wavelength_policy import StrictWavelengthPolicy
 MAX_PUBLIC_TEXT = 4096
 MAX_PUBLIC_PATH = 1024
 MAX_JOB_COLLECTION = 2048
+#: The validation matrix is the one job family whose runtime point bound is
+#: deliberately narrower than the generic collection bound; the schema and
+#: the runtime normalizer share this single constant.
+MAX_VALIDATION_MATRIX_POINTS = 32
 MAX_JOB_OBJECT_FIELDS = 256
 
 BoundedText: TypeAlias = Annotated[str, Field(min_length=1, max_length=MAX_PUBLIC_TEXT)]
@@ -108,7 +112,7 @@ class ValidationMatrixInput(_JobInput):
     job_type: Literal["validation_matrix"]
     source_model_path: BoundedPath
     points: BoundedObjectList
-    point_limit: Annotated[int, Field(ge=1, le=MAX_JOB_COLLECTION)]
+    point_limit: Annotated[int, Field(ge=1, le=MAX_VALIDATION_MATRIX_POINTS)]
     resource_policy: BoundedObject
     startup_admission: BoundedObject | None = None
     comsol_temporary_directory: BoundedPath | None = None

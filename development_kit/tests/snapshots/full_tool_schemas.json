@@ -2705,7 +2705,7 @@
             "title": "Max Retries"
           },
           "point_limit": {
-            "maximum": 2048,
+            "maximum": 32,
             "minimum": 1,
             "title": "Point Limit",
             "type": "integer"
@@ -3328,7 +3328,7 @@
             "title": "Max Retries"
           },
           "point_limit": {
-            "maximum": 2048,
+            "maximum": 32,
             "minimum": 1,
             "title": "Point Limit",
             "type": "integer"

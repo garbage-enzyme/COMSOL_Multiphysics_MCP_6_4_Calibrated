@@ -362,3 +362,27 @@ def test_nested_collector_inputs_require_string_keys(tmp_path):
 
     with pytest.raises(ValueError, match="keys must be strings"):
         normalize_validation_matrix_spec(_spec(source, points=[point]))
+
+
+def test_point_limit_schema_and_runtime_share_one_supported_maximum():
+    import json
+    from pathlib import Path
+
+    from comsol_mcp.contracts.job_submission import (
+        MAX_JOB_COLLECTION,
+        MAX_VALIDATION_MATRIX_POINTS,
+    )
+    from pydantic import TypeAdapter
+
+    from comsol_mcp.contracts.job_submission import ValidationMatrixInput
+
+    schema = TypeAdapter(ValidationMatrixInput).json_schema()
+    declared = schema["properties"]["point_limit"]["maximum"]
+    assert declared == MAX_VALIDATION_MATRIX_POINTS == 32
+    assert declared < MAX_JOB_COLLECTION
+
+    snapshot = json.loads(
+        (Path(__file__).parent / "snapshots" / "full_tool_schemas.json").read_text(encoding="utf-8")
+    )
+    text = json.dumps(snapshot)
+    assert '"maximum": 32' in text or "'maximum': 32" in text

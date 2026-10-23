@@ -14,6 +14,7 @@ from comsol_mcp.contracts.native_condition import (
     NATIVE_FORWARD_COLLECTOR,
     normalize_native_condition_request,
 )
+from comsol_mcp.contracts.job_submission import MAX_VALIDATION_MATRIX_POINTS
 from comsol_mcp.contracts.startup_admission import normalize_robust_startup_policy
 from comsol_mcp.evidence.field_matrix import (
     MATRIX_FIELD_COLLECTOR,
@@ -24,7 +25,6 @@ from comsol_mcp.utils.validation import strict_json_number
 from .resource_admission import normalize_resource_policy
 from .store import JOB_SCHEMA_VERSION
 
-MAX_VALIDATION_MATRIX_POINTS = 32
 MAX_COLLECTORS_PER_POINT = 4
 MAX_EXPECTED_ARTIFACTS_PER_POINT = 16
 MAX_COLLECTOR_INPUT_BYTES = 64 * 1024
