@@ -5,8 +5,7 @@ The fake backend stands in for a real lane so the protocol's rules, error
 translation, and rollback semantics are exercised as behaviour.
 
 The parity tests compare two backends that differ **only** in declared lane and
-in the two capabilities measured in
-``D:\\mcp_tests\\a75s4inv\\mph_131_140_differences.md``.
+in the two capabilities measured in the lane-reconnaissance notes.
 """
 
 from __future__ import annotations
@@ -217,7 +216,7 @@ def test_a_jvm_string_proxy_is_unwrapped_for_the_backend() -> None:
     Measured on COMSOL 6.4.0.293: the study step's `plist` read back as
     `jpype._jstring` / `java.lang.String`, so `isinstance(value, str)` was False
     and a strict conversion reported a spurious `property_type_mismatch` (see
-    `D:\\mcp_tests\\a75s4type\\java_types.json`). Only backend-produced values are
+    the Java proxy-type probe). Only backend-produced values are
     unwrapped; caller input stays strictly checked.
     """
 
@@ -452,12 +451,12 @@ def test_model_identity_calls_methods_rather_than_stringifying_them() -> None:
             return "s4a_probe"
 
         def file(self) -> str:
-            return "D:/mcp_tests/a75s4lic/s4a_probe.mph"
+            return "E:/licensed/s4a_probe.mph"
 
     identity = MphBackendBase()._model_identity(MethodStyleModel())  # noqa: SLF001
     assert identity.name == "s4a_probe"
     assert "bound method" not in identity.name
-    assert identity.file == "D:/mcp_tests/a75s4lic/s4a_probe.mph"
+    assert identity.file == "E:/licensed/s4a_probe.mph"
     assert identity.content_sha256 is None
 
 
@@ -705,7 +704,7 @@ def test_a_real_numpy_style_scalar_array_is_normalized() -> None:
 
     This is measured licensed behaviour, not an assumption: `model.evaluate("a1")`
     returned `array(1.5)` and `model.evaluate("1+1")` returned `array(2.)` on
-    COMSOL 6.4.0.293 (see `D:\\mcp_tests\\a75s4ev\\eval_shape.json`). The
+    COMSOL 6.4.0.293 (see the measured eval-shape receipt). The
     normalizer must therefore duck-type a numpy-like object through `tolist`.
     """
 

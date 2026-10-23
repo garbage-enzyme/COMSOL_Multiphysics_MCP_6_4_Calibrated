@@ -463,7 +463,7 @@ def test_onnx_runtime_uses_only_the_standard_library() -> None:
 # --------------------------------------------------------------------------
 
 # A real ONNX export produced by COMSOL 6.4.0.293 from a trained 2->16->8->1
-# network (receipt D:\mcp_tests\a75s7g02).  Its training target was
+# network (receipt in the licensed S7 gate archive).  Its training target was
 # qoi = sin(a1)cos(a2) + 0.1*a1*a2 over a1 in [1.0, 2.75], a2 in [2.0, 4.5].
 REAL_COMSOL_ONNX_SHA256 = "a417ee487ad5d8c8fc25919aa47f2782b5c9b7f0a979ee255da8aa841860ecca"
 
@@ -471,7 +471,9 @@ REAL_COMSOL_ONNX_SHA256 = "a417ee487ad5d8c8fc25919aa47f2782b5c9b7f0a979ee255da8a
 def _real_comsol_onnx_path():
     from pathlib import Path
 
-    candidate = Path(r"D:\mcp_tests\a75s7g02\workspace\surrogate_export_a.onnx")
+    from development_kit.tests.platform_fixtures import platform_test_root
+
+    candidate = platform_test_root("s7gate") / "workspace" / "surrogate_export_a.onnx"
     return candidate if candidate.is_file() else None
 
 
