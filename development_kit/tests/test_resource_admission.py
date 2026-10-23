@@ -1155,8 +1155,10 @@ def test_windows_reports_pagefile_io_as_unknown_not_measured_zero(monkeypatch, t
     import comsol_mcp.jobs.resource_admission as module
 
     class _Swap:
-        sin = 0
-        sout = 0
+        # Nonzero so the posix branch proves it reads the counters rather
+        # than passing on a zero artifact.
+        sin = 3
+        sout = 4
 
     monkeypatch.setattr(module.psutil, "swap_memory", lambda: _Swap())
     monkeypatch.setattr(module.shutil, "disk_usage", lambda _root: SimpleNamespace(free=10))
@@ -1207,7 +1209,9 @@ def test_windows_reports_pagefile_io_as_unknown_not_measured_zero(monkeypatch, t
         # exercisable where a PosixPath can exist; on a Windows host the
         # source-level contract is asserted instead.
         if posix is not None:
-            assert posix["pagefile_io_bytes"] == 0
+            # The normalized sample keeps value fields under "values" while
+            # the collector metadata merges at the top level.
+            assert posix["values"]["pagefile_io_bytes"] == 7
             assert posix["metric_sources"]["pagefile_io"] == "psutil.swap_memory"
             assert not [
                 error
