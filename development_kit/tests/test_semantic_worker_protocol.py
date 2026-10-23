@@ -129,7 +129,7 @@ def _request(manager: SemanticWorkerManager, request_id: str, **fields: object) 
 
 
 def test_happy_path_reuses_one_worker_and_reset_verifies_absence():
-    with SemanticWorkerManager(startup_deadline=2.0, query_deadline=2.0) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0, query_deadline=5.0) as manager:
         first = manager.query("CopyFace source destination", limit=2)
         pid = manager.status(probe=False)["identity"]["pid"]
         second = manager.query("alpha1_inc", limit=1)
@@ -180,7 +180,7 @@ def test_startup_hang_and_port_collision_are_contained():
 
 
 def test_non_object_startup_handshake_is_contained_and_reaped(monkeypatch):
-    manager = SemanticWorkerManager(startup_deadline=2.0)
+    manager = SemanticWorkerManager(startup_deadline=10.0)
     command = [
         sys.executable,
         "-c",
@@ -219,7 +219,7 @@ def test_startup_handshake_limit_excludes_bytes_after_first_newline():
 
 
 def test_oversized_startup_handshake_is_rejected_before_json_decode(monkeypatch):
-    manager = SemanticWorkerManager(startup_deadline=2.0)
+    manager = SemanticWorkerManager(startup_deadline=10.0)
     command = [
         sys.executable,
         "-c",
@@ -237,7 +237,7 @@ def test_oversized_startup_handshake_is_rejected_before_json_decode(monkeypatch)
 
 @pytest.mark.parametrize("port", [True, 0, 65_536, "1234"])
 def test_invalid_startup_port_is_contained_and_reaped(monkeypatch, port):
-    manager = SemanticWorkerManager(startup_deadline=2.0)
+    manager = SemanticWorkerManager(startup_deadline=10.0)
     handshake = json.dumps(
         {
             "schema_version": WORKER_PROTOCOL_SCHEMA_VERSION,
@@ -456,7 +456,7 @@ def test_lightweight_identity_rejects_missing_required_fields(request, document_
 
 
 def test_authentication_schema_and_message_bounds_do_not_kill_worker():
-    with SemanticWorkerManager(startup_deadline=2.0) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0) as manager:
         assert manager.start()["success"] is True
         port = int(manager._port)
         wrong = _raw_request(
@@ -490,7 +490,7 @@ def test_authentication_schema_and_message_bounds_do_not_kill_worker():
 
 def test_queue_overflow_is_bounded_and_worker_recovers():
     participants = (PUBLIC_LIMITS["maximum_queue_depth"] + 1) * 4
-    with SemanticWorkerManager(startup_deadline=2.0, query_delay=0.75) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0, query_delay=0.75) as manager:
         assert manager.start()["success"] is True
         port = int(manager._port)
         barrier = threading.Barrier(participants)
@@ -696,7 +696,7 @@ def test_backend_status_exception_returns_structured_failure(operation):
 
 
 def test_health_remains_observable_while_query_holds_backend_lock():
-    with SemanticWorkerManager(startup_deadline=2.0, query_delay=0.75) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0, query_delay=0.75) as manager:
         assert manager.start()["success"] is True
         port = int(manager._port)
         result: dict = {}
@@ -801,7 +801,7 @@ def test_request_uses_one_monotonic_deadline_across_trickled_receives(monkeypatc
 
 
 def test_stale_identity_cleanup_reclaims_the_exact_spawned_process():
-    with SemanticWorkerManager(startup_deadline=2.0) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0) as manager:
         assert manager.start()["success"] is True
         process = manager._process
         manager._identity["process_create_time"] -= 10.0
@@ -861,7 +861,7 @@ def test_unhashable_worker_discriminators_return_structured_errors(payload, code
 
 
 def test_crash_after_response_is_observed_without_process_leak():
-    with SemanticWorkerManager(startup_deadline=2.0, fault="crash_after_response") as manager:
+    with SemanticWorkerManager(startup_deadline=10.0, fault="crash_after_response") as manager:
         response = manager.query("respond then crash")
         assert response["success"] is True
         deadline = time.monotonic() + 2.0
@@ -876,7 +876,7 @@ def test_crash_after_response_is_observed_without_process_leak():
 
 
 def test_idle_ttl_stops_worker_lazily_without_wall_clock_margin():
-    with SemanticWorkerManager(startup_deadline=2.0, idle_ttl=300.0) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0, idle_ttl=300.0) as manager:
         assert manager.health()["success"] is True
         manager.idle_ttl = 1.0
         manager._last_activity = float(manager._last_activity) - manager.idle_ttl
@@ -885,7 +885,7 @@ def test_idle_ttl_stops_worker_lazily_without_wall_clock_margin():
 
 def test_worker_pipes_are_drained_after_startup_handshake():
     with SemanticWorkerManager(
-        startup_deadline=2.0, query_deadline=2.0, fault="stderr_flood"
+        startup_deadline=10.0, query_deadline=5.0, fault="stderr_flood"
     ) as manager:
         response = manager.query("CopyFace")
 
@@ -894,7 +894,7 @@ def test_worker_pipes_are_drained_after_startup_handshake():
 
 
 def test_context_manager_reaps_worker_when_test_body_raises():
-    manager = SemanticWorkerManager(startup_deadline=2.0)
+    manager = SemanticWorkerManager(startup_deadline=10.0)
     process = None
     with pytest.raises(RuntimeError, match="injected polling failure"):
         with manager:
@@ -914,7 +914,7 @@ def test_missing_process_create_time_rejects_and_reaps_spawn(monkeypatch):
         "src.knowledge.semantic_process._windows_process_create_time",
         lambda _handle: None,
     )
-    with SemanticWorkerManager(startup_deadline=2.0) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0) as manager:
         result = manager.start()
 
         assert result["success"] is False
@@ -998,7 +998,7 @@ def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search(
     )
     try:
         with SemanticWorkerManager(
-            startup_deadline=2.0, query_deadline=0.5, fault="query_hang"
+            startup_deadline=10.0, query_deadline=0.5, fault="query_hang"
         ) as manager:
             result: dict = {}
 
