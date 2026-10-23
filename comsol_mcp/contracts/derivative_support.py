@@ -34,6 +34,11 @@ _SUPPORT_STATES = {
 _DEPENDENCIES = {"geometry", "material", "mesh", "physics"}
 _CONSTRAINT_KINDS = {"bound", "differentiable_scalar", "forward_only", "evidence", "policy"}
 _DIRECTIONS = {"minimize", "maximize", "match"}
+# The native adjoint runtime converts control variables to SI metres before
+# writing them back to COMSOL; only these units have a conversion factor, so
+# anything else must be refused at admission instead of crashing post-license
+# with a raw KeyError inside the finalist loop.
+CONTROL_VARIABLE_UNITS = frozenset({"m", "um", "nm"})
 
 
 def _object(value: object, fields: set[str], name: str) -> dict[str, Any]:
@@ -180,7 +185,7 @@ def normalize_derivative_variable(value: object, *, index: int) -> dict[str, Any
         "order": index,
         "kind": "continuous",
         "meaning": _text(raw["meaning"], f"{name}.meaning"),
-        "unit": _text(raw["unit"], f"{name}.unit", maximum=32),
+        "unit": _enum(raw["unit"], set(CONTROL_VARIABLE_UNITS), f"{name}.unit"),
         "baseline": baseline,
         "lower": lower,
         "upper": upper,
@@ -411,6 +416,7 @@ def normalize_derivative_support(value: object) -> dict[str, Any]:
 __all__ = [
     "DERIVATIVE_CONSTRAINT_SCHEMA_NAME",
     "DERIVATIVE_CONSTRAINT_SCHEMA_VERSION",
+    "CONTROL_VARIABLE_UNITS",
     "DERIVATIVE_OBJECTIVE_SCHEMA_NAME",
     "DERIVATIVE_OBJECTIVE_SCHEMA_VERSION",
     "DERIVATIVE_SUPPORT_SCHEMA_NAME",

@@ -191,10 +191,17 @@ def _optimizer_solve_budget(total_solves: object, *, finalist_solves: int = 1) -
 
 def _initial_values_si(support: Mapping[str, Any], values: list[float]) -> dict[str, float]:
     scales = {"m": 1.0, "um": 1e-6, "nm": 1e-9}
-    return {
-        item["variable_id"]: value * scales[item["unit"]]
-        for item, value in zip(support["variables"], values, strict=True)
-    }
+    initial: dict[str, float] = {}
+    for item, value in zip(support["variables"], values, strict=True):
+        try:
+            factor = scales[item["unit"]]
+        except KeyError as exc:
+            raise ValueError(
+                f"control variable {item['variable_id']!r} carries unsupported unit "
+                f"{item['unit']!r}; the native runtime converts only m, um, and nm"
+            ) from exc
+        initial[item["variable_id"]] = value * factor
+    return initial
 
 
 def _check_execution_budget(started: float, root: Path, budget: Mapping[str, Any]) -> None:

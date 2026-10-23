@@ -176,3 +176,30 @@ def test_constraint_kind_rejects_unhashable_value_as_value_error():
     ]
     with pytest.raises(ValueError, match="constraint.kind is unsupported"):
         normalize_derivative_support(value)
+
+
+def test_control_variable_unit_is_restricted_to_convertible_units():
+    value = _support()
+    value["variables"][0]["unit"] = "mm"
+    with pytest.raises(ValueError, match=r"variables\[0\]\.unit is unsupported"):
+        normalize_derivative_support(value)
+
+
+def test_control_variable_units_match_the_native_runtime_conversion():
+    from comsol_mcp.contracts.derivative_support import CONTROL_VARIABLE_UNITS
+    from comsol_mcp.jobs.native_adjoint_runtime import _initial_values_si
+
+    assert CONTROL_VARIABLE_UNITS == frozenset({"m", "um", "nm"})
+
+    support = {
+        "variables": [
+            {"variable_id": name, "unit": unit}
+            for name, unit in [("a", "m"), ("b", "um"), ("c", "nm")]
+        ]
+    }
+    initial = _initial_values_si(support, [1.0, 2.0, 3.0])
+    assert initial == {"a": pytest.approx(1.0), "b": pytest.approx(2e-6), "c": pytest.approx(3e-9)}
+
+    support["variables"].append({"variable_id": "d", "unit": "mm"})
+    with pytest.raises(ValueError, match="unsupported unit 'mm'"):
+        _initial_values_si(support, [1.0, 2.0, 3.0, 4.0])
