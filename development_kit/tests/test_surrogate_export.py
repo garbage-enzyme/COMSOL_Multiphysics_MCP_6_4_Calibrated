@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from development_kit.scripts import surrogate_export_licensed_gate as licensed_gate
-
 from comsol_mcp.durable.canonical import canonical_sha256_v1
 from comsol_mcp.surrogate.export import (
     EXPORT_FORMATS,
@@ -16,6 +14,7 @@ from comsol_mcp.surrogate.export import (
     integrate_export_into_registry,
     validate_export_manifest,
 )
+from development_kit.scripts import surrogate_export_licensed_gate as licensed_gate
 
 SOLVER_FREE_BANNED = (
     "import mph",
@@ -209,6 +208,37 @@ def test_relative_tolerance_can_admit_a_scaled_agreement() -> None:
         relative_tolerance=1e-4,
     )
     assert report["state"] == "consistent"
+
+
+def test_zero_expected_rows_do_not_discard_or_restart_worst_relative() -> None:
+    # Row 0 defines a 0.5 ratio, row 1 defines none, row 2 defines a small
+    # ratio: the worst must stay 0.5 even though a zero sits between them.
+    report = check_prediction_consistency(
+        in_model_predictions=[[1.0], [0.0], [2.0]],
+        reimported_predictions=[[1.5], [0.0], [2.0 + 1e-12]],
+        absolute_tolerance=1.0,
+    )
+    assert report["state"] == "consistent"
+    assert report["worst_relative_difference"] == pytest.approx(0.5)
+
+
+def test_trailing_zero_expected_row_keeps_the_accumulated_worst_relative() -> None:
+    report = check_prediction_consistency(
+        in_model_predictions=[[1.0], [0.0]],
+        reimported_predictions=[[1.5], [0.0]],
+        absolute_tolerance=1.0,
+    )
+    assert report["worst_relative_difference"] == pytest.approx(0.5)
+
+
+def test_all_zero_expected_predictions_report_none_for_worst_relative() -> None:
+    report = check_prediction_consistency(
+        in_model_predictions=[[0.0], [0.0]],
+        reimported_predictions=[[0.0], [0.0]],
+        absolute_tolerance=1e-9,
+    )
+    assert report["state"] == "consistent"
+    assert report["worst_relative_difference"] is None
 
 
 def test_consistency_rejects_misaligned_and_bad_tolerances() -> None:
