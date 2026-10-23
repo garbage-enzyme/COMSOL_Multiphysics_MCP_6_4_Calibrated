@@ -47,6 +47,7 @@ Frozen behaviours
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -622,9 +623,16 @@ def _completed_payload(state: Mapping[str, Any]) -> dict[str, Any]:
     """Inline exactly what the synchronous call would have returned.
 
     A tool-level ``isError`` completion belongs here as ``completed``; the
-    extension reserves ``failed`` for JSON-RPC faults.
+    extension reserves ``failed`` for JSON-RPC faults. The projection reads
+    only fields the durable JobStore really writes - status, attempt,
+    progress and ``last_error`` - and never invents summary or artifact data
+    that no producer records. Absolute path locators are stripped from error
+    text so a Tasks payload stays free of private host locations.
     """
-    summary = state.get("summary")
+    progress = state.get("progress") if isinstance(state.get("progress"), Mapping) else {}
+    completed_rows = progress.get("completed")
+    total_rows = progress.get("total")
+    last_error = _bounded_error_detail(state.get("last_error"))
     payload: dict[str, Any] = {
         "content": [
             {
@@ -632,15 +640,19 @@ def _completed_payload(state: Mapping[str, Any]) -> dict[str, Any]:
                 "text": "The durable job reached a terminal state; see structuredContent.",
             }
         ],
-        "isError": bool(state.get("job_error")) if isinstance(state, Mapping) else False,
+        # A completed job that still recorded an error detail is the truthful
+        # tool-level error channel; a clean completion stays isError=false.
+        "isError": last_error is not None,
         "structuredContent": {
             "jobId": state.get("job_id"),
             "status": state.get("status"),
             "attempt": state.get("attempt"),
-            "summary": summary if isinstance(summary, dict) else None,
-            "artifactReferences": state.get("artifacts")
-            if isinstance(state.get("artifacts"), list)
-            else [],
+            "resultReference": {
+                "kind": "durable_progress",
+                "completed": completed_rows if isinstance(completed_rows, int) else None,
+                "total": total_rows if isinstance(total_rows, int) else None,
+            },
+            "lastError": last_error,
         },
     }
     return payload
@@ -648,15 +660,41 @@ def _completed_payload(state: Mapping[str, Any]) -> dict[str, Any]:
 
 def _failed_payload(state: Mapping[str, Any]) -> dict[str, Any]:
     """A protocol-level fault, kept separate from a completed tool error."""
+    progress = state.get("progress") if isinstance(state.get("progress"), Mapping) else {}
+    completed_rows = progress.get("completed")
+    total_rows = progress.get("total")
     return {
         "code": -32603,
-        "message": str(state.get("error") or "the durable job did not complete"),
+        "message": _bounded_error_detail(state.get("last_error"))
+        or "the durable job did not complete",
         "data": {
             "jobId": state.get("job_id"),
             "status": state.get("status"),
             "attempt": state.get("attempt"),
+            "resultReference": {
+                "kind": "durable_progress",
+                "completed": completed_rows if isinstance(completed_rows, int) else None,
+                "total": total_rows if isinstance(total_rows, int) else None,
+            },
         },
     }
+
+
+_ERROR_DETAIL_BOUND = 512
+_ABSOLUTE_PATH_LOCATOR = re.compile(r"[A-Za-z]:[\\/](?:[^\\/:*?\"<>|\r\n]*[\\/])*")
+
+
+def _bounded_error_detail(value: object) -> str | None:
+    """Bound the durable error text and strip absolute path locators.
+
+    The durable ``last_error`` can quote absolute host paths from preflight
+    probes or worker diagnostics; a Tasks payload stays free of private
+    locations by reducing any drive-letter path to its final component.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()[:_ERROR_DETAIL_BOUND]
+    return _ABSOLUTE_PATH_LOCATOR.sub("", text) or None
 
 
 def _bounded_receipt(receipt: object) -> dict[str, Any]:

@@ -281,17 +281,28 @@ def test_terminal_statuses_carry_the_right_payload(bridge: TasksBridge) -> None:
     row = bridge._store.latest_for_task(job_id)
     assert row is not None
 
-    engine.set_state(row.job_id, "completed", summary={"points": 3})
+    engine.set_state(
+        row.job_id,
+        "completed",
+        progress={"completed": 2, "total": 2},
+    )
     completed = bridge.get_task(job_id)
     assert completed["status"] == "completed"
     # Terminal payload is inline, and a completed tool error is NOT `failed`.
     assert completed["result"]["structuredContent"]["jobId"] == row.job_id
     assert completed["result"]["isError"] is False
+    assert completed["result"]["structuredContent"]["resultReference"] == {
+        "kind": "durable_progress",
+        "completed": 2,
+        "total": 2,
+    }
+    assert completed["result"]["structuredContent"]["lastError"] is None
 
-    engine.set_state(row.job_id, "failed", error="solver blew up")
+    engine.set_state(row.job_id, "failed", last_error="solver blew up")
     failed = bridge.get_task(job_id)
     assert failed["status"] == "failed"
     assert failed["error"]["message"] == "solver blew up"
+    assert failed["error"]["data"]["jobId"] == row.job_id
 
 
 def test_a_completed_tool_error_maps_to_completed_not_failed(bridge: TasksBridge) -> None:
@@ -299,10 +310,13 @@ def test_a_completed_tool_error_maps_to_completed_not_failed(bridge: TasksBridge
     handle = _submit(bridge)
     row = bridge._store.latest_for_task(handle["taskId"])
     assert row is not None
-    _engine(bridge).set_state(row.job_id, "completed", job_error=True)
+    _engine(bridge).set_state(
+        row.job_id, "completed", last_error="preflight refused the probe"
+    )
     detail = bridge.get_task(handle["taskId"])
     assert detail["status"] == "completed"
     assert detail["result"]["isError"] is True
+    assert detail["result"]["structuredContent"]["lastError"] == "preflight refused the probe"
     assert "error" not in detail
 
 
@@ -794,3 +808,60 @@ def test_legacy_revision_cannot_receive_a_stable_task_envelope(tmp_path, revisio
     assert result == ordinary
     assert not engine.submit_calls
     assert not (tmp_path / "tasks").exists()
+
+
+def test_payload_error_details_are_bounded_and_path_free(bridge: TasksBridge) -> None:
+    handle = _submit(bridge)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    long_detail = "x" * 700
+    _engine(bridge).set_state(
+        row.job_id,
+        "completed",
+        last_error=(
+            f"preflight failed opening D:\private\evidence\{row.job_id}\probe.json "
+            f"after {long_detail}"
+        ),
+    )
+    detail = bridge.get_task(handle["taskId"])
+
+    assert detail["status"] == "completed"
+    payload = detail["result"]["structuredContent"]
+    assert detail["result"]["isError"] is True
+    assert "D:" not in payload["lastError"]
+    assert "private" not in payload["lastError"]
+    assert payload["lastError"].startswith("preflight failed opening probe.json after ")
+    assert len(payload["lastError"]) <= 512
+
+
+def test_tasks_payload_agrees_with_the_ordinary_job_path_and_survives_restart(
+    tmp_path: Path,
+) -> None:
+    engine = FakeEngine()
+    store_root = tmp_path / "tasks"
+    bridge = TasksBridge(engine=engine, store=TasksMappingStore(store_root), owner="owner-a")
+    handle = _submit(bridge)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    engine.set_state(
+        row.job_id,
+        "completed",
+        attempt=3,
+        progress={"completed": 7, "total": 9},
+    )
+
+    ordinary = engine.status(row.job_id)
+    detail = bridge.get_task(handle["taskId"])
+    structured = detail["result"]["structuredContent"]
+
+    assert structured["jobId"] == row.job_id == ordinary.get("job_id")
+    assert structured["status"] == ordinary["status"]
+    assert structured["attempt"] == ordinary["attempt"]
+    assert structured["resultReference"]["completed"] == ordinary["progress"]["completed"]
+    assert structured["resultReference"]["total"] == ordinary["progress"]["total"]
+
+    restarted = TasksBridge(
+        engine=engine, store=TasksMappingStore(store_root), owner="owner-a"
+    )
+    again = restarted.get_task(handle["taskId"])
+    assert again["result"]["structuredContent"] == structured
