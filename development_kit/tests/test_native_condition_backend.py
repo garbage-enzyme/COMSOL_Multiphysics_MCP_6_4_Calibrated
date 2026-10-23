@@ -1643,8 +1643,6 @@ def test_condition_evaluator_requires_exact_arity(monkeypatch):
                 return None
 
             def component(self):
-                java = self
-
                 class Component:
                     def get(self, _tag):
                         return self
