@@ -980,6 +980,7 @@ class SessionManager:
             self._model_paths.clear()
             self._model_source_identities.clear()
             self._model_revisions.clear()
+            self._model_java_tags.clear()
             self._current_model = None
             self._publish_control_plane_status_locked()
         release = self._release_owned_lease()
@@ -1388,6 +1389,7 @@ class SessionManager:
                     self._model_paths.pop(name, None)
                     self._model_source_identities.pop(name, None)
                     self._model_revisions.pop(name, None)
+                    self._model_java_tags.pop(name, None)
                     self._cleanup_model_artifact(name)
                     if self._current_model == name:
                         self._current_model = next(iter(self._models.keys()), None)

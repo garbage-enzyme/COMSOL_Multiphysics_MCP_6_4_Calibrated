@@ -616,6 +616,61 @@ class TestSessionManager:
         assert not clone_dir.exists()
         sm._client = None
 
+    def test_remove_model_drops_the_tracked_java_tag_entry(self):
+        from src.tools.session import SessionManager
+
+        class FakeClient:
+            def remove(self, model):
+                return None
+
+        class TaggedModel:
+            def name(self):
+                return "leaky"
+
+            def tag(self):
+                return "mod1"
+
+        sm = SessionManager()
+        sm._client = FakeClient()
+        sm._models = {}
+        sm._model_cleanup_paths = {}
+        sm.add_model(TaggedModel())
+        assert "leaky" in sm._model_java_tags
+
+        assert sm.remove_model("leaky") is True
+        assert "leaky" not in sm._model_java_tags
+
+        # A same-name re-registration without a Java tag must not inherit the
+        # removed model's tag: get_status would then report a session_model
+        # identity for a model the client never loaded.
+        class UntaggedModel:
+            def name(self):
+                return "leaky"
+
+        sm.add_model(UntaggedModel())
+        assert sm._model_java_tags.get("leaky") is None
+        sm._client = None
+
+    def test_disconnect_clears_model_java_tags(self):
+        from src.tools.session import SessionManager
+
+        class FakeClient:
+            def clear(self):
+                return None
+
+            def disconnect(self):
+                return None
+
+        sm = SessionManager()
+        sm._client = FakeClient()
+        sm._models = {"model": object()}
+        sm._model_java_tags = {"model": "mod1"}
+
+        result = sm.disconnect()
+
+        assert result["success"] is True
+        assert sm._model_java_tags == {}
+
     def test_clear_models_preserves_connected_client(self):
         from src.tools.session import SessionManager
 
