@@ -765,6 +765,20 @@ class JobManager:
             if spec.get(name) != value:
                 blockers.append(f"{name}_not_bound")
 
+        # Bind the running package's driver identity at preflight so a resume
+        # cannot silently execute against a different training implementation
+        # than the one whose identity the spec froze.
+        driver_blockers: list[str] = []
+        try:
+            from comsol_mcp.jobs.surrogate_training import (
+                validate_surrogate_training_driver_identity,
+            )
+
+            expected_driver = validate_surrogate_training_driver_identity(spec)
+        except ValueError:
+            driver_blockers.append("driver_identity_not_bound")
+            expected_driver = None
+
         ineligible = {item["row_id"] for item in (dataset.get("ineligible_rows") or [])}
         assignments = split_plan.get("assignments") or []
         holdout = [item for item in assignments if item.get("split") == "scientific_holdout"]
@@ -777,6 +791,7 @@ class JobManager:
         if not spec.get("seeds"):
             blockers.append("seeds_are_empty")
         del ineligible  # retained for future eligibility enforcement
+        blockers.extend(driver_blockers)
 
         return {
             "success": not blockers,
@@ -787,7 +802,7 @@ class JobManager:
             "mph_imported": False,
             "client_constructed": False,
             "acquires_solver_lease": False,
-            "bound_identities": declared,
+            "bound_identities": {**declared, "driver_identity": expected_driver},
         }
 
     def _launch_worker(self, job_id: str, module: str) -> dict[str, Any]:

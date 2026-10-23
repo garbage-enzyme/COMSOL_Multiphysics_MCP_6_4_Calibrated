@@ -16,9 +16,14 @@ from pathlib import Path
 from comsol_mcp.durable.io import append_jsonl_record, atomic_write_json, read_complete_jsonl
 
 from .process_control import contain_current_process_tree
+from .journal import recover_jsonl_tail
 from .store import JobStore, cancel_request_targets_attempt, process_identity
 
 MAX_EPOCH_ROWS = 10_000
+
+
+#: Bound on one serialized epoch row for torn-tail recovery.
+MAX_EPOCH_ROW_BYTES = 64 * 1024
 
 
 def _epochs_path(root: Path, job_id: str) -> Path:
@@ -26,8 +31,19 @@ def _epochs_path(root: Path, job_id: str) -> Path:
 
 
 def _read_completed_epochs(path: Path, *, total: int) -> set[int]:
-    """Return the set of epochs already durably recorded for this attempt."""
+    """Return the set of epochs already durably recorded for this attempt.
+
+    A crash mid-write can leave a torn trailing record; the recovery pattern
+    (truncate to the last complete record, mirroring the adjoint journal)
+    repairs it before reading instead of gluing the fragment to the next
+    appended row and losing every earlier epoch to a false corruption
+    verdict. Mid-file corruption is still refused: only the tail is
+    recoverable, because earlier rows are the durable history.
+    """
     report = read_complete_jsonl(path)
+    if report["state"] == "incomplete":
+        recover_jsonl_tail(path, max_row_bytes=MAX_EPOCH_ROW_BYTES)
+        report = read_complete_jsonl(path)
     if report["state"] == "corrupt":
         raise ValueError("epoch journal is corrupt")
     completed: set[int] = set()
