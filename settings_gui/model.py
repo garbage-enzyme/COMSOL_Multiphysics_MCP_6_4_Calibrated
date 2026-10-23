@@ -412,6 +412,16 @@ class SettingsFormModel:
         for key, value in document.items():
             if key not in merged and not key.startswith("_comment"):
                 merged[key] = deepcopy(value)
+        # Top-level unknown keys surface as validation errors; the same rule
+        # must hold one level down, or a typo inside a settings group is
+        # silently dropped from the document and the canonical result while
+        # the equivalent top-level typo is loudly reported. Copy nested
+        # unknown keys through so the validator can see and report them.
+        for key, value in document.items():
+            if isinstance(value, dict) and key in merged and isinstance(merged[key], dict):
+                for nested_key, nested_value in value.items():
+                    if nested_key not in merged[key] and not nested_key.startswith("_comment"):
+                        merged[key][nested_key] = deepcopy(nested_value)
         return cls(merged)
 
     @property

@@ -699,6 +699,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `settings_gui/tests/test_i18n.py` — The tests cover gettext completeness, placeholders, and reproducible PO and MO outputs.
 - `settings_gui/tests/test_icon.py` — The module verifies the packaged ICO dimensions, encoding, transparency-capable depth, and size bound.
 - `settings_gui/tests/test_model_controller.py` — The tests cover complete field bindings and controller state transitions.
+- `settings_gui/tests/test_model.py` — The tests cover raw-document loading, including nested unknown-key reporting instead of silent dropping.
 - `settings_gui/tests/test_manual_index.py` — The tests cover isolated manual-index task progress, cancellation, and cleanup.
 - `settings_gui/tests/test_storage.py` — The tests cover Windows mutex, sharing, conflict, recovery, and atomic-write behavior.
 
