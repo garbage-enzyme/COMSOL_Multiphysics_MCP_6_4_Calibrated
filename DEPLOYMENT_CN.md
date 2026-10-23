@@ -136,11 +136,13 @@ comsol-mcp-settings --settings-path "D:\settings\settings.json" --remove-desktop
 
 | Profile | 用途 |
 | --- | --- |
-| `core` | 紧凑默认控制面和词法手册检索。 |
+| `core` | 紧凑默认控制面；词法手册检索默认关闭，由 `lexical_docs` 开关控制。 |
 | `basic_fem` | 常规 FEM 构建、有界导出，以及无需 Python 的独立启动器工具。 |
 | `wave_optics` | 周期光学、超表面、有界场数据发现/提取、预检和证据审计。 |
+| `electro_chemistry` | 隔离的电化学模块 profile：在 `core` 基础上增加电化学发现、接口创建、电极反应与电解质工具，不并入 `full`。 |
 | `experimental` | 显式选择的通用工具和保留的原生执行接口。 |
-| `full` | 宽泛的非 feature 兼容界面。默认不推荐。 |
+| `full` | 宽泛的非 feature 兼容界面，不含隔离的 `electro_chemistry` 增补。默认不推荐。 |
+| `comsolless_read_only` | 未安装 COMSOL 的电脑：仅提供离线模型/证据探查工具，无法启动 COMSOL 或 Java。 |
 
 普通用户在设置界面选择 profile。开发者和 agent 可以在 JSON 的 `profile.name` 中设置
 等价值。删除时使用 `core`。stdio 进程启动时会冻结 profile，修改后必须重启 client/MCP

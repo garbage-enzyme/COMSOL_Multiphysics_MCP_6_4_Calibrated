@@ -302,6 +302,7 @@ Canonical default template:
     "artifact_write_root": "%PROGRAMDATA%/comsol_mcp/artifacts"
   },
   "shared_server": {"enabled": false},
+  "model_manager": {"enabled": false, "upload_enabled": false},
   "discovery": {"pagination_enabled": false},
   "evidence_integrity": {
     "checks": {
