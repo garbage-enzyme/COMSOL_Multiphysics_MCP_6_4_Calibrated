@@ -1135,3 +1135,96 @@ def test_context_scoping_survives_the_worker_thread_boundary(tmp_path: Path) -> 
     handle = asyncio.run(scenario())
     assert handle["resultType"] == "task"
     assert observed["marker"] == "request-scoped"
+
+
+def _row_document(job_id: str, created: int = 1) -> dict[str, Any]:
+    import hashlib
+
+    return {
+        "task_id": "t" + hashlib.sha256(job_id.encode()).hexdigest()[:16],
+        "job_id": job_id,
+        "created_at_ms": created,
+        "ttl_ms": None,
+        "poll_interval_ms": 1000,
+        "spec_fingerprint": "f" * 64,
+        "owner": "owner-a",
+        "request_client": None,
+    }
+
+
+def test_corrupt_mapping_fails_closed_and_recovers_with_quarantine(tmp_path: Path) -> None:
+    import json as _json
+
+    store = TasksMappingStore(tmp_path / "tasks")
+    store.root.mkdir(parents=True)
+    good = _json.dumps(_row_document("job-good"))
+    store.journal_path.write_text(good + "\n", encoding="ascii")
+
+    # A corrupt middle record: every action fails closed before any launch.
+    engine = FakeEngine()
+    bridge = TasksBridge(engine=engine, store=store, owner="owner-a")
+    store.journal_path.write_text(
+        good
+        + "\n"
+        + '{"task_id": "broken"'
+        + "\n"
+        + _json.dumps(_row_document("job-after"))
+        + "\n",
+        encoding="ascii",
+    )
+    with pytest.raises(TasksMappingError) as excinfo:
+        bridge.get_task("anything")
+    assert excinfo.value.code == "mapping_corrupt"
+    damaged_bytes = store.journal_path.read_bytes()
+
+    with pytest.raises(TasksMappingError, match="mapping journal is corrupt"):
+        bridge.submit_task(
+            {"job_type": "staged_sweep", "parameter_name": "wl", "parameter_values": [1.0]},
+            client_extensions=OPT_IN,
+        )
+    assert engine._jobs == {}
+
+    report = store.recover()
+
+    assert report["salvaged_rows"] == 1
+    assert report["stopped_at_damage"] is True
+    quarantine = store.root / report["quarantine"]
+    assert quarantine.read_bytes() == damaged_bytes
+    rows = store.rows()
+    assert [row.job_id for row in rows] == ["job-good"]
+
+    # Post-recovery duplicate submission reuses the salvaged mapping's job
+    # only when the engine deduplicates to it; a fresh spec launches once.
+    handle = bridge.submit_task(
+        {"job_type": "staged_sweep", "parameter_name": "wl", "parameter_values": [1.0]},
+        client_extensions=OPT_IN,
+    )
+    assert handle["resultType"] == "task"
+    restarted = TasksBridge(
+        engine=engine, store=TasksMappingStore(tmp_path / "tasks"), owner="owner-a"
+    )
+    assert len(restarted._store.rows()) == len(store.rows())
+
+
+def test_torn_tail_is_not_corruption_and_bad_middle_row_fails_closed(tmp_path: Path) -> None:
+    import json as _json
+
+    store = TasksMappingStore(tmp_path / "tasks")
+    store.root.mkdir(parents=True)
+    good = _json.dumps(_row_document("job-tail"))
+    store.journal_path.write_bytes((good + "\n").encode("ascii") + b'{"partial":')
+    assert [row.job_id for row in store.rows()] == ["job-tail"]
+
+    bad_fields = _json.dumps({"task_id": "x", "unexpected": True})
+    store.journal_path.write_text(good + "\n" + bad_fields + "\n", encoding="ascii")
+    with pytest.raises(TasksMappingError) as excinfo:
+        store.rows()
+    assert excinfo.value.code == "mapping_corrupt"
+
+    report = store.recover()
+    assert report == {
+        "quarantine": report["quarantine"],
+        "salvaged_rows": 1,
+        "stopped_at_damage": True,
+    }
+    assert [row.job_id for row in store.rows()] == ["job-tail"]

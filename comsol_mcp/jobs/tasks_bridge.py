@@ -304,20 +304,84 @@ class TasksMappingStore:
             raise TasksMappingError(
                 "mapping_oversized", "task mapping journal exceeds its size bound"
             )
+        if state == "corrupt":
+            # Damaged bytes are never silently skipped: every task action
+            # fails closed until an explicit recovery quarantines the journal
+            # and rebuilds it from validated rows.
+            raise TasksMappingError(
+                "mapping_corrupt",
+                "task mapping journal is corrupt; recovery is required before any task action",
+            )
         records = report.get("records")
         if not isinstance(records, list):
             return []
         rows: list[TaskRow] = []
         for document in records[-MAX_TASK_ROWS:]:
             if not isinstance(document, dict):
-                continue
+                raise TasksMappingError(
+                    "mapping_corrupt",
+                    "task mapping journal holds a non-object record; recovery is required",
+                )
             try:
                 rows.append(self._row(document))
-            except TasksMappingError:
-                # A malformed historical row must not erase the readings of the
-                # rows that are well formed, but it also must not be trusted.
-                continue
+            except TasksMappingError as exc:
+                raise TasksMappingError(
+                    "mapping_corrupt",
+                    "task mapping journal holds an invalid row; recovery is required",
+                ) from exc
         return rows
+
+    def recover(self) -> dict[str, Any]:
+        """Quarantine damaged bytes and rebuild a validated mapping journal.
+
+        The damaged journal is moved aside byte-for-byte before anything is
+        rewritten, and the replacement journal is rebuilt only from rows that
+        pass full validation, stopping at the first damaged record - later
+        rows cannot be validated as unmodified. A torn trailing record is not
+        damage: the complete prefix is already readable and needs no recovery.
+        """
+        with self.transaction():
+            try:
+                raw = self.journal_path.read_bytes()
+            except OSError as exc:
+                raise TasksMappingError(
+                    "mapping_unreadable", "task mapping journal is unreadable"
+                ) from exc
+            if len(raw) > TASKS_FILE_MAX_BYTES:
+                raise TasksMappingError(
+                    "mapping_oversized", "task mapping journal exceeds its size bound"
+                )
+            quarantine = self.root / (
+                self.journal_path.name + f".corrupt-{int(time.time() * 1000)}"
+            )
+            if quarantine.exists():
+                raise TasksMappingError(
+                    "mapping_corrupt", "a quarantine already exists; resolve it first"
+                )
+            self.journal_path.rename(quarantine)
+            salvaged: list[TaskRow] = []
+            stopped_at_damage = False
+            for line in raw.splitlines():
+                if not line:
+                    stopped_at_damage = True
+                    break
+                try:
+                    document = json.loads(line.decode("utf-8"))
+                    if not isinstance(document, dict):
+                        raise ValueError("record is not an object")
+                    salvaged.append(self._row(document))
+                except UnicodeDecodeError, json.JSONDecodeError, ValueError, TasksMappingError:
+                    stopped_at_damage = True
+                    break
+            self.journal_path.parent.mkdir(parents=True, exist_ok=True)
+            self.journal_path.write_bytes(b"")
+            for row in salvaged:
+                self.append(row)
+            return {
+                "quarantine": quarantine.name,
+                "salvaged_rows": len(salvaged),
+                "stopped_at_damage": stopped_at_damage,
+            }
 
     @staticmethod
     def _row(document: Mapping[str, Any]) -> TaskRow:
