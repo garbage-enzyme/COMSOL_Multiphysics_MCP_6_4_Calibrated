@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import copy
 import hashlib
-from types import SimpleNamespace
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import src.jobs.worker as production_worker
