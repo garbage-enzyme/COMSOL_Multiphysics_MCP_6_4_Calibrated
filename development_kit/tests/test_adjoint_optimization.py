@@ -125,10 +125,14 @@ def test_watchdog_identity_confirmation_is_bounded_and_strict(monkeypatch, failu
         return {**expected, "command_signature": "0" * 64} if failure == "mismatch" else expected
 
     monkeypatch.setattr(module, "process_identity", observe)
-    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(
-        module.time, "sleep", lambda interval: clock.__setitem__(0, clock[0] + interval)
+    import time as real_time
+
+    fake_time = SimpleNamespace(
+        time=real_time.time,
+        monotonic=lambda: clock[0],
+        sleep=lambda interval: clock.__setitem__(0, clock[0] + interval),
     )
+    monkeypatch.setattr(module, "time", fake_time)
     process = SimpleNamespace(pid=123, poll=lambda: 0 if failure == "exited" else None)
     if failure is None:
         assert module._wait_for_launched_identity(process, command) == expected

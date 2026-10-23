@@ -19,11 +19,11 @@ from src.jobs.store import process_identity
 _HIDDEN_PROCESS_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
-def _wait_absent(identities, timeout=5.0):
-    deadline = time.monotonic() + timeout
+def _wait_absent(identities, timeout=5.0, *, monotonic=time.monotonic, sleep=time.sleep):
+    deadline = monotonic() + timeout
     verification = verify_absent(identities)
-    while not verification["absent"] and time.monotonic() < deadline:
-        time.sleep(0.025)
+    while not verification["absent"] and monotonic() < deadline:
+        sleep(0.025)
         verification = verify_absent(identities)
     return verification
 
@@ -31,8 +31,7 @@ def _wait_absent(identities, timeout=5.0):
 @pytest.mark.parametrize("resolve", [False, True])
 def test_absence_poll_uses_existing_budget_without_accepting_uncertainty(monkeypatch, resolve):
     clock = [0.0]
-    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+
     calls = []
 
     def inspect(identities):
@@ -42,7 +41,12 @@ def test_absence_poll_uses_existing_budget_without_accepting_uncertainty(monkeyp
         return {"absent": absent, "verdicts": [{"state": "stale" if absent else "uncertain"}]}
 
     monkeypatch.setitem(_wait_absent.__globals__, "verify_absent", inspect)
-    result = _wait_absent(["exact"], timeout=0.05)
+    result = _wait_absent(
+        ["exact"],
+        timeout=0.05,
+        monotonic=lambda: clock[0],
+        sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
     assert result["absent"] is resolve
     assert 2 <= len(calls) <= 3
     assert clock[0] <= 0.05

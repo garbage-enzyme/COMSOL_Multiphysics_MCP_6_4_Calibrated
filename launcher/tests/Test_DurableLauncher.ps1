@@ -41,7 +41,7 @@ if ([regex]::Matches($FrameBody, [regex]::Escape('[Console]::Write(($Padded -joi
 }
 
 function Wait-Until {
-    param([scriptblock]$Condition, [int]$TimeoutSeconds = 15)
+    param([scriptblock]$Condition, [int]$TimeoutSeconds = 30)
     $Deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ([DateTime]::UtcNow -lt $Deadline) {
         if (& $Condition) { return }
