@@ -287,6 +287,29 @@ def test_crash_before_checkpoint_decides_restart(tmp_path):
     }
 
 
+def test_verified_unusable_checkpoint_decides_restart(tmp_path):
+    row = build_bounded_step_receipt(
+        _checkpoint_record(
+            b"durable checkpoint bytes",
+            step_id="s1",
+            execution_status="crashed",
+            evidence_status="incomplete",
+            cleanup="pending",
+            scientific_disposition="not_evaluated",
+            failure_disposition="restart_from_checkpoint",
+        )
+    )
+
+    decision = decide_resume([row], checkpoint_verified=False)
+
+    # The checkpoint was checked and failed verification, so the reason is
+    # its unusability, not an unknown verification verdict.
+    assert decision == {
+        "decision": "restart",
+        "reason_codes": ["checkpoint_not_usable"],
+    }
+
+
 def test_crash_after_checkpoint_resumes_only_with_verified_bytes(tmp_path):
     payload = b"durable checkpoint bytes"
     row = build_bounded_step_receipt(

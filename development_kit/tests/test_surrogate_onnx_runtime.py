@@ -181,9 +181,9 @@ def test_supported_operator_set_is_declared() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_identity_gemm_reproduces_its_input() -> None:
+def test_identity_gemm_reproduces_its_input(tmp_path) -> None:
     path = _write(
-        __import__("pathlib").Path(__import__("tempfile").mkdtemp()),
+        tmp_path,
         "identity.onnx",
         _mlp_onnx(
             weight=[1.0, 0.0, 0.0, 1.0],
@@ -469,7 +469,6 @@ REAL_COMSOL_ONNX_SHA256 = "a417ee487ad5d8c8fc25919aa47f2782b5c9b7f0a979ee255da8a
 
 
 def _real_comsol_onnx_path():
-    from pathlib import Path
 
     from development_kit.tests.platform_fixtures import platform_test_root
 

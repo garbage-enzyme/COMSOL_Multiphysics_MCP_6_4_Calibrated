@@ -20,7 +20,9 @@ MAX_CORE_TOOL_SCHEMA_BYTES = 16 * 1024
 # the shared limits object leaves 5,684 B above the old bound. Raising the bound
 # to 80 KiB keeps a real per-tool guard (about 1.45 KiB/tool at 55 tools) while
 # accommodating a public surface addition, matching the documented 80 KiB
-# capabilities bound below. Measured 2026-09-28: 70,978 B / 55 tools.
+# capabilities bound below. Historical measurement 2026-09-28: 70,978 B / 55
+# tools; the 0.8.1 core surface measures 65,157 B / 52 tools (about 1.25
+# KiB/tool), still comfortably inside the bound.
 #
 # 0.7.6 P0 changes what the capabilities response may contain rather than what it
 # is allowed to weigh. It previously embedded the complete schema registry, which

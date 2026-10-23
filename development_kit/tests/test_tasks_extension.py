@@ -349,6 +349,33 @@ def test_the_mapping_is_durable_before_the_handle_is_returned(bridge: TasksBridg
     assert row.job_id == handle["taskId"] or row.job_id
 
 
+def test_a_crash_between_submit_and_mapping_append_self_heals(tmp_path: Path) -> None:
+    """A crash after the durable job exists but before the mapping row is
+    appended leaves no orphan: duplicate detection returns the same job and a
+    fresh mapping row binds to it instead of launching a second job."""
+    engine = FakeEngine()
+    store = TasksMappingStore(tmp_path / "tasks")
+    first = TasksBridge(engine=engine, store=store, owner="owner-a")
+    _submit(first)
+    (job_id,) = _engine(first)._jobs.keys()
+
+    # The crash window: the engine (durable job) survives, the mapping store
+    # was never written, and the client retries the identical spec.
+    retried_store = TasksMappingStore(tmp_path / "retried-tasks")
+    retried = TasksBridge(engine=engine, store=retried_store, owner="owner-a")
+
+    handle = _submit(retried)
+
+    assert handle["duplicate_submission"] is True
+    rows = retried_store.rows()
+    assert len(rows) == 1
+    assert rows[0].job_id == job_id
+    assert rows[0].task_id == handle["taskId"]
+    # Exactly one durable job exists across both submissions.
+    assert len(_engine(retried).submit_calls) == 2
+    assert len(_engine(retried)._jobs) == 1
+
+
 def test_a_restart_rebinds_the_same_task_id(tmp_path: Path) -> None:
     """Reconnect retrieves the same durable job rather than a new one."""
     engine = FakeEngine()
