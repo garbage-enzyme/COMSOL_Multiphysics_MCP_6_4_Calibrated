@@ -65,6 +65,32 @@ _COLLECTOR_FIELDS = frozenset(
 )
 RESOURCE_JOURNAL_MAX_ENTRIES = 4096
 RESOURCE_JOURNAL_MAX_ENTRY_BYTES = 64 * 1024
+#: Startup stages write journal entries before any point work begins; the
+#: reserve bounds that fixed cost for admission-time capacity accounting.
+RESOURCE_JOURNAL_STARTUP_ENTRY_RESERVE = 8
+
+
+def resource_journal_capacity_verdict(total_points: int) -> dict[str, Any]:
+    """Admission-time accounting for the durable resource journal.
+
+    Every admitted point writes at least a telemetry sample and a decision
+    entry, so the single-attempt lower bound is two entries per point plus the
+    startup reserve. Refusing when even that bound cannot fit keeps a sweep
+    from dying mid-run against the journal limit; retries and resumes may
+    still consume headroom above the bound, and the journal reader keeps its
+    hard entry limit as the backstop. No limit is raised and no history is
+    truncated by this check.
+    """
+    points = _positive_integer(total_points, "total_points")
+    required = RESOURCE_JOURNAL_STARTUP_ENTRY_RESERVE + 2 * points
+    return {
+        "total_points": points,
+        "required_entries_lower_bound": required,
+        "max_entries": RESOURCE_JOURNAL_MAX_ENTRIES,
+        "fits": required <= RESOURCE_JOURNAL_MAX_ENTRIES,
+    }
+
+
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 

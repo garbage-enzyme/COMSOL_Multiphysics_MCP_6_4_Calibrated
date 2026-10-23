@@ -496,9 +496,7 @@ def test_native_cancel_monitor_failure_is_recorded_durably(tmp_path, ascii_root,
     }
 
 
-def test_duplicate_admission_works_beyond_the_old_scan_bound(
-    tmp_path, ascii_root, monkeypatch
-):
+def test_duplicate_admission_works_beyond_the_old_scan_bound(tmp_path, ascii_root, monkeypatch):
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"model")
     manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
@@ -576,9 +574,7 @@ def test_duplicate_index_recovers_from_corruption_deletion_and_stale_entries(
     assert admitted.get("duplicate") is not True
 
 
-def test_concurrent_identical_submissions_admit_exactly_one_job(
-    tmp_path, ascii_root, monkeypatch
-):
+def test_concurrent_identical_submissions_admit_exactly_one_job(tmp_path, ascii_root, monkeypatch):
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"model")
     manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
@@ -604,3 +600,56 @@ def test_concurrent_identical_submissions_admit_exactly_one_job(
     assert len(job_ids) == 1
     assert sum(1 for result in results if result.get("duplicate")) == 1
     assert len(launches) == 1
+
+
+def test_resource_journal_capacity_gates_admission_before_launch(tmp_path, ascii_root, monkeypatch):
+    import comsol_mcp.jobs.resource_admission as admission_module
+    from src.jobs.manager import JobManager
+
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda job_id, module: launches.append(job_id) or identity,
+    )
+
+    oversized = _raw_spec(source, points=2045)
+    oversized["parameter_name"] = "wl"
+    oversized["parameter_values"] = [1.0 + 0.001 * index for index in range(2045)]
+    with pytest.raises(ValueError, match="resource journal cannot hold"):
+        manager.submit(
+            {
+                "job_type": "staged_sweep",
+                "source_model_path": str(source),
+                "parameter_name": "wl",
+                "parameter_values": [1.0 + 0.001 * index for index in range(2045)],
+                "expressions": ["ewfd.Rtotal"],
+            }
+        )
+    assert launches == []
+    assert not any(path.name.startswith("job-") for path in (ascii_root / "jobs").iterdir())
+
+    admitted = manager.submit(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "wl",
+            "parameter_values": [1.0],
+            "expressions": ["ewfd.Rtotal"],
+        }
+    )
+    assert admitted["success"] is True
+    assert len(launches) == 1
+
+    verdict = admission_module.resource_journal_capacity_verdict(2048)
+    assert verdict == {
+        "total_points": 2048,
+        "required_entries_lower_bound": 4104,
+        "max_entries": 4096,
+        "fits": False,
+    }
+    assert admission_module.resource_journal_capacity_verdict(2000)["fits"] is True

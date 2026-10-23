@@ -19,7 +19,7 @@ import psutil
 from .adjoint_optimization import expand_adjoint_optimization_manifest
 from .attached_backend import normalize_attached_execution_backend
 from .process_control import inspect_identity
-from .resource_admission import normalize_resource_policy
+from .resource_admission import normalize_resource_policy, resource_journal_capacity_verdict
 from .store import (
     ACTIVE_STATES,
     JOB_SCHEMA_VERSION,
@@ -540,6 +540,16 @@ class JobManager:
                 )
         now = time.time()
         total_points = _point_count(spec)
+        capacity = resource_journal_capacity_verdict(total_points)
+        if not capacity["fits"]:
+            # Refuse before job creation or launch: even the single-attempt
+            # lower bound cannot fit the durable resource journal, so the
+            # sweep could only die mid-run against the entry limit.
+            raise ValueError(
+                "resource journal cannot hold the admitted sweep: "
+                f"{capacity['required_entries_lower_bound']} entries needed "
+                f"for {total_points} points against {capacity['max_entries']}"
+            )
         state = {
             "schema_version": JOB_SCHEMA_VERSION,
             "status": "submitted",
