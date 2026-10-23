@@ -15,8 +15,8 @@ from pathlib import Path
 
 from comsol_mcp.durable.io import append_jsonl_record, atomic_write_json, read_complete_jsonl
 
-from .process_control import contain_current_process_tree
 from .journal import recover_jsonl_tail
+from .process_control import contain_current_process_tree
 from .store import JobStore, cancel_request_targets_attempt, process_identity
 
 MAX_EPOCH_ROWS = 10_000
