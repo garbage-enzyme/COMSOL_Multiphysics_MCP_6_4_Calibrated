@@ -159,14 +159,10 @@ def test_real_wire_acknowledges_before_barrier_and_recovers_after_restart(
                 assert final["error"]["code"] == -32602
                 assert "expired" in final["error"]["message"]
             else:
-                assert final["result"]["status"] == (
-                    "cancelled" if request_cancel else "completed"
-                )
+                assert final["result"]["status"] == ("cancelled" if request_cancel else "completed")
                 if not request_cancel:
                     assert final["result"]["result"]["isError"] is False
-                    assert (
-                        final["result"]["result"]["structuredContent"]["status"] == "completed"
-                    )
+                    assert final["result"]["result"]["structuredContent"]["status"] == "completed"
             assert TasksMappingStore(root / "runtime/tasks").latest_for_task(task_id) is not None
             assert (root / "engine/submission_count").read_text() == "1"
         finally:

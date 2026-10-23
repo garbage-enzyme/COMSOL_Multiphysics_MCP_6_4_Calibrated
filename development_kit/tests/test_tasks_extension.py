@@ -310,9 +310,7 @@ def test_a_completed_tool_error_maps_to_completed_not_failed(bridge: TasksBridge
     handle = _submit(bridge)
     row = bridge._store.latest_for_task(handle["taskId"])
     assert row is not None
-    _engine(bridge).set_state(
-        row.job_id, "completed", last_error="preflight refused the probe"
-    )
+    _engine(bridge).set_state(row.job_id, "completed", last_error="preflight refused the probe")
     detail = bridge.get_task(handle["taskId"])
     assert detail["status"] == "completed"
     assert detail["result"]["isError"] is True
@@ -860,9 +858,7 @@ def test_tasks_payload_agrees_with_the_ordinary_job_path_and_survives_restart(
     assert structured["resultReference"]["completed"] == ordinary["progress"]["completed"]
     assert structured["resultReference"]["total"] == ordinary["progress"]["total"]
 
-    restarted = TasksBridge(
-        engine=engine, store=TasksMappingStore(store_root), owner="owner-a"
-    )
+    restarted = TasksBridge(engine=engine, store=TasksMappingStore(store_root), owner="owner-a")
     again = restarted.get_task(handle["taskId"])
     assert again["result"]["structuredContent"] == structured
 
