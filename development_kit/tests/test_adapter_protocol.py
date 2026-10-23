@@ -1347,3 +1347,27 @@ def test_an_adopted_client_is_released_rather_than_cleared() -> None:
     opened.close_session()
     assert owned_client.cleared is True
     assert opened.cleared_clients == [owned_client]
+
+
+def test_a_failed_int_write_rolls_back_through_the_int_route() -> None:
+    backend = _opened(
+        properties={"comp1": {"count": 7}}, failures={"property_write": "backend_internal_error"}
+    )
+    node = backend.find_node(["comp1"])
+    plan = backend.plan_write(node, "count", ConvertedValue(11, "int", "int"))
+    receipt = backend.apply_write(plan)
+    assert receipt.applied is False
+    assert receipt.rolled_back is True
+    assert backend.property_value("comp1", "count") == 7
+
+
+def test_attach_client_refuses_while_an_owned_session_is_open() -> None:
+    from comsol_mcp.adapter.protocol import AdapterError
+
+    backend = _opened(properties={"comp1": {}})
+    client = type("Client", (), {"models": staticmethod(lambda: [])})()
+    model = object()
+    with pytest.raises(AdapterError, match="close the owned session first"):
+        backend.attach_client(model, client=client)
+    backend.close_session()
+    backend.attach_client(model, client=client)

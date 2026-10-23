@@ -312,6 +312,15 @@ class FakeComsolBackend:
                 "attach_client requires the client that owns the model",
                 operation="session_open",
             )
+        if self._session is not None and not self.attached:
+            # Parity with the real backend: attaching over an open
+            # self-owned session would leak that client, so it is refused.
+            raise AdapterError(
+                "adapter_unavailable",
+                "attach_client cannot adopt a client while this backend holds "
+                "its own open session; close the owned session first",
+                operation="session_open",
+            )
         self._client = client
         self.attached = True
         if self._session is None:
