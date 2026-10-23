@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping
 from typing import Any, Protocol
 
+from comsol_mcp.adapter.adjoint import _UNIT_SCALE
 from comsol_mcp.adapter.structure import (
     PERIODIC_MIM_PATCH_ADAPTER_ID,
     normalize_structure_adapter_manifest,
@@ -14,6 +16,12 @@ from comsol_mcp.adapter.structure import (
 from comsol_mcp.contracts.derivative_support import normalize_derivative_support
 from comsol_mcp.contracts.shape_support import normalize_shape_support_policy
 from comsol_mcp.durable import domain_sha256_v2
+
+# A live clientapi string readback carries each length as a quantity with an
+# explicit unit, e.g. ``856[nm]``; only the declared length units convert.
+_QUANTITY_TEXT = re.compile(
+    r"^\s*(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\[\s*(m|um|nm)\s*\]\s*$"
+)
 
 ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_NAME = "comsol_mcp.robust_shape_adapter_binding"
 ROBUST_SHAPE_ADAPTER_BINDING_SCHEMA_VERSION = "1.0.0"
@@ -153,14 +161,24 @@ def _control_readback(value: object, binding: Mapping[str, Any]) -> dict[str, An
     def _geometry_vector(value: object) -> list[float] | None:
         if not isinstance(value, list) or len(value) != 3:
             return None
-        if any(
-            isinstance(item, bool)
-            or not isinstance(item, (int, float))
-            or not math.isfinite(float(item))
-            for item in value
-        ):
-            return None
-        return [float(item) for item in value]
+        parsed: list[float] = []
+        for item in value:
+            if isinstance(item, bool) or not isinstance(item, (int, float, str)):
+                return None
+            if isinstance(item, str):
+                # clientapi readbacks arrive as quantity strings; convert the
+                # declared length units to metres so a mixed-unit readback
+                # still compares equal to its baseline.
+                match = _QUANTITY_TEXT.match(item)
+                if match is None:
+                    return None
+                magnitude = float(match.group(1)) * _UNIT_SCALE[match.group(2)]
+            else:
+                magnitude = float(item)
+            if not math.isfinite(magnitude):
+                return None
+            parsed.append(magnitude)
+        return parsed
 
     before_sizes = _geometry_vector(before)
     readback_sizes = _geometry_vector(readback)

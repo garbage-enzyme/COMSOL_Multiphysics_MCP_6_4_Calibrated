@@ -187,6 +187,39 @@ class _TextualBackend(_Backend):
         return result
 
 
+class _QuantityBackend(_Backend):
+    """A licensed readback: sizes arrive as clientapi quantity strings."""
+
+    def prepare_controls(self, support):
+        result = super().prepare_controls(support)
+        result["patch_size_before"] = ["856[nm]", "0.8[um]", "1e-7[m]"]
+        result["patch_size_readback"] = ["8.56e-7[m]", "800[nm]", "1e-7[m]"]
+        return result
+
+
+class _UnsupportedUnitBackend(_QuantityBackend):
+    def prepare_controls(self, support):
+        result = super().prepare_controls(support)
+        result["patch_size_readback"] = ["0.0856[cm]", "800[nm]", "1e-7[m]"]
+        return result
+
+
+def test_control_readback_accepts_clientapi_quantity_strings():
+    manifest, audit, support, policy = _contracts()
+    receipt = prepare_robust_shape_controls(_QuantityBackend(), manifest, audit, support, policy)
+    # The raw quantity strings are preserved in the receipt; equality was
+    # proven after metre conversion inside the readback check, so a mixed-unit
+    # readback still matches its baseline.
+    assert receipt["controls"]["patch_size_before"] == ["856[nm]", "0.8[um]", "1e-7[m]"]
+    assert receipt["controls"]["patch_size_readback"] == ["8.56e-7[m]", "800[nm]", "1e-7[m]"]
+
+
+def test_control_readback_rejects_quantities_outside_the_declared_units():
+    manifest, audit, support, policy = _contracts()
+    with pytest.raises(ValueError, match="baseline geometry changed"):
+        prepare_robust_shape_controls(_UnsupportedUnitBackend(), manifest, audit, support, policy)
+
+
 def test_control_readback_tolerates_last_bit_geometry_drift():
     manifest, audit, support, policy = _contracts()
     receipt = prepare_robust_shape_controls(_DriftBackend(), manifest, audit, support, policy)
