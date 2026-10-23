@@ -146,13 +146,21 @@ class OperationArbiter:
         return unlink_if_content(self.lock_path, expected_bytes)
 
     def inspect(self) -> dict[str, Any]:
-        """Inspect the operation lock without acquiring or recovering it."""
+        """Inspect the operation lock without acquiring or recovering it.
+
+        A malformed lock reports the same bytes and the exact removal route
+        ``try_acquire`` takes, so an operator reading the status knows the
+        blocker is self-healing on the next acquisition attempt rather than
+        waiting for manual deletion.
+        """
         lock, _original, error = self._read_lock()
         if error:
             return {
                 "state": "uncertain",
-                "retryable": False,
-                "retry_after_ms": None,
+                "retryable": error == "operation lock is malformed",
+                "retry_after_ms": RETRY_AFTER_MS
+                if error == "operation lock is malformed"
+                else None,
                 "error": error,
                 "active_operation": None,
             }
@@ -215,6 +223,16 @@ class OperationArbiter:
                             os.close(directory)
                 except FileExistsError:
                     lock, original, error = self._read_lock()
+                    if error == "operation lock is malformed":
+                        # A malformed lock is never parsed, so ownership cannot
+                        # be decided; the file cannot be a live lock (live
+                        # locks are written atomically by this protocol), and
+                        # leaving it in place blocks every comsol_bound tool
+                        # until manual deletion. Remove it by its exact bytes
+                        # and immediately retry the exclusive create.
+                        if original is not None and self._remove_stale(original):
+                            recovered_stale = True
+                            continue
                     if error or lock is None or original is None:
                         retryable = error == "operation lock is malformed"
                         return None, {

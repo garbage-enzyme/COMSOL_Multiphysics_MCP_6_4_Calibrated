@@ -242,8 +242,16 @@ def test_status_does_not_recover_stale_or_malformed_lock(tmp_path):
     lock_path.write_bytes(b"not-json")
     uncertain = arbiter.inspect()
     assert uncertain["state"] == "uncertain"
-    assert uncertain["retryable"] is False
-    assert lock_path.read_bytes() == b"not-json"
+    # A malformed lock is not a live lock: the next acquisition removes it by
+    # its exact bytes and retries, so inspect reports the retry route instead
+    # of a dead end requiring manual deletion.
+    assert uncertain["retryable"] is True
+    assert uncertain["retry_after_ms"] is not None
+    claim, _detail = arbiter.try_acquire(
+        tool_name="shared_model_snapshot", side_effect_class="filesystem_write"
+    )
+    assert claim is not None
+    arbiter.release(claim)
 
 
 def test_stale_lock_is_recovered_after_coordinator_restart(tmp_path):
@@ -298,11 +306,11 @@ def test_malformed_lock_fails_closed(tmp_path):
         tool_name="study_solve", side_effect_class="solver_execution"
     )
 
-    assert claim is None
-    assert evidence["state"] == "uncertain"
-    assert evidence["retryable"] is True
-    assert evidence["retry_after_ms"] == 250
-    assert (tmp_path / "operation.lock").read_bytes() == b"not-json"
+    # A malformed lock cannot be a live lock of this protocol, so the
+    # acquisition removes it by exact bytes and takes over immediately.
+    assert claim is not None
+    assert arbiter.inspect()["state"] == "active"
+    arbiter.release(claim)
 
 
 def test_lock_close_failure_returns_uncertain_and_removes_owned_partial(tmp_path, monkeypatch):
@@ -675,3 +683,65 @@ def test_path_policy_refusal_reports_the_actual_enforcement_decision(tmp_path, m
     assert legacy["success"] is True
     assert legacy["path_policy"]["enforced"] is False
     assert legacy["path_policy"]["compatibility_mode"] == "legacy_broad_paths"
+
+
+def test_transient_lock_read_failure_is_retryable(tmp_path):
+    import src.operation_arbiter as arbiter_module
+
+    arbiter = OperationArbiter(
+        tmp_path,
+        pid=100,
+        process_create_time=10.0,
+        process_probe=lambda pid: 10.0,
+    )
+    # A lock exists but disappears between the failed exclusive create and
+    # the read-back: the retry must be offered instead of a dead end.
+    original_read = arbiter_module._read_lock_bytes
+
+    def vanishing_read(path):
+        if getattr(vanishing_read, "calls", 0) == 0:
+            vanishing_read.calls = 1
+            raise FileExistsError("lost the race")
+        return original_read(path)
+
+    arbiter_module._read_lock_bytes = vanishing_read
+    try:
+        # FileExistsError is not OSError-read path; simulate via read error
+        def erroring_read(path):
+            raise PermissionError("transient share violation")
+
+        arbiter_module._read_lock_bytes = erroring_read
+        with open(arbiter.lock_path, "wb") as handle:
+            handle.write(b"{}")
+        _claim, verdict = arbiter.try_acquire(tool_name="t", side_effect_class="read_only")
+    finally:
+        arbiter_module._read_lock_bytes = original_read
+    assert verdict["state"] == "uncertain"
+    assert verdict["error"].startswith("operation lock cannot be read")
+
+
+def test_malformed_lock_is_removed_and_retried(tmp_path):
+    arbiter = OperationArbiter(
+        tmp_path,
+        pid=100,
+        process_create_time=10.0,
+        process_probe=lambda pid: 10.0,
+    )
+    arbiter.lock_path.write_bytes(b'{"schema_name": "comsol_mcp.operation_lock", trunca')
+
+    claim, _detail = arbiter.try_acquire(tool_name="t", side_effect_class="read_only")
+
+    assert claim is not None
+    assert arbiter.inspect()["state"] == "active"
+
+    arbiter.release(claim)
+
+    arbiter.lock_path.write_bytes(b"not json at all")
+    status = arbiter.inspect()
+    assert status["state"] == "uncertain"
+    assert status["retryable"] is True
+    assert status["retry_after_ms"] is not None
+
+    claim2, _detail2 = arbiter.try_acquire(tool_name="t", side_effect_class="read_only")
+    assert claim2 is not None
+    arbiter.release(claim2)
