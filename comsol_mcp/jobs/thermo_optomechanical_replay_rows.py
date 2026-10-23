@@ -433,7 +433,11 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             or any(
                 not isinstance(item, Mapping)
                 or set(item) != {"control_id", "passed", "reason_code", "provenance", "disposition"}
-                or item["passed"] is not True
+                # A well-formed failed control is durable scientific
+                # rejection evidence, not structural corruption: the summary
+                # turns it into a rejected result instead of the validator
+                # destroying the measurement.
+                or not isinstance(item["passed"], bool)
                 or not isinstance(item["reason_code"], str)
                 or not item["reason_code"]
                 or item["provenance"] not in {"measured", "structural", "declared"}

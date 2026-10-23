@@ -1692,15 +1692,20 @@ def test_summary_separates_executed_structural_and_declared_control_counts(ascii
     )
 
 
-def test_a_failing_structural_or_declared_control_fails_the_run(ascii_tmp_path):
+def test_a_failing_control_is_structurally_valid_rejection_evidence(ascii_tmp_path):
     spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "mut"))
     for broken in ("convection", "fixed_boundary", "wrong_selection"):
         payload = _payload("optical_replay", spec)
         for row in payload["control_results"]:
             if row["control_id"] == broken:
                 row["passed"] = False
-        with pytest.raises(ValueError, match="control matrix is incomplete"):
-            _validate_stage_payload("optical_replay", payload, spec)
+        # A well-formed failed control persists as scientific rejection
+        # evidence; the summary, not the validator, rejects the run.
+        _validate_stage_payload("optical_replay", payload, spec)
+    nonboolean = _payload("optical_replay", spec)
+    nonboolean["control_results"][0]["passed"] = "false"
+    with pytest.raises(ValueError, match="control matrix is incomplete"):
+        _validate_stage_payload("optical_replay", nonboolean, spec)
 
 
 def test_control_rows_without_provenance_are_rejected(ascii_tmp_path):
@@ -1749,3 +1754,44 @@ def test_inversion_statistic_is_reported_as_inferred_not_measured(ascii_tmp_path
     del forged["mesh"]["inverted_element_count_disposition"]
     with pytest.raises(ValueError, match="mesh evidence"):
         _validate_stage_payload("state_evidence", forged, spec)
+
+
+def test_a_well_formed_failed_control_persists_and_rejects_without_rerun(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "rej"))
+    root = ascii_tmp_path / "rej-artifacts"
+    calls = []
+
+    def executor(stage_id, stage_dir, current_spec):
+        calls.append(stage_id)
+        payload = _payload(stage_id, current_spec)
+        if stage_id == "optical_replay":
+            for row in payload["control_results"]:
+                if row["control_id"] == "convection":
+                    row["passed"] = False
+        return payload
+
+    result = run_thermo_optomechanical_replay(spec, root, attempt=1, stage_executor=executor)
+
+    assert result["summary"]["scientific_disposition"] == "rejected"
+    assert "control_matrix_failed" in result["summary"]["reason_codes"]
+    rows = read_thermo_optomechanical_stage_rows(
+        root / "thermo_optomechanical_stages.jsonl", spec, artifact_root=root
+    )
+    optical = next(row for row in rows if row["stage_id"] == "optical_replay")
+    failed = [
+        item
+        for item in _load_stage_evidence_public(root, "optical_replay")["control_results"]
+        if item["control_id"] == "convection"
+    ]
+    assert failed and failed[0]["passed"] is False
+    assert optical["execution_state"] == "completed"
+
+    resumed = run_thermo_optomechanical_replay(spec, root, attempt=2, stage_executor=executor)
+    assert resumed["summary"]["scientific_disposition"] == "rejected"
+    assert calls.count("optical_replay") == 1
+
+
+def _load_stage_evidence_public(root, stage_id):
+    import json as _json
+
+    return _json.loads((root / stage_id / "evidence.json").read_text(encoding="utf-8"))["payload"]
