@@ -327,6 +327,7 @@ def _payload(stage_id: str, spec: dict) -> dict:
                 "vertex_count": 80,
                 "minimum_quality": 0.8,
                 "inverted_element_count": 0,
+                "inverted_element_count_disposition": "inferred_from_minimum_quality",
             },
             "frame": {
                 "identity_sha256": "e" * 64,
@@ -343,7 +344,9 @@ def _payload(stage_id: str, spec: dict) -> dict:
             "source_geometry_sha256": "f" * 64,
             "deformed_geometry_sha256": "1" * 64,
             "readback_exact": True,
-            "rollback_verified": True,
+            "checkpoint_integrity_verified": True,
+            "rollback_exercised": False,
+            "rollback_evidence": "checkpoint_integrity_only_no_rollback_in_transfer_stage",
         }
     rows = []
     for wavelength in spec["optical_replay"]["wavelengths_m"]:
@@ -1718,3 +1721,31 @@ def test_control_rows_without_provenance_are_rejected(ascii_tmp_path):
     invalid[0]["provenance"] = "guessed"
     with pytest.raises(ValueError, match="control matrix is incomplete"):
         _validate_stage_payload("optical_replay", {**payload, "control_results": invalid}, spec)
+
+
+def test_transfer_evidence_distinguishes_checkpoint_integrity_from_rollback(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "rb"))
+    payload = _payload("deformation_transfer", spec)
+
+    assert payload["checkpoint_integrity_verified"] is True
+    assert payload["rollback_exercised"] is False
+    assert payload["rollback_evidence"] == "checkpoint_integrity_only_no_rollback_in_transfer_stage"
+    # An unsupported exercised-rollback claim is refused by the validator.
+    forged = dict(payload)
+    forged["rollback_exercised"] = True
+    with pytest.raises(ValueError, match="deformation transfer evidence is invalid"):
+        _validate_stage_payload("deformation_transfer", forged, spec)
+
+
+def test_inversion_statistic_is_reported_as_inferred_not_measured(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "inv"))
+    payload = _payload("state_evidence", spec)
+
+    assert payload["mesh"]["inverted_element_count"] in (0, None)
+    assert payload["mesh"]["inverted_element_count_disposition"] == "inferred_from_minimum_quality"
+    # An evidence row claiming a measured inversion count without the
+    # inference disposition is refused.
+    forged = json.loads(json.dumps(payload))
+    del forged["mesh"]["inverted_element_count_disposition"]
+    with pytest.raises(ValueError, match="mesh evidence"):
+        _validate_stage_payload("state_evidence", forged, spec)

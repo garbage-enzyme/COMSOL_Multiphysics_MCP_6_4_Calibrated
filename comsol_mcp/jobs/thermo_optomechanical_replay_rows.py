@@ -299,6 +299,7 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
                 "vertex_count",
                 "minimum_quality",
                 "inverted_element_count",
+                "inverted_element_count_disposition",
             },
             "mesh evidence",
         )
@@ -307,9 +308,13 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
                 isinstance(mesh[key], bool) or not isinstance(mesh[key], int) or mesh[key] <= 0
                 for key in ("element_count", "vertex_count")
             )
-            or isinstance(mesh["inverted_element_count"], bool)
-            or not isinstance(mesh["inverted_element_count"], int)
-            or mesh["inverted_element_count"] != 0
+            or mesh["inverted_element_count_disposition"] != "inferred_from_minimum_quality"
+            or mesh["inverted_element_count"] is not None
+            and (
+                isinstance(mesh["inverted_element_count"], bool)
+                or not isinstance(mesh["inverted_element_count"], int)
+                or mesh["inverted_element_count"] != 0
+            )
             or not 0.0 < _finite(mesh["minimum_quality"], "mesh quality") <= 1.0
         ):
             raise ValueError("mesh evidence is invalid")
@@ -339,7 +344,9 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
                 "source_geometry_sha256",
                 "deformed_geometry_sha256",
                 "readback_exact",
-                "rollback_verified",
+                "checkpoint_integrity_verified",
+                "rollback_exercised",
+                "rollback_evidence",
             },
             "deformation transfer payload",
         )
@@ -347,7 +354,10 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             payload["method"] != spec["deformation_transfer"]["method"]
             or payload["material_frame_semantics"] != "spatial_deformation_preserves_material"
             or payload["readback_exact"] is not True
-            or payload["rollback_verified"] is not True
+            or payload["checkpoint_integrity_verified"] is not True
+            or payload["rollback_exercised"] is not False
+            or payload["rollback_evidence"]
+            != "checkpoint_integrity_only_no_rollback_in_transfer_stage"
             or payload["source_geometry_sha256"] == payload["deformed_geometry_sha256"]
         ):
             raise ValueError("deformation transfer evidence is invalid")

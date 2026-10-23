@@ -476,7 +476,11 @@ class ThermoOptomechanicalComsolExecutor:
                 "element_count": element_count,
                 "vertex_count": vertex_count,
                 "minimum_quality": minimum_quality,
-                "inverted_element_count": 0 if minimum_quality > 0.0 else 1,
+                # No inversion count is measured by this stage; a strictly
+                # positive minimum quality implies no inverted elements, and
+                # the degenerate case stays unknown instead of guessed.
+                "inverted_element_count": 0 if minimum_quality > 0.0 else None,
+                "inverted_element_count_disposition": "inferred_from_minimum_quality",
             },
             "frame": {
                 "identity_sha256": frame_identity,
@@ -526,7 +530,12 @@ class ThermoOptomechanicalComsolExecutor:
             "source_geometry_sha256": source_geometry,
             "deformed_geometry_sha256": deformed_geometry,
             "readback_exact": _displacement_readback_matches(displacement_readback, displacement),
-            "rollback_verified": _sha256_file(self.checkpoint_path) == checkpoint_sha,
+            # Checkpoint integrity is not exercised rollback: no stage reload
+            # happens here. A rollback claim would require reloading the
+            # checkpoint and comparing independent model readbacks.
+            "checkpoint_integrity_verified": _sha256_file(self.checkpoint_path) == checkpoint_sha,
+            "rollback_exercised": False,
+            "rollback_evidence": "checkpoint_integrity_only_no_rollback_in_transfer_stage",
         }
 
     def _set_wavelength_branch(self, wavelength: float, branch: str) -> None:
