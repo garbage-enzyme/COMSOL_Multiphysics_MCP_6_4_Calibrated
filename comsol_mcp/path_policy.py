@@ -707,6 +707,14 @@ _JOB_SPEC_MANIFEST_FIELDS: dict[str, tuple[tuple[str, str | None, str, str], ...
     "thermo_optomechanical_replay": (
         ("specification_path", "specification_sha256", "source_model_path", "model_read"),
     ),
+    "adjoint_optimization": (
+        (
+            "submission_manifest_path",
+            "submission_manifest_sha256",
+            "source_model_path",
+            "model_read",
+        ),
+    ),
 }
 # Matches MAX_THERMO_OPTOMECHANICAL_SPEC_BYTES in the owning contract; kept
 # local so the policy module never imports from the jobs layer.
@@ -859,7 +867,11 @@ def validate_tool_paths(
             decision = policy.validate_artifact_write(value, directory=directory)
         bound.arguments[argument] = str(decision.normalized_path)
         decisions.append(decision)
-    if tool_name == "job_submit":
+    if tool_name in {"job_submit", "job_spec_preview"}:
+        # job_spec_preview expands the same manifests job_submit submits, so
+        # its spec rides through the identical containment: a preview may
+        # never stat, read, or hash a source the submission path would
+        # refuse.
         spec = bound.arguments.get("spec")
         if isinstance(spec, Mapping):
             normalized_spec = dict(spec)

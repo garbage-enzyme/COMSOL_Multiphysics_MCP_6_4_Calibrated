@@ -1021,3 +1021,55 @@ def test_nested_manifest_source_is_expanded_and_contained_before_any_read(
             profile_name="experimental",
         )
     assert outside_opened == []
+
+
+def test_adjoint_manifest_and_preview_are_contained(tmp_path, ascii_root, monkeypatch):
+    import hashlib
+
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    read_root.mkdir(parents=True, exist_ok=True)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    outside_model = tmp_path / "outside.mph"
+    outside_model.write_bytes(b"outside")
+    manifest = write_root / "adjoint.manifest.json"
+    payload = json.dumps(
+        {
+            "schema_name": "comsol_mcp.adjoint_optimization.manifest",
+            "schema_version": "1.0.0",
+            "source_model_path": str(outside_model),
+        }
+    ).encode("utf-8")
+    manifest.write_bytes(payload)
+
+    def tool(*, spec=None):
+        pass
+
+    spec = {
+        "job_type": "adjoint_optimization",
+        "submission_manifest_path": str(manifest),
+        "submission_manifest_sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    import unittest.mock as mock
+
+    opened = []
+    original_open = Path.open
+
+    def observed_open(path, *args, **kwargs):
+        if path.resolve() == outside_model.resolve():
+            opened.append(str(path))
+        return original_open(path, *args, **kwargs)
+
+    with mock.patch.object(Path, "open", observed_open):
+        for tool_name in ("job_submit", "job_spec_preview"):
+            opened.clear()
+            with pytest.raises(ValueError, match="escapes the configured read roots"):
+                validate_tool_paths(
+                    tool,
+                    (),
+                    {"spec": dict(spec)},
+                    tool_name=tool_name,
+                    profile_name="experimental",
+                )
+            assert opened == []

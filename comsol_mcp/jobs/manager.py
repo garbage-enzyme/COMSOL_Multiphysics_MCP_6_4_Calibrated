@@ -201,6 +201,14 @@ def _append_duplicate_index_entry(root: Path, fingerprint: str, job_id: str) -> 
 
 
 _REQUEST_BINDING_DIR = "request-bindings"
+
+
+#: Job families whose engine admission deduplicates identical specs into one
+#: durable job. The Tasks bridge uses this to know whether a matching spec
+#: fingerprint guarantees job-identity reuse (and thus mapping reuse) or
+#: whether a new submission always creates a new job that needs reserved
+#: mapping capacity.
+ENGINE_DUPLICATE_JOB_TYPES = _DUPLICATE_INDEX_JOB_TYPES
 _REQUEST_BINDING_SCHEMA = "comsol_mcp.request_binding"
 
 
@@ -574,7 +582,14 @@ class JobManager:
                 duplicate = self._find_exact_duplicate(spec["job_type"], spec["spec_fingerprint"])
                 if duplicate is not None:
                     existing_state = self.store.read_state(duplicate)
-                    if request_id is not None and self._read_request_record(request_id) is None:
+                    if request_id is not None:
+                        # Revalidate the binding under the lock: a concurrent
+                        # request with the same id may have bound a different
+                        # spec or job already, and that conflict must refuse
+                        # here rather than silently overwrite the binding.
+                        binding = self._bind_request_under_lock(request_id, spec)
+                        if isinstance(binding, dict):
+                            return binding
                         self._write_request_record(
                             request_id, spec["spec_fingerprint"], duplicate, "dispatched"
                         )
@@ -624,7 +639,14 @@ class JobManager:
                 duplicate = self._find_exact_duplicate(spec["job_type"], spec["spec_fingerprint"])
                 if duplicate is not None:
                     existing_state = self.store.read_state(duplicate)
-                    if request_id is not None and self._read_request_record(request_id) is None:
+                    if request_id is not None:
+                        # Revalidate the binding under the lock: a concurrent
+                        # request with the same id may have bound a different
+                        # spec or job already, and that conflict must refuse
+                        # here rather than silently overwrite the binding.
+                        binding = self._bind_request_under_lock(request_id, spec)
+                        if isinstance(binding, dict):
+                            return binding
                         self._write_request_record(
                             request_id, spec["spec_fingerprint"], duplicate, "dispatched"
                         )
@@ -714,11 +736,24 @@ class JobManager:
         return {"success": True, "job_id": job_id, "status": "submitted"}
 
     def _read_request_record(self, request_id: str) -> dict[str, Any] | None:
-        try:
-            payload = read_json(_request_binding_path(self.store.root, request_id))
-        except OSError, ValueError, RuntimeError:
+        path = _request_binding_path(self.store.root, request_id)
+        if not path.is_file():
             return None
-        return payload if isinstance(payload, dict) else None
+        try:
+            payload = read_json(path)
+        except (OSError, ValueError, RuntimeError) as exc:
+            # A damaged record is uncertainty, not absence: treating it as
+            # absent would let one uncertain retry launch a second job.
+            raise ValueError(
+                f"request binding record is unreadable ({type(exc).__name__}); "
+                "repair or remove it before resubmitting this request_id"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise ValueError(
+                "request binding record is malformed; repair or remove it "
+                "before resubmitting this request_id"
+            )
+        return payload
 
     def _write_request_record(
         self, request_id: str, fingerprint: str, job_id: str, state: str
@@ -769,6 +804,40 @@ class JobManager:
             )
         if self.store.job_dir(job_id).exists():
             existing_state = self.store.read_state(job_id)
+            if (
+                existing_state.get("status") == "submitted"
+                and existing_state.get("worker_pid") is None
+            ):
+                # Publication happened but no worker identity was ever bound:
+                # the attempt died between publication and launch. Represent
+                # the uncertainty durably - marking the orphan interrupted
+                # makes it resumable - and never claim a replayed success.
+                self.store.update_state(
+                    job_id,
+                    "interrupted",
+                    patch={
+                        "last_error": {
+                            "type": "PublishedWithoutLaunch",
+                            "message": (
+                                "The job was published but its worker launch "
+                                "never completed; reconcile with job_status or resume."
+                            ),
+                        }
+                    },
+                    event="request_replay_orphan_reconciled",
+                )
+                return {
+                    "success": False,
+                    "job_id": job_id,
+                    "status": "interrupted",
+                    "duplicate": True,
+                    "action": "reconcile_orphan_then_resume",
+                    "error": (
+                        "the bound job was published but never launched; it is "
+                        "marked interrupted - resume it or inspect job_status "
+                        "before retrying this request_id"
+                    ),
+                }
             return {
                 "success": True,
                 "job_id": job_id,
@@ -806,7 +875,14 @@ class JobManager:
         entries = _load_duplicate_index(self.store.root)
         job_id = entries.get(spec_fingerprint)
         if job_id is None:
-            return None
+            # A miss is not proof of absence: the disposable index may have
+            # lost individual entries. Rebuild from retained evidence (which
+            # fails closed on unreadable specs) and let the evidence decide
+            # before a second launch can be admitted.
+            rebuilt = _rebuild_duplicate_index(self.store.root)
+            job_id = rebuilt.get(spec_fingerprint)
+            if job_id is None:
+                return None
         try:
             existing = read_json(self.store.root / job_id / "spec.json")
         except OSError, ValueError, RuntimeError:
@@ -1385,6 +1461,28 @@ class JobManager:
                 continue
         return reconciled
 
+    def _retained_resource_journal_entries(self, job_id: str) -> int:
+        """Count complete resource-journal entries retained by earlier attempts."""
+        journal = self.store.job_dir(job_id) / "resource.jsonl"
+        try:
+            payload = journal.read_bytes()
+        except OSError:
+            return 0
+        count = 0
+        for line in payload.splitlines():
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                import json as _json
+
+                document = _json.loads(text)
+            except ValueError:
+                continue
+            if isinstance(document, dict):
+                count += 1
+        return count
+
     def resume(self, job_id: str) -> dict[str, Any]:
         _refuse_removed_job(self.store.read_spec(job_id).get("job_type"))
         with self.store.lock(job_id):
@@ -1406,6 +1504,20 @@ class JobManager:
         # outside this job's lock.  The second locked validation below prevents
         # two concurrent resume callers from both transitioning and launching.
         _verify_source_identities(spec)
+
+        # A resume inherits every retained journal entry from earlier
+        # attempts; relaunching without headroom for the new attempt's
+        # entries would only die against the hard limit mid-run.
+        retained_entries = self._retained_resource_journal_entries(job_id)
+        projected = resource_journal_capacity_verdict(int(_point_count(spec)))
+        if retained_entries + projected["required_entries_lower_bound"] > projected["max_entries"]:
+            raise ValueError(
+                "resource journal cannot hold the resumed sweep: "
+                f"{retained_entries} retained entries plus "
+                f"{projected['required_entries_lower_bound']} projected entries "
+                f"exceed the {projected['max_entries']}-entry limit; export the "
+                "retained evidence and submit a fresh job instead"
+            )
 
         if spec["job_type"] != "test_sequence":
             preflight = self._run_preflight(spec)

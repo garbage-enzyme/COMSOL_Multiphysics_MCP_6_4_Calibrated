@@ -133,7 +133,9 @@ class DurableJobEngine(Protocol):
     solver-free tests and cannot reach into engine internals.
     """
 
-    def submit(self, raw_spec: dict[str, Any]) -> dict[str, Any]: ...
+    def submit(
+        self, raw_spec: dict[str, Any], request_id: str | None = None
+    ) -> dict[str, Any]: ...
 
     def status(self, job_id: str) -> dict[str, Any]: ...
 
@@ -515,6 +517,7 @@ class TasksBridge:
         ttl_ms: object = None,
         poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS,
         generation: object = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         """Create or reuse a durable job and return a durably-bound task handle."""
         validate_extension_generation(generation)
@@ -534,10 +537,13 @@ class TasksBridge:
         # the durable engine has already dispatched work.
         with self._store.transaction():
             # Capacity admission before the durable engine is touched: at the
-            # row bound a brand-new task is refused without creating a job or
-            # appending a mapping, so no retained or unexpired task is ever
-            # silently evicted by the reader's tail bound. A duplicate retry
-            # may still pass, because it reuses an existing mapping row.
+            # row bound a task whose dispatch will need a NEW mapping row is
+            # refused without creating a job, so no retained or unexpired
+            # task is ever silently evicted by the reader's tail bound. A
+            # matching spec fingerprint only guarantees job-identity reuse
+            # for engine-deduplicated job families; for every other family
+            # an identical spec still creates a new durable job and needs
+            # its own reserved mapping row.
             duplicate_row = next(
                 (
                     row
@@ -546,22 +552,35 @@ class TasksBridge:
                 ),
                 None,
             )
-            if len(self._store.rows()) >= MAX_TASK_ROWS and duplicate_row is None:
-                raise TasksMappingError(
-                    "tasks_store_capacity",
-                    "task mapping store is at its row capacity; refuse a new task",
-                )
-            if duplicate_row is None and not self._store.has_byte_headroom(MAX_TASK_ROW_BYTES):
-                # Reserve the worst-case encoded row before dispatch: the
-                # append-side exact check cannot then fail after the engine
-                # has created a job the client would never see.
-                raise TasksMappingError(
-                    "tasks_file_capacity", "task mapping journal exceeds its size bound"
-                )
+            from comsol_mcp.jobs.manager import ENGINE_DUPLICATE_JOB_TYPES
+
+            reuses_mapping = (
+                duplicate_row is not None
+                and str(raw_spec.get("job_type")) in ENGINE_DUPLICATE_JOB_TYPES
+            )
+            if not reuses_mapping:
+                if len(self._store.rows()) >= MAX_TASK_ROWS:
+                    raise TasksMappingError(
+                        "tasks_store_capacity",
+                        "task mapping store is at its row capacity; refuse a new task",
+                    )
+                if not self._store.has_byte_headroom(MAX_TASK_ROW_BYTES):
+                    # Reserve the worst-case encoded row before dispatch: the
+                    # append-side exact check cannot then fail after the
+                    # engine created a job the client would never see.
+                    raise TasksMappingError(
+                        "tasks_file_capacity", "task mapping journal exceeds its size bound"
+                    )
 
             # Reuse an existing durable job for an identical retry so a duplicate
             # submission cannot launch a second simulation.
-            submission = self._engine.submit(dict(raw_spec))
+            if request_id is not None:
+                from comsol_mcp.jobs.manager import _validate_request_id
+
+                _validate_request_id(request_id)
+                submission = self._engine.submit(dict(raw_spec), request_id=request_id)
+            else:
+                submission = self._engine.submit(dict(raw_spec))
             job_id = _bounded(submission.get("job_id"), "job_id", 256)
             existing = self._store.latest_for_job(job_id)
 

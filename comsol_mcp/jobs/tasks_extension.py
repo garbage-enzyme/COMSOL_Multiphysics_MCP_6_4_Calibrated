@@ -245,6 +245,11 @@ def build_tasks_extension(bridge: TasksBridge) -> Any:
                             client_extensions=extensions,
                             request_client=_request_client(ctx),
                             ttl_ms=_requested_ttl(capabilities),
+                            request_id=(
+                                arguments.get("request_id")
+                                if isinstance(arguments.get("request_id"), str)
+                                else None
+                            ),
                         )
                     ),
                 )

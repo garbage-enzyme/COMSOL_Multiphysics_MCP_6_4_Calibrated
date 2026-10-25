@@ -169,8 +169,9 @@ class FakeEngine:
         self.duplicate_fingerprints: set[str] = set()
         self.fail_submit = False
 
-    def submit(self, raw_spec: dict[str, Any]) -> dict[str, Any]:
+    def submit(self, raw_spec: dict[str, Any], request_id: str | None = None) -> dict[str, Any]:
         self.submit_calls.append(dict(raw_spec))
+        self.last_request_id = request_id
         if self.fail_submit:
             raise RuntimeError("engine refused the submission")
         fingerprint = spec_fingerprint(raw_spec)
@@ -985,7 +986,11 @@ def test_duplicate_submit_keeps_the_original_mapping_metadata(tmp_path: Path) ->
     assert list(bridge._store.rows()) == rows_after_first
 
 
-def test_capacity_admission_refuses_new_tasks_before_the_engine(tmp_path: Path) -> None:
+def test_capacity_admission_refuses_new_tasks_before_the_engine(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import comsol_mcp.jobs.tasks_bridge as module
+
     engine = FakeEngine()
     store = TasksMappingStore(tmp_path / "tasks")
     bridge = TasksBridge(engine=engine, store=store, owner="owner-a")
@@ -998,28 +1003,26 @@ def test_capacity_admission_refuses_new_tasks_before_the_engine(tmp_path: Path) 
             },
             client_extensions=OPT_IN,
         )
-    import comsol_mcp.jobs.tasks_bridge as module
+    monkeypatch.setattr(module, "MAX_TASK_ROWS", 8)
+    with pytest.raises(TasksMappingError) as excinfo:
+        bridge.submit_task(
+            {
+                "job_type": "staged_sweep",
+                "parameter_name": "wl",
+                "parameter_values": [99.0],
+            },
+            client_extensions=OPT_IN,
+        )
+    assert excinfo.value.code == "tasks_store_capacity"
+    # The durable engine was never touched for the refused task.
+    assert len(engine._jobs) == 8
+    assert len(store.rows()) == 8
 
-    original_max = module.MAX_TASK_ROWS
-    module.MAX_TASK_ROWS = 8
-    try:
-        with pytest.raises(TasksMappingError) as excinfo:
-            bridge.submit_task(
-                {
-                    "job_type": "staged_sweep",
-                    "parameter_name": "wl",
-                    "parameter_values": [99.0],
-                },
-                client_extensions=OPT_IN,
-            )
-        assert excinfo.value.code == "tasks_store_capacity"
-        # The durable engine was never touched for the refused task.
-        assert len(engine._jobs) == 8
-        assert len(store.rows()) == 8
-
-        # A duplicate retry still passes at capacity: it reuses a mapping row
-        # instead of appending one.
-        retry = bridge.submit_task(
+    # A staged_sweep duplicate is NOT a mapping reuse: the real engine never
+    # deduplicates that family, so an identical spec still creates a new
+    # durable job that needs its own reserved row.
+    with pytest.raises(TasksMappingError) as retry_info:
+        bridge.submit_task(
             {
                 "job_type": "staged_sweep",
                 "parameter_name": "wl",
@@ -1027,10 +1030,26 @@ def test_capacity_admission_refuses_new_tasks_before_the_engine(tmp_path: Path) 
             },
             client_extensions=OPT_IN,
         )
-        assert retry["duplicate_submission"] is True
-        assert len(store.rows()) == 8
-    finally:
-        module.MAX_TASK_ROWS = original_max
+    assert retry_info.value.code == "tasks_store_capacity"
+    assert len(store.rows()) == 8
+
+    # An engine-deduplicated family reuses the mapping row at capacity: with
+    # one row of headroom the first validation_matrix task appends, and its
+    # identical retry at the full bound reuses that row.
+    vm_spec = {
+        "job_type": "validation_matrix",
+        "points": [{"x": 1.0}],
+    }
+    monkeypatch.setattr(module, "MAX_TASK_ROWS", 9)
+    vm_first = bridge.submit_task(dict(vm_spec), client_extensions=OPT_IN)
+    assert len(store.rows()) == 9
+    monkeypatch.setattr(module, "MAX_TASK_ROWS", 8)
+    vm_retry = bridge.submit_task(dict(vm_spec), client_extensions=OPT_IN)
+    assert vm_retry["taskId"] == vm_first["taskId"]
+    # Nine rows are durable; rows() is tail-bounded by design at the reduced
+    # cap, but addressability (latest_for_task) is not.
+    assert len(store.journal_path.read_text(encoding="utf-8").splitlines()) == 9
+    assert store.latest_for_task(vm_first["taskId"]) is not None
 
 
 def test_journal_size_bound_refuses_appends_without_dropping_rows(tmp_path: Path) -> None:
@@ -1302,7 +1321,7 @@ def test_concurrent_submissions_cannot_cross_the_row_capacity(tmp_path: Path) ->
     import comsol_mcp.jobs.tasks_bridge as module
 
     class CountingEngine:
-        def submit(self, spec):
+        def submit(self, spec, request_id=None):
             return {"job_id": "job-" + spec["work"], "status": "submitted"}
 
         def status(self, job_id):

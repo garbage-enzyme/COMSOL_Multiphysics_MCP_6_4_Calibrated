@@ -796,3 +796,144 @@ def test_unreadable_retained_spec_fails_closed_for_new_submissions(
     (jobs_root / first["job_id"] / "spec.json").write_text("{torn", encoding="ascii")
     with pytest.raises(ValueError, match="unreadable spec"):
         manager.submit(_raw_spec(source))
+
+
+def test_corrupt_request_binding_refuses_instead_of_relauRnching(tmp_path, ascii_root, monkeypatch):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    jobs_root = ascii_root / "jobs"
+    manager = JobManager(jobs_root, preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager, "_launch_worker", lambda job_id, module: launches.append(job_id) or identity
+    )
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+    }
+    manager.submit(spec, request_id="torn-1")
+    binding = jobs_root / "request-bindings"
+    record = next(binding.glob("*.json"))
+    record.write_text("{torn", encoding="ascii")
+    with pytest.raises(ValueError, match="unreadable"):
+        manager.submit(spec, request_id="torn-1")
+    assert len(launches) == 1
+
+
+def test_partial_duplicate_index_loss_reconciles_from_evidence(tmp_path, ascii_root, monkeypatch):
+    source = tmp_path / "a.mph"
+    source.write_bytes(b"a")
+    other = tmp_path / "b.mph"
+    other.write_bytes(b"b")
+    jobs_root = ascii_root / "jobs"
+    manager = JobManager(jobs_root, preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager, "_launch_worker", lambda job_id, module: launches.append(job_id) or identity
+    )
+    first = manager.submit(_raw_spec(source))
+    second = manager.submit(_raw_spec(other))
+    # Remove only the FIRST fingerprint from a still-valid index: the miss
+    # must be verified against retained evidence, not trusted as absence.
+    import json as _json
+
+    entries = _json.loads((jobs_root / "duplicate-index.json").read_text(encoding="ascii"))
+    fingerprint = next(key for key, value in entries["entries"].items() if value == first["job_id"])
+    del entries["entries"][fingerprint]
+    (jobs_root / "duplicate-index.json").write_text(_json.dumps(entries), encoding="ascii")
+    retry = manager.submit(_raw_spec(source))
+    assert retry["duplicate"] is True
+    assert retry["job_id"] == first["job_id"]
+    assert len(launches) == 2
+
+
+def test_published_without_launch_orphan_is_not_replayed_as_success(
+    tmp_path, ascii_root, monkeypatch
+):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager, "_launch_worker", lambda job_id, module: launches.append(job_id) or identity
+    )
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+    }
+    normalized = validate_staged_sweep_spec(spec)
+    # Simulate the crash window: the dispatched binding points at a job that
+    # was published but whose worker never launched.
+    orphan = "job-orphan00000000000000000000000000001"
+    from src.jobs.store import JobStore
+
+    store = JobStore(ascii_root / "jobs")
+    store.create(
+        dict(normalized),
+        {
+            "schema_version": "2",
+            "status": "submitted",
+            "attempt": 1,
+            "worker_pid": None,
+            "progress": {"completed": 0, "total": 1},
+            "last_error": None,
+        },
+        job_id=orphan,
+    )
+    manager._write_request_record("orphan-1", normalized["spec_fingerprint"], orphan, "dispatched")
+    result = manager.submit(spec, request_id="orphan-1")
+    assert result["success"] is False
+    assert result["action"] == "reconcile_orphan_then_resume"
+    assert store.read_state(orphan)["status"] == "interrupted"
+    assert launches == []
+
+
+def test_concurrent_same_request_conflicting_specs_refuse_one(tmp_path, ascii_root, monkeypatch):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager, "_launch_worker", lambda job_id, module: launches.append(job_id) or identity
+    )
+    base = _raw_spec(source)
+    first = manager.submit(base, request_id="race-1")
+
+    outcomes = []
+    barrier = threading.Barrier(2)
+
+    def submit_variant(spec):
+        def run():
+            try:
+                barrier.wait(timeout=10)
+                outcomes.append(("ok", manager.submit(spec, request_id="race-1")))
+            except ValueError as exc:
+                outcomes.append(("refused", str(exc)[:40]))
+
+        return run
+
+    threads = [
+        threading.Thread(target=submit_variant(base)),
+        threading.Thread(target=submit_variant(_raw_spec(source, points=3))),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    kinds = [kind for kind, _ in outcomes]
+    # The replay wins and the conflicting spec is refused; exactly one job
+    # id is ever acknowledged under this request.
+    assert kinds.count("refused") == 1
+    assert kinds.count("ok") == 1
+    ok = [value for kind, value in outcomes if kind == "ok"][0]
+    assert ok["job_id"] == first["job_id"]

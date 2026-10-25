@@ -107,6 +107,10 @@ def test_pre_h3_compatibility_snapshot_is_preserved():
             }
             assert "expected_attempt" not in observed["required"]
             allowed_additions.add("expected_attempt")
+        if name == "job_submit":
+            # 0.8.1 exposes the durable caller request identity; the optional
+            # parameter is the public route to response-loss retry binding.
+            allowed_additions.add("request_id")
 
         actual_additions = set(observed["properties"]) - set(expected["properties"])
         assert actual_additions == allowed_additions, name

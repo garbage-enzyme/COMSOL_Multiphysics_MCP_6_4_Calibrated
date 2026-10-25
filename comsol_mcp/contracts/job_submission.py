@@ -14,6 +14,12 @@ from .wavelength_policy import StrictWavelengthPolicy
 MAX_PUBLIC_TEXT = 4096
 MAX_PUBLIC_PATH = 1024
 MAX_JOB_COLLECTION = 2048
+#: The staged sweep journals four resource entries per point plus a startup
+#: reserve against the durable 4096-entry limit, so the public point bound a
+#: sweep can actually admit is (4096 - 8) // 4 = 1022. Advertising the generic
+#: collection bound here would let a caller submit sweeps that admission
+#: always refuses.
+MAX_STAGED_SWEEP_POINTS = 1022
 #: The validation matrix is the one job family whose runtime point bound is
 #: deliberately narrower than the generic collection bound; the schema and
 #: the runtime normalizer share this single constant.
@@ -50,7 +56,7 @@ class StagedSweepInput(_JobInput):
     parameter_name: BoundedText
     parameter_values: Annotated[
         list[BoundedSweepNumber],
-        Field(min_length=1, max_length=MAX_JOB_COLLECTION),
+        Field(min_length=1, max_length=MAX_STAGED_SWEEP_POINTS),
     ]
     expressions: Annotated[
         list[BoundedText],

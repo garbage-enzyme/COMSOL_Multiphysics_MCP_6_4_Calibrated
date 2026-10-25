@@ -2411,7 +2411,7 @@
               "ge": -1e+308,
               "le": 1e+308
             },
-            "maxItems": 2048,
+            "maxItems": 1022,
             "minItems": 1,
             "title": "Parameter Values",
             "type": "array"
@@ -3034,7 +3034,7 @@
               "ge": -1e+308,
               "le": 1e+308
             },
-            "maxItems": 2048,
+            "maxItems": 1022,
             "minItems": 1,
             "title": "Parameter Values",
             "type": "array"
@@ -3400,6 +3400,19 @@
     "additionalProperties": false,
     "maxProperties": 256,
     "properties": {
+      "request_id": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Request Id"
+      },
       "spec": {
         "discriminator": {
           "mapping": {

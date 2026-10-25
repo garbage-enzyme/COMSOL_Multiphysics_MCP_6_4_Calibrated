@@ -30,11 +30,13 @@ class _LazyJobManager:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._get(), name)
 
-    def submit(self, spec: dict[str, Any]) -> Any:
+    def submit(self, spec: dict[str, Any], request_id: str | None = None) -> Any:
         from comsol_mcp.platform_support import require_native_solver
 
         require_native_solver()
-        return self._get().submit(spec)
+        if request_id is None:
+            return self._get().submit(spec)
+        return self._get().submit(spec, request_id=request_id)
 
     def resume(self, job_id: str) -> Any:
         from comsol_mcp.platform_support import require_native_solver
@@ -199,6 +201,7 @@ def _submit_job(
     shared_enabled: bool,
     manager: Any = None,
     session_manager: Any = None,
+    request_id: str | None = None,
 ) -> dict[str, Any]:
     manager = job_manager if manager is None else manager
     spec = validate_job_submission(spec)
@@ -207,7 +210,9 @@ def _submit_job(
     execution_request = spec.get("execution_backend")
     if execution_request is None:
         try:
-            return manager.submit(spec)
+            if request_id is None:
+                return manager.submit(spec)
+            return manager.submit(spec, request_id=request_id)
         except JobLaunchError as exc:
             recovery = {
                 "success": False,
@@ -336,13 +341,14 @@ def register_job_tools(mcp: MCPServer) -> None:
     shared_enabled = bool(selection is not None and selection.feature_enabled("shared_server"))
 
     @mcp.tool()
-    def job_submit(spec: JobSubmissionSpec) -> dict[str, Any]:
+    def job_submit(spec: JobSubmissionSpec, request_id: str | None = None) -> dict[str, Any]:
         """Validate and detach one bounded standalone or attached durable job."""
         return _job_call(
             "job_submit",
             lambda: _submit_job(
                 spec,
                 profile_name=profile_name,
+                request_id=request_id,
                 shared_enabled=shared_enabled,
             ),
         )
