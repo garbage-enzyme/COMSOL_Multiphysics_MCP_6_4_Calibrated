@@ -909,9 +909,7 @@ def test_continuation_rejects_lexically_invalid_paths_without_any_probe(
     assert "escape" not in joined
 
 
-def test_valid_continuation_still_routes_through_artifact_update(
-    tmp_path, ascii_root, monkeypatch
-):
+def test_valid_continuation_still_routes_through_artifact_update(tmp_path, ascii_root, monkeypatch):
     _, read_root, write_root = _policy(tmp_path, ascii_root)
     write_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
@@ -932,3 +930,94 @@ def test_valid_continuation_still_routes_through_artifact_update(
 
     assert normalized["csv_path"] == str(csv_path.resolve())
     assert write_pins and write_pins[0].target == csv_path.resolve()
+
+
+def test_nested_manifest_source_is_expanded_and_contained_before_any_read(
+    tmp_path, ascii_root, monkeypatch
+):
+    import hashlib
+
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    read_root.mkdir(parents=True, exist_ok=True)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    outside_model = tmp_path / "outside.mph"
+    outside_model.write_bytes(b"outside model")
+    inner_model = read_root / "inner.mph"
+    inner_model.write_bytes(b"inner model")
+    document = {"schema_name": "comsol_mcp.thermo_optomechanical_replay"}
+    manifest = write_root / "specification.json"
+
+    def write_manifest(source):
+        payload = json.dumps({**document, "source_model_path": str(source)}).encode("utf-8")
+        manifest.write_bytes(payload)
+        return hashlib.sha256(payload).hexdigest()
+
+    def job_submit(*, spec=None):
+        pass
+
+    outside_opened = []
+    original_open = Path.open
+
+    def observed_open(path, *args, **kwargs):
+        if path.resolve() == outside_model.resolve():
+            outside_opened.append(str(path))
+        return original_open(path, *args, **kwargs)
+
+    # An inside-root manifest whose inner source escapes the read roots is
+    # refused before the escaping file is ever opened.
+    write_manifest(outside_model)
+    import unittest.mock as mock
+
+    with mock.patch.object(Path, "open", observed_open):
+        with pytest.raises(ValueError, match="escapes the configured read roots"):
+            validate_tool_paths(
+                job_submit,
+                (),
+                {
+                    "spec": {
+                        "job_type": "thermo_optomechanical_replay",
+                        "specification_path": str(manifest),
+                    }
+                },
+                tool_name="job_submit",
+                profile_name="experimental",
+            )
+    assert outside_opened == []
+
+    # A contained inner source is validated and pinned like any direct input.
+    write_manifest(inner_model)
+    _args, _normalized, _evidence, read_pins, _write_pins = validate_tool_paths(
+        job_submit,
+        (),
+        {
+            "spec": {
+                "job_type": "thermo_optomechanical_replay",
+                "specification_path": str(manifest),
+            }
+        },
+        tool_name="job_submit",
+        profile_name="experimental",
+    )
+    assert inner_model.resolve() in {pin.path for pin in read_pins}
+
+    # A declared digest binds the manifest content at validation time, so a
+    # replaced manifest is refused before expansion reads any inner path.
+    digest = write_manifest(inner_model)
+    write_manifest(outside_model)
+    with pytest.raises(ValueError, match="does not match the .* content"):
+        validate_tool_paths(
+            job_submit,
+            (),
+            {
+                "spec": {
+                    "job_type": "thermo_optomechanical_replay",
+                    "specification_path": str(manifest),
+                    "specification_sha256": digest,
+                }
+            },
+            tool_name="job_submit",
+            profile_name="experimental",
+        )
+    assert outside_opened == []

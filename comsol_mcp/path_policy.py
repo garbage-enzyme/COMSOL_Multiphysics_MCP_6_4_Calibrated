@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import hashlib
 import inspect
+import json
 import os
 import re
 import stat
@@ -692,6 +693,24 @@ _JOB_SPEC_PATH_FIELDS: dict[str, tuple[tuple[str, str], ...]] = {
     "thermo_optomechanical_replay": (("specification_path", "artifact_read"),),
     "validation_matrix": (("comsol_temporary_directory", "artifact_write_directory"),),
 }
+# A validated spec field may itself be a JSON manifest that names further
+# paths. Expansion opens only the already-validated manifest, under the same
+# byte bound the owning contract enforces, and validates every declared inner
+# reference before the tool's own normalizer can stat, read, or hash it - so
+# a contained profile cannot smuggle an outside-root source through manifest
+# indirection. When the spec carries a caller-declared digest for the
+# manifest, validation pins the content to that digest: a replacement between
+# validation and normalization then fails the normalizer's own digest check
+# instead of reopening an unvalidated path.
+# Each entry is (manifest field, digest field or None, inner field, inner kind).
+_JOB_SPEC_MANIFEST_FIELDS: dict[str, tuple[tuple[str, str | None, str, str], ...]] = {
+    "thermo_optomechanical_replay": (
+        ("specification_path", "specification_sha256", "source_model_path", "model_read"),
+    ),
+}
+# Matches MAX_THERMO_OPTOMECHANICAL_SPEC_BYTES in the owning contract; kept
+# local so the policy module never imports from the jobs layer.
+_JOB_SPEC_MANIFEST_MAX_BYTES = 4 * 1024 * 1024
 _ARTIFACT_READ_ARGUMENTS = {
     "wave_optics_point_audit": ("air_reference_artifact_path",),
     # B04: offline export manifest must stay inside the owned artifact root.
@@ -864,6 +883,53 @@ def validate_tool_paths(
                 else:  # pragma: no cover - table entries are internal constants
                     raise ValueError(f"unsupported nested path kind for job spec field {field}")
                 normalized_spec[field] = str(decision.normalized_path)
+                decisions.append(decision)
+            for (
+                manifest_field,
+                digest_field,
+                inner_field,
+                inner_kind,
+            ) in _JOB_SPEC_MANIFEST_FIELDS.get(str(spec.get("job_type")), ()):
+                manifest_value = normalized_spec.get(manifest_field)
+                if manifest_value is None:
+                    continue
+                try:
+                    with open(manifest_value, "rb") as handle:
+                        payload = handle.read(_JOB_SPEC_MANIFEST_MAX_BYTES + 1)
+                except OSError as exc:
+                    raise ValueError(
+                        f"{tool_name}.spec.{manifest_field} could not be read for path expansion"
+                    ) from exc
+                if len(payload) > _JOB_SPEC_MANIFEST_MAX_BYTES:
+                    raise ValueError(
+                        f"{tool_name}.spec.{manifest_field} exceeds the manifest byte bound"
+                    )
+                if digest_field is not None:
+                    declared = spec.get(digest_field)
+                    if isinstance(declared, str) and declared.strip():
+                        actual = hashlib.sha256(payload).hexdigest()
+                        if actual != declared.strip().lower():
+                            raise ValueError(
+                                f"{tool_name}.spec.{digest_field} does not match the "
+                                f"{manifest_field} content"
+                            )
+                try:
+                    document = json.loads(payload.decode("utf-8"))
+                except (UnicodeError, json.JSONDecodeError) as exc:
+                    raise ValueError(
+                        f"{tool_name}.spec.{manifest_field} is not a readable JSON manifest"
+                    ) from exc
+                inner_value = document.get(inner_field) if isinstance(document, dict) else None
+                if inner_value is None:
+                    continue
+                if inner_kind == "model_read":
+                    decision = policy.validate_model_read(inner_value, suffixes=(".mph",))
+                elif inner_kind == "artifact_read":
+                    decision = policy.validate_artifact_read(inner_value)
+                else:  # pragma: no cover - table entries are internal constants
+                    raise ValueError(
+                        f"unsupported nested manifest path kind for {manifest_field}.{inner_field}"
+                    )
                 decisions.append(decision)
             bound.arguments["spec"] = normalized_spec
     evidence = {

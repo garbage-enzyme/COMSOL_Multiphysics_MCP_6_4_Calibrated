@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from src.jobs.manager import JobManager
+from src.jobs.manager import JobManager, validate_staged_sweep_spec
 from src.jobs.store import JobStore, process_identity
 from src.jobs.validation_matrix import normalize_validation_matrix_spec
 from src.jobs.validation_rows import read_validation_rows
@@ -561,10 +561,12 @@ def test_duplicate_index_recovers_from_corruption_deletion_and_stale_entries(
     assert restarted["duplicate"] is True
     assert restarted["job_id"] == first["job_id"]
 
-    stale = jobs_root / "job-removed0000000000000000000000000001"
-    stale.mkdir()
+    # A stale entry names a job whose directory was fully removed by the
+    # normal retention lifecycle: rebuild never sees the directory, and the
+    # entry must not block other admissions.
+    stale_name = "job-removed0000000000000000000000000001"
     index_path.write_text(
-        json.dumps({"entries": {("a" * 64): stale.name}}),
+        json.dumps({"entries": {("a" * 64): stale_name}}),
         encoding="ascii",
     )
     assert manager._find_exact_duplicate("validation_matrix", "a" * 64) is None
@@ -603,8 +605,9 @@ def test_concurrent_identical_submissions_admit_exactly_one_job(tmp_path, ascii_
 
 
 def test_resource_journal_capacity_gates_admission_before_launch(tmp_path, ascii_root, monkeypatch):
-    import comsol_mcp.jobs.resource_admission as admission_module
     from src.jobs.manager import JobManager
+
+    import comsol_mcp.jobs.resource_admission as admission_module
 
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"model")
@@ -645,11 +648,151 @@ def test_resource_journal_capacity_gates_admission_before_launch(tmp_path, ascii
     assert admitted["success"] is True
     assert len(launches) == 1
 
-    verdict = admission_module.resource_journal_capacity_verdict(2048)
+    # Four journal entries per point (pre-solve and post-solve telemetry and
+    # decision pairs) plus the startup reserve; the earlier two-per-point
+    # bound admitted sweeps that could only die at the 4096-entry limit.
+    verdict = admission_module.resource_journal_capacity_verdict(1023)
     assert verdict == {
-        "total_points": 2048,
-        "required_entries_lower_bound": 4104,
+        "total_points": 1023,
+        "required_entries_lower_bound": 4100,
         "max_entries": 4096,
         "fits": False,
     }
-    assert admission_module.resource_journal_capacity_verdict(2000)["fits"] is True
+    assert admission_module.resource_journal_capacity_verdict(1022)["fits"] is True
+
+
+def test_request_id_binds_response_loss_retries_to_one_attempt(tmp_path, ascii_root, monkeypatch):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager, "_launch_worker", lambda job_id, module: launches.append(job_id) or identity
+    )
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+    }
+
+    first = manager.submit(spec, request_id="retry-me-1")
+    retry = manager.submit(spec, request_id="retry-me-1")
+
+    assert first["job_id"] == retry["job_id"]
+    assert retry["duplicate"] is True
+    assert retry["action"] == "request_replay"
+    assert launches == [first["job_id"]]
+
+    # The same request id cannot silently rebind to a different submission.
+    changed = dict(spec)
+    changed["parameter_values"] = [2.0]
+    with pytest.raises(ValueError, match="already durably bound"):
+        manager.submit(changed, request_id="retry-me-1")
+
+    # Without a request id, identical submissions stay independent by design.
+    independent_a = manager.submit(spec)
+    independent_b = manager.submit(spec)
+    assert independent_a["job_id"] != independent_b["job_id"]
+    assert len(launches) == 3
+
+    with pytest.raises(ValueError, match="non-empty ASCII string"):
+        manager.submit(spec, request_id="not-ascii-陆")
+
+
+def test_request_id_unknown_record_resumes_the_preallocated_attempt(
+    tmp_path, ascii_root, monkeypatch
+):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    jobs_root = ascii_root / "jobs"
+    manager = JobManager(jobs_root, preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager, "_launch_worker", lambda job_id, module: launches.append(job_id) or identity
+    )
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+    }
+    normalized = validate_staged_sweep_spec(spec)
+    # Simulate the crash window: the write-ahead record exists as UNKNOWN
+    # with a pre-allocated id, but no job was ever published under it.
+    preallocated = "job-preallocated000000000000000000000001"
+    manager._write_request_record(
+        "interrupted-1", normalized["spec_fingerprint"], preallocated, "unknown"
+    )
+
+    resumed = manager.submit(spec, request_id="interrupted-1")
+
+    assert resumed["job_id"] == preallocated
+    assert launches == [preallocated]
+
+    # A DISPATCHED record whose job evidence vanished is uncertain, and
+    # uncertainty must stop the dependent resubmission.
+    manager._write_request_record(
+        "vanished-1",
+        normalized["spec_fingerprint"],
+        "job-missing0000000000000000000000001",
+        "dispatched",
+    )
+    with pytest.raises(ValueError, match="whose evidence is missing"):
+        manager.submit(spec, request_id="vanished-1")
+
+
+def test_duplicate_type_request_binds_to_the_existing_duplicate(tmp_path, ascii_root, monkeypatch):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    monkeypatch.setattr(manager, "_launch_worker", lambda job_id, module: identity)
+    first = manager.submit(_raw_spec(source))
+
+    bound = manager.submit(_raw_spec(source), request_id="vm-1")
+    assert bound["duplicate"] is True
+    assert bound["job_id"] == first["job_id"]
+
+    replay = manager.submit(_raw_spec(source), request_id="vm-1")
+    assert replay["action"] == "request_replay"
+    assert replay["job_id"] == first["job_id"]
+
+
+def test_lost_duplicate_index_entries_are_reconciled_from_evidence(
+    tmp_path, ascii_root, monkeypatch
+):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    jobs_root = ascii_root / "jobs"
+    manager = JobManager(jobs_root, preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    monkeypatch.setattr(manager, "_launch_worker", lambda job_id, module: identity)
+    first = manager.submit(_raw_spec(source))
+
+    # A readable but emptied index over retained evidence is index loss, not
+    # proof of absence; admission reconciles from the retained specs.
+    (jobs_root / "duplicate-index.json").write_text('{"entries": {}}', encoding="ascii")
+    second = manager.submit(_raw_spec(source))
+    assert second["duplicate"] is True
+    assert second["job_id"] == first["job_id"]
+
+
+def test_unreadable_retained_spec_fails_closed_for_new_submissions(
+    tmp_path, ascii_root, monkeypatch
+):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    jobs_root = ascii_root / "jobs"
+    manager = JobManager(jobs_root, preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    monkeypatch.setattr(manager, "_launch_worker", lambda job_id, module: identity)
+    first = manager.submit(_raw_spec(source))
+
+    (jobs_root / first["job_id"] / "spec.json").write_text("{torn", encoding="ascii")
+    with pytest.raises(ValueError, match="unreadable spec"):
+        manager.submit(_raw_spec(source))

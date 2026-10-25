@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -125,7 +126,11 @@ def _rebuild_duplicate_index(root: Path) -> dict[str, str]:
     Retained job directories are immutable evidence, so the rebuild reads
     each spec and never deletes a job. It runs once when the index is absent
     or corrupt; every subsequent submission is a bounded index lookup instead
-    of a directory scan whose cost grew with retained history.
+    of a directory scan whose cost grew with retained history. A job
+    directory whose spec evidence is missing or unreadable is uncertainty,
+    not proof of absence: the rebuild fails closed naming that job, because
+    silently skipping it would reopen duplicate admission after a storage
+    fault. Repair or remove the named job before submitting again.
     """
     entries: dict[str, str] = {}
     for path in sorted(root.iterdir()):
@@ -133,11 +138,19 @@ def _rebuild_duplicate_index(root: Path) -> dict[str, str]:
             continue
         spec_path = path / "spec.json"
         if not spec_path.is_file():
-            continue
+            raise ValueError(
+                f"duplicate index cannot be reconciled: retained job "
+                f"{path.name} has no spec evidence; repair or remove that job "
+                "before new duplicate-type submissions"
+            )
         try:
             existing = read_json(spec_path)
-        except OSError, ValueError, RuntimeError:
-            continue
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise ValueError(
+                f"duplicate index cannot be reconciled: retained job "
+                f"{path.name} has an unreadable spec ({type(exc).__name__}); "
+                "repair or remove that job before new duplicate-type submissions"
+            ) from exc
         if not isinstance(existing, dict):
             continue
         if existing.get("job_type") not in _DUPLICATE_INDEX_JOB_TYPES:
@@ -149,14 +162,31 @@ def _rebuild_duplicate_index(root: Path) -> dict[str, str]:
     return entries
 
 
+def _has_retained_job_evidence(root: Path) -> bool:
+    """Whether any retained job directory carries spec evidence at all."""
+    if not root.is_dir():
+        return False
+    for path in root.iterdir():
+        if path.is_dir() and path.name.startswith("job-") and (path / "spec.json").is_file():
+            return True
+    return False
+
+
 def _load_duplicate_index(root: Path) -> dict[str, str]:
-    """Load the duplicate index, rebuilding it from evidence when unusable."""
+    """Load the duplicate index, rebuilding it from evidence when unusable.
+
+    A readable but empty index over retained job evidence is index loss, not
+    proof that nothing was admitted: reconcile from the evidence itself
+    rather than letting a second launch through.
+    """
     try:
         payload = read_json(root / _DUPLICATE_INDEX_NAME)
         entries = payload.get("entries") if isinstance(payload, dict) else None
         if isinstance(entries, dict) and all(
             isinstance(key, str) and isinstance(value, str) for key, value in entries.items()
         ):
+            if not entries and _has_retained_job_evidence(root):
+                return _rebuild_duplicate_index(root)
             return dict(entries)
     except OSError, ValueError, RuntimeError:
         pass
@@ -168,6 +198,22 @@ def _append_duplicate_index_entry(root: Path, fingerprint: str, job_id: str) -> 
     entries = _load_duplicate_index(root)
     entries[fingerprint] = job_id
     atomic_write_json(root / _DUPLICATE_INDEX_NAME, {"entries": entries})
+
+
+_REQUEST_BINDING_DIR = "request-bindings"
+_REQUEST_BINDING_SCHEMA = "comsol_mcp.request_binding"
+
+
+def _validate_request_id(value: object) -> str:
+    """Accept a caller request identity: bounded, ASCII, never a path."""
+    if not isinstance(value, str) or not value.strip() or len(value) > 128 or not value.isascii():
+        raise ValueError("request_id must be a non-empty ASCII string of at most 128 characters")
+    return value
+
+
+def _request_binding_path(root: Path, request_id: str) -> Path:
+    digest = hashlib.sha256(request_id.encode("utf-8")).hexdigest()
+    return root / _REQUEST_BINDING_DIR / f"{digest}.json"
 
 
 def _refuse_removed_job(job_type: object) -> None:
@@ -492,9 +538,11 @@ class JobManager:
         if reconcile_on_start:
             self.reconcile_cancellations()
 
-    def submit(self, raw_spec: dict[str, Any]) -> dict[str, Any]:
+    def submit(self, raw_spec: dict[str, Any], *, request_id: str | None = None) -> dict[str, Any]:
         job_type = raw_spec.get("job_type") if isinstance(raw_spec, dict) else None
         _refuse_removed_job(job_type)
+        if request_id is not None:
+            request_id = _validate_request_id(request_id)
         if job_type == "test_sequence":
             if not self.allow_test_jobs:
                 raise ValueError("test_sequence jobs are disabled")
@@ -516,11 +564,20 @@ class JobManager:
             "adjoint_optimization",
             "surrogate_training",
         }
+        # A response-loss retry that carries the same caller request id
+        # replays the one bound attempt instead of launching a second job.
+        early_binding = self._resolve_request_binding(request_id, spec)
+        if isinstance(early_binding, dict):
+            return early_binding
         if spec["job_type"] in duplicate_job_types:
             with JobLock(self.store.root / ".submit.lock"):
                 duplicate = self._find_exact_duplicate(spec["job_type"], spec["spec_fingerprint"])
                 if duplicate is not None:
                     existing_state = self.store.read_state(duplicate)
+                    if request_id is not None and self._read_request_record(request_id) is None:
+                        self._write_request_record(
+                            request_id, spec["spec_fingerprint"], duplicate, "dispatched"
+                        )
                     return {
                         "success": True,
                         "job_id": duplicate,
@@ -567,6 +624,10 @@ class JobManager:
                 duplicate = self._find_exact_duplicate(spec["job_type"], spec["spec_fingerprint"])
                 if duplicate is not None:
                     existing_state = self.store.read_state(duplicate)
+                    if request_id is not None and self._read_request_record(request_id) is None:
+                        self._write_request_record(
+                            request_id, spec["spec_fingerprint"], duplicate, "dispatched"
+                        )
                     return {
                         "success": True,
                         "job_id": duplicate,
@@ -578,8 +639,31 @@ class JobManager:
                             else "observe_existing"
                         ),
                     }
-                job_id = self.store.create(spec, state)
+                bound_job_id = None
+                if request_id is not None:
+                    binding = self._bind_request_under_lock(request_id, spec)
+                    if isinstance(binding, dict):
+                        return binding
+                    bound_job_id = binding
+                job_id = self.store.create(spec, state, job_id=bound_job_id)
+                if request_id is not None:
+                    self._write_request_record(
+                        request_id, spec["spec_fingerprint"], job_id, "dispatched"
+                    )
                 _append_duplicate_index_entry(self.store.root, spec["spec_fingerprint"], job_id)
+        elif request_id is not None:
+            # Bind the caller request durably before the first side effect:
+            # an interrupted submit leaves an UNKNOWN record whose retry
+            # reuses the same pre-allocated job id, so a lost response can
+            # never materialize as a second launched job.
+            with JobLock(self.store.root / ".submit.lock"):
+                binding = self._bind_request_under_lock(request_id, spec)
+                if isinstance(binding, dict):
+                    return binding
+                job_id = self.store.create(spec, state, job_id=binding)
+                self._write_request_record(
+                    request_id, spec["spec_fingerprint"], job_id, "dispatched"
+                )
         else:
             job_id = self.store.create(spec, state)
         try:
@@ -628,6 +712,95 @@ class JobManager:
                 ),
             ) from exc
         return {"success": True, "job_id": job_id, "status": "submitted"}
+
+    def _read_request_record(self, request_id: str) -> dict[str, Any] | None:
+        try:
+            payload = read_json(_request_binding_path(self.store.root, request_id))
+        except OSError, ValueError, RuntimeError:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _write_request_record(
+        self, request_id: str, fingerprint: str, job_id: str, state: str
+    ) -> None:
+        path = _request_binding_path(self.store.root, request_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(
+            path,
+            {
+                "schema_name": _REQUEST_BINDING_SCHEMA,
+                "schema_version": "1.0.0",
+                "job_id": job_id,
+                "spec_fingerprint": fingerprint,
+                "state": state,
+                "updated_at_epoch": time.time(),
+            },
+        )
+
+    def _resolve_request_binding(
+        self, request_id: str | None, spec: dict[str, Any]
+    ) -> dict[str, Any] | str | None:
+        """Fast-path replay for a bound request, outside the submit lock.
+
+        Returns a replay result dict, a pre-allocated job id for a record
+        whose dispatch never published a job (UNKNOWN), or None when the
+        request is unbound. The authoritative re-check runs under the submit
+        lock at creation time, so an unlocked race only falls through.
+        """
+        if request_id is None:
+            return None
+        record = self._read_request_record(request_id)
+        if record is None:
+            return None
+        return self._request_record_outcome(record, spec)
+
+    def _request_record_outcome(
+        self, record: dict[str, Any], spec: dict[str, Any]
+    ) -> dict[str, Any] | str:
+        if record.get("spec_fingerprint") != spec["spec_fingerprint"]:
+            raise ValueError(
+                "request_id is already durably bound to a different submission; "
+                "use a new request_id for an independent submission"
+            )
+        job_id = record.get("job_id")
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError(
+                "request binding record is incomplete; repair or remove it before resubmitting"
+            )
+        if self.store.job_dir(job_id).exists():
+            existing_state = self.store.read_state(job_id)
+            return {
+                "success": True,
+                "job_id": job_id,
+                "status": existing_state["status"],
+                "duplicate": True,
+                "action": "request_replay",
+            }
+        if record.get("state") == "dispatched":
+            raise ValueError(
+                f"request_id was dispatched to job {job_id!r} whose evidence is "
+                "missing; reconcile that job before resubmitting"
+            )
+        # UNKNOWN: the interrupted attempt never published a job under the
+        # pre-allocated id, so reusing it keeps the retry on one attempt.
+        return job_id
+
+    def _bind_request_under_lock(
+        self, request_id: str, spec: dict[str, Any]
+    ) -> dict[str, Any] | str:
+        """Idempotently bind a request under the submit lock.
+
+        Returns the replay result when the bound job exists, otherwise the
+        job id to create under (freshly pre-allocated and recorded as
+        UNKNOWN for an unbound request, or the recorded id of an UNKNOWN
+        attempt).
+        """
+        record = self._read_request_record(request_id)
+        if record is not None:
+            return self._request_record_outcome(record, spec)
+        job_id = f"job-{uuid.uuid4().hex}"
+        self._write_request_record(request_id, spec["spec_fingerprint"], job_id, "unknown")
+        return job_id
 
     def _find_exact_duplicate(self, job_type: str, spec_fingerprint: str) -> str | None:
         entries = _load_duplicate_index(self.store.root)
