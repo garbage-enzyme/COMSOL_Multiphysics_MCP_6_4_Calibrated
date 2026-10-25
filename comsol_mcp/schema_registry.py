@@ -390,6 +390,11 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.jobs.tasks_bridge",
         ),
         _entry(
+            "comsol_mcp.request_binding",
+            "1.0.0",
+            "comsol_mcp.jobs.manager",
+        ),
+        _entry(
             "comsol_mcp.tasks_mapping",
             "1.0.0",
             "comsol_mcp.jobs.tasks_bridge",

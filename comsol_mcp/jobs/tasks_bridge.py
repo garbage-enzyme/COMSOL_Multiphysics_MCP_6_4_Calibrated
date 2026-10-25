@@ -284,6 +284,23 @@ class TasksMappingStore:
             )
         append_jsonl_record(self.journal_path, payload)
 
+    def has_byte_headroom(self, prospective_bytes: int) -> bool:
+        """Whether an append of the given encoded size fits the byte bound.
+
+        Capacity is measured against the complete-record prefix, matching the
+        append path's own torn-tail truncation, so a reservation made before
+        dispatch cannot be invalidated by the repair.
+        """
+        try:
+            report = read_complete_jsonl(self.journal_path)
+            if report.get("state") == "incomplete":
+                journal_bytes = int(report["complete_byte_count"])
+            else:
+                journal_bytes = self.journal_path.stat().st_size
+        except OSError:
+            journal_bytes = 0
+        return journal_bytes + int(prospective_bytes) <= TASKS_FILE_MAX_BYTES
+
     def rows(self) -> list[TaskRow]:
         """Return the complete, well-formed rows from the append-only journal.
 
@@ -510,25 +527,42 @@ class TasksBridge:
         interval = _finite_int(poll_interval_ms, "pollIntervalMs", minimum=1, maximum=2**53 - 1)
         fingerprint = spec_fingerprint(raw_spec)
 
-        # Capacity admission runs before the durable engine is touched: at the
-        # row bound a brand-new task is refused without creating a job or
-        # appending a mapping, so no retained or unexpired task is ever
-        # silently evicted by the reader's tail bound. A duplicate retry may
-        # still pass, because it reuses an existing mapping row.
-        if len(self._store.rows()) >= MAX_TASK_ROWS and not any(
-            row.spec_fingerprint == fingerprint and row.owner == self._owner
-            for row in self._store.rows_for_owner(self._owner)
-        ):
-            raise TasksMappingError(
-                "tasks_store_capacity",
-                "task mapping store is at its row capacity; refuse a new task",
-            )
-
-        # Reuse an existing durable job for an identical retry so a duplicate
-        # submission cannot launch a second simulation.
-        submission = self._engine.submit(dict(raw_spec))
-        job_id = _bounded(submission.get("job_id"), "job_id", 256)
+        # The whole admission - capacity reservation, engine dispatch, and the
+        # mapping append - runs inside one mapping transaction so two
+        # concurrent submissions cannot both pass an outside-the-lock
+        # capacity check, and a byte-capacity refusal can never arrive after
+        # the durable engine has already dispatched work.
         with self._store.transaction():
+            # Capacity admission before the durable engine is touched: at the
+            # row bound a brand-new task is refused without creating a job or
+            # appending a mapping, so no retained or unexpired task is ever
+            # silently evicted by the reader's tail bound. A duplicate retry
+            # may still pass, because it reuses an existing mapping row.
+            duplicate_row = next(
+                (
+                    row
+                    for row in self._store.rows_for_owner(self._owner)
+                    if row.spec_fingerprint == fingerprint
+                ),
+                None,
+            )
+            if len(self._store.rows()) >= MAX_TASK_ROWS and duplicate_row is None:
+                raise TasksMappingError(
+                    "tasks_store_capacity",
+                    "task mapping store is at its row capacity; refuse a new task",
+                )
+            if duplicate_row is None and not self._store.has_byte_headroom(MAX_TASK_ROW_BYTES):
+                # Reserve the worst-case encoded row before dispatch: the
+                # append-side exact check cannot then fail after the engine
+                # has created a job the client would never see.
+                raise TasksMappingError(
+                    "tasks_file_capacity", "task mapping journal exceeds its size bound"
+                )
+
+            # Reuse an existing durable job for an identical retry so a duplicate
+            # submission cannot launch a second simulation.
+            submission = self._engine.submit(dict(raw_spec))
+            job_id = _bounded(submission.get("job_id"), "job_id", 256)
             existing = self._store.latest_for_job(job_id)
 
             if existing is not None and existing.owner != self._owner:
@@ -776,15 +810,39 @@ def _completed_payload(state: Mapping[str, Any]) -> dict[str, Any]:
             "jobId": state.get("job_id"),
             "status": state.get("status"),
             "attempt": state.get("attempt"),
-            "resultReference": {
-                "kind": "durable_progress",
-                "completed": completed_rows if isinstance(completed_rows, int) else None,
-                "total": total_rows if isinstance(total_rows, int) else None,
-            },
+            "resultReference": _result_reference(state, completed_rows, total_rows),
             "lastError": last_error,
         },
     }
     return payload
+
+
+def _result_reference(
+    state: Mapping[str, Any], completed_rows: object, total_rows: object
+) -> dict[str, Any]:
+    """Reference exactly the result identity the durable state records.
+
+    A completed sweep records its results-manifest identity in the terminal
+    state; when that record is present it is referenced verbatim. Without
+    it the reference stays honestly labeled progress metadata - the
+    projection never invents an artifact reference no producer wrote.
+    """
+    manifest = state.get("result_manifest")
+    if isinstance(manifest, Mapping):
+        reference: dict[str, Any] = {"kind": "durable_result_manifest"}
+        name = manifest.get("name")
+        digest = manifest.get("sha256")
+        if isinstance(name, str) and name.strip():
+            reference["name"] = name.strip()[:128]
+        if isinstance(digest, str) and len(digest) == 64:
+            reference["sha256"] = digest
+        if len(reference) > 1:
+            return reference
+    return {
+        "kind": "durable_progress",
+        "completed": completed_rows if isinstance(completed_rows, int) else None,
+        "total": total_rows if isinstance(total_rows, int) else None,
+    }
 
 
 def _failed_payload(state: Mapping[str, Any]) -> dict[str, Any]:
@@ -795,36 +853,72 @@ def _failed_payload(state: Mapping[str, Any]) -> dict[str, Any]:
     total_rows = progress.get("total")
     return {
         "code": -32603,
-        "message": _bounded_error_detail(state.get("last_error"))
+        "message": _error_message_text(state.get("last_error"))
         or "the durable job did not complete",
         "data": {
             "jobId": state.get("job_id"),
             "status": state.get("status"),
             "attempt": state.get("attempt"),
-            "resultReference": {
-                "kind": "durable_progress",
-                "completed": completed_rows if isinstance(completed_rows, int) else None,
-                "total": total_rows if isinstance(total_rows, int) else None,
-            },
+            "resultReference": _result_reference(state, completed_rows, total_rows),
         },
     }
 
 
 _ERROR_DETAIL_BOUND = 512
-_ABSOLUTE_PATH_LOCATOR = re.compile(r"[A-Za-z]:[\\/](?:[^\\/:*?\"<>|\r\n]*[\\/])*")
+_ERROR_TYPE_BOUND = 128
+# Absolute host locators are reduced to their final component so a Tasks
+# payload never carries private locations: drive-letter paths, UNC shares,
+# and POSIX-absolute prefixes alike. Redaction keeps the final component so
+# the message stays diagnosable ("model.mph failed") without the host path.
+_ABSOLUTE_PATH_LOCATOR = re.compile(
+    r"(?:"
+    r"[A-Za-z]:[\\/](?:[^\\/:*?\"<>|\r\n]*[\\/])*"  # C:\a\b\ (drive letter)
+    r"|\\\\[^\\/:*?\"<>|\r\n]+[\\/](?:[^\\/:*?\"<>|\r\n]*[\\/])+"  # \\server\share\
+    r"|/(?:[^/:*?\"<>|\r\n]+/)+"  # /posix/absolute/ prefixes
+    r")"
+)
 
 
-def _bounded_error_detail(value: object) -> str | None:
-    """Bound the durable error text and strip absolute path locators.
-
-    The durable ``last_error`` can quote absolute host paths from preflight
-    probes or worker diagnostics; a Tasks payload stays free of private
-    locations by reducing any drive-letter path to its final component.
-    """
-    if not isinstance(value, str) or not value.strip():
+def _redacted_error_text(text: str) -> str | None:
+    """Bound one error string and strip absolute host path locators."""
+    if not isinstance(text, str) or not text.strip():
         return None
-    text = value.strip()[:_ERROR_DETAIL_BOUND]
-    return _ABSOLUTE_PATH_LOCATOR.sub("", text) or None
+    bounded = text.strip()[:_ERROR_DETAIL_BOUND]
+    return _ABSOLUTE_PATH_LOCATOR.sub("", bounded).strip() or None
+
+
+def _bounded_error_detail(value: object) -> str | dict[str, Any] | None:
+    """Project the durable error faithfully, bounded and path-free.
+
+    The durable ``last_error`` arrives either as plain text or as the
+    structured ``{"type", "message"}`` shape the workers write; the Tasks
+    payload keeps the producer's shape rather than flattening the real
+    failure cause into a generic string, and both shapes are bounded and
+    stripped of private host locations.
+    """
+    if isinstance(value, Mapping):
+        error_type = value.get("type")
+        message = value.get("message")
+        if not isinstance(error_type, str) or not isinstance(message, str):
+            return None
+        redacted = _redacted_error_text(message)
+        if redacted is None:
+            return None
+        return {
+            "type": error_type.strip()[:_ERROR_TYPE_BOUND] or "Error",
+            "message": redacted,
+        }
+    if isinstance(value, str):
+        return _redacted_error_text(value)
+    return None
+
+
+def _error_message_text(value: object) -> str | None:
+    """Flatten a durable error to bounded, path-free message text."""
+    detail = _bounded_error_detail(value)
+    if isinstance(detail, Mapping):
+        return str(detail["message"])
+    return detail
 
 
 def _bounded_receipt(receipt: object) -> dict[str, Any]:

@@ -83,6 +83,16 @@ def build_thermo_optomechanical_summary(
                 break
     if any(item["passed"] is not True for item in optical["control_results"]):
         reasons.append("control_matrix_failed")
+    # A stage whose finite measurements failed the scientific gate is real
+    # rejected evidence: it stays durable, and the summary rejects on it
+    # explicitly instead of the measurement being destroyed upstream. The
+    # stamped verdict rides on the evidence envelope, not the payload.
+    optical_envelope = read_json(root / "optical_replay" / "evidence.json")
+    if (
+        isinstance(optical_envelope, Mapping)
+        and optical_envelope.get("scientific_disposition") == "measured_gate_failed"
+    ):
+        reasons.append("optical_rta_nonpassive")
     control_dispositions = [
         item.get("disposition", "executed_control") for item in optical["control_results"]
     ]

@@ -133,6 +133,23 @@ def _attached_revision_from_client(
     ).to_dict()
 
 
+def _result_manifest_identity(directory: Path) -> dict[str, Any] | None:
+    """Record the durable results-manifest identity for a terminal completion.
+
+    The Tasks projection references exactly this recorded identity, so a
+    completed task points at the real manifest bytes the sweep wrote instead
+    of progress metadata alone.
+    """
+    manifest_path = directory / "results.csv.manifest.json"
+    try:
+        payload = manifest_path.read_bytes()
+    except OSError:
+        return None
+    if not payload or len(payload) > 1024 * 1024:
+        return None
+    return {"name": manifest_path.name, "sha256": hashlib.sha256(payload).hexdigest()}
+
+
 def _select_attached_model(
     client: Any,
     target: AttachedExecutionTarget,
@@ -804,6 +821,7 @@ def _run(root: str, job_id: str) -> int:
                                 "completed": attached_completion_count,
                                 "total": attached_completion_count,
                             },
+                            "result_manifest": _result_manifest_identity(directory),
                             "attached_cleanup": cleanup,
                         },
                         event="attached_cleanup_verified",
@@ -880,6 +898,8 @@ def _run(root: str, job_id: str) -> int:
                     "completed": owned_completion_count,
                     "total": owned_completion_count,
                 }
+                if not cleanup_errors:
+                    patch["result_manifest"] = _result_manifest_identity(directory)
                 if cleanup_errors:
                     patch["last_error"] = {
                         "type": "OwnedCleanupUnverified",

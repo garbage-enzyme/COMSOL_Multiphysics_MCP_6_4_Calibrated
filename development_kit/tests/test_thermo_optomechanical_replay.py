@@ -631,9 +631,26 @@ def test_optical_evidence_preserves_tiny_negative_absorption_but_rejects_active_
     evidence = build_stage_evidence(spec, "optical_replay", payload)
     assert evidence["payload"]["rows"][0]["deformed_rta"]["A"] == -1.0e-18
 
+    # A finite but unphysical measurement is real evidence: it stays
+    # durable with an explicit measured rejection instead of being erased.
     payload["rows"][0]["deformed_rta"]["A"] = -1.0e-8
-    with pytest.raises(ValueError, match="non-passive"):
-        build_stage_evidence(spec, "optical_replay", payload)
+    rejected = build_stage_evidence(spec, "optical_replay", payload)
+    assert rejected["scientific_disposition"] == "measured_gate_failed"
+    assert rejected["rejection_reason_codes"] == ["optical_rta_nonpassive_deformed_rta_row_0"]
+    assert rejected["payload"]["rows"][0]["deformed_rta"]["A"] == -1.0e-8
+    # A verdict that drifts from the measured rows is refused even when the
+    # tamperer re-hashes the evidence: the validator re-derives the verdict.
+    from src.jobs.thermo_optomechanical_replay_rows import (
+        _fingerprint,
+        _validate_common_evidence,
+    )
+
+    tampered = dict(rejected)
+    tampered["scientific_disposition"] = "measured_gate_passed"
+    tampered.pop("evidence_sha256")
+    tampered["evidence_sha256"] = _fingerprint(tampered)
+    with pytest.raises(ValueError, match="disposition must match"):
+        _validate_common_evidence(tampered, spec, "optical_replay")
 
 
 @pytest.mark.parametrize(
@@ -658,11 +675,6 @@ def test_optical_evidence_preserves_tiny_negative_absorption_but_rejects_active_
             "optical_replay",
             lambda payload: payload.__setitem__("derived_model_sha256", None),
             "derived_model_sha256",
-        ),
-        (
-            "optical_replay",
-            lambda payload: payload["rows"][0]["baseline_rta"].__setitem__("closure_residual", 0.5),
-            "non-passive R/T/A",
         ),
         (
             "state_evidence",
@@ -1875,3 +1887,30 @@ def _load_stage_evidence_public(root, stage_id):
     import json as _json
 
     return _json.loads((root / stage_id / "evidence.json").read_text(encoding="utf-8"))["payload"]
+
+
+def test_summary_rejects_on_retained_nonpassive_measurements(ascii_tmp_path):
+    """C081-08: finite unphysical rows stay durable and reject the summary."""
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "nonpassive-summary")
+    )
+
+    def executor(stage_id, _stage_dir, stage_spec):
+        payload = _payload(stage_id, stage_spec)
+        if stage_id == "optical_replay":
+            payload["rows"][0]["deformed_rta"]["R"] = 1.2
+            payload["rows"][0]["deformed_rta"]["T"] = 0.1
+            payload["rows"][0]["deformed_rta"]["A"] = -0.3
+            payload["rows"][0]["deformed_rta"]["closure_residual"] = 0.0
+        return payload
+
+    root = ascii_tmp_path / "nonpassive-summary" / "job"
+    result = run_thermo_optomechanical_replay(spec, root, attempt=1, stage_executor=executor)
+
+    summary = result["summary"]
+    assert summary["scientific_disposition"] == "rejected"
+    assert "optical_rta_nonpassive" in summary["reason_codes"]
+    # The measured rows themselves survive as durable stage evidence.
+    optical = (root / "optical_replay" / "evidence.json").read_text(encoding="utf-8")
+    assert '"measured_gate_failed"' in optical
+    assert '"R": 1.2' in optical

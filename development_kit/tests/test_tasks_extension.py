@@ -24,6 +24,7 @@ from typing import Any
 
 import pytest
 
+import comsol_mcp.jobs.tasks_bridge as tasks_bridge_module
 from comsol_mcp.jobs.tasks_bridge import (
     DEFAULT_POLL_INTERVAL_MS,
     JOB_STATE_TO_TASK_STATUS,
@@ -1292,3 +1293,127 @@ def test_terminal_job_with_clean_owned_cleanup_reports_complete(bridge: TasksBri
 
     assert receipt["cleanupComplete"] is True
     assert receipt["pendingReason"] is None
+
+
+def test_concurrent_submissions_cannot_cross_the_row_capacity(tmp_path: Path) -> None:
+    """Capacity admission is atomic with the mapping append (C081-04)."""
+    from unittest.mock import patch
+
+    import comsol_mcp.jobs.tasks_bridge as module
+
+    class CountingEngine:
+        def submit(self, spec):
+            return {"job_id": "job-" + spec["work"], "status": "submitted"}
+
+        def status(self, job_id):
+            return {"job_id": job_id, "status": "running"}
+
+    handles: list[dict] = []
+    errors: list[str] = []
+
+    def submit_concurrent(label: str) -> None:
+        try:
+            bridge = TasksBridge(
+                engine=CountingEngine(),
+                store=TasksMappingStore(tmp_path / "rows"),
+                owner="owner-a",
+            )
+            handles.append(bridge.submit_task({"work": label}, client_extensions=OPT_IN))
+        except TasksMappingError as exc:
+            errors.append(exc.code)
+
+    with patch.object(module, "MAX_TASK_ROWS", 1):
+        threads = [
+            threading.Thread(target=submit_concurrent, args=(label,)) for label in ("a", "b")
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    reopened = TasksMappingStore(tmp_path / "rows")
+    # Exactly one task is acknowledged, one row is durable, and the second
+    # admission is refused at capacity - never appended then hidden by the
+    # reader's tail bound.
+    assert len(handles) == 1
+    assert len(reopened.journal_path.read_text(encoding="utf-8").splitlines()) == 1
+    assert len(reopened.rows()) == 1
+    assert errors == ["tasks_store_capacity"]
+
+
+def test_byte_capacity_refusal_precedes_engine_dispatch(tmp_path: Path) -> None:
+    """A refused task never dispatches a job the client cannot address (C081-05)."""
+    from unittest.mock import patch
+
+    import comsol_mcp.jobs.tasks_bridge as module
+
+    engine = FakeEngine()
+    store = TasksMappingStore(tmp_path / "bytes")
+    bridge = TasksBridge(engine=engine, store=store, owner="owner-a")
+
+    with patch.object(module, "TASKS_FILE_MAX_BYTES", 1):
+        with pytest.raises(TasksMappingError) as excinfo:
+            bridge.submit_task({"work": 1}, client_extensions=OPT_IN)
+
+    assert excinfo.value.code == "tasks_file_capacity"
+    assert engine.submit_calls == []
+    assert store.rows() == []
+
+
+def test_structured_last_error_and_unc_locators_project_truthfully(bridge: TasksBridge) -> None:
+    """C081-07/C081-09: real producer shapes and private network locations."""
+    handle = _submit(bridge)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    _engine(bridge).set_state(
+        row.job_id,
+        "failed",
+        last_error={
+            "type": "ValueError",
+            "message": r"failed at \\private-server\research\secret\model.mph: bad sweep",
+        },
+    )
+    detail = bridge.get_task(handle["taskId"])
+    # The JSON-RPC fault flattens to bounded, path-free message text; the
+    # structured shape belongs to the completed payload's structuredContent.
+    assert detail["error"]["message"] == "failed at model.mph: bad sweep"
+
+    _engine(bridge).set_state(
+        row.job_id,
+        "completed",
+        last_error={
+            "type": "ValueError",
+            "message": r"failed at \\private-server\research\secret\model.mph: bad sweep",
+        },
+    )
+    completed = bridge.get_task(handle["taskId"])
+    last_error = completed["result"]["structuredContent"]["lastError"]
+    assert last_error == {"type": "ValueError", "message": "failed at model.mph: bad sweep"}
+
+    direct = tasks_bridge_module._bounded_error_detail(
+        r"worker died reading /home/research/secret/run.py mid-sweep"
+    )
+    assert direct == "worker died reading run.py mid-sweep"
+
+
+def test_recorded_result_manifest_is_referenced_verbatim(bridge: TasksBridge) -> None:
+    """A completed sweep's manifest identity replaces progress metadata."""
+    import hashlib as _hashlib
+
+    handle = _submit(bridge)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    digest = _hashlib.sha256(b"manifest bytes").hexdigest()
+    _engine(bridge).set_state(
+        row.job_id,
+        "completed",
+        progress={"completed": 1, "total": 1},
+        result_manifest={"name": "results.csv.manifest.json", "sha256": digest},
+    )
+    detail = bridge.get_task(handle["taskId"])
+    reference = detail["result"]["structuredContent"]["resultReference"]
+    assert reference == {
+        "kind": "durable_result_manifest",
+        "name": "results.csv.manifest.json",
+        "sha256": digest,
+    }

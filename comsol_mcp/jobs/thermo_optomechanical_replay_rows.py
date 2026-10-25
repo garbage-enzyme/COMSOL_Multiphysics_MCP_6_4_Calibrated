@@ -70,22 +70,23 @@ def _validate_common_evidence(
     spec: Mapping[str, Any],
     stage_id: str,
 ) -> dict[str, Any]:
-    evidence = _exact(
-        value,
-        {
-            "schema_name",
-            "schema_version",
-            "stage_id",
-            "execution_state",
-            "spec_fingerprint",
-            "source_model_sha256",
-            "optical_configuration_sha256",
-            "material_ledger_sha256",
-            "payload",
-            "evidence_sha256",
-        },
-        "thermo-optomechanical stage evidence",
-    )
+    allowed_fields = {
+        "schema_name",
+        "schema_version",
+        "stage_id",
+        "execution_state",
+        "spec_fingerprint",
+        "source_model_sha256",
+        "optical_configuration_sha256",
+        "material_ledger_sha256",
+        "payload",
+        "evidence_sha256",
+    }
+    if stage_id == "optical_replay":
+        # The stamped scientific verdict and its bounded rejection codes are
+        # part of the hashed evidence for the optical stage only.
+        allowed_fields |= {"scientific_disposition", "rejection_reason_codes"}
+    evidence = _exact(value, allowed_fields, "thermo-optomechanical stage evidence")
     if (
         evidence["schema_name"] != THERMO_OPTOMECHANICAL_STAGE_SCHEMA_NAME
         or evidence["schema_version"] != THERMO_OPTOMECHANICAL_STAGE_SCHEMA_VERSION
@@ -101,11 +102,19 @@ def _validate_common_evidence(
     supplied = body.pop("evidence_sha256")
     if not isinstance(supplied, str) or _fingerprint(body) != supplied:
         raise ValueError("thermo-optomechanical stage evidence hash does not match")
-    _validate_stage_payload(stage_id, evidence["payload"], spec)
+    nonpassive_codes = _validate_stage_payload(stage_id, evidence["payload"], spec)
+    if stage_id == "optical_replay":
+        stamped_disposition = evidence.get("scientific_disposition")
+        if (
+            stamped_disposition
+            != ("measured_gate_failed" if nonpassive_codes else "measured_gate_passed")
+            or evidence.get("rejection_reason_codes") != nonpassive_codes[:64]
+        ):
+            raise ValueError("optical replay scientific disposition must match the measured rows")
     return evidence
 
 
-def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any]) -> None:
+def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any]) -> list[str]:
     if stage_id == "preflight":
         payload = _exact(
             value,
@@ -200,7 +209,7 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             )
         ):
             raise ValueError("preflight selection readback is incomplete")
-        return
+        return []
     if stage_id == "thermal_structural_solve":
         payload = _exact(
             value,
@@ -284,7 +293,7 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             )
         ):
             raise ValueError("thermal expansion readback differs from the job")
-        return
+        return []
     if stage_id == "state_evidence":
         payload = _exact(
             value,
@@ -334,7 +343,7 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
         ratio = _finite(payload["displacement_to_length"], "displacement ratio")
         if ratio < 0.0:
             raise ValueError("displacement ratio must not be negative")
-        return
+        return []
     if stage_id == "deformation_transfer":
         payload = _exact(
             value,
@@ -363,7 +372,7 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             raise ValueError("deformation transfer evidence is invalid")
         _hex_digest(payload["source_geometry_sha256"], "source_geometry_sha256")
         _hex_digest(payload["deformed_geometry_sha256"], "deformed_geometry_sha256")
-        return
+        return []
     if stage_id == "optical_replay":
         payload = _exact(
             value,
@@ -381,7 +390,8 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             for branch in spec["optical_replay"]["branches"]
         }
         observed = set()
-        for row_value in rows:
+        nonpassive_codes: list[str] = []
+        for row_index, row_value in enumerate(rows):
             row = _exact(
                 row_value,
                 {
@@ -407,6 +417,11 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
                 rta = _exact(row[name], {"R", "T", "A", "closure_residual", "passive"}, name)
                 values = [_finite(rta[key], f"{name}.{key}") for key in ("R", "T", "A")]
                 closure_residual = _finite(rta["closure_residual"], f"{name}.closure_residual")
+                # Structural and nonfinite checks above still raise and destroy
+                # nothing but corruption. A finite but unphysical measurement
+                # is real scientific evidence: it stays durable with an
+                # explicit measured rejection instead of being erased before
+                # the evidence exists.
                 if (
                     any(item < -1.0e-10 for item in values)
                     or rta["passive"] is not True
@@ -417,7 +432,7 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
                         abs_tol=1.0e-15,
                     )
                 ):
-                    raise ValueError("optical replay contains non-passive R/T/A")
+                    nonpassive_codes.append(f"optical_rta_nonpassive_{name}_row_{row_index}")
         if observed != expected:
             raise ValueError("optical replay coordinates differ from the declared grid")
         controls = payload["control_results"]
@@ -449,7 +464,7 @@ def _validate_stage_payload(stage_id: str, value: object, spec: Mapping[str, Any
             raise ValueError("thermo-optomechanical control matrix is incomplete")
         if payload["source_unchanged"] is not True:
             raise ValueError("optical replay did not preserve the immutable source")
-        return
+        return nonpassive_codes
     raise ValueError(f"unsupported thermo-optomechanical stage: {stage_id}")
 
 
@@ -469,8 +484,57 @@ def build_stage_evidence(
         "material_ledger_sha256": spec["material_ledger_sha256"],
         "payload": dict(payload),
     }
+    if stage_id == "optical_replay":
+        # Stamp the scientific verdict before hashing so the validator can
+        # re-derive and verify it: rejected measurements stay durable, and a
+        # stamped verdict can never drift from the measured rows.
+        codes = _optical_nonpassive_codes(payload)
+        body["scientific_disposition"] = "measured_gate_failed" if codes else "measured_gate_passed"
+        body["rejection_reason_codes"] = codes[:64]
     evidence = {**body, "evidence_sha256": _fingerprint(body)}
     return _validate_common_evidence(evidence, spec, stage_id)
+
+
+def _optical_nonpassive_codes(payload: Mapping[str, Any]) -> list[str]:
+    """Derive bounded rejection codes for finite but unphysical RTA rows."""
+    codes: list[str] = []
+    rows = payload.get("rows")
+    if not isinstance(rows, list):
+        return codes
+    for row_index, row_value in enumerate(rows):
+        if not isinstance(row_value, Mapping):
+            continue
+        for name in ("baseline_rta", "deformed_rta"):
+            rta = row_value.get(name)
+            if not isinstance(rta, Mapping):
+                continue
+            raw_values = [rta.get(key) for key in ("R", "T", "A")]
+            closure_residual = rta.get("closure_residual")
+            numeric_values = [
+                item
+                for item in raw_values
+                if isinstance(item, (int, float)) and not isinstance(item, bool)
+            ]
+            residual_value: float | None = None
+            if isinstance(closure_residual, (int, float)) and not isinstance(
+                closure_residual, bool
+            ):
+                residual_value = float(closure_residual)
+            if len(numeric_values) != len(raw_values) or residual_value is None:
+                continue
+            values = [float(item) for item in numeric_values]
+            if (
+                any(item < -1.0e-10 for item in values)
+                or rta.get("passive") is not True
+                or not math.isclose(
+                    residual_value,
+                    sum(values) - 1.0,
+                    rel_tol=1.0e-12,
+                    abs_tol=1.0e-15,
+                )
+            ):
+                codes.append(f"optical_rta_nonpassive_{name}_row_{row_index}")
+    return codes
 
 
 def _artifact_descriptor(path: Path, root: Path) -> dict[str, Any]:

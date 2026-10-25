@@ -137,7 +137,7 @@ fake-server 测试只证明 bridge 行为，真实 DSH discovery、cleanup 和 l
 - **共享 Desktop 协作（默认关闭）。** 独立的 `shared_server.enabled` 功能可与任意工具 profile 组合，连接用户手动启动的本地 COMSOL Server，精确采用一个 Server 模型，执行非拥有式租约和 revision lock，运行持久化 attached job，并在 detach 时保留用户的 Server、Desktop、listener 和模型。并行 solver owner 最多两个，各自限用一个核心；服务器会拒绝多核求解、第三个 owner 以及跨 owner 的模型访问。
 - **COMSOL Model Manager（默认关闭）。** 独立的 `model_manager.enabled` 功能增加有界的 Model Manager 工具，可与任意 profile 组合。另一个独立开关 `model_manager.upload_enabled` 控制是否允许写回 Model Manager。关闭 upload 时 open、run、download 仍可使用，共享会话也绝不会顺带打开这两个开关。即使开启 upload，仍需显式声明派生来源身份，且已存在的目标、revision 不匹配或任何 overwrite 都会被拒绝而不强制写入。每次操作（包括被拒绝的）都会持久记录。
 - **Wave Optics 验证。** 专用 profile 支持只读模型预检，以及用于周期性超表面的单波长证据审计。
-- **渐进式 discovery。** 冷启动保持精简：`capabilities` 只返回 artifact schema 注册表的紧凑身份与计数视图，而不是全部 139 条记录。只读的 `catalog` 工具可按需返回 domain/tool 摘要、某个 domain 的工具及其完整输入 schema、单个工具或单个具名 schema。完整注册表仍以服务器为准，并与摘要公布的是同一个指纹绑定，因此按需获取的结果不可能与已公布内容不一致。另有默认关闭的 `discovery.pagination_enabled` 开关，用于启用实验性的 `tools/list` 游标分页。关闭时只读取首页的客户端仍会收到常规的完整列表，开启时每页都会声明真实总数，客户端必须读取该总数并继续获取后续页面，才能发现全部工具。
+- **渐进式 discovery。** 冷启动保持精简：`capabilities` 只返回 artifact schema 注册表的紧凑身份与计数视图，而不是全部 140 条记录。只读的 `catalog` 工具可按需返回 domain/tool 摘要、某个 domain 的工具及其完整输入 schema、单个工具或单个具名 schema。完整注册表仍以服务器为准，并与摘要公布的是同一个指纹绑定，因此按需获取的结果不可能与已公布内容不一致。另有默认关闭的 `discovery.pagination_enabled` 开关，用于启用实验性的 `tools/list` 游标分页。关闭时只读取首页的客户端仍会收到常规的完整列表，开启时每页都会声明真实总数，客户端必须读取该总数并继续获取后续页面，才能发现全部工具。
 - **有界离线手册检索（默认关闭）。** `manuals.root` 表示原始 COMSOL PDF 目录。独立的 `lexical_docs.enabled` 功能在生成本地索引后增加 SQLite FTS5/BM25 检索和页读取。
 - **如实标注的可选语义检索。** 隔离式 `semantic_docs.enabled` 功能可与任意工具 profile 组合，但基线模型未通过质量和内存的晋级门槛。推荐默认使用词法手册检索。
 
