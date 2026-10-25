@@ -385,7 +385,12 @@ def test_non_parameter_wavelength_driver_rejects_residual_parameter_name():
 )
 def test_job_preview_is_side_effect_free_and_content_bound(spec):
     original = deepcopy(spec)
-    if spec["job_type"] in {"spectral_characterization", "convergence_campaign", "branch_continuation_campaign"}:
+    removed_types = {
+        "spectral_characterization",
+        "convergence_campaign",
+        "branch_continuation_campaign",
+    }
+    if spec["job_type"] in removed_types:
         with pytest.raises(ValidationError):
             _preview_job_spec(spec)
         assert spec == original
@@ -434,7 +439,12 @@ def test_job_preview_and_submit_share_discriminated_input_rejections():
     assert submitted == []
 
 
-def test_public_f0_dispatch_is_solver_free():
+def test_public_f0_dispatch_is_solver_free(ascii_tmp_path, monkeypatch):
+    # Typed public specs are path-contained since 0.8.1: the preview source
+    # must be a real file inside an allowed model read root.
+    source = ascii_tmp_path / "model.mph"
+    source.write_bytes(b"f0 synthetic model")
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(ascii_tmp_path))
     server = create_server("f0-public", profile="core")
     validate_result = _decode_public(
         asyncio.run(
@@ -450,7 +460,7 @@ def test_public_f0_dispatch_is_solver_free():
                 {
                     "spec": {
                         "job_type": "staged_sweep",
-                        "source_model_path": "D:/fixtures/model.mph",
+                        "source_model_path": str(source),
                         "parameter_name": "p",
                         "parameter_values": [1.0, 2.0],
                         "expressions": ["ewfd.Rorder_0"],

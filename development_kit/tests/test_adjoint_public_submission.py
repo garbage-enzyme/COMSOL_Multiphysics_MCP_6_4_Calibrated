@@ -11,6 +11,10 @@ from development_kit.tests.test_adjoint_optimization import _write_manifest
 
 def test_native_adjoint_submission_reaches_manager(monkeypatch, ascii_tmp_path):
     monkeypatch.setattr("comsol_mcp.platform_support.native_solver_enabled", lambda: True)
+    # Typed public specs are path-contained since 0.8.1: manifest and inner
+    # source both live inside the allowed roots.
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(ascii_tmp_path))
+    monkeypatch.setenv("COMSOL_MCP_ARTIFACT_WRITE_ROOT", str(ascii_tmp_path))
     envelope, _, _ = _write_manifest(ascii_tmp_path)
     received = []
 
@@ -25,7 +29,9 @@ def test_native_adjoint_submission_reaches_manager(monkeypatch, ascii_tmp_path):
     assert received == [envelope]
 
 
-def test_native_adjoint_preview_refuses_changed_manifest(ascii_tmp_path):
+def test_native_adjoint_preview_refuses_changed_manifest(monkeypatch, ascii_tmp_path):
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(ascii_tmp_path))
+    monkeypatch.setenv("COMSOL_MCP_ARTIFACT_WRITE_ROOT", str(ascii_tmp_path))
     envelope, _, manifest = _write_manifest(ascii_tmp_path)
     server = create_server("native-adjoint-preview", profile="core")
     result = decode_tool_result(

@@ -253,7 +253,7 @@ def get_capabilities(selection: ProfileSelection | None = None) -> dict:
         "compatibility_registry": _compatibility_registry_summary(active_selection),
         "environment_identity": get_environment_identity(),
         # Cold discovery carries only the compact identity/count view. The full
-        # 140-entry registry is ~60 kB and is fetched on demand through `catalog`;
+        # 141-entry registry is ~60 kB and is fetched on demand through `catalog`;
         # embedding it here made startup scale with the artifact surface.
         "schema_registry": summarize_schema_registry(),
         "artifact_chain_verification": {

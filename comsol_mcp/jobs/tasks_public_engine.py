@@ -30,12 +30,17 @@ class ProfiledTasksEngine:
             raise TasksMappingError("job_action_refused", str(code))
         return result
 
-    def submit(self, raw_spec: dict[str, Any]) -> dict[str, Any]:
-        if set(raw_spec) != {"spec"} or not isinstance(raw_spec["spec"], dict):
-            raise TasksMappingError(
-                "invalid_spec", "job_submit arguments require exactly one spec object"
-            )
-        return self._call("job_submit", raw_spec)
+    def submit(self, raw_spec: dict[str, Any], request_id: str | None = None) -> dict[str, Any]:
+        # The Tasks interceptor forwards the full public argument envelope:
+        # a spec object plus, since 0.8.1, an optional bounded request_id
+        # that routes the submission through durable response-loss binding.
+        allowed = {"spec"} if request_id is None else {"spec", "request_id"}
+        if set(raw_spec) != allowed or not isinstance(raw_spec["spec"], dict):
+            raise TasksMappingError("invalid_spec", "job_submit arguments require one spec object")
+        arguments: dict[str, Any] = {"spec": raw_spec["spec"]}
+        if request_id is not None:
+            arguments["request_id"] = request_id
+        return self._call("job_submit", arguments)
 
     def status(self, job_id: str) -> dict[str, Any]:
         return self._call("job_status", {"job_id": job_id})

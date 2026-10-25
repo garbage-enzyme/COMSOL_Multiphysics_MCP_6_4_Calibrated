@@ -30,13 +30,23 @@ class _LazyJobManager:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._get(), name)
 
-    def submit(self, spec: dict[str, Any], request_id: str | None = None) -> Any:
+    def submit(
+        self,
+        spec: dict[str, Any],
+        request_id: str | None = None,
+        source_fingerprint: str | None = None,
+    ) -> Any:
         from comsol_mcp.platform_support import require_native_solver
 
         require_native_solver()
-        if request_id is None:
+        kwargs: dict[str, Any] = {}
+        if request_id is not None:
+            kwargs["request_id"] = request_id
+        if source_fingerprint is not None:
+            kwargs["source_fingerprint"] = source_fingerprint
+        if not kwargs:
             return self._get().submit(spec)
-        return self._get().submit(spec, request_id=request_id)
+        return self._get().submit(spec, **kwargs)
 
     def resume(self, job_id: str) -> Any:
         from comsol_mcp.platform_support import require_native_solver
@@ -234,6 +244,16 @@ def _submit_job(
     standalone_fields = dict(spec)
     standalone_fields.pop("execution_backend")
     validated = validate_staged_sweep_spec(standalone_fields)
+    # Resolve durable request authority BEFORE the session handoff repeats
+    # its side effects: a lost-response retry with the same caller-side
+    # fingerprint replays its bound outcome without another handoff.
+    source_fingerprint = validated.get("spec_fingerprint")
+    if request_id is not None and source_fingerprint is not None:
+        resolver = getattr(manager, "resolve_attached_retry", None)
+        if callable(resolver):
+            replay = resolver(request_id, source_fingerprint)
+            if isinstance(replay, dict):
+                return replay
     handoff = session_manager.prepare_attached_job_handoff(
         expected_lock_sha256=request["expected_lock_sha256"],
         expected_revision_sha256=request["expected_revision_sha256"],
@@ -276,7 +296,12 @@ def _submit_job(
         )
 
     try:
-        submitted = manager.submit(expanded)
+        if request_id is None:
+            submitted = manager.submit(expanded)
+        else:
+            submitted = manager.submit(
+                expanded, request_id=request_id, source_fingerprint=source_fingerprint
+            )
     except Exception as exc:
         if isinstance(exc, JobLaunchError):
             recovery = {

@@ -133,9 +133,7 @@ class DurableJobEngine(Protocol):
     solver-free tests and cannot reach into engine internals.
     """
 
-    def submit(
-        self, raw_spec: dict[str, Any], request_id: str | None = None
-    ) -> dict[str, Any]: ...
+    def submit(self, raw_spec: dict[str, Any], request_id: str | None = None) -> dict[str, Any]: ...
 
     def status(self, job_id: str) -> dict[str, Any]: ...
 
@@ -554,9 +552,17 @@ class TasksBridge:
             )
             from comsol_mcp.jobs.manager import ENGINE_DUPLICATE_JOB_TYPES
 
+            # The public adapter submits the argument envelope {spec: ...};
+            # the engine family lives inside it. A flat engine payload keeps
+            # its top-level job_type.
+            capacity_spec: Mapping[str, Any] = raw_spec
+            if "job_type" not in raw_spec:
+                inner = raw_spec.get("spec")
+                if isinstance(inner, Mapping):
+                    capacity_spec = inner
             reuses_mapping = (
                 duplicate_row is not None
-                and str(raw_spec.get("job_type")) in ENGINE_DUPLICATE_JOB_TYPES
+                and str(capacity_spec.get("job_type")) in ENGINE_DUPLICATE_JOB_TYPES
             )
             if not reuses_mapping:
                 if len(self._store.rows()) >= MAX_TASK_ROWS:

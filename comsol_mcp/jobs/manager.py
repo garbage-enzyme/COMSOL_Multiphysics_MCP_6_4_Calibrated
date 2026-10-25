@@ -224,6 +224,69 @@ def _request_binding_path(root: Path, request_id: str) -> Path:
     return root / _REQUEST_BINDING_DIR / f"{digest}.json"
 
 
+_LAUNCH_MARKER_NAME = "launch-in-progress.json"
+
+
+def _write_launch_marker(store: Any, job_id: str) -> None:
+    """Durably record that this process owns an in-flight worker launch.
+
+    A job published without a bound worker identity is ambiguous evidence:
+    either the launcher crashed, or the launcher is alive and still inside
+    the launch call. The marker carries the owning process identity so a
+    concurrent retry or resume can tell those apart instead of treating a
+    live dispatch as an interruptible orphan.
+    """
+    import os as _os
+
+    marker = {
+        "schema_name": "comsol_mcp.launch_marker",
+        "schema_version": "1.0.0",
+        "pid": _os.getpid(),
+        "process_create_time": None,
+        "started_at_epoch": time.time(),
+    }
+    try:
+        import psutil
+
+        marker["process_create_time"] = psutil.Process(_os.getpid()).create_time()
+    except Exception:  # noqa: S110 - identity degrades to pid-only liveness
+        pass
+    atomic_write_json(store.job_dir(job_id) / _LAUNCH_MARKER_NAME, marker)
+
+
+def _clear_launch_marker(store: Any, job_id: str) -> None:
+    try:
+        (store.job_dir(job_id) / _LAUNCH_MARKER_NAME).unlink()
+    except OSError:
+        pass
+
+
+def _launch_marker_alive(store: Any, job_id: str) -> bool:
+    """Whether a live process still owns the in-flight launch for this job."""
+    try:
+        marker = read_json(store.job_dir(job_id) / _LAUNCH_MARKER_NAME)
+    except OSError, ValueError, RuntimeError:
+        return False
+    if not isinstance(marker, dict):
+        return False
+    pid = marker.get("pid")
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        import psutil
+
+        process = psutil.Process(pid)
+        created = marker.get("process_create_time")
+        if isinstance(created, (int, float)) and not isinstance(created, bool):
+            if abs(process.create_time() - float(created)) > 1.0:
+                return False  # the pid was recycled by a different process
+        return True
+    except psutil.Error:
+        return False
+    except Exception:  # noqa: S110 - no psutil evidence means not provable alive
+        return False
+
+
 def _refuse_removed_job(job_type: object) -> None:
     if isinstance(job_type, str) and job_type in REMOVED_RESEARCH_JOB_TYPES:
         raise ValueError("Research job type removed in 0.8.0; use 0.7.8 for legacy execution")
@@ -546,7 +609,13 @@ class JobManager:
         if reconcile_on_start:
             self.reconcile_cancellations()
 
-    def submit(self, raw_spec: dict[str, Any], *, request_id: str | None = None) -> dict[str, Any]:
+    def submit(
+        self,
+        raw_spec: dict[str, Any],
+        *,
+        request_id: str | None = None,
+        source_fingerprint: str | None = None,
+    ) -> dict[str, Any]:
         job_type = raw_spec.get("job_type") if isinstance(raw_spec, dict) else None
         _refuse_removed_job(job_type)
         if request_id is not None:
@@ -591,7 +660,11 @@ class JobManager:
                         if isinstance(binding, dict):
                             return binding
                         self._write_request_record(
-                            request_id, spec["spec_fingerprint"], duplicate, "dispatched"
+                            request_id,
+                            spec["spec_fingerprint"],
+                            duplicate,
+                            "dispatched",
+                            source_fingerprint=source_fingerprint,
                         )
                     return {
                         "success": True,
@@ -648,7 +721,11 @@ class JobManager:
                         if isinstance(binding, dict):
                             return binding
                         self._write_request_record(
-                            request_id, spec["spec_fingerprint"], duplicate, "dispatched"
+                            request_id,
+                            spec["spec_fingerprint"],
+                            duplicate,
+                            "dispatched",
+                            source_fingerprint=source_fingerprint,
                         )
                     return {
                         "success": True,
@@ -670,7 +747,11 @@ class JobManager:
                 job_id = self.store.create(spec, state, job_id=bound_job_id)
                 if request_id is not None:
                     self._write_request_record(
-                        request_id, spec["spec_fingerprint"], job_id, "dispatched"
+                        request_id,
+                        spec["spec_fingerprint"],
+                        job_id,
+                        "dispatched",
+                        source_fingerprint=source_fingerprint,
                     )
                 _append_duplicate_index_entry(self.store.root, spec["spec_fingerprint"], job_id)
         elif request_id is not None:
@@ -684,7 +765,11 @@ class JobManager:
                     return binding
                 job_id = self.store.create(spec, state, job_id=binding)
                 self._write_request_record(
-                    request_id, spec["spec_fingerprint"], job_id, "dispatched"
+                    request_id,
+                    spec["spec_fingerprint"],
+                    job_id,
+                    "dispatched",
+                    source_fingerprint=source_fingerprint,
                 )
         else:
             job_id = self.store.create(spec, state)
@@ -694,8 +779,12 @@ class JobManager:
                 "submitted",
                 {"spec_fingerprint": spec["spec_fingerprint"]},
             )
-            identity = self._launch_worker(job_id, worker_module)
-            self.store.bind_worker_identity(job_id, identity)
+            _write_launch_marker(self.store, job_id)
+            try:
+                identity = self._launch_worker(job_id, worker_module)
+                self.store.bind_worker_identity(job_id, identity)
+            finally:
+                _clear_launch_marker(self.store, job_id)
         except Exception as exc:
             state_record_error = None
             try:
@@ -756,21 +845,30 @@ class JobManager:
         return payload
 
     def _write_request_record(
-        self, request_id: str, fingerprint: str, job_id: str, state: str
+        self,
+        request_id: str,
+        fingerprint: str,
+        job_id: str,
+        state: str,
+        *,
+        source_fingerprint: str | None = None,
     ) -> None:
         path = _request_binding_path(self.store.root, request_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_json(
-            path,
-            {
-                "schema_name": _REQUEST_BINDING_SCHEMA,
-                "schema_version": "1.0.0",
-                "job_id": job_id,
-                "spec_fingerprint": fingerprint,
-                "state": state,
-                "updated_at_epoch": time.time(),
-            },
-        )
+        record = {
+            "schema_name": _REQUEST_BINDING_SCHEMA,
+            "schema_version": "1.0.0",
+            "job_id": job_id,
+            "spec_fingerprint": fingerprint,
+            "state": state,
+            "updated_at_epoch": time.time(),
+        }
+        # Attached submissions bind a caller-side (pre-handoff) fingerprint
+        # so a lost-response retry can resolve its authority BEFORE the
+        # session handoff repeats its side effects.
+        if source_fingerprint is not None:
+            record["source_fingerprint"] = source_fingerprint
+        atomic_write_json(path, record)
 
     def _resolve_request_binding(
         self, request_id: str | None, spec: dict[str, Any]
@@ -789,21 +887,26 @@ class JobManager:
             return None
         return self._request_record_outcome(record, spec)
 
-    def _request_record_outcome(
-        self, record: dict[str, Any], spec: dict[str, Any]
-    ) -> dict[str, Any] | str:
-        if record.get("spec_fingerprint") != spec["spec_fingerprint"]:
-            raise ValueError(
-                "request_id is already durably bound to a different submission; "
-                "use a new request_id for an independent submission"
-            )
-        job_id = record.get("job_id")
-        if not isinstance(job_id, str) or not job_id:
-            raise ValueError(
-                "request binding record is incomplete; repair or remove it before resubmitting"
-            )
+    def _request_job_replay(self, job_id: str) -> dict[str, Any] | str:
+        """Replay outcome for a bound job id, honoring dispatch uncertainty."""
         if self.store.job_dir(job_id).exists():
             existing_state = self.store.read_state(job_id)
+            if (
+                existing_state.get("status") == "submitted"
+                and existing_state.get("worker_pid") is None
+                and _launch_marker_alive(self.store, job_id)
+            ):
+                # The publishing launcher still owns an in-flight dispatch:
+                # this is a live attempt, not an orphan. Replay the truthful
+                # current state; never mark it interrupted and never permit
+                # a second launch through resume.
+                return {
+                    "success": True,
+                    "job_id": job_id,
+                    "status": existing_state["status"],
+                    "duplicate": True,
+                    "action": "request_replay_in_flight",
+                }
             if (
                 existing_state.get("status") == "submitted"
                 and existing_state.get("worker_pid") is None
@@ -845,14 +948,63 @@ class JobManager:
                 "duplicate": True,
                 "action": "request_replay",
             }
-        if record.get("state") == "dispatched":
+        # A job directory that does not exist leaves the binding's own
+        # state to decide: UNKNOWN keeps the pre-allocated id (reusing it
+        # holds the retry on one attempt); anything else is uncertainty.
+        return job_id
+
+    def _request_record_outcome(
+        self, record: dict[str, Any], spec: dict[str, Any]
+    ) -> dict[str, Any] | str:
+        if record.get("spec_fingerprint") != spec["spec_fingerprint"]:
+            raise ValueError(
+                "request_id is already durably bound to a different submission; "
+                "use a new request_id for an independent submission"
+            )
+        job_id = record.get("job_id")
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError(
+                "request binding record is incomplete; repair or remove it before resubmitting"
+            )
+        return self._request_replay_with_record(record, job_id)
+
+    def _request_replay_with_record(
+        self, record: dict[str, Any], job_id: str
+    ) -> dict[str, Any] | str:
+        outcome = self._request_job_replay(job_id)
+        if isinstance(outcome, str) and record.get("state") == "dispatched":
             raise ValueError(
                 f"request_id was dispatched to job {job_id!r} whose evidence is "
                 "missing; reconcile that job before resubmitting"
             )
-        # UNKNOWN: the interrupted attempt never published a job under the
-        # pre-allocated id, so reusing it keeps the retry on one attempt.
-        return job_id
+        return outcome
+
+    def resolve_attached_retry(
+        self, request_id: str, source_fingerprint: str
+    ) -> dict[str, Any] | None:
+        """Pre-handoff replay resolution for an attached retry.
+
+        The caller-side fingerprint is computable before the session handoff;
+        a binding whose source fingerprint matches resolves to its replay
+        outcome without repeating the handoff side effects. A bound request
+        with a different source fingerprint is a conflict and refuses.
+        """
+        request_id = _validate_request_id(request_id)
+        record = self._read_request_record(request_id)
+        if record is None:
+            return None
+        bound_source = record.get("source_fingerprint")
+        if bound_source != source_fingerprint:
+            raise ValueError(
+                "request_id is already durably bound to a different submission; "
+                "use a new request_id for an independent submission"
+            )
+        job_id = record.get("job_id")
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError(
+                "request binding record is incomplete; repair or remove it before resubmitting"
+            )
+        return self._request_replay_with_record(record, job_id)
 
     def _bind_request_under_lock(
         self, request_id: str, spec: dict[str, Any]
@@ -1462,29 +1614,27 @@ class JobManager:
         return reconciled
 
     def _retained_resource_journal_entries(self, job_id: str) -> int:
-        """Count complete resource-journal entries retained by earlier attempts."""
-        journal = self.store.job_dir(job_id) / "resource.jsonl"
-        try:
-            payload = journal.read_bytes()
-        except OSError:
-            return 0
-        count = 0
-        for line in payload.splitlines():
-            text = line.strip()
-            if not text:
-                continue
-            try:
-                import json as _json
+        """Count retained resource-journal entries with the authoritative reader.
 
-                document = _json.loads(text)
-            except ValueError:
-                continue
-            if isinstance(document, dict):
-                count += 1
-        return count
+        The store's bounded reader is the same validator the next append
+        goes through: unreadable or malformed retained evidence surfaces as
+        a refusal here instead of being silently counted as zero entries
+        and letting the relaunch die at its first append.
+        """
+        entries = self.store.read_resource_journal(job_id)
+        return len(entries)
 
     def resume(self, job_id: str) -> dict[str, Any]:
         _refuse_removed_job(self.store.read_spec(job_id).get("job_type"))
+        if _launch_marker_alive(self.store, job_id):
+            # A live launcher still owns this job's dispatch; a concurrent
+            # resume here would race its pending worker into a second
+            # launch for one job.
+            raise ValueError(
+                "this job has an in-flight worker launch owned by a live "
+                "process; wait for it to finish and reconcile with "
+                "job_status before resuming"
+            )
         with self.store.lock(job_id):
             state = self.store.read_state(job_id)
             if state["status"] not in {"failed", "interrupted", "cancelled"}:

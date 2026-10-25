@@ -1073,3 +1073,57 @@ def test_adjoint_manifest_and_preview_are_contained(tmp_path, ascii_root, monkey
                     profile_name="experimental",
                 )
             assert opened == []
+
+
+def test_typed_job_spec_models_receive_containment(tmp_path, ascii_root, monkeypatch):
+    from comsol_mcp.contracts.job_submission import StagedSweepInput
+
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    read_root.mkdir(parents=True, exist_ok=True)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    outside = tmp_path / "outside.mph"
+    outside.write_bytes(b"outside")
+    inside = read_root / "in.mph"
+    inside.write_bytes(b"in")
+
+    def job_submit(*, spec=None):
+        return {"dispatched_type": type(spec).__name__}
+
+    typed_outside = StagedSweepInput(
+        job_type="staged_sweep",
+        source_model_path=str(outside),
+        parameter_name="wl",
+        parameter_values=[1.0],
+        expressions=["ewfd.Rtotal"],
+    )
+    with pytest.raises(ValueError, match="escapes the configured read roots"):
+        validate_tool_paths(
+            job_submit,
+            (),
+            {"spec": typed_outside},
+            tool_name="job_submit",
+            profile_name="core",
+        )
+
+    typed_inside = StagedSweepInput(
+        job_type="staged_sweep",
+        source_model_path=str(inside),
+        parameter_name="wl",
+        parameter_values=[1.0],
+        expressions=["ewfd.Rtotal"],
+    )
+    args, kwargs, evidence, read_pins, _write_pins = validate_tool_paths(
+        job_submit,
+        (),
+        {"spec": typed_inside},
+        tool_name="job_submit",
+        profile_name="core",
+    )
+    # The strict typed instance stays the dispatched argument, the validated
+    # identity was written back onto it, and the check actually ran.
+    assert evidence["validated_input_count"] == 1
+    assert kwargs["spec"].source_model_path == str(inside.resolve())
+    assert kwargs["spec"].__class__.__name__ == "StagedSweepInput"
+    assert inside.resolve() in {pin.path for pin in read_pins}

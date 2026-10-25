@@ -837,7 +837,7 @@ def test_partial_duplicate_index_loss_reconciles_from_evidence(tmp_path, ascii_r
         manager, "_launch_worker", lambda job_id, module: launches.append(job_id) or identity
     )
     first = manager.submit(_raw_spec(source))
-    second = manager.submit(_raw_spec(other))
+    manager.submit(_raw_spec(other))
     # Remove only the FIRST fingerprint from a still-valid index: the miss
     # must be verified against retained evidence, not trusted as absence.
     import json as _json
@@ -937,3 +937,127 @@ def test_concurrent_same_request_conflicting_specs_refuse_one(tmp_path, ascii_ro
     assert kinds.count("ok") == 1
     ok = [value for kind, value in outcomes if kind == "ok"][0]
     assert ok["job_id"] == first["job_id"]
+
+
+def test_in_flight_launch_is_not_an_orphan_and_blocks_resume(tmp_path, ascii_root, monkeypatch):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    release = threading.Event()
+    entered = threading.Event()
+
+    def slow_launch(job_id, module):
+        launches.append(job_id)
+        entered.set()
+        assert release.wait(timeout=30)
+        return identity
+
+    monkeypatch.setattr(manager, "_launch_worker", slow_launch)
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+    }
+    first_result = {}
+    thread = threading.Thread(
+        target=lambda: first_result.update(manager.submit(spec, request_id="live-1"))
+    )
+    thread.start()
+    assert entered.wait(timeout=10)
+
+    retry = manager.submit(spec, request_id="live-1")
+    assert retry["action"] == "request_replay_in_flight"
+    assert retry["success"] is True
+    state = manager.store.read_state(retry["job_id"])
+    assert state["status"] == "submitted"  # live dispatch never marked interrupted
+    with pytest.raises(ValueError, match="in-flight worker launch"):
+        manager.resume(retry["job_id"])
+
+    release.set()
+    thread.join(timeout=30)
+    assert first_result["success"] is True
+    assert launches == [retry["job_id"]]  # exactly one launch for one job
+
+
+def test_profiled_engine_accepts_request_id_envelope():
+    from comsol_mcp.jobs.tasks_public_engine import ProfiledTasksEngine, TasksMappingError
+
+    engine = ProfiledTasksEngine()
+    calls = []
+
+    class Tool:
+        fn = staticmethod(lambda **kwargs: calls.append(kwargs) or {"success": True})
+
+    class ToolManager:
+        _tools = {"job_submit": Tool()}
+
+    class Manager:
+        _tool_manager = ToolManager()
+
+    engine.server = Manager()
+    flat = {"spec": {"job_type": "staged_sweep"}}
+    engine.submit(flat)
+    engine.submit({**flat, "request_id": "req-1"}, request_id="req-1")
+    assert calls[0] == {"spec": {"job_type": "staged_sweep"}}
+    assert calls[1] == {"spec": {"job_type": "staged_sweep"}, "request_id": "req-1"}
+    with pytest.raises(TasksMappingError):
+        engine.submit({"unexpected": True})
+
+
+def test_envelope_validation_retry_reuses_capacity(tmp_path, monkeypatch):
+    """The public {spec: ...} envelope resolves its engine family (C081C-05)."""
+    import comsol_mcp.jobs.tasks_bridge as module
+    from comsol_mcp.jobs.tasks_bridge import TasksBridge, TasksMappingStore
+    from development_kit.tests.test_tasks_extension import OPT_IN
+
+    class DedupeEngine:
+        def submit(self, raw_spec, request_id=None):
+            return {"job_id": "job-vm", "status": "running", "duplicate": True}
+
+        def status(self, job_id):
+            return {"job_id": job_id, "status": "running"}
+
+    store = TasksMappingStore(tmp_path / "envelope")
+    bridge = TasksBridge(engine=DedupeEngine(), store=store, owner="owner-a")
+    envelope = {"spec": {"job_type": "validation_matrix", "points": [{"x": 1.0}]}}
+    monkeypatch.setattr(module, "MAX_TASK_ROWS", 1)
+    first = bridge.submit_task(dict(envelope), client_extensions=OPT_IN)
+    assert len(store.rows()) == 1
+    # Identical envelope retry at the bound reuses the mapping row.
+    retry = bridge.submit_task(dict(envelope), client_extensions=OPT_IN)
+    assert retry["taskId"] == first["taskId"]
+    assert len(store.journal_path.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_torn_retained_journal_refuses_resume(tmp_path, ascii_root, monkeypatch):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager, "_launch_worker", lambda job_id, module: launches.append(job_id) or identity
+    )
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+    }
+    submitted = manager.submit(spec)
+    job_id = submitted["job_id"]
+    manager.store.update_state(
+        job_id, "failed", patch={"last_error": {"type": "Test", "message": "boom"}}
+    )
+    # A torn retained journal is corruption, not zero entries.
+    (ascii_root / "jobs" / job_id / "resource.jsonl").write_text(
+        '{"entry": 1}\n{torn\n', encoding="ascii"
+    )
+    with pytest.raises(ValueError):
+        manager.resume(job_id)
+    assert launches == [job_id]

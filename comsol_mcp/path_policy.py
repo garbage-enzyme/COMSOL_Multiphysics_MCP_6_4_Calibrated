@@ -873,6 +873,16 @@ def validate_tool_paths(
         # never stat, read, or hash a source the submission path would
         # refuse.
         spec = bound.arguments.get("spec")
+        # The registered public tools receive typed pydantic input models,
+        # not mappings. Validate a dumped copy - strict models refuse dict
+        # coercion, so the typed instance stays the dispatched argument and
+        # validated identities are written back onto it by field.
+        typed_instance = None
+        if not isinstance(spec, Mapping) and hasattr(spec, "model_dump"):
+            dumped = spec.model_dump(mode="python")
+            if isinstance(dumped, Mapping):
+                typed_instance = spec
+                spec = dumped
         if isinstance(spec, Mapping):
             normalized_spec = dict(spec)
             if spec.get("source_model_path") is not None:
@@ -943,7 +953,21 @@ def validate_tool_paths(
                         f"unsupported nested manifest path kind for {manifest_field}.{inner_field}"
                     )
                 decisions.append(decision)
-            bound.arguments["spec"] = normalized_spec
+            if typed_instance is not None:
+                # Write ONLY the validated path identities back onto the
+                # typed instance; the dispatched argument keeps its strict
+                # model type and its original field set.
+                validated_fields = {"source_model_path"}
+                validated_fields.update(
+                    field for field, _kind in _JOB_SPEC_PATH_FIELDS.get(
+                        str(spec.get("job_type")), ()
+                    )
+                )
+                for field in validated_fields:
+                    if normalized_spec.get(field) != spec.get(field):
+                        setattr(typed_instance, field, normalized_spec[field])
+            else:
+                bound.arguments["spec"] = normalized_spec
     evidence = {
         **policy.capability(enforced=True),
         "validated_input_count": len(decisions),

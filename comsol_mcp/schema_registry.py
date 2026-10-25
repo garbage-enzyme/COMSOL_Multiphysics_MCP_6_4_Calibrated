@@ -395,6 +395,11 @@ def _entries() -> list[dict[str, Any]]:
             "comsol_mcp.jobs.manager",
         ),
         _entry(
+            "comsol_mcp.launch_marker",
+            "1.0.0",
+            "comsol_mcp.jobs.manager",
+        ),
+        _entry(
             "comsol_mcp.tasks_mapping",
             "1.0.0",
             "comsol_mcp.jobs.tasks_bridge",
