@@ -729,6 +729,14 @@ def test_request_id_unknown_record_resumes_the_preallocated_attempt(
         "interrupted-1", normalized["spec_fingerprint"], preallocated, "unknown"
     )
 
+    from comsol_mcp.jobs import manager as manager_module
+
+    original_write = manager_module._write_launch_marker
+    monkeypatch.setattr(
+        manager_module,
+        "_write_launch_marker",
+        lambda store, job_id: original_write(store, job_id),
+    )
     resumed = manager.submit(spec, request_id="interrupted-1")
 
     assert resumed["job_id"] == preallocated
@@ -1061,3 +1069,86 @@ def test_torn_retained_journal_refuses_resume(tmp_path, ascii_root, monkeypatch)
     with pytest.raises(ValueError):
         manager.resume(job_id)
     assert launches == [job_id]
+
+
+def test_publication_window_retry_waits_for_dispatch_authority(tmp_path, ascii_root, monkeypatch):
+    """C081D-01: a retry during publication never orphans a live dispatcher."""
+    import threading as _threading
+
+    from comsol_mcp.jobs import manager as manager_module
+
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager, "_launch_worker", lambda job_id, module: launches.append(job_id) or identity
+    )
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+    }
+    entered = _threading.Event()
+    release = _threading.Event()
+    original_write = manager_module._write_launch_marker
+
+    def pausable_marker(store, job_id):
+        # Pause BEFORE the marker write: the dispatched record exists while
+        # the dispatcher is provably alive and mid-publication.
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(timeout=30)
+        return original_write(store, job_id)
+
+    monkeypatch.setattr(manager_module, "_write_launch_marker", pausable_marker)
+    outcomes = {}
+    thread = _threading.Thread(
+        target=lambda: outcomes.update({"first": manager.submit(spec, request_id="window-1")})
+    )
+    thread.start()
+    assert entered.wait(timeout=10)
+    release.set()
+    thread.join(timeout=30)
+    assert outcomes["first"]["success"] is True
+
+    # Only after the original dispatcher finished (marker armed, worker
+    # bound) does the retry resolve - and it replays the live job.
+    retry = manager.submit(spec, request_id="window-1")
+    assert retry["success"] is True
+    assert retry["job_id"] == outcomes["first"]["job_id"]
+    state = manager.store.read_state(retry["job_id"])
+    assert state["status"] in {"submitted", "running", "starting"}
+    assert launches == [retry["job_id"]]
+
+
+def test_manager_resolves_request_replay_without_dispatch(ascii_root, tmp_path):
+    """C081D-04: pure resolution powers the bridge's capacity decision."""
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    manager._launch_worker = lambda job_id, module: identity
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+    }
+    assert manager.resolve_request_replay(spec, "unbound-1") is None
+    submitted = manager.submit(spec, request_id="bound-1")
+    # Both the flat spec and the public envelope resolve without launching.
+    replay = manager.resolve_request_replay(spec, "bound-1")
+    assert replay["job_id"] == submitted["job_id"]
+    envelope_replay = manager.resolve_request_replay(
+        {"spec": spec, "request_id": "bound-1"}, "bound-1"
+    )
+    assert envelope_replay["job_id"] == submitted["job_id"]
+    changed = dict(spec)
+    changed["parameter_values"] = [2.0]
+    with pytest.raises(ValueError, match="already durably bound"):
+        manager.resolve_request_replay(changed, "bound-1")

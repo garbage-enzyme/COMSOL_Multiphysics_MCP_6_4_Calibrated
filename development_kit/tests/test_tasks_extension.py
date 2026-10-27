@@ -1436,3 +1436,78 @@ def test_recorded_result_manifest_is_referenced_verbatim(bridge: TasksBridge) ->
         "name": "results.csv.manifest.json",
         "sha256": digest,
     }
+
+
+def test_profiled_engine_accepts_explicit_null_request_id():
+    """C081D-03: explicit null is the schema-legal spelling of omission."""
+    from types import SimpleNamespace
+
+    from comsol_mcp.jobs.tasks_public_engine import ProfiledTasksEngine, TasksMappingError
+
+    engine = ProfiledTasksEngine()
+    observed = []
+
+    def fn(**kwargs):
+        observed.append(kwargs)
+        return {"success": True, "job_id": "same", "status": "submitted", "duplicate": True}
+
+    engine.bind(
+        SimpleNamespace(
+            _tool_manager=SimpleNamespace(_tools={"job_submit": SimpleNamespace(fn=fn)})
+        )
+    )
+    spec = {"job_type": "staged_sweep", "parameter_name": "wl", "parameter_values": [1.0]}
+    engine.submit({"spec": spec, "request_id": None})
+    assert observed[-1] == {"spec": spec}
+    engine.submit({"spec": spec}, request_id="r-1")
+    assert observed[-1] == {"spec": spec, "request_id": "r-1"}
+    engine.submit({"spec": spec, "request_id": "env-1"})
+    assert observed[-1] == {"spec": spec, "request_id": "env-1"}
+    with pytest.raises(TasksMappingError):
+        engine.submit({"spec": spec, "request_id": 5})
+
+
+def test_same_request_replay_passes_capacity_via_resolver(tmp_path, monkeypatch):
+    """C081D-04: durable replay resolution precedes new-row admission."""
+    import comsol_mcp.jobs.tasks_bridge as module
+    from comsol_mcp.jobs.manager import JobManager
+    from comsol_mcp.jobs.store import process_identity
+    from comsol_mcp.jobs.tasks_bridge import TasksBridge, TasksMappingStore
+    from development_kit.tests.test_validation_worker import _raw_spec  # noqa: F401
+
+    source = tmp_path / "model.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(tmp_path / "jobs", preflight=lambda **kw: {"ready": True})
+    manager._launch_worker = lambda job_id, module: process_identity(0) if False else _identity()
+
+    def _identity():
+        import os as _os
+
+        return process_identity(_os.getpid())
+
+    class Engine:
+        def submit(self, args, request_id=None):
+            return manager.submit(args["spec"], request_id=request_id)
+
+        def resolve_request_replay(self, args, request_id):
+            return manager.resolve_request_replay(args["spec"], request_id)
+
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+    }
+    bridge = TasksBridge(engine=Engine(), store=TasksMappingStore(tmp_path / "tasks"), owner="a")
+    arguments = {"spec": spec, "request_id": "same-1"}
+    monkeypatch.setattr(module, "MAX_TASK_ROWS", 1)
+    first = bridge.submit_task(dict(arguments), request_id="same-1", client_extensions=OPT_IN)
+    # The same-request retry needs no new job or row: it replays at capacity.
+    retry = bridge.submit_task(dict(arguments), request_id="same-1", client_extensions=OPT_IN)
+    assert retry["taskId"] == first["taskId"]
+    # A genuinely independent staged submission at the bound still refuses.
+    other = {"spec": {**spec, "parameter_values": [2.0]}, "request_id": "other-1"}
+    with pytest.raises(TasksMappingError) as excinfo:
+        bridge.submit_task(dict(other), request_id="other-1", client_extensions=OPT_IN)
+    assert excinfo.value.code == "tasks_store_capacity"

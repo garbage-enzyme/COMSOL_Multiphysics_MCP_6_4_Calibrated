@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -259,6 +260,23 @@ def _clear_launch_marker(store: Any, job_id: str) -> None:
         (store.job_dir(job_id) / _LAUNCH_MARKER_NAME).unlink()
     except OSError:
         pass
+
+
+def _authoritative_in_flight(root: Path, store: Any, job_id: str) -> bool:
+    """Re-check in-flight status under the submit lock.
+
+    The submitter writes the launch marker while still holding the submit
+    lock and releases only after the marker is durable, so a resolver that
+    acquires the lock and still sees no marker holds authoritative proof
+    the dispatcher cannot be mid-publication: the job is a true orphan.
+    """
+    try:
+        with JobLock(root / ".submit.lock", timeout=30.0):
+            return _launch_marker_alive(store, job_id)
+    except Exception:  # noqa: S110 - lock contention is uncertainty, not liveness
+        # Contention means a submitter is active for this root: treat the
+        # dispatch as in flight rather than risking a duplicate launch.
+        return True
 
 
 def _launch_marker_alive(store: Any, job_id: str) -> bool:
@@ -745,6 +763,11 @@ class JobManager:
                         return binding
                     bound_job_id = binding
                 job_id = self.store.create(spec, state, job_id=bound_job_id)
+                # Arm the launch marker while the submit lock is still held:
+                # once the dispatched record is visible, any resolver that
+                # re-checks under this lock will see the marker and treat the
+                # dispatch as in flight instead of an interruptible orphan.
+                _write_launch_marker(self.store, job_id)
                 if request_id is not None:
                     self._write_request_record(
                         request_id,
@@ -764,6 +787,7 @@ class JobManager:
                 if isinstance(binding, dict):
                     return binding
                 job_id = self.store.create(spec, state, job_id=binding)
+                _write_launch_marker(self.store, job_id)
                 self._write_request_record(
                     request_id,
                     spec["spec_fingerprint"],
@@ -772,14 +796,15 @@ class JobManager:
                     source_fingerprint=source_fingerprint,
                 )
         else:
-            job_id = self.store.create(spec, state)
+            with JobLock(self.store.root / ".submit.lock"):
+                job_id = self.store.create(spec, state)
+                _write_launch_marker(self.store, job_id)
         try:
             self.store.append_event(
                 job_id,
                 "submitted",
                 {"spec_fingerprint": spec["spec_fingerprint"]},
             )
-            _write_launch_marker(self.store, job_id)
             try:
                 identity = self._launch_worker(job_id, worker_module)
                 self.store.bind_worker_identity(job_id, identity)
@@ -910,6 +935,8 @@ class JobManager:
             if (
                 existing_state.get("status") == "submitted"
                 and existing_state.get("worker_pid") is None
+                and not _launch_marker_alive(self.store, job_id)
+                and not _authoritative_in_flight(self.store.root, self.store, job_id)
             ):
                 # Publication happened but no worker identity was ever bound:
                 # the attempt died between publication and launch. Represent
@@ -968,6 +995,7 @@ class JobManager:
             )
         return self._request_replay_with_record(record, job_id)
 
+
     def _request_replay_with_record(
         self, record: dict[str, Any], job_id: str
     ) -> dict[str, Any] | str:
@@ -1004,7 +1032,57 @@ class JobManager:
             raise ValueError(
                 "request binding record is incomplete; repair or remove it before resubmitting"
             )
-        return self._request_replay_with_record(record, job_id)
+        outcome = self._request_replay_with_record(record, job_id)
+        return outcome if isinstance(outcome, dict) else None
+
+    def resolve_request_replay(
+        self, raw_spec: object, request_id: str | None
+    ) -> dict[str, Any] | None:
+        """Resolve a durably bound request WITHOUT dispatching (C081D-04).
+
+        Accepts either a flat engine spec or the public {spec, request_id}
+        envelope. Normalizes the spec to its fingerprint, reads the binding,
+        and returns the replay outcome (dict) when bound, None when the
+        request is unbound; conflicting bindings and damaged records refuse
+        exactly like a dispatch would.
+        """
+        if request_id is None:
+            return None
+        request_id = _validate_request_id(request_id)
+        spec = raw_spec
+        if isinstance(spec, Mapping) and "job_type" not in spec:
+            inner = spec.get("spec")
+            if isinstance(inner, Mapping):
+                spec = inner
+        if not isinstance(spec, Mapping):
+            return None
+        job_type = spec.get("job_type")
+        _refuse_removed_job(job_type)
+        if job_type == "validation_matrix":
+            normalized = normalize_validation_matrix_spec(dict(spec))
+        elif job_type == "thermo_optomechanical_replay":
+            normalized = normalize_thermo_optomechanical_replay_spec(dict(spec))
+        elif job_type == "adjoint_optimization":
+            normalized = expand_adjoint_optimization_manifest(dict(spec))
+        elif job_type == "surrogate_training":
+            normalized = normalize_surrogate_training_spec(dict(spec))
+        else:
+            normalized = validate_staged_sweep_spec(dict(spec))
+        record = self._read_request_record(request_id)
+        if record is None:
+            return None
+        if record.get("spec_fingerprint") != normalized["spec_fingerprint"]:
+            raise ValueError(
+                "request_id is already durably bound to a different submission; "
+                "use a new request_id for an independent submission"
+            )
+        job_id = record.get("job_id")
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError(
+                "request binding record is incomplete; repair or remove it before resubmitting"
+            )
+        outcome = self._request_replay_with_record(record, job_id)
+        return outcome if isinstance(outcome, dict) else None
 
     def _bind_request_under_lock(
         self, request_id: str, spec: dict[str, Any]

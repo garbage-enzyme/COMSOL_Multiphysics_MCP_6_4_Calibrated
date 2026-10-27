@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Any
@@ -246,8 +247,16 @@ def _submit_job(
     validated = validate_staged_sweep_spec(standalone_fields)
     # Resolve durable request authority BEFORE the session handoff repeats
     # its side effects: a lost-response retry with the same caller-side
-    # fingerprint replays its bound outcome without another handoff.
-    source_fingerprint = validated.get("spec_fingerprint")
+    # fingerprint replays its bound outcome without another handoff. The
+    # fingerprint covers the FULL caller request - the standalone sweep
+    # fields AND the attached backend identity (lock and revision hashes,
+    # confirmation) - so a retry that changed any requested backend field
+    # is a different request and must refuse, not replay.
+    import hashlib as _hashlib
+
+    source_fingerprint = _hashlib.sha256(
+        json.dumps(spec, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
     if request_id is not None and source_fingerprint is not None:
         resolver = getattr(manager, "resolve_attached_retry", None)
         if callable(resolver):

@@ -564,6 +564,21 @@ class TasksBridge:
                 duplicate_row is not None
                 and str(capacity_spec.get("job_type")) in ENGINE_DUPLICATE_JOB_TYPES
             )
+            if not reuses_mapping and request_id is not None:
+                # A durably bound same-request replay needs neither a new
+                # job nor a new mapping row: resolve it before new-row
+                # admission so a genuine retry is never refused at capacity.
+                # Engines without a non-dispatching resolver keep the safe
+                # refusal.
+                resolver = getattr(self._engine, "resolve_request_replay", None)
+                if callable(resolver):
+                    replay = resolver(raw_spec, request_id)
+                    if (
+                        isinstance(replay, Mapping)
+                        and isinstance(replay.get("job_id"), str)
+                        and self._store.latest_for_job(replay["job_id"]) is not None
+                    ):
+                        reuses_mapping = True
             if not reuses_mapping:
                 if len(self._store.rows()) >= MAX_TASK_ROWS:
                     raise TasksMappingError(

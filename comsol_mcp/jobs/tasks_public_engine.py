@@ -34,13 +34,39 @@ class ProfiledTasksEngine:
         # The Tasks interceptor forwards the full public argument envelope:
         # a spec object plus, since 0.8.1, an optional bounded request_id
         # that routes the submission through durable response-loss binding.
-        allowed = {"spec"} if request_id is None else {"spec", "request_id"}
-        if set(raw_spec) != allowed or not isinstance(raw_spec["spec"], dict):
+        # An explicit null request_id is the schema-legal spelling of
+        # omission: the envelope may carry the key with a null value.
+        envelope = dict(raw_spec)
+        declared = envelope.pop("request_id", None)
+        if set(envelope) != {"spec"} or not isinstance(envelope["spec"], dict):
             raise TasksMappingError("invalid_spec", "job_submit arguments require one spec object")
-        arguments: dict[str, Any] = {"spec": raw_spec["spec"]}
+        if declared is not None and not isinstance(declared, str):
+            raise TasksMappingError("invalid_request_id", "request_id must be a string or null")
+        if request_id is None and isinstance(declared, str):
+            request_id = declared
+        arguments: dict[str, Any] = {"spec": envelope["spec"]}
         if request_id is not None:
             arguments["request_id"] = request_id
         return self._call("job_submit", arguments)
+
+    def resolve_request_replay(
+        self, raw_spec: dict[str, Any], request_id: str | None
+    ) -> dict[str, Any] | None:
+        """Resolve a durably bound replay WITHOUT dispatching (C081D-04).
+
+        The Tasks bridge consults this before new-row capacity admission so
+        a same-request retry that needs no new job or mapping row is never
+        refused at the boundary. Returns the replay outcome, or None when
+        unbound; conflicting bindings refuse like a dispatch would.
+        """
+        from comsol_mcp.tools import jobs as jobs_module
+
+        manager = getattr(jobs_module, "job_manager", None)
+        delegate = getattr(manager, "resolve_request_replay", None)
+        if not callable(delegate):
+            return None
+        outcome = delegate(raw_spec, request_id)
+        return outcome if isinstance(outcome, dict) else None
 
     def status(self, job_id: str) -> dict[str, Any]:
         return self._call("job_status", {"job_id": job_id})

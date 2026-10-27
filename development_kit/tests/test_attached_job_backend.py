@@ -1335,3 +1335,87 @@ def test_attached_submission_forwards_request_identity_and_replays_pre_handoff(t
     assert retry.get("duplicate") is True
     assert session.prepare_attached_job_handoff.call_count == handoff_calls_before
     assert len(manager.calls) == 1
+
+
+def test_attached_retry_with_changed_backend_identity_refuses():
+    """C081D-02: the caller-side fingerprint covers the whole request."""
+    import tempfile
+    from unittest.mock import MagicMock
+
+    from comsol_mcp.tools.jobs import _submit_job
+
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "model.mph"
+        source.write_bytes(b"attached model")
+
+        fingerprints = []
+
+        class FakeManager:
+            def submit(self, spec, request_id=None, source_fingerprint=None):
+                fingerprints.append(source_fingerprint)
+                return {"success": True, "job_id": "job-a2"}
+
+            def resolve_attached_retry(self, request_id, source_fingerprint):
+                if not fingerprints:
+                    return None
+                if fingerprints[0] != source_fingerprint:
+                    raise ValueError(
+                        "request_id is already durably bound to a different submission"
+                    )
+                return {"success": True, "job_id": "job-a2", "duplicate": True}
+
+        manager = FakeManager()
+        session = MagicMock()
+        session.prepare_attached_job_handoff.return_value = {
+            "success": True,
+            "model": {},
+            "execution_backend": {"kind": "attached_shared_server"},
+        }
+        base = {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "wl",
+            "parameter_values": [1.0],
+            "expressions": ["ewfd.Rtotal"],
+            "execution_backend": {
+                "kind": "attached_shared_server",
+                "expected_lock_sha256": "a" * 64,
+                "expected_revision_sha256": "b" * 64,
+                "user_confirmed_automation_exclusive": True,
+            },
+        }
+        _submit_job(
+            dict(base),
+            profile_name="wave_optics",
+            shared_enabled=True,
+            manager=manager,
+            session_manager=session,
+            request_id="att-1",
+        )
+        changed = dict(
+            base,
+            execution_backend=dict(
+                base["execution_backend"],
+                expected_lock_sha256="c" * 64,
+                expected_revision_sha256="d" * 64,
+            ),
+        )
+        with pytest.raises(ValueError, match="already durably bound"):
+            _submit_job(
+                dict(changed),
+                profile_name="wave_optics",
+                shared_enabled=True,
+                manager=manager,
+                session_manager=session,
+                request_id="att-1",
+            )
+        replay = _submit_job(
+            dict(base),
+            profile_name="wave_optics",
+            shared_enabled=True,
+            manager=manager,
+            session_manager=session,
+            request_id="att-1",
+        )
+        assert replay.get("duplicate") is True
+        assert session.prepare_attached_job_handoff.call_count == 1
