@@ -201,6 +201,20 @@ def _append_duplicate_index_entry(root: Path, fingerprint: str, job_id: str) -> 
     atomic_write_json(root / _DUPLICATE_INDEX_NAME, {"entries": entries})
 
 
+def public_request_fingerprint(spec: Mapping[str, Any]) -> str:
+    """Fingerprint the FULL public request, including attached backend fields.
+
+    Shared by the attached submission path and the replay resolvers so a
+    caller-side identity computed before the session handoff matches the
+    binding the submission writes.
+    """
+    import json as _json
+
+    return hashlib.sha256(
+        _json.dumps(dict(spec), sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+
+
 _REQUEST_BINDING_DIR = "request-bindings"
 
 
@@ -936,38 +950,52 @@ class JobManager:
                 existing_state.get("status") == "submitted"
                 and existing_state.get("worker_pid") is None
                 and not _launch_marker_alive(self.store, job_id)
-                and not _authoritative_in_flight(self.store.root, self.store, job_id)
+            ):
+                # Ambiguous: reread the CURRENT state and marker under the
+                # submit lock before any transition. The launcher binds the
+                # worker identity only after arming the marker under this
+                # same lock, so by the time the lock is free the state is
+                # authoritative: a bound worker means a live completed
+                # dispatch (replay it), an armed marker means in flight, and
+                # only a state still submitted with no worker identity and
+                # no marker is a true orphan whose transition happens here,
+                # inside the lock.
+                try:
+                    with JobLock(self.store.root / ".submit.lock", timeout=30.0):
+                        locked_state = self.store.read_state(job_id)
+                        if (
+                            locked_state.get("status") != "submitted"
+                            or locked_state.get("worker_pid") is not None
+                        ):
+                            existing_state = locked_state
+                        elif _launch_marker_alive(self.store, job_id):
+                            return {
+                                "success": True,
+                                "job_id": job_id,
+                                "status": locked_state["status"],
+                                "duplicate": True,
+                                "action": "request_replay_in_flight",
+                            }
+                        else:
+                            return self._transition_orphan_replay(job_id)
+                except Exception:  # noqa: S110 - contention is uncertainty
+                    # A submitter is active for this root: treat the dispatch
+                    # as in flight rather than risking a duplicate launch.
+                    return {
+                        "success": True,
+                        "job_id": job_id,
+                        "status": existing_state["status"],
+                        "duplicate": True,
+                        "action": "request_replay_in_flight",
+                    }
+            if (
+                existing_state.get("status") == "submitted"
+                and existing_state.get("worker_pid") is None
+                and not _launch_marker_alive(self.store, job_id)
             ):
                 # Publication happened but no worker identity was ever bound:
-                # the attempt died between publication and launch. Represent
-                # the uncertainty durably - marking the orphan interrupted
-                # makes it resumable - and never claim a replayed success.
-                self.store.update_state(
-                    job_id,
-                    "interrupted",
-                    patch={
-                        "last_error": {
-                            "type": "PublishedWithoutLaunch",
-                            "message": (
-                                "The job was published but its worker launch "
-                                "never completed; reconcile with job_status or resume."
-                            ),
-                        }
-                    },
-                    event="request_replay_orphan_reconciled",
-                )
-                return {
-                    "success": False,
-                    "job_id": job_id,
-                    "status": "interrupted",
-                    "duplicate": True,
-                    "action": "reconcile_orphan_then_resume",
-                    "error": (
-                        "the bound job was published but never launched; it is "
-                        "marked interrupted - resume it or inspect job_status "
-                        "before retrying this request_id"
-                    ),
-                }
+                # the attempt died between publication and launch.
+                return self._transition_orphan_replay(job_id)
             return {
                 "success": True,
                 "job_id": job_id,
@@ -995,6 +1023,34 @@ class JobManager:
             )
         return self._request_replay_with_record(record, job_id)
 
+    def _transition_orphan_replay(self, job_id: str) -> dict[str, Any]:
+        """Mark a proven-orphan dispatch interrupted and return its outcome."""
+        self.store.update_state(
+            job_id,
+            "interrupted",
+            patch={
+                "last_error": {
+                    "type": "PublishedWithoutLaunch",
+                    "message": (
+                        "The job was published but its worker launch "
+                        "never completed; reconcile with job_status or resume."
+                    ),
+                }
+            },
+            event="request_replay_orphan_reconciled",
+        )
+        return {
+            "success": False,
+            "job_id": job_id,
+            "status": "interrupted",
+            "duplicate": True,
+            "action": "reconcile_orphan_then_resume",
+            "error": (
+                "the bound job was published but never launched; it is "
+                "marked interrupted - resume it or inspect job_status "
+                "before retrying this request_id"
+            ),
+        }
 
     def _request_replay_with_record(
         self, record: dict[str, Any], job_id: str
@@ -1058,6 +1114,14 @@ class JobManager:
             return None
         job_type = spec.get("job_type")
         _refuse_removed_job(job_type)
+        backend = spec.get("execution_backend")
+        if job_type == "staged_sweep" and isinstance(backend, Mapping) and "spec" not in spec:
+            if "expected_lock_sha256" in backend or "expected_revision_sha256" in backend:
+                # A schema-valid PUBLIC attached request: its identity is the
+                # full public request, resolved through the pre-handoff
+                # contract - never through the expanded internal backend the
+                # submission itself would normalize.
+                return self.resolve_attached_retry(request_id, public_request_fingerprint(spec))
         if job_type == "validation_matrix":
             normalized = normalize_validation_matrix_spec(dict(spec))
         elif job_type == "thermo_optomechanical_replay":

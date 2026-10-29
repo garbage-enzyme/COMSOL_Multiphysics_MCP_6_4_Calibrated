@@ -1152,3 +1152,119 @@ def test_manager_resolves_request_replay_without_dispatch(ascii_root, tmp_path):
     changed["parameter_values"] = [2.0]
     with pytest.raises(ValueError, match="already durably bound"):
         manager.resolve_request_replay(changed, "bound-1")
+
+
+def test_overlapping_retry_rereads_state_under_the_dispatch_lock(ascii_root, tmp_path):
+    """C081E-01: a retry that raced a live launch never interrupts it."""
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    manager._launch_worker = lambda job_id, module: launches.append(job_id) or identity
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+    }
+    submitted = manager.submit(spec, request_id="race-2")
+    job_id = submitted["job_id"]
+
+    # Simulate the race: the retry's first (unlocked) read sees the stale
+    # ambiguous snapshot; by its authoritative locked reread the original
+    # launch has bound the worker and cleared the marker.
+    real_read = manager.store.read_state
+    reads = []
+
+    def racing_read(target):
+        state = real_read(target)
+        if target == job_id:
+            reads.append(1)
+            if len(reads) == 2:
+                manager.store.bind_worker_identity(job_id, identity)
+                state = real_read(target)
+        return state
+
+    manager.store.read_state = racing_read
+    retry = manager._request_record_outcome(
+        manager._read_request_record("race-2"), validate_staged_sweep_spec(spec)
+    )
+    assert retry["success"] is True
+    assert retry["action"] == "request_replay"
+    assert real_read(job_id)["status"] != "interrupted"
+    assert launches == [job_id]
+
+
+def test_public_attached_request_resolves_through_pre_handoff_contract(ascii_root, tmp_path):
+    """C081E-02: schema-valid public attached requests resolve without dispatch."""
+    from unittest.mock import MagicMock
+
+    from comsol_mcp.tools.jobs import _submit_job
+    from development_kit.tests.test_attached_job_backend import _backend
+
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_root / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    manager._launch_worker = lambda job_id, module: launches.append(job_id) or identity
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+        "execution_backend": {
+            "kind": "attached_shared_server",
+            "expected_lock_sha256": "a" * 64,
+            "expected_revision_sha256": "b" * 64,
+            "user_confirmed_automation_exclusive": True,
+        },
+    }
+    # Unbound public attached requests resolve to None and continue to the
+    # registered submission - never a pre-binding normalization refusal.
+    assert manager.resolve_request_replay(spec, "att-9") is None
+
+    session = MagicMock()
+    session.prepare_attached_job_handoff.return_value = {
+        "success": True,
+        "model": {},
+        "execution_backend": _backend(),
+        "detach": {"state": "detached"},
+    }
+    first = _submit_job(
+        dict(spec),
+        profile_name="wave_optics",
+        shared_enabled=True,
+        manager=manager,
+        session_manager=session,
+        request_id="att-9",
+    )
+    assert first["success"] is True
+
+    replay = manager.resolve_request_replay(spec, "att-9")
+    assert replay["job_id"] == first["job_id"]
+    envelope = manager.resolve_request_replay({"spec": spec, "request_id": "att-9"}, "att-9")
+    assert envelope["job_id"] == first["job_id"]
+
+    changed = dict(
+        spec,
+        execution_backend=dict(spec["execution_backend"], expected_lock_sha256="c" * 64),
+    )
+    with pytest.raises(ValueError, match="already durably bound"):
+        manager.resolve_request_replay(changed, "att-9")
+
+    handoffs = session.prepare_attached_job_handoff.call_count
+    again = _submit_job(
+        dict(spec),
+        profile_name="wave_optics",
+        shared_enabled=True,
+        manager=manager,
+        session_manager=session,
+        request_id="att-9",
+    )
+    assert again.get("duplicate") is True
+    assert session.prepare_attached_job_handoff.call_count == handoffs
+    assert len(launches) == 1
