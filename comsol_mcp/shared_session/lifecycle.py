@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import heapq
+import json
 import math
 import os
 import threading
@@ -50,6 +51,8 @@ MAX_REVISION_PROPERTY_TEXT_CHARACTERS = 65536
 MAX_SNAPSHOT_BYTES = 32 * 1024 * 1024 * 1024
 SHARED_MODEL_SNAPSHOT_SCHEMA = "comsol_mcp.shared_model_snapshot"
 SHARED_MODEL_SNAPSHOT_VERSION = "1.0.0"
+ATTACHED_HANDOFF_RECEIPT_DIRECTORY = "attached-handoff-receipts"
+MAX_ATTACHED_HANDOFF_RECEIPTS = 64
 REVISION_TREE_GROUPS = (
     "functions",
     "components",
@@ -72,6 +75,20 @@ def _default_ownership_factory():
     from comsol_mcp.tools.ownership import SolverOwnership
 
     return SolverOwnership()
+
+
+def _default_attached_receipt_root() -> Path:
+    """Durable home for completed attached-handoff receipts (policy-scoped).
+
+    Resolved lazily on first use, never at construction: the production
+    singleton builds at import time, before the environment may be fully
+    configured. Receipts are keyed by the handed-off model lock SHA-256,
+    so the store is identity-bound rather than positional.
+    """
+    from comsol_mcp.path_policy import PathPolicy
+
+    policy = PathPolicy.from_environment()
+    return policy.artifact_write_root / ATTACHED_HANDOFF_RECEIPT_DIRECTORY
 
 
 def _default_client_factory(host: str, port: int):
@@ -338,6 +355,7 @@ class SharedSessionManager:
         save_copy_writer_is_bounded: bool = False,
         manifest_writer: Callable[[Path, dict[str, Any]], None] = _default_manifest_writer,
         clock: Callable[[], float] = time.time,
+        attached_receipt_root: Path | None = None,
     ):
         self._snapshot_provider = snapshot_provider
         self._ownership_factory = ownership_factory
@@ -369,6 +387,12 @@ class SharedSessionManager:
         # reconciliation identity for an admission interrupted after the
         # lifecycle handoff completed but before its caller recorded it.
         self._last_attached_handoff: dict[str, Any] | None = None
+        # Explicit roots win; None defers to the policy-scoped default on
+        # first use so construction never evaluates the environment early.
+        self._attached_receipt_root_override = (
+            None if attached_receipt_root is None else Path(attached_receipt_root)
+        )
+        self._attached_receipt_root_resolved: Path | None = None
 
     def _reset_session_state(self) -> None:
         self._client = None
@@ -1098,13 +1122,106 @@ class SharedSessionManager:
                 "source_revision_sha256": handed_off_revision_sha256,
                 "source_model_path": str(declared_path),
             }
-            # Record the completed handoff BEFORE the caller can observe it:
-            # a caller that dies between this detach and its own durable
-            # recording leaves an admission that can never repeat the
-            # handoff (the model is no longer locked), so this receipt is
-            # the identity its recovery reconciles against.
+            # Record the completed handoff BEFORE the caller can observe it,
+            # durably (identity-bound, survives process replacement) and in
+            # memory (survives the return boundary): a caller that dies
+            # between this detach and its own durable recording leaves an
+            # admission that can never repeat the handoff (the model is no
+            # longer locked), so this receipt is the identity its recovery
+            # reconciles against.
+            self._persist_attached_handoff_receipt(receipt)
             self._last_attached_handoff = receipt
             return dict(receipt)
+
+    def _attached_receipt_root(self) -> Path:
+        if self._attached_receipt_root_resolved is None:
+            override = self._attached_receipt_root_override
+            self._attached_receipt_root_resolved = (
+                _default_attached_receipt_root() if override is None else override
+            )
+        return self._attached_receipt_root_resolved
+
+    @staticmethod
+    def _attached_receipt_path(root: Path, lock_sha256: str) -> Path:
+        return root / f"{lock_sha256}.json"
+
+    def _persist_attached_handoff_receipt(self, receipt: dict[str, Any]) -> None:
+        """Write one identity-bound completed-handoff receipt, best effort.
+
+        The write must never undo a completed detach: on any storage or
+        serialization failure the in-memory slot still serves same-process
+        recovery, and the next handoff retry reports its own truthful
+        failure. Receipts are capped so the runtime directory stays
+        bounded; the request-binding receipt (written by the attached flow
+        once it observes success) remains the primary durable evidence.
+        """
+        try:
+            root = self._attached_receipt_root()
+            root.mkdir(parents=True, exist_ok=True)
+            atomic_write_json(
+                self._attached_receipt_path(root, receipt["source_model_lock_sha256"]),
+                receipt,
+            )
+            self._prune_attached_receipt_files(root)
+        except OSError, TypeError, ValueError:
+            return
+
+    @staticmethod
+    def _prune_attached_receipt_files(root: Path) -> None:
+        try:
+            receipts = [path for path in root.iterdir() if path.is_file()]
+        except OSError:
+            return
+        excess = len(receipts) - MAX_ATTACHED_HANDOFF_RECEIPTS
+        if excess <= 0:
+            return
+        try:
+            receipts.sort(key=lambda path: path.stat().st_mtime)
+        except OSError:
+            return
+        for stale in receipts[:excess]:
+            try:
+                stale.unlink()
+            except OSError:
+                return
+
+    @staticmethod
+    def _matching_attached_receipt(
+        receipt: object,
+        *,
+        expected_lock_sha256: str,
+        expected_revision_sha256: str,
+        source_model_path: str,
+    ) -> dict[str, Any] | None:
+        """Return the receipt when its identity matches exactly, else None."""
+        if not isinstance(receipt, dict):
+            return None
+        if receipt.get("source_model_lock_sha256") != expected_lock_sha256:
+            return None
+        if receipt.get("source_revision_sha256") != expected_revision_sha256:
+            return None
+        try:
+            requested = Path(str(source_model_path)).expanduser().resolve()
+            recorded = Path(str(receipt.get("source_model_path", ""))).expanduser().resolve()
+        except OSError, RuntimeError:
+            return None
+        if os.path.normcase(str(requested)) != os.path.normcase(str(recorded)):
+            return None
+        return receipt
+
+    def _read_durable_attached_receipt(self, lock_sha256: str) -> dict[str, Any] | None:
+        if not isinstance(lock_sha256, str) or len(lock_sha256) != 64:
+            return None
+        if any(character not in "0123456789abcdef" for character in lock_sha256):
+            return None
+        try:
+            with self._attached_receipt_path(self._attached_receipt_root(), lock_sha256).open(
+                "r", encoding="utf-8"
+            ) as handle:
+                payload = json.load(handle)
+        except OSError, ValueError, RuntimeError:
+            return None
+        return payload if isinstance(payload, dict) else None
 
     def completed_attached_handoff(
         self,
@@ -1118,28 +1235,33 @@ class SharedSessionManager:
         A caller recovering an interrupted attached admission lost the
         handoff result between the lifecycle detach and its own durable
         recording; repeating the handoff is impossible because the model is
-        no longer locked. When the expected lock, revision and immutable
-        source match the completed handoff EXACTLY, the recorded receipt is
-        the reconciled identity for completing that admission. Any
-        disagreement returns None so the caller falls through to its normal
-        handoff path.
+        no longer locked. The in-memory slot reconciles same-process loss
+        at the return boundary; the identity-bound durable store reconciles
+        loss across process replacement (a fresh manager and session
+        reconstructed over retained storage). When the expected lock,
+        revision and immutable source match a completed handoff EXACTLY,
+        its receipt is the reconciled identity for completing that
+        admission. Any disagreement returns None so the caller falls
+        through to its normal handoff path.
         """
         with self._lock:
-            receipt = self._last_attached_handoff
-            if not isinstance(receipt, dict):
-                return None
-            if receipt.get("source_model_lock_sha256") != expected_lock_sha256:
-                return None
-            if receipt.get("source_revision_sha256") != expected_revision_sha256:
-                return None
-            try:
-                requested = Path(str(source_model_path)).expanduser().resolve()
-                recorded = Path(str(receipt.get("source_model_path", ""))).expanduser().resolve()
-            except OSError, RuntimeError:
-                return None
-            if os.path.normcase(str(requested)) != os.path.normcase(str(recorded)):
-                return None
-            return dict(receipt)
+            memory = self._matching_attached_receipt(
+                self._last_attached_handoff,
+                expected_lock_sha256=expected_lock_sha256,
+                expected_revision_sha256=expected_revision_sha256,
+                source_model_path=source_model_path,
+            )
+            if memory is not None:
+                return dict(memory)
+            durable = self._matching_attached_receipt(
+                self._read_durable_attached_receipt(expected_lock_sha256),
+                expected_lock_sha256=expected_lock_sha256,
+                expected_revision_sha256=expected_revision_sha256,
+                source_model_path=source_model_path,
+            )
+            if durable is not None:
+                return dict(durable)
+            return None
 
     def recover_attached_job_handoff(
         self,

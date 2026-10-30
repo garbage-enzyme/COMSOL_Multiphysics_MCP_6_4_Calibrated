@@ -276,6 +276,7 @@ def _manager(
         manifest_writer=manifest_writer
         or (lambda path, value: path.write_text(json.dumps(value), encoding="utf-8")),
         clock=lambda: 1100.0,
+        attached_receipt_root=tmp_path / lifecycle_module.ATTACHED_HANDOFF_RECEIPT_DIRECTORY,
     )
     manager._test_snapshot_provider = provider
     manager._test_model_reader = model_reader
@@ -1632,7 +1633,7 @@ def test_detach_independently_checks_preservation_boundaries(
     assert ownership.releases == 1
 
 
-def test_interrupted_attached_admission_recovers_completed_handoff(tmp_path, monkeypatch):
+def test_interrupted_attached_admission_recovers_completed_handoff(ascii_tmp_path, monkeypatch):
     """c081i F02: an exception after the REAL lifecycle detach leaves a
     pending-attached reservation; the retry reconciles the completed
     handoff receipt instead of repeating the (now impossible) handoff."""
@@ -1642,6 +1643,7 @@ def test_interrupted_attached_admission_recovers_completed_handoff(tmp_path, mon
     from src.jobs.store import process_identity
     from src.tools.jobs import _submit_job
 
+    tmp_path = ascii_tmp_path
     source = tmp_path / "interrupted-source.mph"
     source.write_bytes(b"no vendor")
     models = [
@@ -1724,3 +1726,111 @@ def test_interrupted_attached_admission_recovers_completed_handoff(tmp_path, mon
     assert replay["duplicate"] is True
     assert observed == ["attached_job_handoff_ready"]
     assert len(launches) == 1
+
+
+def test_interrupted_attached_admission_recovers_across_process_replacement(
+    ascii_tmp_path, monkeypatch
+):
+    """c081j F02: a fresh session and manager reconstructed over retained
+    storage recover an admission whose lifecycle detach completed before
+    the flow could durably record it - the completed-handoff receipt is
+    identity-bound durable evidence, not process memory."""
+    import os
+
+    from src.jobs.manager import JobManager
+    from src.jobs.store import process_identity
+    from src.tools.jobs import _submit_job
+
+    tmp_path = ascii_tmp_path
+    source = tmp_path / "restarted-source.mph"
+    source.write_bytes(b"no vendor")
+    models = [
+        {
+            "tag": "Model_1",
+            "label": "Working",
+            "file_path": "D:/models/working.mph",
+            "unsaved": False,
+        }
+    ]
+    session, _ownership, _client = _manager(tmp_path, models=models)
+    lock = _attach_saved_and_lock(session, source, collaboration_mode="automation_exclusive")
+    raw = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["R"],
+        "execution_backend": {
+            "kind": "attached_shared_server",
+            "expected_lock_sha256": lock["lock_sha256"],
+            "expected_revision_sha256": lock["revision"]["revision_sha256"],
+            "user_confirmed_automation_exclusive": True,
+        },
+    }
+
+    def build_manager():
+        manager = JobManager(
+            tmp_path / "jobs", preflight=lambda **_k: {"ready": True}, reconcile_on_start=False
+        )
+        identity = process_identity(os.getpid())
+        monkeypatch.setattr(
+            manager,
+            "_launch_worker",
+            lambda job_id, module: launched_job_ids.append(job_id) or identity,
+        )
+        return manager
+
+    launched_job_ids = []
+    manager = build_manager()
+
+    original = session.prepare_attached_job_handoff
+    observed = []
+
+    def interrupt_after_detach(**kwargs):
+        result = original(**kwargs)
+        observed.append(result.get("state"))
+        if result.get("success"):
+            raise RuntimeError("injected interruption after actual detach")
+        return result
+
+    monkeypatch.setattr(session, "prepare_attached_job_handoff", interrupt_after_detach)
+
+    def submit(current_session, current_manager):
+        return _submit_job(
+            dict(raw),
+            profile_name="wave_optics",
+            shared_enabled=True,
+            manager=current_manager,
+            session_manager=current_session,
+            request_id="restarted-1",
+        )
+
+    with pytest.raises(RuntimeError, match="injected interruption"):
+        submit(session, manager)
+
+    binding = manager._read_request_record("restarted-1")
+    assert binding["spec_fingerprint"] == "pending-attached"
+
+    # Process replacement: every in-memory structure is gone; only retained
+    # storage (request binding + identity-bound durable receipt) survives.
+    fresh_session, _ownership2, _client2 = _manager(tmp_path, models=models)
+    fresh_entries = []
+    monkeypatch.setattr(
+        fresh_session,
+        "prepare_attached_job_handoff",
+        lambda **kwargs: fresh_entries.append("entered") or {"success": False},
+    )
+    fresh_manager = build_manager()
+
+    retry = submit(fresh_session, fresh_manager)
+
+    assert retry["success"] is True
+    assert retry["job_id"] == binding["job_id"]
+    assert retry["attached_handoff"]["state"] == "attached_job_handoff_ready"
+    assert retry["attached_handoff"]["detach_state"] == "detached"
+    # The reconstructed lifecycle was never entered: the durable receipt
+    # reconciled the completed handoff and the admission completed under
+    # the reserved id with exactly one launch in total.
+    assert fresh_entries == []
+    assert observed == ["attached_job_handoff_ready"]
+    assert launched_job_ids == [binding["job_id"]]
