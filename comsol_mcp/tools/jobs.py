@@ -236,14 +236,10 @@ def _submit_job(
     if spec.get("job_type") != "staged_sweep":
         raise ValueError("attached execution is currently supported only for staged_sweep jobs")
     from comsol_mcp.jobs.attached_backend import normalize_attached_execution_request
-    from comsol_mcp.jobs.manager import validate_staged_sweep_spec
     from comsol_mcp.tools.shared_session import shared_session_manager
 
     request = normalize_attached_execution_request(execution_request)
     session_manager = session_manager or shared_session_manager
-    standalone_fields = dict(spec)
-    standalone_fields.pop("execution_backend")
-    validated = validate_staged_sweep_spec(standalone_fields)
     # Resolve durable request authority BEFORE the session handoff repeats
     # its side effects: a lost-response retry with the same caller-side
     # fingerprint replays its bound outcome without another handoff. The
@@ -255,11 +251,63 @@ def _submit_job(
 
     source_fingerprint = public_request_fingerprint(spec)
     if request_id is not None and source_fingerprint is not None:
-        resolver = getattr(manager, "resolve_attached_retry", None)
-        if callable(resolver):
-            replay = resolver(request_id, source_fingerprint)
-            if isinstance(replay, dict):
-                return replay
+        # Reserve the request durably BEFORE any handoff side effect, then
+        # resolve any prior binding: an identical in-flight retry observes
+        # the reservation instead of re-entering the lifecycle, and a
+        # changed identity refuses before a second detach could occur.
+        reserver = getattr(manager, "reserve_attached_request", None)
+        if callable(reserver):
+            reserved = reserver(request_id, source_fingerprint)
+            if isinstance(reserved, dict):
+                return reserved
+        else:
+            resolver = getattr(manager, "resolve_attached_retry", None)
+            if callable(resolver):
+                replay = resolver(request_id, source_fingerprint)
+                if isinstance(replay, dict):
+                    return replay
+    # Mark this process as the active attached flow for the request BEFORE
+    # the handoff's side effects: a concurrent identical retry observes the
+    # reservation as in flight; if this flow dies, the stale guard lets the
+    # next retry recover instead of wedging the request.
+    guard_owner = manager if hasattr(manager, "arm_attached_guard") else None
+    if request_id is not None and guard_owner is not None:
+        guard_owner.arm_attached_guard(request_id)
+    try:
+        return _submit_job_attached_flow(
+            spec,
+            profile_name=profile_name,
+            shared_enabled=shared_enabled,
+            manager=manager,
+            session_manager=session_manager,
+            request_id=request_id,
+        )
+    finally:
+        if request_id is not None and guard_owner is not None:
+            guard_owner.disarm_attached_guard(request_id)
+
+
+def _submit_job_attached_flow(
+    spec,
+    *,
+    profile_name: str,
+    shared_enabled: bool,
+    manager,
+    session_manager,
+    request_id,
+):
+    from comsol_mcp.jobs.attached_backend import normalize_attached_execution_request
+    from comsol_mcp.jobs.manager import (
+        JobLaunchError,
+        public_request_fingerprint,
+        validate_staged_sweep_spec,
+    )
+
+    request = normalize_attached_execution_request(spec.get("execution_backend"))
+    standalone_fields = dict(spec)
+    standalone_fields.pop("execution_backend")
+    validated = validate_staged_sweep_spec(standalone_fields)
+    source_fingerprint = public_request_fingerprint(spec)
     handoff = session_manager.prepare_attached_job_handoff(
         expected_lock_sha256=request["expected_lock_sha256"],
         expected_revision_sha256=request["expected_revision_sha256"],

@@ -153,12 +153,35 @@ def _rebuild_duplicate_index(root: Path) -> dict[str, str]:
                 "repair or remove that job before new duplicate-type submissions"
             ) from exc
         if not isinstance(existing, dict):
+            # A retained spec that is valid JSON but not an object loses the
+            # job-type discriminator: this job could be ANY duplicate family,
+            # so skipping it would reopen duplicate admission for it.
+            raise ValueError(
+                f"duplicate index cannot be reconciled: retained job "
+                f"{path.name} spec is not an object; repair or remove that "
+                "job before new duplicate-type submissions"
+            )
+        job_type = existing.get("job_type")
+        if not isinstance(job_type, str) or not job_type:
+            raise ValueError(
+                f"duplicate index cannot be reconciled: retained job "
+                f"{path.name} spec has no job_type; repair or remove that "
+                "job before new duplicate-type submissions"
+            )
+        if job_type not in _DUPLICATE_INDEX_JOB_TYPES:
             continue
-        if existing.get("job_type") not in _DUPLICATE_INDEX_JOB_TYPES:
-            continue
+        # For duplicate families the fingerprint is a mandatory, internally
+        # consistent discriminator: admission wrote it, so a missing or
+        # placeholder fingerprint on a retained duplicate-family spec is
+        # damaged evidence, not absence of duplication.
         fingerprint = existing.get("spec_fingerprint")
-        if isinstance(fingerprint, str) and fingerprint:
-            entries[fingerprint] = path.name
+        if not isinstance(fingerprint, str) or not fingerprint:
+            raise ValueError(
+                f"duplicate index cannot be reconciled: retained job "
+                f"{path.name} spec has no spec_fingerprint; repair or remove "
+                "that job before new duplicate-type submissions"
+            )
+        entries[fingerprint] = path.name
     atomic_write_json(root / _DUPLICATE_INDEX_NAME, {"entries": entries})
     return entries
 
@@ -225,6 +248,7 @@ _REQUEST_BINDING_DIR = "request-bindings"
 #: mapping capacity.
 ENGINE_DUPLICATE_JOB_TYPES = _DUPLICATE_INDEX_JOB_TYPES
 _REQUEST_BINDING_SCHEMA = "comsol_mcp.request_binding"
+_PENDING_ATTACHED_FINGERPRINT = "pending-attached"
 
 
 def _validate_request_id(value: object) -> str:
@@ -1011,6 +1035,16 @@ class JobManager:
     def _request_record_outcome(
         self, record: dict[str, Any], spec: dict[str, Any]
     ) -> dict[str, Any] | str:
+        if record.get("spec_fingerprint") == _PENDING_ATTACHED_FINGERPRINT:
+            # A pre-handoff reservation: the caller identity lives in
+            # source_fingerprint (compared by the resolvers), and this
+            # admission completes the binding under the reserved id.
+            job_id = record.get("job_id")
+            if not isinstance(job_id, str) or not job_id:
+                raise ValueError(
+                    "request binding record is incomplete; repair or remove it before resubmitting"
+                )
+            return job_id
         if record.get("spec_fingerprint") != spec["spec_fingerprint"]:
             raise ValueError(
                 "request_id is already durably bound to a different submission; "
@@ -1063,6 +1097,112 @@ class JobManager:
             )
         return outcome
 
+    def _attached_guard_path(self, request_id: str) -> Path:
+        digest = hashlib.sha256(request_id.encode("utf-8")).hexdigest()
+        return self.store.root / "attached-in-flight" / f"{digest}.json"
+
+    def arm_attached_guard(self, request_id: str) -> None:
+        """Mark this process as actively running the attached flow."""
+        import psutil
+
+        path = self._attached_guard_path(request_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(
+            path,
+            {
+                "pid": os.getpid(),
+                "process_create_time": psutil.Process(os.getpid()).create_time(),
+                "armed_at_epoch": time.time(),
+            },
+        )
+
+    def disarm_attached_guard(self, request_id: str) -> None:
+        try:
+            self._attached_guard_path(request_id).unlink()
+        except OSError:
+            pass
+
+    def _attached_flow_in_flight(self, request_id: str) -> bool:
+        """Whether a live process is mid attached-flow for this request."""
+        try:
+            guard = read_json(self._attached_guard_path(request_id))
+        except OSError, ValueError, RuntimeError:
+            return False
+        if not isinstance(guard, dict):
+            return False
+        pid = guard.get("pid")
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+            return False
+        try:
+            import psutil
+
+            process = psutil.Process(pid)
+            created = guard.get("process_create_time")
+            if isinstance(created, (int, float)) and not isinstance(created, bool):
+                if abs(process.create_time() - float(created)) > 1.0:
+                    return False
+            return True
+        except Exception:  # noqa: S110 - no provable liveness means recoverable
+            return False
+
+    def reserve_attached_request(
+        self, request_id: str, source_fingerprint: str
+    ) -> dict[str, Any] | None:
+        """Durably reserve a request before attached handoff side effects.
+
+        Written BEFORE the session handoff runs: an in-flight identical
+        retry observes the reservation instead of re-entering the
+        lifecycle, and a changed identity refuses. The reservation is
+        completed by the attached admission's dispatched binding (same
+        record, same fingerprints), so an interruption between handoff and
+        publication leaves an UNKNOWN record whose retry reconciles
+        exactly like every other UNKNOWN dispatch.
+        """
+        request_id = _validate_request_id(request_id)
+        with JobLock(self.store.root / ".submit.lock"):
+            record = self._read_request_record(request_id)
+            if record is not None:
+                if record.get("source_fingerprint") != source_fingerprint:
+                    raise ValueError(
+                        "request_id is already durably bound to a different "
+                        "submission; use a new request_id for an independent "
+                        "submission"
+                    )
+                job_id = str(record.get("job_id") or "")
+                if job_id and self.store.job_dir(job_id).exists():
+                    return self._request_replay_with_record(record, job_id)
+                if self._attached_flow_in_flight(request_id):
+                    return self._reservation_in_flight(job_id)
+                # The reserving flow is no longer active (it failed or died
+                # between handoff and publication): recovery proceeds, and
+                # the admission completes the reservation under its id.
+                return None
+            job_id = f"job-{uuid.uuid4().hex}"
+            self._write_request_record(
+                request_id,
+                "pending-attached",
+                job_id,
+                "unknown",
+                source_fingerprint=source_fingerprint,
+            )
+            return None
+
+    @staticmethod
+    def _reservation_in_flight(job_id: str) -> dict[str, Any]:
+        """Truthful outcome for a reserved-but-unpublished attached request."""
+        return {
+            "success": False,
+            "job_id": job_id,
+            "status": "reserved",
+            "duplicate": True,
+            "action": "request_reservation_in_flight",
+            "error": (
+                "this request_id holds a durable pre-handoff reservation whose "
+                "submission has not published yet; retry after job_status "
+                "shows the job, or reconcile if it never appears"
+            ),
+        }
+
     def resolve_attached_retry(
         self, request_id: str, source_fingerprint: str
     ) -> dict[str, Any] | None:
@@ -1088,8 +1228,10 @@ class JobManager:
             raise ValueError(
                 "request binding record is incomplete; repair or remove it before resubmitting"
             )
-        outcome = self._request_replay_with_record(record, job_id)
-        return outcome if isinstance(outcome, dict) else None
+        if self.store.job_dir(job_id).exists():
+            outcome = self._request_job_replay(job_id)
+            return outcome if isinstance(outcome, dict) else None
+        return self._reservation_in_flight(job_id)
 
     def resolve_request_replay(
         self, raw_spec: object, request_id: str | None
@@ -1177,21 +1319,52 @@ class JobManager:
             job_id = rebuilt.get(spec_fingerprint)
             if job_id is None:
                 return None
+        if not (self.store.root / job_id).is_dir():
+            # The whole job directory is gone: retention legitimately removes
+            # jobs, and the index entry is dead history. Drop it.
+            entries.pop(spec_fingerprint, None)
+            atomic_write_json(self.store.root / _DUPLICATE_INDEX_NAME, {"entries": entries})
+            return None
         try:
             existing = read_json(self.store.root / job_id / "spec.json")
-        except OSError, ValueError, RuntimeError:
-            existing = None
-        if (
-            isinstance(existing, dict)
-            and existing.get("job_type") == job_type
-            and existing.get("spec_fingerprint") == spec_fingerprint
-        ):
+        except (OSError, ValueError, RuntimeError) as exc:
+            # The directory survives but its evidence is unreadable: that is
+            # uncertain retained evidence, not proof the entry is dead
+            # history.
+            raise ValueError(
+                f"duplicate index cannot be reconciled: retained job "
+                f"{job_id} spec is unreadable ({type(exc).__name__}); repair "
+                "or remove that job before new duplicate-type submissions"
+            ) from exc
+        if not isinstance(existing, dict) or not isinstance(existing.get("job_type"), str):
+            raise ValueError(
+                f"duplicate index cannot be reconciled: retained job "
+                f"{job_id} spec lost its object shape or job_type; repair or "
+                "remove that job before new duplicate-type submissions"
+            )
+        if existing.get("job_type") != job_type:
+            # The entry maps a fingerprint to a job of a different family:
+            # dead history, drop it.
+            entries.pop(spec_fingerprint, None)
+            atomic_write_json(self.store.root / _DUPLICATE_INDEX_NAME, {"entries": entries})
+            return None
+        stored = existing.get("spec_fingerprint")
+        if stored == spec_fingerprint:
             return job_id
-        # The recorded job no longer matches or is gone; drop the stale entry
-        # instead of refusing future submissions against dead history.
-        entries.pop(spec_fingerprint, None)
-        atomic_write_json(self.store.root / _DUPLICATE_INDEX_NAME, {"entries": entries})
-        return None
+        if not isinstance(stored, str) or not stored:
+            raise ValueError(
+                f"duplicate index cannot be reconciled: retained job "
+                f"{job_id} spec has no spec_fingerprint; repair or remove "
+                "that job before new duplicate-type submissions"
+            )
+        # Same family, but the retained fingerprint disagrees with the index:
+        # uncertain evidence on BOTH mappings - refuse instead of silently
+        # dropping a possibly-live duplicate.
+        raise ValueError(
+            f"duplicate index cannot be reconciled: retained job "
+            f"{job_id} spec fingerprint disagrees with the index; repair or "
+            "remove that job before new duplicate-type submissions"
+        )
 
     def _run_preflight(self, spec: dict[str, Any]) -> dict[str, Any]:
         if spec.get("job_type") == "surrogate_training":

@@ -802,7 +802,7 @@ def test_unreadable_retained_spec_fails_closed_for_new_submissions(
     first = manager.submit(_raw_spec(source))
 
     (jobs_root / first["job_id"] / "spec.json").write_text("{torn", encoding="ascii")
-    with pytest.raises(ValueError, match="unreadable spec"):
+    with pytest.raises(ValueError, match="unreadable"):
         manager.submit(_raw_spec(source))
 
 
@@ -1267,4 +1267,143 @@ def test_public_attached_request_resolves_through_pre_handoff_contract(ascii_roo
     )
     assert again.get("duplicate") is True
     assert session.prepare_attached_job_handoff.call_count == handoffs
+    assert len(launches) == 1
+
+
+def test_semantically_damaged_retained_specs_fail_closed(ascii_tmp_path, monkeypatch):
+    """C081F-01: damaged-but-valid-JSON retained evidence refuses admission."""
+    source = ascii_tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    damage = {
+        "no_fingerprint": lambda document: document.pop("spec_fingerprint"),
+        "no_job_type": lambda document: document.pop("job_type"),
+        "wrong_fingerprint": lambda document: document.update(spec_fingerprint="0" * 64),
+    }
+    for label, mutate in damage.items():
+        jobs_root = ascii_tmp_path / f"dmg-{label}" / "jobs"
+        manager = JobManager(jobs_root, preflight=lambda **_kwargs: {"ready": True})
+        identity = process_identity(os.getpid())
+        launches = []
+        monkeypatch.setattr(
+            manager,
+            "_launch_worker",
+            lambda job_id, module: launches.append(job_id) or identity,
+        )
+        first = manager.submit(_raw_spec(source))
+        spec_path = jobs_root / first["job_id"] / "spec.json"
+        document = json.loads(spec_path.read_text(encoding="utf-8"))
+        mutate(document)
+        spec_path.write_text(json.dumps(document), encoding="utf-8")
+        with pytest.raises(ValueError, match="cannot be reconciled"):
+            manager.submit(_raw_spec(source))
+        assert len(launches) == 1, label
+
+
+def test_indexed_lookup_validates_retained_evidence_consistency(ascii_tmp_path, monkeypatch):
+    """C081F-01 indexed path: a changed retained fingerprint refuses."""
+    source = ascii_tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    jobs_root = ascii_tmp_path / "indexed" / "jobs"
+    manager = JobManager(jobs_root, preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda job_id, module: launches.append(job_id) or identity,
+    )
+    first = manager.submit(_raw_spec(source))
+    spec_path = jobs_root / first["job_id"] / "spec.json"
+    document = json.loads(spec_path.read_text(encoding="utf-8"))
+    document["spec_fingerprint"] = "f" * 64
+    spec_path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ValueError, match="disagrees with the index"):
+        manager.submit(_raw_spec(source))
+    assert launches == [first["job_id"]]
+
+
+def test_attached_retry_observes_pre_handoff_reservation(ascii_tmp_path):
+    """C081F-02: identical in-flight retries see the reservation, not a
+    second lifecycle entry; changed identity refuses before any handoff."""
+    from unittest.mock import MagicMock
+
+    from comsol_mcp.tools.jobs import _submit_job
+    from development_kit.tests.test_attached_job_backend import _backend
+
+    source = ascii_tmp_path / "model.mph"
+    source.write_bytes(b"attached model")
+    manager = JobManager(ascii_tmp_path / "jobs2", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    manager._launch_worker = lambda job_id, module: launches.append(job_id) or identity
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+        "execution_backend": {
+            "kind": "attached_shared_server",
+            "expected_lock_sha256": "a" * 64,
+            "expected_revision_sha256": "b" * 64,
+            "user_confirmed_automation_exclusive": True,
+        },
+    }
+
+    from comsol_mcp.jobs.manager import public_request_fingerprint
+
+    session = MagicMock()
+    session.prepare_attached_job_handoff.return_value = {
+        "success": True,
+        "model": {},
+        "execution_backend": _backend(),
+        "detach": {"state": "detached"},
+    }
+
+    # PAUSED original: reservation written and the attached-flow guard held
+    # by a live process - the identical retry observes the reservation as
+    # in flight and never re-enters the lifecycle.
+    manager.reserve_attached_request("gap-1", public_request_fingerprint(spec))
+    manager.arm_attached_guard("gap-1")
+    try:
+        retry = _submit_job(
+            dict(spec),
+            profile_name="wave_optics",
+            shared_enabled=True,
+            manager=manager,
+            session_manager=session,
+            request_id="gap-1",
+        )
+        assert retry["success"] is False
+        assert retry["action"] == "request_reservation_in_flight"
+        assert session.prepare_attached_job_handoff.call_count == 0
+    finally:
+        manager.disarm_attached_guard("gap-1")
+
+    changed = dict(
+        spec,
+        execution_backend=dict(spec["execution_backend"], expected_lock_sha256="c" * 64),
+    )
+    with pytest.raises(ValueError, match="already durably bound"):
+        _submit_job(
+            dict(changed),
+            profile_name="wave_optics",
+            shared_enabled=True,
+            manager=manager,
+            session_manager=session,
+            request_id="gap-1",
+        )
+
+    # RECOVERY: the flow died between handoff and publication (guard gone);
+    # a fresh submission under the same request completes the reservation -
+    # the reserved id is reused, exactly one launch.
+    completed = _submit_job(
+        dict(spec),
+        profile_name="wave_optics",
+        shared_enabled=True,
+        manager=manager,
+        session_manager=session,
+        request_id="gap-1",
+    )
+    assert completed["success"] is True
     assert len(launches) == 1
