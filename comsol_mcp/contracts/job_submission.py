@@ -14,12 +14,13 @@ from .wavelength_policy import StrictWavelengthPolicy
 MAX_PUBLIC_TEXT = 4096
 MAX_PUBLIC_PATH = 1024
 MAX_JOB_COLLECTION = 2048
-#: The staged sweep journals four resource entries per point plus a startup
-#: reserve against the durable 4096-entry limit, so the public point bound a
-#: sweep can actually admit is (4096 - 8) // 4 = 1022. Advertising the generic
-#: collection bound here would let a caller submit sweeps that admission
-#: always refuses.
-MAX_STAGED_SWEEP_POINTS = 1022
+#: Caller decision 2026-10-30 (B081-017): retain an actually USABLE
+#: 2048-point staged-sweep bound. The durable resource journal reaches that
+#: through bounded segmentation (four entries per point plus a startup
+#: reserve roll across bounded resource-segment-N.jsonl files), so the
+#: public bound matches what admission really accepts instead of
+#: advertising 2048 while unconditionally refusing beyond 1022 points.
+MAX_STAGED_SWEEP_POINTS = 2048
 #: The validation matrix is the one job family whose runtime point bound is
 #: deliberately narrower than the generic collection bound; the schema and
 #: the runtime normalizer share this single constant.

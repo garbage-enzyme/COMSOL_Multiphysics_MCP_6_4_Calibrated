@@ -248,3 +248,22 @@ def test_job_submission_dict_deep_copies_plain_dicts():
 
     submitted["physical_bounds"]["wl"]["min"] = -5
     assert snapshot["physical_bounds"]["wl"]["min"] == 999
+
+
+def test_staged_sweep_public_point_bound_is_usable_2048():
+    """B081-017 (caller decision 2026-10-30): the public bound is an
+    actually usable 2048 points - the segmented journal admits what the
+    schema advertises, and 2049 still refuses at the contract."""
+    from src.contracts.job_submission import MAX_STAGED_SWEEP_POINTS
+
+    assert MAX_STAGED_SWEEP_POINTS == 2048
+    base = {
+        "job_type": "staged_sweep",
+        "source_model_path": "D:/models/fixture.mph",
+        "parameter_name": "wl",
+        "parameter_values": [1.0 + 0.001 * index for index in range(2048)],
+        "expressions": ["ewfd.Rtotal"],
+    }
+    assert len(validate_job_submission(base)["parameter_values"]) == 2048
+    with pytest.raises(ValidationError, match="too_long"):
+        validate_job_submission(dict(base, parameter_values=base["parameter_values"] + [2.0]))

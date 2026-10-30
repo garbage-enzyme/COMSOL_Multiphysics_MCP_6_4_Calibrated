@@ -53,7 +53,7 @@ _SAMPLE_FIELDS = frozenset(
     }
 )
 _STAGES = frozenset({"pre_mesh", "post_mesh", "pre_solve", "post_solve", "recovery"})
-_RESOURCE_JOURNAL_NAME = re.compile(r"resource(?:-level-\d+|-state-\d+)?\.jsonl\Z")
+_RESOURCE_JOURNAL_NAME = re.compile(r"resource(?:-level-\d+|-state-\d+|-segment-\d+)?\.jsonl\Z")
 _COLLECTOR_FIELDS = frozenset(
     {
         "process_id",
@@ -68,26 +68,44 @@ RESOURCE_JOURNAL_MAX_ENTRY_BYTES = 64 * 1024
 #: Startup stages write journal entries before any point work begins; the
 #: reserve bounds that fixed cost for admission-time capacity accounting.
 RESOURCE_JOURNAL_STARTUP_ENTRY_RESERVE = 8
+#: Bounded segmentation (caller decision 2026-10-30, B081-017): the durable
+#: journal rolls into ``resource-segment-N.jsonl`` files when a segment
+#: reaches the per-file entry limit, so a usable 2048-point sweep (8 startup
+#: + 4 x 2048 = 8200 entries) keeps complete history without raising any
+#: per-file limit or truncating anything. The SEGMENT COUNT stays bounded:
+#: four segments hold 16384 entries, which is the 2048-point public sweep
+#: bound plus retry/resume headroom, and exhaustion refuses with export
+#: guidance instead of growing without limit.
+RESOURCE_JOURNAL_MAX_SEGMENTS = 4
 
 
 def resource_journal_capacity_verdict(total_points: int) -> dict[str, Any]:
-    """Admission-time accounting for the durable resource journal.
+    """Admission-time accounting for the durable, segmented resource journal.
 
     Every admitted point journals a telemetry sample and a decision entry
     for the pre-solve stage, and the same pair again for the post-solve
-    stage: four entries per point, plus the startup reserve. Refusing when
-    that bound cannot fit keeps a sweep from dying mid-run against the
-    journal limit; retries and resumes may still consume headroom above the
-    bound, and the journal reader keeps its hard entry limit as the
-    backstop. No limit is raised and no history is truncated by this check.
+    stage: four entries per point, plus the startup reserve. Capacity is
+    the per-segment entry limit times the bounded segment count; the
+    required lower bound may span several segments. Refusing when that
+    total cannot fit keeps a sweep from dying mid-run against the journal
+    limit; retries and resumes may still consume headroom above the bound,
+    and each segment's reader keeps its hard entry limit as the backstop.
+    No per-file limit is raised and no history is truncated by this check.
     """
     points = _positive_integer(total_points, "total_points")
     required = RESOURCE_JOURNAL_STARTUP_ENTRY_RESERVE + 4 * points
+    segment_capacity = RESOURCE_JOURNAL_MAX_ENTRIES
+    total_capacity = segment_capacity * RESOURCE_JOURNAL_MAX_SEGMENTS
+    segments_needed = -(-required // segment_capacity)
     return {
         "total_points": points,
         "required_entries_lower_bound": required,
-        "max_entries": RESOURCE_JOURNAL_MAX_ENTRIES,
-        "fits": required <= RESOURCE_JOURNAL_MAX_ENTRIES,
+        "max_entries": segment_capacity,
+        "segment_max_entries": segment_capacity,
+        "max_segments": RESOURCE_JOURNAL_MAX_SEGMENTS,
+        "max_total_entries": total_capacity,
+        "segments_needed": segments_needed,
+        "fits": required <= total_capacity,
     }
 
 
@@ -1097,8 +1115,8 @@ def replay_resource_journal(
     normalized_expected_policy = normalize_resource_policy(expected_policy)
     if not isinstance(entries, list):
         raise ValueError("resource journal entries must be a list")
-    if len(entries) > RESOURCE_JOURNAL_MAX_ENTRIES:
-        raise ValueError("resource journal exceeds the entry limit")
+    if len(entries) > RESOURCE_JOURNAL_MAX_ENTRIES * RESOURCE_JOURNAL_MAX_SEGMENTS:
+        raise ValueError("resource journal exceeds the bounded entry limit")
     if not isinstance(completed_point_ids, (list, tuple, set, frozenset)):
         raise ValueError("completed_point_ids must be a collection")
     completed = {_identifier(item, "completed_point_id") for item in completed_point_ids}
@@ -1372,6 +1390,7 @@ class ResourceStageAdapter:
 
 __all__ = [
     "RESOURCE_JOURNAL_MAX_ENTRIES",
+    "RESOURCE_JOURNAL_MAX_SEGMENTS",
     "ResourceStageAdapter",
     "build_resource_admission_entries",
     "build_resource_calibration_report",

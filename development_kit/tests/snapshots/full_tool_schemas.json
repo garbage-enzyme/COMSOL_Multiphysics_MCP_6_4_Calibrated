@@ -2411,7 +2411,7 @@
               "ge": -1e+308,
               "le": 1e+308
             },
-            "maxItems": 1022,
+            "maxItems": 2048,
             "minItems": 1,
             "title": "Parameter Values",
             "type": "array"
@@ -3034,7 +3034,7 @@
               "ge": -1e+308,
               "le": 1e+308
             },
-            "maxItems": 1022,
+            "maxItems": 2048,
             "minItems": 1,
             "title": "Parameter Values",
             "type": "array"

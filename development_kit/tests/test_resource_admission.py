@@ -1220,3 +1220,123 @@ def test_windows_reports_pagefile_io_as_unknown_not_measured_zero(monkeypatch, t
             ]
     finally:
         monkeypatch.setattr(module.os, "name", real_os_name, raising=False)
+
+
+def _segmentation_pairs(count, *, first_pair_index):
+    """Replay-valid telemetry+admission pairs with globally ordered sequences."""
+    entries: list[dict] = []
+    for offset in range(count):
+        entries.extend(
+            build_resource_admission_entries(
+                attempt=1,
+                point_id=f"point-{first_pair_index + offset}",
+                attempt_sequence=2 * (first_pair_index + offset),
+                policy=POLICY,
+                sample=normalize_telemetry_sample(sample(stage="pre_solve")),
+            )
+        )
+    return entries
+
+
+def test_resource_journal_segments_roll_bounded_without_truncating_history(ascii_jobs_root):
+    """B081-017: the journal rolls into bounded resource-segment-N files.
+
+    The per-file entry limit is never exceeded, history is never truncated,
+    and the default read returns the logical whole journal across segments.
+    """
+    from src.jobs.resource_admission import RESOURCE_JOURNAL_MAX_ENTRIES
+
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "running"})
+    job_dir = store.job_dir(job_id)
+    pair_index = 0
+
+    def append_pairs(count):
+        nonlocal pair_index
+        store.append_resource_journal(
+            job_id,
+            _segmentation_pairs(count, first_pair_index=pair_index),
+            expected_policy=POLICY,
+        )
+        pair_index += count
+
+    # Fill the base file exactly to its per-file limit: no roll yet.
+    append_pairs(2048)
+    assert [path.name for path in job_dir.glob("resource*.jsonl")] == ["resource.jsonl"]
+
+    # The next pairs cannot fit the base whole: they roll into segment 2.
+    append_pairs(2)
+    assert sorted(path.name for path in job_dir.glob("resource*.jsonl")) == [
+        "resource-segment-2.jsonl",
+        "resource.jsonl",
+    ]
+    logical = store.read_resource_journal(job_id)
+    assert len(logical) == 4100
+    for path in job_dir.glob("resource*.jsonl"):
+        assert path.read_text(encoding="utf-8").count(chr(10)) <= RESOURCE_JOURNAL_MAX_ENTRIES
+
+
+def test_resource_journal_missing_interior_segment_refuses(ascii_jobs_root):
+    """A missing interior segment is damaged evidence, not absence."""
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "running"})
+    pair_index = 0
+
+    def append_pairs(count):
+        nonlocal pair_index
+        store.append_resource_journal(
+            job_id,
+            _segmentation_pairs(count, first_pair_index=pair_index),
+            expected_policy=POLICY,
+        )
+        pair_index += count
+
+    append_pairs(2048)  # base exactly full
+    append_pairs(2048)  # segment 2 exactly full
+    append_pairs(1)  # rolls into segment 3
+    job_dir = store.job_dir(job_id)
+    assert (job_dir / "resource-segment-3.jsonl").is_file()
+
+    (job_dir / "resource-segment-2.jsonl").unlink()
+    with pytest.raises(ValueError, match="not contiguous"):
+        store.read_resource_journal(job_id)
+
+
+def test_resource_journal_refuses_oversized_batches_and_segment_exhaustion(
+    ascii_jobs_root, monkeypatch
+):
+    """A batch larger than one segment never places; exhausting the bounded
+    segment count refuses with export guidance instead of growing without
+    bound."""
+    import comsol_mcp.jobs.resource_admission as admission_module
+
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "running"})
+
+    with pytest.raises(ValueError, match="per-segment entry limit"):
+        store.append_resource_journal(
+            job_id, _segmentation_pairs(2049, first_pair_index=0), expected_policy=POLICY
+        )
+
+    # Large batches roll early (the active segment must fit a batch whole),
+    # so three 3000-entry batches reach the segment-count limit while the
+    # TOTAL bound still has room - isolating the roll refusal from the
+    # replay-total refusal that guards the same budget.
+    monkeypatch.setattr(admission_module, "RESOURCE_JOURNAL_MAX_SEGMENTS", 3)
+    pair_index = 0
+
+    def append_pairs(count):
+        nonlocal pair_index
+        store.append_resource_journal(
+            job_id,
+            _segmentation_pairs(count, first_pair_index=pair_index),
+            expected_policy=POLICY,
+        )
+        pair_index += count
+
+    append_pairs(1500)  # base holds 3000 of its 4096-entry budget
+    append_pairs(1500)  # rolls into segment 2
+    append_pairs(1500)  # rolls into segment 3 (the bounded maximum)
+    assert (store.job_dir(job_id) / "resource-segment-3.jsonl").is_file()
+    with pytest.raises(ValueError, match="segments are exhausted"):
+        append_pairs(1500)

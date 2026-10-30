@@ -622,45 +622,56 @@ def test_resource_journal_capacity_gates_admission_before_launch(tmp_path, ascii
         lambda job_id, module: launches.append(job_id) or identity,
     )
 
-    oversized = _raw_spec(source, points=2045)
-    oversized["parameter_name"] = "wl"
-    oversized["parameter_values"] = [1.0 + 0.001 * index for index in range(2045)]
+    # Caller decision 2026-10-30 (B081-017): an actually usable 2048-point
+    # sweep must be ADMITTED - the journal reaches it through bounded
+    # segmentation, not by refusing everything beyond 1022 points.
+    admitted = manager.submit(
+        {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "wl",
+            "parameter_values": [1.0 + 0.001 * index for index in range(2045)],
+            "expressions": ["ewfd.Rtotal"],
+        }
+    )
+    assert admitted["success"] is True
+    assert launches == [admitted["job_id"]]
+
+    # Four journal entries per point (pre-solve and post-solve telemetry and
+    # decision pairs) plus the startup reserve, spread across bounded
+    # segments: 1022 points fit one segment, 1023 rolls into a second, and
+    # the 2048-point public bound needs three of the four bounded segments.
+    verdict = admission_module.resource_journal_capacity_verdict(1023)
+    assert verdict == {
+        "total_points": 1023,
+        "required_entries_lower_bound": 4100,
+        "max_entries": 4096,
+        "segment_max_entries": 4096,
+        "max_segments": 4,
+        "max_total_entries": 16384,
+        "segments_needed": 2,
+        "fits": True,
+    }
+    assert admission_module.resource_journal_capacity_verdict(1022)["segments_needed"] == 1
+    assert admission_module.resource_journal_capacity_verdict(1024)["fits"] is True
+    assert admission_module.resource_journal_capacity_verdict(1025)["fits"] is True
+    assert admission_module.resource_journal_capacity_verdict(2048)["segments_needed"] == 3
+    assert admission_module.resource_journal_capacity_verdict(2048)["fits"] is True
+
+    # The engine-side gate still refuses work whose journal bound cannot fit
+    # even the bounded segment total (4095 direct-engine points need 16388
+    # entries against 16384; the public contract bound stops callers first).
     with pytest.raises(ValueError, match="resource journal cannot hold"):
         manager.submit(
             {
                 "job_type": "staged_sweep",
                 "source_model_path": str(source),
                 "parameter_name": "wl",
-                "parameter_values": [1.0 + 0.001 * index for index in range(2045)],
+                "parameter_values": [1.0 + 0.001 * index for index in range(4095)],
                 "expressions": ["ewfd.Rtotal"],
             }
         )
-    assert launches == []
-    assert not any(path.name.startswith("job-") for path in (ascii_root / "jobs").iterdir())
-
-    admitted = manager.submit(
-        {
-            "job_type": "staged_sweep",
-            "source_model_path": str(source),
-            "parameter_name": "wl",
-            "parameter_values": [1.0],
-            "expressions": ["ewfd.Rtotal"],
-        }
-    )
-    assert admitted["success"] is True
-    assert len(launches) == 1
-
-    # Four journal entries per point (pre-solve and post-solve telemetry and
-    # decision pairs) plus the startup reserve; the earlier two-per-point
-    # bound admitted sweeps that could only die at the 4096-entry limit.
-    verdict = admission_module.resource_journal_capacity_verdict(1023)
-    assert verdict == {
-        "total_points": 1023,
-        "required_entries_lower_bound": 4100,
-        "max_entries": 4096,
-        "fits": False,
-    }
-    assert admission_module.resource_journal_capacity_verdict(1022)["fits"] is True
+    assert launches == [admitted["job_id"]]
 
 
 def test_request_id_binds_response_loss_retries_to_one_attempt(tmp_path, ascii_root, monkeypatch):
@@ -1495,3 +1506,85 @@ def test_attached_handoff_receipt_roundtrip_and_published_noop(ascii_tmp_path, m
     # dispatch outcome; the receipt stops being reconciliation evidence.
     assert manager.attached_handoff_receipt("receipt-1") is None
     assert len(launches) == 1
+
+
+def test_resume_accounts_for_retained_entries_across_segments(ascii_tmp_path, monkeypatch):
+    """B081-017: a resume inherits retained journal entries across bounded
+    segments; the gate compares against the bounded segment TOTAL, so a
+    resumed sweep whose retained history already spans segments proceeds,
+    and only exhausting the total refuses (no native solves involved)."""
+    from src.jobs.resource_admission import (
+        build_resource_admission_entries,
+        normalize_telemetry_sample,
+    )
+
+    from development_kit.tests.test_resource_admission import POLICY, sample
+
+    source = ascii_tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_tmp_path / "jobs", preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda job_id, module: launches.append(job_id) or identity,
+    )
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0, 2.0],
+        "expressions": ["ewfd.Rtotal"],
+    }
+
+    def retained_pairs(job_id, pairs):
+        start = len(manager.store.read_resource_journal(job_id)) // 2
+        # Batches must fit one segment whole, so pairs are appended in
+        # bounded chunks of 2048 pairs (4096 entries) that pack segments
+        # exactly for the exhaustion phase below.
+        for chunk_start in range(start, start + pairs, 2048):
+            entries: list[dict] = []
+            for offset in range(chunk_start, min(chunk_start + 2048, start + pairs)):
+                entries.extend(
+                    build_resource_admission_entries(
+                        attempt=1,
+                        point_id=f"point-{offset}",
+                        attempt_sequence=2 * offset,
+                        policy=POLICY,
+                        sample=normalize_telemetry_sample(sample(stage="pre_solve")),
+                    )
+                )
+            manager.store.append_resource_journal(job_id, entries, expected_policy=POLICY)
+
+    # Retained history spans two segments (8190 entries > any single
+    # segment); the old single-segment math would have refused this resume.
+    first = manager.submit(dict(spec))
+    job_id = first["job_id"]
+    retained_pairs(job_id, 4095)
+    manager.store.update_state(
+        job_id,
+        "failed",
+        patch={"last_error": {"type": "Injected", "message": "test failure"}},
+        event="test_injected_failure",
+    )
+    assert any((ascii_tmp_path / "jobs" / job_id).glob("resource-segment-*.jsonl"))
+    assert manager._retained_resource_journal_entries(job_id) == 8190
+    resumed = manager.resume(job_id)
+    assert resumed["success"] is True
+    assert len(launches) == 2
+
+    # Exhausting the bounded segment total refuses with export guidance.
+    second = manager.submit(dict(spec, parameter_values=[1.0, 2.0, 3.0]))
+    retained_pairs(second["job_id"], 8192)
+    manager.store.update_state(
+        second["job_id"],
+        "failed",
+        patch={"last_error": {"type": "Injected", "message": "test failure"}},
+        event="test_injected_failure",
+    )
+    with pytest.raises(ValueError, match="cannot hold the resumed sweep"):
+        manager.resume(second["job_id"])
+    # Job 1 launch + job 1 resume launch + job 2 launch; the refused
+    # resume never launches anything.
+    assert len(launches) == 3

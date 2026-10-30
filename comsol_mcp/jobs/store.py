@@ -62,7 +62,12 @@ TRANSITIONS = {
 
 _PROCESS_GUARD_REGISTRY_LOCK = threading.Lock()
 _PROCESS_GUARDS: WeakValueDictionary[str, Any] = WeakValueDictionary()
-_RESOURCE_JOURNAL_NAME = re.compile(r"resource(?:-level-\d+|-state-\d+)?\.jsonl\Z")
+_RESOURCE_JOURNAL_NAME = re.compile(r"resource(?:-level-\d+|-state-\d+|-segment-\d+)?\.jsonl\Z")
+_RESOURCE_JOURNAL_SEGMENT_NAME = re.compile(r"resource-segment-(\d+)\.jsonl\Z")
+#: The default journal base name: reads of the base resolve the base file
+#: plus every contiguous ``resource-segment-N.jsonl`` in order, so callers
+#: observe one logical journal while each physical file stays bounded.
+_RESOURCE_JOURNAL_BASE_NAME = "resource.jsonl"
 
 
 def _validate_resource_journal_name(name: str) -> str:
@@ -835,18 +840,67 @@ class JobStore:
                     raise ValueError("resource journal exceeds the entry limit")
         return entries
 
+    def _resource_journal_files(self, job_dir: Path, journal_name: str) -> list[Path]:
+        """Resolve the physical journal files for one logical journal name.
+
+        The default base name resolves the base file plus every contiguous
+        ``resource-segment-N.jsonl`` in ascending order (segments number
+        from 2, so the base is unambiguously segment 1). A gap between
+        existing segments is damaged evidence, not absence: silently
+        skipping it would hide retained history, so it refuses. An explicit
+        non-base name always addresses exactly one physical file.
+        """
+        if journal_name != _RESOURCE_JOURNAL_BASE_NAME:
+            return [job_dir / journal_name]
+        files = [job_dir / journal_name]
+        if not job_dir.is_dir():
+            # A missing job directory has no journal and no segments: the
+            # per-file reader treats a missing file as empty.
+            return files
+        segment_numbers = sorted(
+            int(match.group(1))
+            for path in job_dir.iterdir()
+            if path.is_file()
+            for match in [_RESOURCE_JOURNAL_SEGMENT_NAME.fullmatch(path.name)]
+            if match
+        )
+        expected = 2
+        for number in segment_numbers:
+            if number != expected:
+                raise ValueError(
+                    "resource journal segments are not contiguous: expected "
+                    f"segment {expected}, found {number}; repair or export the "
+                    "retained evidence before continuing this job"
+                )
+            files.append(job_dir / f"resource-segment-{number}.jsonl")
+            expected += 1
+        return files
+
     def read_resource_journal(
         self, job_id: str, *, journal_name: str = "resource.jsonl"
     ) -> list[dict[str, Any]]:
-        """Read and validate the bounded append-only resource journal."""
+        """Read and validate the bounded append-only resource journal.
+
+        Reading the default base journal returns the LOGICAL whole journal:
+        the base file plus every segment, each individually bounded by the
+        hard per-file entry limit, concatenated in order and replayed as
+        one sequence.
+        """
         from .resource_admission import replay_resource_journal
 
         with self.lock(job_id):
             journal_name = _validate_resource_journal_name(journal_name)
-            path = (self.job_dir(job_id) / journal_name).resolve(strict=False)
-            if path.parent != self.job_dir(job_id).resolve(strict=False):
-                raise ValueError("resource journal path escapes job directory")
-            entries = self._read_resource_journal_unlocked_path(path)
+            job_dir = self.job_dir(job_id).resolve(strict=False)
+            files = self._resource_journal_files(job_dir, journal_name)
+            resolved = []
+            for path in files:
+                path = path.resolve(strict=False)
+                if path.parent != job_dir:
+                    raise ValueError("resource journal path escapes job directory")
+                resolved.append(path)
+            entries: list[dict[str, Any]] = []
+            for path in resolved:
+                entries.extend(self._read_resource_journal_unlocked_path(path))
             if entries:
                 admission = next(
                     (item for item in entries if item.get("entry_type") == "admission"),
@@ -868,24 +922,60 @@ class JobStore:
         expected_policy: object,
         journal_name: str = "resource.jsonl",
     ) -> dict[str, Any]:
-        """Durably append validated resource transitions for the active attempt."""
-        from .resource_admission import replay_resource_journal
+        """Durably append validated resource transitions for the active attempt.
+
+        Appends to the default base journal roll into the next bounded
+        ``resource-segment-N.jsonl`` when the active segment cannot hold the
+        batch whole; the per-file entry limit is never exceeded, history is
+        never truncated, and exhausting the bounded segment count refuses
+        with export guidance. Validation replays the LOGICAL whole journal.
+        """
+        from .resource_admission import (
+            RESOURCE_JOURNAL_MAX_ENTRIES,
+            RESOURCE_JOURNAL_MAX_SEGMENTS,
+            replay_resource_journal,
+        )
 
         if not isinstance(entries, list) or not entries:
             raise ValueError("resource journal append requires a non-empty entry list")
+        if len(entries) > RESOURCE_JOURNAL_MAX_ENTRIES:
+            raise ValueError(
+                "resource journal append exceeds the per-segment entry limit "
+                f"({len(entries)} entries against {RESOURCE_JOURNAL_MAX_ENTRIES})"
+            )
         with self.lock(job_id):
             journal_name = _validate_resource_journal_name(journal_name)
-            path = (self.job_dir(job_id) / journal_name).resolve(strict=False)
-            if path.parent != self.job_dir(job_id).resolve(strict=False):
-                raise ValueError("resource journal path escapes job directory")
-            current = self._read_resource_journal_unlocked_path(path)
+            job_dir = self.job_dir(job_id).resolve(strict=False)
+            files = self._resource_journal_files(job_dir, journal_name)
+            per_file: list[tuple[Path, list[dict[str, Any]]]] = []
+            logical: list[dict[str, Any]] = []
+            for path in files:
+                path = path.resolve(strict=False)
+                if path.parent != job_dir:
+                    raise ValueError("resource journal path escapes job directory")
+                file_entries = self._read_resource_journal_unlocked_path(path)
+                per_file.append((path, file_entries))
+                logical.extend(file_entries)
             state = self.read_state(job_id)
             attempt = int(state.get("attempt", 1))
             replay = replay_resource_journal(
-                current + entries,
+                logical + entries,
                 attempt=attempt,
                 expected_policy=expected_policy,
             )
+            target_path, target_entries = per_file[-1]
+            if len(target_entries) + len(entries) > RESOURCE_JOURNAL_MAX_ENTRIES:
+                next_segment = len(per_file) + 1
+                if next_segment > RESOURCE_JOURNAL_MAX_SEGMENTS:
+                    raise ValueError(
+                        "resource journal segments are exhausted: "
+                        f"{RESOURCE_JOURNAL_MAX_SEGMENTS} bounded segments hold "
+                        f"{RESOURCE_JOURNAL_MAX_ENTRIES * RESOURCE_JOURNAL_MAX_SEGMENTS} "
+                        "entries; export the retained evidence and submit a fresh "
+                        "job instead of growing the journal without bound"
+                    )
+                target_path = job_dir / f"resource-segment-{next_segment}.jsonl"
+                target_entries = []
             payload = b"".join(
                 json.dumps(
                     entry,
@@ -895,9 +985,9 @@ class JobStore:
                     allow_nan=False,
                 ).encode("utf-8")
                 + b"\n"
-                for entry in current + entries
+                for entry in target_entries + entries
             )
-            _durable_atomic_write_bytes(path, payload, replace_fn=os.replace)
+            _durable_atomic_write_bytes(target_path, payload, replace_fn=os.replace)
             return replay
 
     def _append_event_unlocked(

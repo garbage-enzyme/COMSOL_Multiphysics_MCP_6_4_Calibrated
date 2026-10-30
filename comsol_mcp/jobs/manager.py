@@ -764,7 +764,9 @@ class JobManager:
             raise ValueError(
                 "resource journal cannot hold the admitted sweep: "
                 f"{capacity['required_entries_lower_bound']} entries needed "
-                f"for {total_points} points against {capacity['max_entries']}"
+                f"for {total_points} points against "
+                f"{capacity['max_total_entries']} bounded entries across "
+                f"{capacity['max_segments']} segments"
             )
         state = {
             "schema_version": JOB_SCHEMA_VERSION,
@@ -2038,13 +2040,18 @@ class JobManager:
         # entries would only die against the hard limit mid-run.
         retained_entries = self._retained_resource_journal_entries(job_id)
         projected = resource_journal_capacity_verdict(int(_point_count(spec)))
-        if retained_entries + projected["required_entries_lower_bound"] > projected["max_entries"]:
+        if (
+            retained_entries + projected["required_entries_lower_bound"]
+            > projected["max_total_entries"]
+        ):
             raise ValueError(
                 "resource journal cannot hold the resumed sweep: "
                 f"{retained_entries} retained entries plus "
                 f"{projected['required_entries_lower_bound']} projected entries "
-                f"exceed the {projected['max_entries']}-entry limit; export the "
-                "retained evidence and submit a fresh job instead"
+                f"exceed the {projected['max_total_entries']}-entry bounded "
+                f"segment capacity ({projected['max_segments']} segments of "
+                f"{projected['segment_max_entries']}); export the retained "
+                "evidence and submit a fresh job instead"
             )
 
         if spec["job_type"] != "test_sequence":
