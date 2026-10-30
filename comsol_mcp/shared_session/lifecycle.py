@@ -365,6 +365,10 @@ class SharedSessionManager:
         self._detach_inventory_after = None
         self._detach_inventory_error = None
         self._unlock_audit: list[dict[str, Any]] = []
+        # Survives detach and session-state resets on purpose: it is the
+        # reconciliation identity for an admission interrupted after the
+        # lifecycle handoff completed but before its caller recorded it.
+        self._last_attached_handoff: dict[str, Any] | None = None
 
     def _reset_session_state(self) -> None:
         self._client = None
@@ -1071,6 +1075,8 @@ class SharedSessionManager:
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             unlocked = self._unlock_record(reason="durable attached job handoff")
+            handed_off_lock_sha256 = self._model_lock.lock_sha256
+            handed_off_revision_sha256 = self._model_lock.revision["revision_sha256"]
             detached = self._detach(allow_model_lock=True)
             if not detached.get("success"):
                 return {
@@ -1082,13 +1088,58 @@ class SharedSessionManager:
                 }
             self._unlock_audit.append(unlocked)
             self._unlock_audit = self._unlock_audit[-32:]
-            return {
+            receipt = {
                 "success": True,
                 "state": "attached_job_handoff_ready",
                 "execution_backend": backend,
                 "unlock": unlocked,
                 "detach": detached,
+                "source_model_lock_sha256": handed_off_lock_sha256,
+                "source_revision_sha256": handed_off_revision_sha256,
+                "source_model_path": str(declared_path),
             }
+            # Record the completed handoff BEFORE the caller can observe it:
+            # a caller that dies between this detach and its own durable
+            # recording leaves an admission that can never repeat the
+            # handoff (the model is no longer locked), so this receipt is
+            # the identity its recovery reconciles against.
+            self._last_attached_handoff = receipt
+            return dict(receipt)
+
+    def completed_attached_handoff(
+        self,
+        *,
+        expected_lock_sha256: str,
+        expected_revision_sha256: str,
+        source_model_path: str,
+    ) -> dict[str, Any] | None:
+        """Return this session's completed handoff receipt when identity matches.
+
+        A caller recovering an interrupted attached admission lost the
+        handoff result between the lifecycle detach and its own durable
+        recording; repeating the handoff is impossible because the model is
+        no longer locked. When the expected lock, revision and immutable
+        source match the completed handoff EXACTLY, the recorded receipt is
+        the reconciled identity for completing that admission. Any
+        disagreement returns None so the caller falls through to its normal
+        handoff path.
+        """
+        with self._lock:
+            receipt = self._last_attached_handoff
+            if not isinstance(receipt, dict):
+                return None
+            if receipt.get("source_model_lock_sha256") != expected_lock_sha256:
+                return None
+            if receipt.get("source_revision_sha256") != expected_revision_sha256:
+                return None
+            try:
+                requested = Path(str(source_model_path)).expanduser().resolve()
+                recorded = Path(str(receipt.get("source_model_path", ""))).expanduser().resolve()
+            except OSError, RuntimeError:
+                return None
+            if os.path.normcase(str(requested)) != os.path.normcase(str(recorded)):
+                return None
+            return dict(receipt)
 
     def recover_attached_job_handoff(
         self,

@@ -507,18 +507,20 @@ def test_duplicate_admission_works_beyond_the_old_scan_bound(tmp_path, ascii_roo
         "_launch_worker",
         lambda job_id, module: launches.append((job_id, module)) or identity,
     )
+    from src.jobs.manager import _fingerprint
+
+    historical_fingerprints = []
     for index in range(1200):
         directory = ascii_root / "jobs" / f"job-hist{index:05d}"
         directory.mkdir()
-        (directory / "spec.json").write_text(
-            json.dumps(
-                {
-                    "job_type": "validation_matrix",
-                    "spec_fingerprint": f"{index:064x}",
-                }
-            ),
-            encoding="ascii",
-        )
+        # Retained specs must carry internally consistent fingerprints: the
+        # rebuild re-derives them from the retained content and refuses
+        # disagreement, so the synthetic history is stamped like admission
+        # would have stamped it.
+        document = {"job_type": "validation_matrix", "history_index": index}
+        document["spec_fingerprint"] = _fingerprint(document)
+        historical_fingerprints.append(document["spec_fingerprint"])
+        (directory / "spec.json").write_text(json.dumps(document), encoding="ascii")
 
     first = manager.submit(_raw_spec(source))
 
@@ -528,7 +530,7 @@ def test_duplicate_admission_works_beyond_the_old_scan_bound(tmp_path, ascii_roo
     assert second["job_id"] != first["job_id"]
     assert len(launches) == 2
 
-    historical = manager._find_exact_duplicate("validation_matrix", f"{7:064x}")
+    historical = manager._find_exact_duplicate("validation_matrix", historical_fingerprints[7])
     assert historical == "job-hist00007"
 
     duplicate = manager.submit(_raw_spec(source))
@@ -1406,4 +1408,90 @@ def test_attached_retry_observes_pre_handoff_reservation(ascii_tmp_path):
         request_id="gap-1",
     )
     assert completed["success"] is True
+    assert len(launches) == 1
+
+
+def test_rebuild_refuses_retained_fingerprint_disagreement(ascii_tmp_path, monkeypatch):
+    """c081i F01 rebuild path: a stored-but-wrong retained fingerprint that
+    no longer matches its own retained content refuses after index loss."""
+    source = ascii_tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    jobs_root = ascii_tmp_path / "rebuild-fp" / "jobs"
+    manager = JobManager(jobs_root, preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda job_id, module: launches.append(job_id) or identity,
+    )
+    first = manager.submit(_raw_spec(source))
+    spec_path = jobs_root / first["job_id"] / "spec.json"
+    document = json.loads(spec_path.read_text(encoding="utf-8"))
+    document["spec_fingerprint"] = "0" * 64
+    spec_path.write_text(json.dumps(document), encoding="utf-8")
+    # Index loss forces the rebuild to trust retained evidence only.
+    (jobs_root / "duplicate-index.json").unlink()
+    with pytest.raises(ValueError, match="disagrees with its retained content"):
+        manager.submit(_raw_spec(source))
+    assert launches == [first["job_id"]]
+
+
+def test_reserve_arms_attached_guard_under_the_reservation_lock(ascii_tmp_path):
+    """c081i code concern: the guard is armed atomically with the durable
+    reservation, on both the fresh and the recovery continuation paths."""
+    manager = JobManager(ascii_tmp_path / "guard-jobs", preflight=lambda **_kwargs: {"ready": True})
+    assert manager.reserve_attached_request("guard-1", "a" * 64) is None
+    # No separate arm call happened: the reservation itself is in flight.
+    assert manager._attached_flow_in_flight("guard-1") is True
+    manager.disarm_attached_guard("guard-1")
+
+    # Recovery continuation of a dead reserver re-arms under the same lock.
+    assert manager.reserve_attached_request("guard-1", "a" * 64) is None
+    assert manager._attached_flow_in_flight("guard-1") is True
+    manager.disarm_attached_guard("guard-1")
+
+    with pytest.raises(ValueError, match="already durably bound"):
+        manager.reserve_attached_request("guard-1", "b" * 64)
+
+
+def test_attached_handoff_receipt_roundtrip_and_published_noop(ascii_tmp_path, monkeypatch):
+    """c081i F02: successful handoff identity persists in the binding until
+    publication; after publication the receipt is no longer reconciliation
+    evidence, and unreserved requests cannot record one."""
+    source = ascii_tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    jobs_root = ascii_tmp_path / "receipt-jobs"
+    manager = JobManager(jobs_root, preflight=lambda **_kwargs: {"ready": True})
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda job_id, module: launches.append(job_id) or identity,
+    )
+    with pytest.raises(ValueError, match="unreserved request_id"):
+        manager.record_attached_handoff("receipt-1", {"success": True})
+
+    manager.reserve_attached_request("receipt-1", "a" * 64)
+    manager.disarm_attached_guard("receipt-1")
+    receipt = {
+        "success": True,
+        "state": "attached_job_handoff_ready",
+        "execution_backend": {"kind": "attached_shared_server"},
+        "detach": {"state": "detached"},
+    }
+    manager.record_attached_handoff("receipt-1", receipt)
+    read_back = manager.attached_handoff_receipt("receipt-1")
+    assert read_back is not None
+    assert read_back["state"] == "attached_job_handoff_ready"
+    # A non-mapping receipt refuses instead of corrupting the binding.
+    with pytest.raises(ValueError, match="must be a mapping"):
+        manager.record_attached_handoff("receipt-1", ["not", "a", "mapping"])
+
+    first = manager.submit(_raw_spec(source), request_id="receipt-1", source_fingerprint="a" * 64)
+    assert first["success"] is True
+    # Once the bound job is published the binding replays through its
+    # dispatch outcome; the receipt stops being reconciliation evidence.
+    assert manager.attached_handoff_receipt("receipt-1") is None
     assert len(launches) == 1

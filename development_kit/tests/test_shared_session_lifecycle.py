@@ -1630,3 +1630,97 @@ def test_detach_independently_checks_preservation_boundaries(
     assert expected_violation in result["violations"]
     assert client.calls == ["disconnect"]
     assert ownership.releases == 1
+
+
+def test_interrupted_attached_admission_recovers_completed_handoff(tmp_path, monkeypatch):
+    """c081i F02: an exception after the REAL lifecycle detach leaves a
+    pending-attached reservation; the retry reconciles the completed
+    handoff receipt instead of repeating the (now impossible) handoff."""
+    import os
+
+    from src.jobs.manager import JobManager
+    from src.jobs.store import process_identity
+    from src.tools.jobs import _submit_job
+
+    source = tmp_path / "interrupted-source.mph"
+    source.write_bytes(b"no vendor")
+    models = [
+        {
+            "tag": "Model_1",
+            "label": "Working",
+            "file_path": "D:/models/working.mph",
+            "unsaved": False,
+        }
+    ]
+    session, _ownership, _client = _manager(tmp_path, models=models)
+    lock = _attach_saved_and_lock(session, source, collaboration_mode="automation_exclusive")
+    raw = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["R"],
+        "execution_backend": {
+            "kind": "attached_shared_server",
+            "expected_lock_sha256": lock["lock_sha256"],
+            "expected_revision_sha256": lock["revision"]["revision_sha256"],
+            "user_confirmed_automation_exclusive": True,
+        },
+    }
+    manager = JobManager(
+        tmp_path / "jobs", preflight=lambda **_kwargs: {"ready": True}, reconcile_on_start=False
+    )
+    identity = process_identity(os.getpid())
+    launches = []
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda job_id, module: launches.append(job_id) or identity,
+    )
+
+    original = session.prepare_attached_job_handoff
+    observed = []
+
+    def interrupt_after_detach(**kwargs):
+        result = original(**kwargs)
+        observed.append(result.get("state"))
+        if result.get("success"):
+            raise RuntimeError("injected interruption after actual detach")
+        return result
+
+    monkeypatch.setattr(session, "prepare_attached_job_handoff", interrupt_after_detach)
+
+    def submit():
+        return _submit_job(
+            dict(raw),
+            profile_name="wave_optics",
+            shared_enabled=True,
+            manager=manager,
+            session_manager=session,
+            request_id="interrupted-1",
+        )
+
+    with pytest.raises(RuntimeError, match="injected interruption"):
+        submit()
+
+    binding = manager._read_request_record("interrupted-1")
+    assert binding["spec_fingerprint"] == "pending-attached"
+    assert "attached_handoff" not in binding
+
+    retry = submit()
+
+    assert retry["success"] is True
+    assert retry["job_id"] == binding["job_id"]
+    assert retry["attached_handoff"]["state"] == "attached_job_handoff_ready"
+    assert retry["attached_handoff"]["detach_state"] == "detached"
+    # The lifecycle was entered exactly once: the retry reconciled the
+    # completed handoff receipt and never repeated the detach.
+    assert observed == ["attached_job_handoff_ready"]
+    assert len(launches) == 1
+    # A third identical submit now replays the published binding without
+    # re-entering the lifecycle or launching anything.
+    replay = submit()
+    assert replay["success"] is True
+    assert replay["duplicate"] is True
+    assert observed == ["attached_job_handoff_ready"]
+    assert len(launches) == 1

@@ -181,6 +181,21 @@ def _rebuild_duplicate_index(root: Path) -> dict[str, str]:
                 f"{path.name} spec has no spec_fingerprint; repair or remove "
                 "that job before new duplicate-type submissions"
             )
+        # The stored fingerprint is retained DATA, not authority: admission
+        # stamped it from this same content, so the rebuild re-derives it and
+        # refuses a mismatch. Trusting a stored-but-wrong value would re-key
+        # the index so the next legitimate retry misses its own entry and
+        # launches a duplicate worker.
+        recomputed = _fingerprint(
+            {key: value for key, value in existing.items() if key != "spec_fingerprint"}
+        )
+        if fingerprint != recomputed:
+            raise ValueError(
+                f"duplicate index cannot be reconciled: retained job "
+                f"{path.name} spec_fingerprint disagrees with its retained "
+                "content; repair or remove that job before new duplicate-type "
+                "submissions"
+            )
         entries[fingerprint] = path.name
     atomic_write_json(root / _DUPLICATE_INDEX_NAME, {"entries": entries})
     return entries
@@ -1157,6 +1172,11 @@ class JobManager:
         record, same fingerprints), so an interruption between handoff and
         publication leaves an UNKNOWN record whose retry reconciles
         exactly like every other UNKNOWN dispatch.
+
+        The attached-flow guard is armed INSIDE this lock on both paths
+        that continue into the handoff (fresh reservation and recovery of
+        a dead reserver), so no reserve-to-guard window exists in which a
+        concurrent retry could mistake a live reservation for a dead one.
         """
         request_id = _validate_request_id(request_id)
         with JobLock(self.store.root / ".submit.lock"):
@@ -1176,6 +1196,8 @@ class JobManager:
                 # The reserving flow is no longer active (it failed or died
                 # between handoff and publication): recovery proceeds, and
                 # the admission completes the reservation under its id.
+                # Arming under the lock atomically claims that recovery.
+                self.arm_attached_guard(request_id)
                 return None
             job_id = f"job-{uuid.uuid4().hex}"
             self._write_request_record(
@@ -1185,6 +1207,7 @@ class JobManager:
                 "unknown",
                 source_fingerprint=source_fingerprint,
             )
+            self.arm_attached_guard(request_id)
             return None
 
     @staticmethod
@@ -1232,6 +1255,46 @@ class JobManager:
             outcome = self._request_job_replay(job_id)
             return outcome if isinstance(outcome, dict) else None
         return self._reservation_in_flight(job_id)
+
+    def record_attached_handoff(self, request_id: str, handoff: Mapping[str, Any]) -> None:
+        """Durably preserve a successful attached handoff receipt (C081F-02).
+
+        Written after the lifecycle handoff succeeds but BEFORE admission
+        publishes the job: if this flow dies in that window, the retry's
+        recovery completes the interrupted admission under the reserved id
+        without repeating the handoff (the detached lifecycle would refuse
+        with model_not_locked). No-op once the bound job is published.
+        """
+        request_id = _validate_request_id(request_id)
+        if not isinstance(handoff, Mapping):
+            raise ValueError("attached handoff receipt must be a mapping")
+        with JobLock(self.store.root / ".submit.lock"):
+            record = self._read_request_record(request_id)
+            if record is None:
+                raise ValueError("cannot record an attached handoff for an unreserved request_id")
+            job_id = record.get("job_id")
+            if isinstance(job_id, str) and job_id and self.store.job_dir(job_id).exists():
+                return
+            updated = dict(record)
+            updated["attached_handoff"] = dict(handoff)
+            updated["updated_at_epoch"] = time.time()
+            atomic_write_json(_request_binding_path(self.store.root, request_id), updated)
+
+    def attached_handoff_receipt(self, request_id: str) -> dict[str, Any] | None:
+        """Read the durably recorded successful handoff receipt, if any.
+
+        Only meaningful while the bound job is unpublished: once the job
+        directory exists the binding replays through its dispatch outcome
+        instead of reconciling a handoff.
+        """
+        record = self._read_request_record(_validate_request_id(request_id))
+        if record is None:
+            return None
+        job_id = record.get("job_id")
+        if isinstance(job_id, str) and job_id and self.store.job_dir(job_id).exists():
+            return None
+        receipt = record.get("attached_handoff")
+        return dict(receipt) if isinstance(receipt, dict) else None
 
     def resolve_request_replay(
         self, raw_spec: object, request_id: str | None
