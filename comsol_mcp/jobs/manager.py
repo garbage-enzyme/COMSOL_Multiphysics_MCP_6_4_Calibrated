@@ -332,6 +332,19 @@ def _authoritative_in_flight(root: Path, store: Any, job_id: str) -> bool:
         return True
 
 
+def _listing_mtime_ns(path: Path) -> int:
+    """Sort key that survives concurrent job-directory cleanup.
+
+    A directory removed between the listing filter and this stat is a
+    concurrent cleanup race, not a reason to fail the whole listing; such
+    entries sort oldest and the per-job read below skips them.
+    """
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
 def _launch_marker_alive(store: Any, job_id: str) -> bool:
     """Whether a live process still owns the in-flight launch for this job."""
     try:
@@ -1851,7 +1864,7 @@ class JobManager:
                 and path.name.startswith("job-")
                 and (path / "state.json").is_file()
             ),
-            key=lambda path: path.stat().st_mtime_ns,
+            key=_listing_mtime_ns,
             reverse=True,
         )
         if count is not None:
@@ -2272,7 +2285,7 @@ class JobManager:
                 and path.name.startswith("job-")
                 and (path / "state.json").is_file()
             ),
-            key=lambda path: path.stat().st_mtime_ns,
+            key=_listing_mtime_ns,
             reverse=True,
         )[:count]
         jobs = []

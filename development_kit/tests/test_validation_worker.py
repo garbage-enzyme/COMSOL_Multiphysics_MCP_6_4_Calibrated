@@ -1588,3 +1588,29 @@ def test_resume_accounts_for_retained_entries_across_segments(ascii_tmp_path, mo
     # Job 1 launch + job 1 resume launch + job 2 launch; the refused
     # resume never launches anything.
     assert len(launches) == 3
+
+
+def test_listing_survives_concurrent_job_directory_cleanup(ascii_tmp_path, monkeypatch):
+    """A-05: a job directory removed between the listing filter and the
+    mtime sort key must not fail the whole summaries listing."""
+    from pathlib import Path as _Path
+
+    source = ascii_tmp_path / "fixture.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(ascii_tmp_path / "jobs", preflight=lambda **_k: {"ready": True})
+    first = manager.submit(_raw_spec(source))
+
+    original_stat = _Path.stat
+
+    def racing_stat(self, *args, **kwargs):
+        if self.name.startswith("job-") and self.name != first["job_id"]:
+            raise FileNotFoundError("concurrent cleanup")
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(_Path, "stat", racing_stat)
+    summaries = manager.summaries(limit=10)
+    monkeypatch.undo()
+    assert [item["job_id"] for item in summaries["recent"]] == [first["job_id"]]
+
+    listed = manager.summaries(limit=10)
+    assert [item["job_id"] for item in listed["recent"]] == [first["job_id"]]

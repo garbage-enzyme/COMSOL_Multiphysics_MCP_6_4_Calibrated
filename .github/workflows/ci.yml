@@ -59,7 +59,7 @@ jobs:
           if (!(Test-Path -LiteralPath (Join-Path $bridgeTarget 'package.json'))) { throw 'Missing bridge package' }
 
   compatibility-py315:
-    name: Python 3.15 preview compatibility (not production)
+    name: Python 3.15 formal supported lane (3.14 stays primary)
     runs-on: windows-2025
     timeout-minutes: 30
     env:
@@ -98,7 +98,7 @@ jobs:
             "https://files.pythonhosted.org/packages/05/8e/961c0007c59b8dd7729d542c61a4d537767a59645b82a0b521206e1e25c2/pyyaml-6.0.3.tar.gz#sha256=d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem D:\mcp_tests\py315\wheels\*.whl | Get-FileHash -Algorithm SHA256 | ConvertTo-Json | Set-Content D:\mcp_tests\py315\wheel-hashes.json
-      - name: Install preview dependencies and project
+      - name: Install formal-lane dependencies and project
         shell: pwsh
         run: |
           python -m pip install --only-binary=:all: --find-links D:\mcp_tests\py315\wheels ".[dev,manuals]" "jpype1==1.7.1" "pyyaml==6.0.3" "pydantic==2.13.5"
@@ -106,7 +106,7 @@ jobs:
           python -m pip check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip freeze --all > D:\mcp_tests\py315\installed.txt
-      - name: Run preview solver-free regression and GUI tests
+      - name: Run formal-lane solver-free regression and GUI tests
         shell: pwsh
         run: |
           # Per-worker synthetic runtime isolation makes the parallel lane safe here.
@@ -117,33 +117,33 @@ jobs:
           # PyMuPDF 1.28.2 uses typing.ByteString during import on Python 3.15.
           # Remove this exact third-party exception when upstream stops using it.
           python -m pytest -q -W error -W "ignore:'typing.ByteString' and 'collections.abc.ByteString' are deprecated and slated for removal in Python 3.17:DeprecationWarning:pymupdf:470" settings_gui/tests --basetemp D:\mcp_tests\py315gui
-      - name: Build and verify an installed preview wheel
+      - name: Build and verify an installed formal-lane wheel
         shell: pwsh
         run: |
           python -m build --outdir D:\mcp_tests\py315\dist
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m venv D:\mcp_tests\py315env
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $previewPython = 'D:\mcp_tests\py315env\Scripts\python.exe'
+          $lanePython = 'D:\mcp_tests\py315env\Scripts\python.exe'
           $wheel = (Get-ChildItem D:\mcp_tests\py315\dist\*.whl).FullName
-          & $previewPython -m pip install --only-binary=:all: --find-links D:\mcp_tests\py315\wheels $wheel "jpype1==1.7.1" "pydantic==2.13.5"
+          & $lanePython -m pip install --only-binary=:all: --find-links D:\mcp_tests\py315\wheels $wheel "jpype1==1.7.1" "pydantic==2.13.5"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $previewPython -m pip check
+          & $lanePython -m pip check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Push-Location D:\mcp_tests\py315
           try {
-            & $previewPython "$env:GITHUB_WORKSPACE\development_kit\scripts\installed_package_probe.py" --snapshot-dir "$env:GITHUB_WORKSPACE\development_kit\tests\snapshots" --output D:\mcp_tests\py315\installed-package.json
+            & $lanePython "$env:GITHUB_WORKSPACE\development_kit\scripts\installed_package_probe.py" --snapshot-dir "$env:GITHUB_WORKSPACE\development_kit\tests\snapshots" --output D:\mcp_tests\py315\installed-package.json
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            & $previewPython "$env:GITHUB_WORKSPACE\development_kit\scripts\installed_stdio_probe.py" --command D:\mcp_tests\py315env\Scripts\comsol-mcp.exe --workdir D:\mcp_tests\py315stdio --output D:\mcp_tests\py315\installed-stdio.json
+            & $lanePython "$env:GITHUB_WORKSPACE\development_kit\scripts\installed_stdio_probe.py" --command D:\mcp_tests\py315env\Scripts\comsol-mcp.exe --workdir D:\mcp_tests\py315stdio --output D:\mcp_tests\py315\installed-stdio.json
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } finally {
             Pop-Location
           }
-      - name: Upload preview receipts and failure logs
+      - name: Upload formal-lane receipts and failure logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: python315-preview-evidence
+          name: python315-formal-evidence
           path: |
             D:\mcp_tests\py315
             D:\mcp_tests\py315main\*.log

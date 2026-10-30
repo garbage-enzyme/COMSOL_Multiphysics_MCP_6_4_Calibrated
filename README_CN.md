@@ -493,10 +493,12 @@ hash 不变，结束后无 client、进程或 lease 残留。
 - MPh `>=1.3.1,<1.5`、MCP SDK `>=2.2.0,<2.3`、`pydantic` 和 `psutil>=5.9.0`
 - 已验证配置中使用 COMSOL 自带的 Java 21 runtime
 
-Python 3.14 仍是主开发和生产 lane。标准 Windows x64 Python 3.15 使用独立的
-实验性兼容 CI，目前固定 3.15.0rc2。缺少 wheel 时源码构建 JPype 1.7.1、
-PyYAML 6.0.3 和 Pydantic 2.13.5 所需的精确 core 2.46.5。需要 MSVC/Windows
-SDK、JDK/Ant 和 Rust。此通道排除实验性 `semantic-docs` extra，不代表已经
+Python 3.14 仍是主构建、发布与生产 lane。标准 Windows x64 Python 3.15 是
+正式支持 lane（调用方决定，2026-10-26/30）：其 CI 通道运行完整
+solver-free 套件与 package/install、stdio 门禁，目前固定 3.15.0rc2
+候选版。缺少 cp315 wheel 时源码构建 JPype 1.7.1、PyYAML 6.0.3 和
+Pydantic 2.13.5 所需的精确 core 2.46.5。需要 MSVC/Windows SDK、
+JDK/Ant 和 Rust。此通道排除实验性 `semantic-docs` extra，不代表已经
 通过 licensed COMSOL 验收，也不承诺 free-threaded Python 支持。
 
 本项目仍在积极开发，依赖范围与锁定版本可能随时调整，不保证较长的弃用过渡期。

@@ -578,13 +578,15 @@ client, process, or lease residue.
 - MPh `>=1.3.1,<1.5`, MCP SDK `>=2.2.0,<2.3`, `pydantic`, and `psutil>=5.9.0`
 - COMSOL's Java 21 runtime in the verified configuration
 
-Python 3.14 remains the main development and production lane. Standard Windows
-x64 Python 3.15 has a separate experimental compatibility CI lane, currently
-pinned to 3.15.0rc2. It builds JPype 1.7.1, PyYAML 6.0.3 and the exact
-Pydantic 2.13.5/core 2.46.5 pair from source where wheels are unavailable.
-MSVC/Windows SDK, a JDK with Ant, and Rust are required for those builds.
-This lane excludes the experimental `semantic-docs` extra and does not establish
-licensed COMSOL compatibility or free-threaded Python support.
+Python 3.14 remains the primary build, release and production lane. Standard
+Windows x64 Python 3.15 is a formal supported lane (caller decision,
+2026-10-26/30): its CI lane runs the full solver-free suite, package/install
+and stdio gates, currently pinned to the 3.15.0rc2 candidate. It builds
+JPype 1.7.1, PyYAML 6.0.3 and the exact Pydantic 2.13.5/core 2.46.5 pair
+from source where cp315 wheels are unavailable. MSVC/Windows SDK, a JDK with
+Ant, and Rust are required for those builds. This lane excludes the
+experimental `semantic-docs` extra and does not establish licensed COMSOL
+compatibility or free-threaded Python support.
 
 This project is under active development, so dependency ranges and locked
 versions may change without a long deprecation window. Before updating an
