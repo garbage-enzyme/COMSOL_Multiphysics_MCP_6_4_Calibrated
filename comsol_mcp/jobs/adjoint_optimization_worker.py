@@ -239,39 +239,44 @@ def run(root: str, job_id: str) -> int:
             for row in read_adjoint_rows(rows_path, job_fingerprint=spec["spec_fingerprint"])
             if row.get("attempt") == attempt
         ]
-        if {"gradient", "iteration"} - {row.get("kind") for row in existing}:
+        # D-01: a crash between the two row appends must not duplicate the
+        # already-persisted row on resume - only the MISSING kind is added.
+        missing_kinds = {"gradient", "iteration"} - {row.get("kind") for row in existing}
+        if missing_kinds:
             gradient_fp = domain_sha256_v2("comsol_mcp.synthetic_gradient", {"values": [0.0]})
             check_fp = domain_sha256_v2("comsol_mcp.synthetic_gradient_check", {"passed": True})
-            append_adjoint_row(
-                rows_path,
-                job_fingerprint=spec["spec_fingerprint"],
-                attempt=attempt,
-                kind="gradient",
-                payload={
-                    "iteration_id": "it-0",
-                    "gradient_fingerprint": gradient_fp,
-                    "check_fingerprint": check_fp,
-                    "evidence_state": "gradient_validated",
-                },
-            )
-            append_adjoint_row(
-                rows_path,
-                job_fingerprint=spec["spec_fingerprint"],
-                attempt=attempt,
-                kind="iteration",
-                payload={
-                    "iteration_id": "it-0",
-                    "iteration_index": 0,
-                    "candidate_fingerprint": domain_sha256_v2(
-                        "comsol_mcp.synthetic_candidate", {"values": spec["initial_values"]}
-                    ),
-                    "objective_value": 0.0,
-                    "status": "accepted",
-                    "gradient_fingerprint": gradient_fp,
-                    "forward_fingerprint": check_fp,
-                    "reason_code": "synthetic_contract_only",
-                },
-            )
+            if "gradient" in missing_kinds:
+                append_adjoint_row(
+                    rows_path,
+                    job_fingerprint=spec["spec_fingerprint"],
+                    attempt=attempt,
+                    kind="gradient",
+                    payload={
+                        "iteration_id": "it-0",
+                        "gradient_fingerprint": gradient_fp,
+                        "check_fingerprint": check_fp,
+                        "evidence_state": "gradient_validated",
+                    },
+                )
+            if "iteration" in missing_kinds:
+                append_adjoint_row(
+                    rows_path,
+                    job_fingerprint=spec["spec_fingerprint"],
+                    attempt=attempt,
+                    kind="iteration",
+                    payload={
+                        "iteration_id": "it-0",
+                        "iteration_index": 0,
+                        "candidate_fingerprint": domain_sha256_v2(
+                            "comsol_mcp.synthetic_candidate", {"values": spec["initial_values"]}
+                        ),
+                        "objective_value": 0.0,
+                        "status": "accepted",
+                        "gradient_fingerprint": gradient_fp,
+                        "forward_fingerprint": check_fp,
+                        "reason_code": "synthetic_contract_only",
+                    },
+                )
         store.update_state(job_id, "smoke_validated", event="adjoint_synthetic_validated")
         store.update_state(
             job_id,

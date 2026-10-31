@@ -433,14 +433,13 @@ def execute_native_adjoint_optimization(
         study.run()
         dataset = _dataset_for_solution(model, solver["solution_tag"])
         variables = [item["variable_id"] for item in support["variables"]]
+        # D-02: the policy path reports geometry in metres and the plain path
+        # in model units; each branch computes its values exactly once instead
+        # of computing unitless values and overwriting them under policy.
         evaluated = model.evaluate(
             [support["objective"]["expression"], *variables], dataset=dataset
         )
         final = _numeric_series(evaluated[0])[-1]
-        final_variables = {
-            name: _numeric_series(value)[-1]
-            for name, value in zip(variables, evaluated[1:], strict=True)
-        }
         if policy is not None:
             final_variables = {
                 name: _numeric_series(
@@ -448,6 +447,12 @@ def execute_native_adjoint_optimization(
                 )[-1]
                 for name in variables
             }
+        else:
+            final_variables = {
+                name: _numeric_series(value)[-1]
+                for name, value in zip(variables, evaluated[1:], strict=True)
+            }
+        if policy is not None:
             receipt["optimizer_constraints"] = []
             _constraint_evidence(
                 model,

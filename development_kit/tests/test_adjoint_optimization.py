@@ -872,3 +872,55 @@ def test_explicit_runtime_loading_checks_physics_and_actual_solve_budget(
     assert values["nsolvemax"] == "20"
     assert calls.count("loading") == 4
     assert receipt["cleanup"] == {"client_clear": True, "source_unchanged": True}
+
+
+def test_synthetic_worker_resume_does_not_duplicate_persisted_row(ascii_tmp_path, monkeypatch):
+    """D-01: a crash between the gradient and iteration row appends leaves
+    only the gradient row persisted; the resumed worker must add exactly the
+    MISSING iteration row instead of duplicating the gradient row."""
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
+    manager = JobManager(
+        ascii_tmp_path / "jobs",
+        preflight=lambda **_kwargs: {"success": True, "ready": True},
+    )
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda _job_id, _module: process_identity(os.getpid()),
+    )
+    result = manager.submit(envelope)
+    job_id = result["job_id"]
+    store = manager.store
+    rows_path = store.job_dir(job_id) / "optimization_rows.jsonl"
+    spec_fingerprint = store.read_spec(job_id)["spec_fingerprint"]
+    from comsol_mcp.jobs.adjoint_rows import append_adjoint_row, domain_sha256_v2, read_adjoint_rows
+
+    # Simulate the crash window: the gradient row was persisted, the
+    # iteration row was not, and the job returned to a startable state.
+    append_adjoint_row(
+        rows_path,
+        job_fingerprint=spec_fingerprint,
+        attempt=1,
+        kind="gradient",
+        payload={
+            "iteration_id": "it-0",
+            "gradient_fingerprint": domain_sha256_v2(
+                "comsol_mcp.synthetic_gradient", {"values": [0.0]}
+            ),
+            "check_fingerprint": domain_sha256_v2(
+                "comsol_mcp.synthetic_gradient_check", {"passed": True}
+            ),
+            "evidence_state": "gradient_validated",
+        },
+    )
+    store.update_state(job_id, "starting", event="resume_after_crash_window")
+
+    assert run_adjoint_worker(str(store.root), job_id) == 0
+    rows = [
+        row
+        for row in read_adjoint_rows(rows_path, job_fingerprint=spec_fingerprint)
+        if row.get("attempt") == 1
+    ]
+    kinds = [row["kind"] for row in rows]
+    assert kinds.count("gradient") == 1
+    assert kinds.count("iteration") == 1
