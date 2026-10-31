@@ -495,7 +495,7 @@ hash 不变，结束后无 client、进程或 lease 残留。
 
 Python 3.14 仍是主构建、发布与生产 lane。标准 Windows x64 Python 3.15 是
 正式支持 lane（调用方决定，2026-10-26/30）：其 CI 通道运行完整
-solver-free 套件与 package/install、stdio 门禁，目前固定 3.15.0rc2
+solver-free 套件与 package/install、stdio 门禁，目前固定 3.15.2 最终版
 候选版。缺少 cp315 wheel 时源码构建 JPype 1.7.1、PyYAML 6.0.3 和
 Pydantic 2.13.5 所需的精确 core 2.46.5。需要 MSVC/Windows SDK、
 JDK/Ant 和 Rust。此通道排除实验性 `semantic-docs` extra，不代表已经

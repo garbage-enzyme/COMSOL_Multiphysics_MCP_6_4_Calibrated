@@ -276,14 +276,29 @@ def validate_screening_record(value: Any) -> dict[str, Any]:
 
 
 def rank_candidates(
-    records: Sequence[Mapping[str, Any]], *, maximize: bool, top_k: int
+    records: Sequence[Mapping[str, Any]],
+    *,
+    maximize: bool,
+    top_k: int,
+    maximum_fem_escalations: int | None = None,
 ) -> dict[str, Any]:
     """Rank screened candidates and select the bounded escalation set.
 
     Out-of-domain and uncalibrated candidates are always escalated regardless of
     rank, because their prediction is not trustworthy enough to skip a FEM run.
+    That forced escalation is ordinary-input reachable by design; the campaign
+    budget stays authoritative. When maximum_fem_escalations is supplied the
+    plan itself refuses fail-closed instead of letting a caller discover the
+    overspend only at summary time.
     """
     top_k = _require_int("top_k", top_k, minimum=1, maximum=MAX_TOP_K)
+    if maximum_fem_escalations is not None:
+        maximum_fem_escalations = _require_int(
+            "maximum_fem_escalations",
+            maximum_fem_escalations,
+            minimum=1,
+            maximum=MAX_FEM_ESCALATIONS,
+        )
     validated = [validate_screening_record(record) for record in records]
     if not validated:
         raise ValueError("records must be non-empty")
@@ -329,6 +344,14 @@ def rank_candidates(
             }
         )
 
+    if maximum_fem_escalations is not None and len(escalation) > maximum_fem_escalations:
+        raise ValueError(
+            "escalation plan exceeds the declared budget: "
+            f"{len(escalation)} escalations (forced uncalibrated or "
+            "out-of-domain candidates included) against "
+            f"maximum_fem_escalations={maximum_fem_escalations}; widen the "
+            "declared budget or calibrate the surrogate before planning"
+        )
     return {
         "ranked_candidate_ids": [record["candidate_id"] for record in ordered],
         "selected_candidate_ids": [record["candidate_id"] for record in selected],

@@ -391,19 +391,29 @@ def test_summary_reports_no_metrics_without_verified_fem() -> None:
 
 def test_summary_rejects_duplicate_or_unscreened_fem_results() -> None:
     result = record_fem_result(
-        candidate_id="c1", predicted_objective=1.0, measured_objective=None,
-        fem_evidence_state="failed", fem_artifact_sha256=None, absolute_tolerance=1e-6,
+        candidate_id="c1",
+        predicted_objective=1.0,
+        measured_objective=None,
+        fem_evidence_state="failed",
+        fem_artifact_sha256=None,
+        absolute_tolerance=1e-6,
     )
     with pytest.raises(ValueError, match="duplicate FEM result"):
         summarize_campaign(
-            spec=_spec(), screening_records=[_record("c1", 1.0)],
-            fem_results=[result, result], fem_escalations_used=2, wall_time_seconds=1.0,
+            spec=_spec(),
+            screening_records=[_record("c1", 1.0)],
+            fem_results=[result, result],
+            fem_escalations_used=2,
+            wall_time_seconds=1.0,
         )
     unknown = {**result, "candidate_id": "missing"}
     with pytest.raises(ValueError, match="unscreened candidate"):
         summarize_campaign(
-            spec=_spec(), screening_records=[_record("c1", 1.0)],
-            fem_results=[unknown], fem_escalations_used=1, wall_time_seconds=1.0,
+            spec=_spec(),
+            screening_records=[_record("c1", 1.0)],
+            fem_results=[unknown],
+            fem_escalations_used=1,
+            wall_time_seconds=1.0,
         )
 
 
@@ -502,3 +512,31 @@ def test_campaign_module_is_solver_free() -> None:
     source = open(module.__file__, encoding="utf-8").read().lower()
     for banned in SOLVER_FREE_BANNED:
         assert banned not in source, f"campaign references {banned}"
+
+
+def test_forced_escalation_is_by_design_and_plan_budget_bounded() -> None:
+    """L-02 (c081k): forced escalation of uncalibrated candidates is
+    ordinary-input reachable BY DESIGN (never trust an uncalibrated
+    prediction), the declared budget stays authoritative, and a supplied
+    plan budget refuses fail-closed at plan time instead of at summary
+    time."""
+    records = [
+        _record("trusted", 0.9, ood="in_domain"),
+        _record("untrusted", 0.1, ood="uncalibrated"),
+    ]
+    report = rank_candidates(records, maximize=True, top_k=1)
+    assert report["escalation_count"] == 2
+    assert [item["reason"] for item in report["escalation_plan"]] == [
+        "selected_by_surrogate",
+        "uncalibrated",
+    ]
+    # Within the declared budget the plan stands.
+    assert (
+        rank_candidates(records, maximize=True, top_k=1, maximum_fem_escalations=2)[
+            "escalation_count"
+        ]
+        == 2
+    )
+    # Over the declared budget the plan itself refuses fail-closed.
+    with pytest.raises(ValueError, match="exceeds the declared budget"):
+        rank_candidates(records, maximize=True, top_k=1, maximum_fem_escalations=1)

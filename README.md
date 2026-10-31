@@ -581,7 +581,7 @@ client, process, or lease residue.
 Python 3.14 remains the primary build, release and production lane. Standard
 Windows x64 Python 3.15 is a formal supported lane (caller decision,
 2026-10-26/30): its CI lane runs the full solver-free suite, package/install
-and stdio gates, currently pinned to the 3.15.0rc2 candidate. It builds
+and stdio gates, currently pinned to 3.15.2 (final). It builds
 JPype 1.7.1, PyYAML 6.0.3 and the exact Pydantic 2.13.5/core 2.46.5 pair
 from source where cp315 wheels are unavailable. MSVC/Windows SDK, a JDK with
 Ant, and Rust are required for those builds. This lane excludes the
