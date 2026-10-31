@@ -213,9 +213,10 @@ def test_startup_handshake_line_byte_limit_includes_newline(size):
 
 def test_startup_handshake_limit_excludes_bytes_after_first_newline():
     line = b'{"event":"ready"}\n'
-    assert SemanticWorkerManager._read_startup_line(
-        BytesIO(line + b"x" * 4096), maximum=len(line)
-    ) == line
+    assert (
+        SemanticWorkerManager._read_startup_line(BytesIO(line + b"x" * 4096), maximum=len(line))
+        == line
+    )
 
 
 def test_oversized_startup_handshake_is_rejected_before_json_decode(monkeypatch):
@@ -1096,3 +1097,65 @@ def test_failed_reset_replaces_stale_last_error(monkeypatch):
     assert result["success"] is False
     assert service._health_gate_passed is False
     assert service._last_error == {"message": "worker pipe broken"}
+
+
+def test_pid_matches_launcher_process_accepts_shallow_trampolines_only(monkeypatch):
+    """3.15 venv trampolines re-exec the base interpreter as a waiting
+    launcher's child, so the worker handshake must accept the launcher's
+    executing descendants - but only within trampoline depth, never
+    unrelated, unreadable, or dead pids."""
+    import psutil
+    from src.knowledge import semantic_process
+
+    match = semantic_process._pid_matches_launcher_process
+    launcher_pid = 10_000
+
+    def fake_process_tree(chain):
+        """psutil.Process stub whose parent() walks the given pid chain."""
+        parents = {chain[index]: chain[index + 1] for index in range(len(chain) - 1)}
+        terminals = set(chain)
+
+        class _FakeProcess:
+            def __init__(self, pid):
+                if pid not in terminals:
+                    raise psutil.NoSuchProcess(pid)
+                object.__setattr__(self, "pid", pid)
+
+            def parent(self):
+                upstream = parents.get(object.__getattribute__(self, "pid"))
+                if upstream is None:
+                    return None
+                return _FakeProcess(upstream)
+
+        return _FakeProcess
+
+    real_process = psutil.Process
+    # chain: worker(10001) -> trampoline child(10002) -> launcher(10000)
+    monkeypatch.setattr(psutil, "Process", fake_process_tree([10001, 10002, launcher_pid]))
+    assert match(10001, launcher_pid) is True
+    assert match(10002, launcher_pid) is True
+    # The launcher itself matches (Python <= 3.14 in-place interpreters).
+    assert match(launcher_pid, launcher_pid) is True
+    # An unrelated live pid in the same stubbed world refuses.
+    monkeypatch.setattr(psutil, "Process", fake_process_tree([20001, 20002, 30000]))
+    assert match(20001, launcher_pid) is False
+    # A chain deeper than any trampoline refuses.
+    monkeypatch.setattr(
+        psutil,
+        "Process",
+        fake_process_tree([10001, 10002, 10003, 10004, launcher_pid]),
+    )
+    assert match(10001, launcher_pid) is False
+    # Unreadable (dead) pids refuse.
+    monkeypatch.setattr(psutil, "Process", fake_process_tree([]))
+    assert match(39_999, launcher_pid) is False
+    monkeypatch.undo()
+    # Malformed and non-positive values never reach the process table.
+    assert match(True, launcher_pid) is False
+    assert match("10001", launcher_pid) is False
+    assert match(1.5, launcher_pid) is False
+    assert match(0, launcher_pid) is False
+    assert match(-10001, launcher_pid) is False
+    # A real unrelated process against the real table still refuses.
+    assert match(os.getpid(), launcher_pid) is False
+    del real_process

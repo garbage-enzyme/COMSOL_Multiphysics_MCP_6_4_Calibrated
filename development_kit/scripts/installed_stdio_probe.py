@@ -78,10 +78,16 @@ def _stdio_environment(workdir: Path) -> dict[str, str]:
         key: value for key, value in os.environ.items() if not key.startswith("COMSOL_MCP_")
     }
     environment.pop("PYTHONPATH", None)
+    fixtures_root = workdir / "fixtures"
+    fixtures_root.mkdir(parents=True, exist_ok=True)
+    solver_free = fixtures_root / "solver-free.mph"
+    if not solver_free.is_file():
+        solver_free.write_bytes(b"installed stdio probe solver-free fixture")
     environment.update(
         {
             "COMSOL_MCP_PROFILE": "core",
             "COMSOL_MCP_RUNTIME_DIR": str(workdir / "runtime"),
+            "COMSOL_MCP_MODEL_READ_ROOTS": str(fixtures_root),
         }
     )
     return environment
@@ -101,11 +107,11 @@ def _validate_passive_evidence(capabilities: dict[str, Any], preview: dict[str, 
     return bool(session_state["connected"] or session_state["starting"])
 
 
-def _preview_arguments() -> dict[str, Any]:
+def _preview_arguments(workdir: Path) -> dict[str, Any]:
     return {
         "spec": {
             "job_type": "staged_sweep",
-            "source_model_path": "fixtures/solver-free.mph",
+            "source_model_path": str(workdir / "fixtures" / "solver-free.mph"),
             "parameter_name": "wl",
             "parameter_values": [5.0],
             "expressions": ["R", "T"],
@@ -193,7 +199,7 @@ async def _probe(command: Path, workdir: Path, stderr_path: Path) -> dict[str, A
                 preview_started = time.perf_counter()
                 preview_result = await session.call_tool(
                     "job_spec_preview",
-                    _preview_arguments(),
+                    _preview_arguments(workdir),
                     read_timeout_seconds=15.0,
                 )
                 preview_wall = time.perf_counter() - preview_started
@@ -307,7 +313,9 @@ async def _probe_modern(command: Path, workdir: Path) -> dict[str, Any]:
         names = sorted(tool.name for tool in listed.tools)
         removed = await _verify_removed_tools(client, names)
         capabilities = _tool_payload(await client.call_tool("capabilities", {}))
-        preview = _tool_payload(await client.call_tool("job_spec_preview", _preview_arguments()))
+        preview = _tool_payload(
+            await client.call_tool("job_spec_preview", _preview_arguments(workdir))
+        )
         if preview.get("success") is not True:
             raise RuntimeError("installed modern offline preview call failed")
         started = _validate_passive_evidence(capabilities, preview)
