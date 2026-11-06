@@ -47,6 +47,8 @@ LINT_TARGETS = (
     "comsol_mcp/compatibility.py",
     "comsol_mcp/contracts",
     "comsol_mcp/durable",
+    # 0.8.2 P03: the discovery-manifest generator is lint-clean and stays covered.
+    "comsol_mcp/discovery_manifest.py",
     "comsol_mcp/contracts/simulation_configuration.py",
     "comsol_mcp/contracts/thermo_optomechanical.py",
     "comsol_mcp/evidence/simulation_configuration.py",
@@ -159,6 +161,7 @@ MYPY_GROUPS = (
         "--follow-imports=skip",
         "development_kit/scripts/paired_coverage.py",
         "comsol_mcp/adapter/wavelength_controls.py",
+        "comsol_mcp/discovery_manifest.py",
         "comsol_mcp/platform_support.py",
         "comsol_mcp/posix_lock.py",
         "comsol_mcp/strict_wavelength.py",
