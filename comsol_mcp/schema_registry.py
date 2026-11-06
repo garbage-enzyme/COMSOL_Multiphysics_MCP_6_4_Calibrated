@@ -52,6 +52,7 @@ from comsol_mcp.contracts.shape_support import (
     SHAPE_SUPPORT_POLICY_SCHEMA_NAME,
     SHAPE_SUPPORT_POLICY_SCHEMA_VERSION,
 )
+from comsol_mcp.discovery_manifest import MANIFEST_SCHEMA_NAME, MANIFEST_SCHEMA_VERSION
 from comsol_mcp.durable import canonical_sha256_v1
 from comsol_mcp.settings_gui_handshake import HANDSHAKE_SCHEMA, HANDSHAKE_VERSION
 
@@ -340,6 +341,11 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="durable_artifact",
         ),
         _entry("comsol_mcp.build_identity", "1.0.0", "comsol_mcp.build_identity"),
+        _entry(
+            MANIFEST_SCHEMA_NAME,
+            MANIFEST_SCHEMA_VERSION,
+            "comsol_mcp.discovery_manifest",
+        ),
         _entry(
             CLEANUP_OUTCOME_SCHEMA,
             CLEANUP_OUTCOME_VERSION,

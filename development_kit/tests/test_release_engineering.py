@@ -692,12 +692,16 @@ def test_repository_root_is_release_focused_and_free_of_generated_artifacts():
     }
 
     forbidden_suffixes = {".class", ".lock", ".mph", ".pyc", ".recovery", ".status"}
+    # A committed Cargo lock file is the reproducible dependency graph of the
+    # optional Rust binary crate, not a runtime lock artifact. This exact path
+    # is the only permitted `.lock` file.
+    permitted_lock_files = {"shim/Cargo.lock"}
     for mode, path_text in entries:
         path = Path(path_text)
         assert mode != "160000", f"orphaned gitlink: {path_text}"
         assert path.name != ".DS_Store"
         assert "__pycache__" not in path.parts
-        assert path.suffix not in forbidden_suffixes
+        assert path.suffix not in forbidden_suffixes or path_text in permitted_lock_files
         assert path.name not in {"server_err.txt", "server_log.txt"}
 
 
