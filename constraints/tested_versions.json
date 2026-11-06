@@ -2,7 +2,7 @@
   "schema_name": "comsol_mcp.tested_versions",
   "schema_version": "2.0.0",
   "description": "Human-reviewed runtime and optional dependency versions for the Python 3.14 production lane. Package metadata in pyproject.toml governs compatible ranges; the complete transitive release lock governs the accepted Windows environment.",
-  "last_reviewed": "2026-10-22",
+  "last_reviewed": "2026-10-23",
   "dependency_lane_policy": {
     "mcp": "newest stable SDK minor line only; MCP 1.x stays a client wire-compatibility requirement, not a second server lane",
     "runtime": "at most two reviewed lanes per library where behavior changes across them (newest minor plus the oldest supported line)",
