@@ -254,7 +254,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/tests/test_clientapi_properties.py` — The tests cover constrained clientapi property access with mocks.
 - `development_kit/tests/test_control_plane_metrics.py` — The tests cover bounded control-plane latency, overload, and fairness evidence.
 - `development_kit/tests/test_control_plane_startup.py` — The tests cover solver-free cold discovery and startup budgets.
-- `development_kit/tests/conftest.py` — The module prepares the shared ASCII runtime parent for dependency-only tests.
+- `development_kit/tests/conftest.py` — The module prepares the shared ASCII runtime parent for dependency-only tests. On Windows it also adds `CREATE_NO_WINDOW` to every test-spawned child that does not set `creationflags`, so console-subsystem children of console-less parents open no window.
 - `development_kit/tests/mcp_test_support.py` — The module decodes public in-process MCP tool results consistently across the legacy SDK 1.x and conservative SDK 2.0 base.
 - `development_kit/tests/semantic_test_support.py` — The module provides sanitized subprocess environments for semantic isolation tests.
 - `development_kit/tests/test_compatibility_registry.py` — The module solver-free tests the compatibility/skill registry matrix, hashes, and cold discovery.

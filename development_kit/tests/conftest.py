@@ -44,6 +44,37 @@ def ascii_tmp_path():
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _hide_child_console_windows():
+    """Keep console-subsystem children of the suite from opening windows.
+
+    The suite runs under console-less parents (harness shells, hosted CI).
+    On Windows a console-subsystem child of a console-less parent otherwise
+    allocates a visible window for every spawn. Default-only spawns gain
+    ``CREATE_NO_WINDOW``. Spawns that already pass ``creationflags`` keep
+    their own console policy untouched, and non-Windows platforms are
+    unchanged.
+    """
+    if os.name != "nt":
+        yield
+        return
+
+    import subprocess
+
+    original_popen = subprocess.Popen
+
+    def _popen_hidden(*args, **kwargs):
+        if not kwargs.get("creationflags"):
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        return original_popen(*args, **kwargs)
+
+    subprocess.Popen = _popen_hidden
+    try:
+        yield
+    finally:
+        subprocess.Popen = original_popen
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _synthetic_runtime_isolation():
     """Scope one synthetic runtime root per test worker before any ownership.
 
