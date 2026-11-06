@@ -763,3 +763,4 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `shim/Cargo.lock` — The file records the resolved dependency graph for reproducible shim builds.
 - `shim/src/main.rs` — The module implements the prototype MCP stdio shim: manifest-backed static discovery, one lazily spawned Python worker with a separate handshake, verbatim forwarding, bounded reads, and refusal of automatic respawn. It never acquires solver leases and never fabricates live state.
 - `shim/src/winjob.rs` — The module assigns the shim worker to a Windows Job Object with kill-on-close semantics. Hard-killing the shim terminates the whole worker tree; graceful shutdown still closes the worker stdin first.
+- `development_kit/release/shim_platform_matrix.json` — The file records the shim crate identity, frozen build toolchains and triples, distribution model, verified dependency licenses, and the release profile. It changes only with a reviewed packaging batch.

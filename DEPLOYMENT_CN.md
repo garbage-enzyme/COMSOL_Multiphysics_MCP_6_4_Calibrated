@@ -348,3 +348,25 @@ D:\path\to\python-env\python.exe -m pip install . --no-deps
 
 重启准确的 MCP host，并使用 `capabilities.deployment_identity` 验证安装包和
 profile 确实是目标修订。
+
+## 10. 可选 Rust shim（实验性，0.8.2）
+
+Rust shim 是一个可选的、单独分发的启动器。它从生成的清单应答静态发现
+（initialize、tools/list、ping、server/discover），不启动 Python；在第一个
+需要转发的请求上恰好拉起一个 Python worker。工具链、目标三元组和许可证
+见 `development_kit/release/shim_platform_matrix.json`。
+
+事实与限制：
+
+- Python wheel 保持平台无关，绝不包含 shim 二进制。shim 是显式选用的
+  启动命令；现有安装不会被自动改变。
+- 不会自动下载。按平台获取二进制，对照已发布的构建清单记录并校验
+  SHA-256 后再使用。
+- 清单或二进制与已安装包身份不符时，shim 拒绝启动。移除 shim 命令并
+  直接以 Python 入口启动，普通服务器行为不变。
+- worker 在请求未完成时退出：客户端收到"结果未知"错误，传输关闭。
+  重连即可；shim 绝不自动重生或重放。
+- Windows：强杀 shim 会终止整个 worker 树（Job Object）。Linux 依赖
+  优雅的 stdin 关闭路径；父进程死亡本身不构成遏制声明。
+- 已验证工具链：Rust 1.99.1（windows-gnu 与 linux-gnu）。理论下限为
+  1.85（edition 2024）；更早的工具链未测试。

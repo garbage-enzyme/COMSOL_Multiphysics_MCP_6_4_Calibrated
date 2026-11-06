@@ -425,3 +425,32 @@ D:\path\to\python-env\python.exe -m pip install . --no-deps
 
 Restart the exact MCP host and use `capabilities.deployment_identity` to verify
 that the installed package and profile are the intended revision.
+
+## 10. Optional Rust shim (experimental, 0.8.2)
+
+The Rust shim is an optional, separately distributed launcher. It answers
+static discovery (initialize, tools/list, ping, server/discover) from a
+generated manifest without starting Python, and spawns exactly one Python
+worker on the first forwarded request. Read the platform matrix at
+`development_kit/release/shim_platform_matrix.json` for toolchains,
+triples, and licenses.
+
+Facts and limits:
+
+- The Python wheel stays platform-independent and never contains a shim
+  binary. The shim is an opt-in launch command. Nothing about an existing
+  installation changes by itself.
+- No auto-download happens. Obtain the binary for your platform, record its
+  SHA-256 against the published build manifest, and verify it before use.
+- If the manifest or binary does not match the installed package identity,
+  the shim refuses to start. Remove the shim command and launch the Python
+  entry point directly. The ordinary server behavior then stays the same.
+- If the worker exits while a request is pending, the client receives an
+  error that the result is unknown, and the transport closes. Reconnect.
+  The shim never respawns or replays automatically.
+- Windows: hard-killing the shim terminates the whole worker tree (Job
+  Object). Linux relies on the graceful stdin-close path. Parent death
+  alone is not a containment claim there.
+- Verified toolchain: Rust 1.99.1 (windows-gnu and linux-gnu). The
+  theoretical minimum is 1.85 (edition 2024). Testing did not cover any
+  older toolchain.
