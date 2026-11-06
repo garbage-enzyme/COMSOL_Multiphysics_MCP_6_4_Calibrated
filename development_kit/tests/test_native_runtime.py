@@ -227,3 +227,63 @@ print(json.dumps({"receipt": receipt, "native_image_count": len(after)}))
         expected |= {"jpype", "mph"}
     assert set(result["receipt"]) == expected
     assert result["native_image_count"] > 0
+
+
+def _run_fresh_preload_process(extra_env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    environment = dict(os.environ)
+    environment.pop("OPENBLAS_NUM_THREADS", None)
+    environment.update(extra_env)
+    code = r"""
+import json
+import os
+import threading
+
+from comsol_mcp.native_runtime import preload_mcp_native_runtime
+
+receipt = preload_mcp_native_runtime()
+import numpy
+import scipy.interpolate
+
+print(
+    json.dumps(
+        {
+            "openblas_num_threads": os.environ.get("OPENBLAS_NUM_THREADS"),
+            "thread_count": threading.active_count(),
+            "numpy_version": numpy.__version__,
+        }
+    )
+)
+"""
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env=environment,
+    )
+
+
+def test_preload_bounds_vendored_openblas_thread_pools_by_default() -> None:
+    """Without an explicit bound, preload caps OpenBLAS pools at one thread.
+
+    Unbounded pools committed about 1.53 GB at idle on a 28-logical-core
+    host (P00 evidence D:/mcp_tests/p0082). The bound keeps every import of
+    the preload manifest and leaves the idle thread count small.
+    """
+    completed = _run_fresh_preload_process({})
+
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["openblas_num_threads"] == "1"
+    assert result["thread_count"] <= 8, result
+
+
+def test_preload_preserves_explicit_openblas_thread_override() -> None:
+    """An explicit OPENBLAS_NUM_THREADS from the caller wins over the default."""
+    completed = _run_fresh_preload_process({"OPENBLAS_NUM_THREADS": "4"})
+
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["openblas_num_threads"] == "4"

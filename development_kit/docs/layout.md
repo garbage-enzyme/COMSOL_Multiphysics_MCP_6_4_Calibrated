@@ -315,7 +315,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/tests/test_operation_arbiter.py` — The tests cover durable serialization and responsive control-plane operation classes.
 - `development_kit/tests/test_native_cancel_probe.py` — The tests cover native cancellation discovery and allowlisting without COMSOL.
 - `development_kit/tests/test_namespace_compatibility.py` — The tests cover canonical package identity and the bounded legacy import interval.
-- `development_kit/tests/test_native_runtime.py` — The tests cover the native-runtime manifest, main-thread preload, and representative lazy native calls.
+- `development_kit/tests/test_native_runtime.py` — The tests cover the native-runtime manifest, main-thread preload, representative lazy native calls, and the default OpenBLAS thread bound with its explicit override.
 - `development_kit/tests/test_ownership.py` — The tests cover solver ownership, leases, and collision detection.
 - `development_kit/tests/test_parameters.py` — The tests cover parameter tools without a COMSOL client.
 - `development_kit/tests/test_path_policy.py` — The tests cover configured model-read and owned-artifact path containment.
@@ -498,7 +498,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `comsol_mcp/shared_session/solver_owners.py` — The module enforces at most two independent one-core solver owners with verified-absence release and no cross-owner access.
 - `comsol_mcp/durable/operation_ledger.py` — The module journals Model Manager, owner, and local-session operations for append-only replay, duplicate suppression, and recovery.
 - `comsol_mcp/schema_registry.py` — The module registers named artifact schema producers and readable and writable versions.
-- `comsol_mcp/native_runtime.py` — The module classifies native-backed imports and preloads every main-process runtime before event-loop dispatch.
+- `comsol_mcp/native_runtime.py` — The module classifies native-backed imports and preloads every main-process runtime before event-loop dispatch. The preload bounds vendored OpenBLAS thread pools to one thread unless the caller exports `OPENBLAS_NUM_THREADS` first; P00 measured each unbounded pool at 32 MB private commit per thread at idle.
 - `comsol_mcp/server.py` — The module creates the profiled MCP server and console entry point.
 - `comsol_mcp/settings.py` — The module loads grouped project settings and reports bounded fallback errors.
 - `comsol_mcp/settings_gui_handshake.py` — The module implements the bounded path-free Settings GUI startup handshake.

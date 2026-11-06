@@ -34,6 +34,7 @@ SOLVER_PROCESS_NAMES = ("comsolmphserver", "comsol", "comsolui")
 IDLE_HOLD_S = 10.0
 EXIT_GRACE_S = 8.0
 PREDICTED_SERVER_COMMIT_BYTES = 1_700_000_000
+_PER_SESSION_OVERRIDE_MB: float | None = None
 
 
 class _PERF_INFO(ctypes.Structure):
@@ -289,7 +290,9 @@ def preflight(
     machine["effective_ceiling"] = ceiling
     solvers = solver_processes_present()
     per_session = PREDICTED_SERVER_COMMIT_BYTES
-    if variant is not None and variant.env.get("OPENBLAS_NUM_THREADS") == "1":
+    if _PER_SESSION_OVERRIDE_MB is not None:
+        per_session = int(_PER_SESSION_OVERRIDE_MB * 1_000_000)
+    elif variant is not None and variant.env.get("OPENBLAS_NUM_THREADS") == "1":
         per_session = 300_000_000
     predicted = (
         machine["commit_total_bytes"] + sessions * per_session
@@ -314,7 +317,7 @@ async def wait_for_server_tree(timeout_s: float = 20.0) -> int | None:
                 cmdline = " ".join(proc.cmdline() or []).lower()
             except Exception:
                 continue
-            if "comsol-mcp" in (proc.name() or "").lower() or "comsol-mcp" in cmdline:
+            if "comsol-mcp" in (proc.name() or "").lower() or "comsol-mcp" in cmdline or "comsol_mcp.server" in cmdline:
                 return proc.pid
         await asyncio.sleep(0.2)
     return None
@@ -358,6 +361,7 @@ async def drive_session(
     run_id: str,
     writer: SampleWriter,
     errlog_path: Path,
+    server_args: list[str] | None = None,
 ) -> dict[str, Any]:
     """Drive one MCP stdio session with staged sampling and latencies."""
     from mcp import ClientSession, StdioServerParameters
@@ -367,7 +371,7 @@ async def drive_session(
     stages: list[dict[str, Any]] = []
     errlog = open(errlog_path, "ab")
     params = StdioServerParameters(
-        command=command, args=[], env=env, errlog=errlog
+        command=command, args=server_args or [], env=env, errlog=errlog
     )
     async with stdio_client(params) as (reader, writer_transport):
         server_pid = await wait_for_server_tree()
@@ -437,6 +441,7 @@ async def run_server_scenario(
 ) -> None:
     """Run the cold-launch server scenario for one variant."""
     command = args.command or str(Path(sys.executable).parent / "comsol-mcp.exe")
+    server_args = args.server_args.split() if args.server_args else None
     settings_path = root / f"settings-{variant.name}.json"
     for launch in range(args.launches):
         run_id = f"{variant.name}-{args.sessions}s-l{launch:02d}-{run_stamp()}"
@@ -463,7 +468,12 @@ async def run_server_scenario(
         if args.sessions == 1:
             results = [
                 await drive_session(
-                    command, base_env, run_id, writer, run_dir / "server-stderr.log"
+                    command,
+                    base_env,
+                    run_id,
+                    writer,
+                    run_dir / "server-stderr.log",
+                    server_args,
                 )
             ]
         else:
@@ -474,6 +484,7 @@ async def run_server_scenario(
                     f"{run_id}-s{index}",
                     writer,
                     run_dir / f"server-stderr-s{index}.log",
+                    server_args,
                 )
                 for index in range(args.sessions)
             ]
@@ -485,6 +496,7 @@ async def run_server_scenario(
             "sessions": args.sessions,
             "launch_index": launch,
             "command": command,
+            "server_args": server_args or [],
             "settings_path": str(settings_path),
             "env_overrides": variant.env,
                 "machine_before": machine,
@@ -582,6 +594,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--launches", type=int, default=3)
     parser.add_argument("--command", default=None)
     parser.add_argument(
+        "--server-args",
+        default=None,
+        help="Space-separated server arguments; use with --command to launch a "
+        "source checkout, for example '-m comsol_mcp.server' with the "
+        "repository root as the working directory.",
+    )
+    parser.add_argument(
+        "--per-session-commit-mb",
+        type=float,
+        default=None,
+        help="Override the predicted per-session commit estimate in MB when "
+        "the server under test is known to commit less than the legacy "
+        "default (for example a source checkout with the BLAS bound).",
+    )
+    parser.add_argument(
         "--ceiling",
         type=float,
         default=COMMIT_CEILING,
@@ -594,6 +621,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    global _PER_SESSION_OVERRIDE_MB
+    _PER_SESSION_OVERRIDE_MB = args.per_session_commit_mb
     if args.sessions < 1 or args.launches < 1:
         raise SystemExit("sessions and launches must be positive")
     root: Path = args.evidence_root

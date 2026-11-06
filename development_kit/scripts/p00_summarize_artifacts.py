@@ -68,16 +68,23 @@ def main() -> int:
         lambda: defaultdict(list)
     )
     threads_by_variant: dict[str, list[int]] = defaultdict(list)
+
+    def variant_label(run: dict[str, Any]) -> str:
+        """Distinguish installed-wheel runs from source-checkout runs."""
+        suffix = "-src" if run.get("server_args") else ""
+        return run["variant"] + suffix
+
     for run in server_runs:
+        label = variant_label(run)
         for session in run["session_results"]:
             stages = {s["stage"]: s for s in session["stages"]}
             idle = stages.get("idle_hold_end")
             if idle:
-                idle_by_variant[run["variant"]].append(idle["tree_private_commit_bytes"])
+                idle_by_variant[label].append(idle["tree_private_commit_bytes"])
             lat = session.get("latencies", {})
             for key in ("initialize_s", "tools_list_s", "first_call_s", "warm_call_s"):
                 if lat.get(key) is not None:
-                    latency_by_variant[run["variant"]][key].append(lat[key])
+                    latency_by_variant[label][key].append(lat[key])
     for line in (root / "process-samples.jsonl").read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -222,12 +229,17 @@ def main() -> int:
                 return value
         return 0.0
 
-    four_session = [r for r in server_runs if r.get("sessions", 1) == 4]
+    four_session = [
+        r
+        for r in server_runs
+        if r.get("sessions", 1) == 4
+        and not any("error" in s for s in r["session_results"])
+    ]
     four_idle_by_variant: dict[str, list[float]] = defaultdict(list)
     ceiling_overrides: list[dict[str, Any]] = []
     for run in four_session:
         total = sum(last_stage_commit(s) for s in run["session_results"])
-        four_idle_by_variant[run["variant"]].append(total)
+        four_idle_by_variant[variant_label(run)].append(total)
         if run.get("ceiling_override"):
             ceiling_overrides.append(
                 {
@@ -249,7 +261,12 @@ def main() -> int:
                 variant: mb(values) for variant, values in four_idle_by_variant.items()
             },
         },
-        "caller_acceptance_status": None,
+        "caller_acceptance_status": "DRAFT_ACCEPTED_PENDING_RUST_TIGHTENING",
+        "caller_direction_2026_11_06": (
+            "Caller accepted the proposed numbers as a draft. The final frozen "
+            "targets may tighten based on measured Rust shim results (P02+). "
+            "Batch B/P01 implementation proceeds against the draft numbers."
+        ),
         "ceiling_overrides_recorded": ceiling_overrides,
         "rule": "targets are frozen only after caller acceptance; no implementation comparison starts before that",
     }
