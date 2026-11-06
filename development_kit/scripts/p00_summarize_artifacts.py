@@ -270,23 +270,34 @@ def main() -> int:
         "schema": "comsol_mcp.p00.target_decision/1",
         "generated_at_utc": now,
         "proposed_targets": {
-            "single_host_idle_private_commit_mb_max": 200,
-            "four_client_aggregate_idle_private_commit_mb_max": 750,
+            "single_host_idle_private_commit_mb_max": 150,
+            "discovery_only_session_private_commit_mb_max": 10,
+            "four_client_aggregate_idle_private_commit_mb_max": 600,
+            "static_initialize_latency_s_max": 0.05,
             "first_call_latency_regression_s_max": 0.5,
             "basis": (
                 "prod-like-blas1 measured idle (mean %.1f MB per host); "
-                "measured four-session aggregates below"
+                "four-session aggregates below; Rust shim measured "
+                "1.2-1.7 MB static-only sessions and 110 MB sessions with a "
+                "spawned worker (D:/mcp_tests/p0082/p02-shim-probe.json)"
             )
             % (stats.mean(blas1_idle) / 2**20 if blas1_idle else -1),
             "measured_four_session_aggregate_mb": {
                 variant: mb(values) for variant, values in four_idle_by_variant.items()
             },
+            "rust_measurement_2026_11_06": {
+                "shim_static_only_session_mb": [1.7, 1.2],
+                "shim_with_worker_session_mb": 110.5,
+                "static_initialize_s": 0.0001,
+                "static_tools_list_s": 0.0009,
+                "warm_forwarded_call_s": 0.2361,
+            },
         },
-        "caller_acceptance_status": "DRAFT_ACCEPTED_PENDING_RUST_TIGHTENING",
+        "caller_acceptance_status": "PROPOSED_FINAL_PENDING_CALLER_FREEZE",
         "caller_direction_2026_11_06": (
-            "Caller accepted the proposed numbers as a draft. The final frozen "
-            "targets may tighten based on measured Rust shim results (P02+). "
-            "Batch B/P01 implementation proceeds against the draft numbers."
+            "Caller accepted the initial numbers as a draft and directed that "
+            "the final targets tighten based on measured Rust shim results. "
+            "The tightened numbers above follow the first Rust measurements."
         ),
         "ceiling_overrides_recorded": ceiling_overrides,
         "rule": (
