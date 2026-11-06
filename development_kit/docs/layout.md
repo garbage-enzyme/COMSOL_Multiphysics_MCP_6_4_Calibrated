@@ -756,3 +756,9 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/scripts/native_optimizer_gate_checks.py` — The repository-only helper checks numerical native gate receipts; it is excluded from runtime packages.
 - `development_kit/tests/test_tasks_owner_binding.py` — The tests cover binding Tasks to the normalized effective owner.
 - `development_kit/tests/test_native_measurement_gate.py` — The tests cover the explicit scientific-gate policy for native condition measurements.
+
+## Optional Rust shim (0.8.2)
+
+- `shim/Cargo.toml` — The file declares the optional `comsol-mcp-shim` binary crate. The crate stays out of the Python wheel and sdist; packaging and locked dependencies are decided by the packaging batch.
+- `shim/Cargo.lock` — The file records the resolved dependency graph for reproducible shim builds.
+- `shim/src/main.rs` — The module implements the prototype MCP stdio shim: manifest-backed static discovery, one lazily spawned Python worker with a separate handshake, verbatim forwarding, bounded reads, and refusal of automatic respawn. It never acquires solver leases and never fabricates live state.

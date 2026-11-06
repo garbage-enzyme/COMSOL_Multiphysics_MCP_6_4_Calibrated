@@ -31,3 +31,6 @@ knowledge_base/
 *.mph
 knowledge_base_v2/
 pdf/
+
+# Rust shim build output
+/shim/target/
