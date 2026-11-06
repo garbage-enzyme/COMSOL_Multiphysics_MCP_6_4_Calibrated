@@ -754,4 +754,37 @@ mod tests {
         let mut reader = std::io::BufReader::new(data);
         assert!(matches!(read_crlf_line(&mut reader), LineRead::Eof));
     }
+
+    /// G-REG-UTF8-001 regression: the generator serializes manifest bodies
+    /// with Python's `ensure_ascii=False`, so a non-ASCII character stays
+    /// raw UTF-8 both in payload bytes and in the hashed canonical body.
+    /// serde_json must agree byte for byte, or a valid manifest would be
+    /// refused (body hash) and a valid reply would gain escape sequences.
+    #[test]
+    fn non_ascii_payload_stays_raw_utf8_and_hashes_like_the_generator() {
+        // Vector computed with CPython: sha256("temp 25°C, µm scale" as UTF-8).
+        let payload = "temp 25\u{b0}C, \u{b5}m scale";
+        assert_eq!(
+            sha256_hex(payload.as_bytes()),
+            "1479447c5aaa0193e9c6117f09a4ec719d76d5979d7fcc752789f2e25dfa5b4d"
+        );
+        // Vector computed with CPython:
+        // sha256(json.dumps(body, sort_keys=True, separators=(",", ":"),
+        //                   ensure_ascii=False).encode()).
+        let body = json!({
+            "schema_name": MANIFEST_SCHEMA_NAME,
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "k": "v\u{b0}",
+        });
+        let canonical = canonical_json(&body);
+        assert_eq!(
+            sha256_hex(canonical.as_bytes()),
+            "b702c18a3a2485162d5ed07205dd1af5bdc02cc3bc4024f4b9f6e0c8ddcbb3df"
+        );
+        // The envelope must splice the payload verbatim: raw UTF-8 bytes,
+        // never an ASCII escape sequence.
+        let line = format!("{{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{payload}}}");
+        assert!(line.as_bytes().windows(2).any(|w| w == [0xc2, 0xb0]));
+        assert!(!line.contains("\\u00b0"));
+    }
 }

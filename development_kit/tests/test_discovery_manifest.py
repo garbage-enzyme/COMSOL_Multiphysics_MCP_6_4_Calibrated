@@ -249,6 +249,52 @@ def test_manifest_file_stays_bounded(core_manifest) -> None:
     assert len(manifest_bytes(core_manifest)) <= core_manifest["bounds"]["max_manifest_bytes"]
 
 
+def test_non_ascii_payload_stays_raw_utf8_round_trip(manifest_settings, monkeypatch, tmp_path):
+    """G-REG-UTF8-001: non-ASCII bytes survive the manifest round trip raw.
+
+    The canonical form uses ``ensure_ascii=False``. A payload with non-ASCII
+    must keep raw UTF-8 bytes in the file, through hashing, loading, and
+    verification. An ASCII-escaped copy would break byte-equality with the
+    server wire and invalidate the static discovery contract.
+    """
+    import hashlib
+
+    from comsol_mcp.discovery_manifest import _sha256_text
+
+    payload = "degree \u00b0 and micro \u00b5 stay raw"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv(SETTINGS_PATH_ENV, str(manifest_settings))
+        patch.delenv("COMSOL_MCP_PROFILE", raising=False)
+        manifest = build_manifest()
+    # Inject a synthetic non-ASCII payload row, then recompute the document
+    # hash the same way the generator does and round-trip through the file.
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    manifest["payloads"][digest] = payload
+    manifest["responses"].append(
+        {
+            "era": "handshake",
+            "protocol_version": manifest["negotiation"]["handshake_versions"][-1],
+            "method": "ping",
+            "cursor": None,
+            "result_sha256": digest,
+        }
+    )
+    del manifest["manifest_sha256"]
+    manifest["manifest_sha256"] = _sha256_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    )
+    path = tmp_path / "non-ascii.json"
+    write_manifest(path, manifest)
+    raw = path.read_bytes()
+    assert "degree \u00b0 and micro \u00b5 stay raw".encode("utf-8") in raw
+    assert b"\\u00b0" not in raw
+    loaded = json.loads(raw)
+    assert loaded["payloads"][digest] == payload
+    # The stored digest matches the raw UTF-8 bytes, not an escaped form.
+    assert hashlib.sha256(loaded["payloads"][digest].encode("utf-8")).hexdigest() == digest
+    assert verify_manifest(loaded) == []
+
+
 def _child_environment(settings: Path, **extra: str) -> dict[str, str]:
     environment = dict(os.environ)
     environment.pop("COMSOL_MCP_PROFILE", None)
