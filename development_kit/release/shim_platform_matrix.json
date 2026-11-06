@@ -6,7 +6,8 @@
     "name": "comsol-mcp-shim",
     "version_policy": "Tracks comsol_mcp.__version__; dev trees carry a -dev pre-release. The release batch bumps both in one commit.",
     "edition": "2024",
-    "msrv": "1.99.1 (the frozen toolchain; no lower version is tested or claimed)",
+    "msrv": "1.99.1 (the frozen, verified toolchain)",
+    "msrv_theoretical_note": "Edition 2024 first shipped with Rust 1.85, so 1.85 is the theoretical lower bound. No build on an older toolchain is tested or claimed; the shim ships as prebuilt binaries.",
     "license": "MIT"
   },
   "build_toolchain": {

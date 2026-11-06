@@ -4,8 +4,10 @@ name = "comsol-mcp-shim"
 # with comsol_mcp.__version__ in one commit; dev builds carry -dev suffixes.
 version = "0.8.2-dev"
 edition = "2024"
-# MSRV equals the frozen, verified toolchain. The shim ships as prebuilt
-# binaries; no lower toolchain claim is tested or made.
+# rust-version is the frozen, verified toolchain only. The theoretical
+# lower bound is 1.85 (the release that introduced edition 2024), but no
+# build on any older toolchain is tested or claimed. The shim ships as
+# prebuilt binaries; consumers never compile it.
 rust-version = "1.99.1"
 description = "Optional MCP stdio shim: manifest-backed discovery with a lazily spawned Python worker"
 license = "MIT"
