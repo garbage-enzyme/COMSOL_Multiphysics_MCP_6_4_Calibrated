@@ -21,12 +21,12 @@ use std::collections::HashMap;
 use std::io::{BufRead, Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[cfg(windows)]
 use winjob::JobHandle;
@@ -238,7 +238,7 @@ fn read_crlf_line<R: BufRead>(reader: &mut R) -> LineRead {
                     LineRead::Eof
                 } else {
                     LineRead::Line(String::from_utf8_lossy(&bytes).into_owned())
-                }
+                };
             }
             Ok(_) => {}
             Err(_) => return LineRead::Eof,
@@ -642,7 +642,7 @@ fn handshake_version_of(era: &Option<ClientEra>, latest: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{json, Map};
+    use serde_json::{Map, json};
 
     fn sample_manifest() -> Value {
         let payload_a = "{}".to_owned();
@@ -686,18 +686,26 @@ mod tests {
     #[test]
     fn manifest_loads_and_answers_each_era() {
         let manifest = Manifest::from_value(sample_manifest()).expect("manifest is valid");
-        assert!(manifest
-            .lookup("handshake", "2025-11-25", "initialize", None)
-            .is_some());
-        assert!(manifest
-            .lookup("handshake", "1999-01-01", "initialize", None)
-            .is_some());
-        assert!(manifest
-            .lookup("modern", "2026-07-28", "server/discover", None)
-            .is_some());
-        assert!(manifest
-            .lookup("handshake", "2025-11-25", "tools/list", Some("x"))
-            .is_none());
+        assert!(
+            manifest
+                .lookup("handshake", "2025-11-25", "initialize", None)
+                .is_some()
+        );
+        assert!(
+            manifest
+                .lookup("handshake", "1999-01-01", "initialize", None)
+                .is_some()
+        );
+        assert!(
+            manifest
+                .lookup("modern", "2026-07-28", "server/discover", None)
+                .is_some()
+        );
+        assert!(
+            manifest
+                .lookup("handshake", "2025-11-25", "tools/list", Some("x"))
+                .is_none()
+        );
     }
 
     #[test]

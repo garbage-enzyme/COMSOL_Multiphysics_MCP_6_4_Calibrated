@@ -39,7 +39,7 @@ struct ExtendedLimitInformation {
 }
 
 #[link(name = "kernel32")]
-extern "system" {
+unsafe extern "system" {
     fn CreateJobObjectW(
         attributes: *const core::ffi::c_void,
         name: *const u16,

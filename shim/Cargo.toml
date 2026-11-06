@@ -1,7 +1,10 @@
 [package]
 name = "comsol-mcp-shim"
-version = "0.1.0"
-edition = "2021"
+# Tracks the COMSOL MCP release line. The release batch bumps this together
+# with comsol_mcp.__version__ in one commit; dev builds carry -dev suffixes.
+version = "0.8.2-dev"
+edition = "2024"
+rust-version = "1.85"
 description = "Optional MCP stdio shim: manifest-backed discovery with a lazily spawned Python worker"
 license = "MIT"
 publish = false
@@ -11,6 +14,14 @@ name = "comsol-mcp-shim"
 path = "src/main.rs"
 
 [dependencies]
+# Exact versions are frozen by the committed Cargo.lock; the packaging
+# batch records the lock hash in the shim build manifest.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
