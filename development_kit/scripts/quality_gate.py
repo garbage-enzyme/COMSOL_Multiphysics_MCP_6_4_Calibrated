@@ -499,6 +499,9 @@ def _run(
             cwd=ROOT,
             env=environment,
             check=True,
+            # Console allocation would steal focus once per stage. GUI test
+            # windows are not consoles: this flag never hides them.
+            creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
         )
     except subprocess.CalledProcessError as exc:
         raise QualityCommandError(stage, exc.returncode) from None

@@ -45,14 +45,14 @@ def ascii_tmp_path():
 
 @pytest.fixture(scope="session", autouse=True)
 def _hide_child_console_windows():
-    """Keep console-subsystem children of the suite from opening windows.
+    """Keep every console-subsystem child of the suite from opening a window.
 
     The suite runs under console-less parents (harness shells, hosted CI).
     On Windows a console-subsystem child of a console-less parent otherwise
-    allocates a visible window for every spawn. Default-only spawns gain
-    ``CREATE_NO_WINDOW``. Spawns that already pass ``creationflags`` keep
-    their own console policy untouched, and non-Windows platforms are
-    unchanged.
+    allocates a visible, focus-stealing console per spawn. Every spawn gains
+    ``CREATE_NO_WINDOW`` and loses ``CREATE_NEW_CONSOLE``. This governs only
+    console allocation: real GUI windows that GUI tests must capture are not
+    consoles and stay visible. Non-Windows platforms are unchanged.
     """
     if os.name != "nt":
         yield
@@ -61,10 +61,12 @@ def _hide_child_console_windows():
     import subprocess
 
     original_popen = subprocess.Popen
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    new_console = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
 
     def _popen_hidden(*args, **kwargs):
-        if not kwargs.get("creationflags"):
-            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        flags = kwargs.get("creationflags") or 0
+        kwargs["creationflags"] = (flags & ~new_console) | no_window
         return original_popen(*args, **kwargs)
 
     subprocess.Popen = _popen_hidden
