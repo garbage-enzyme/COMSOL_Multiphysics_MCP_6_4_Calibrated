@@ -198,7 +198,8 @@ async def _session(server: Any) -> AsyncIterator[Send]:
                     reply = await client_read.receive()
                 if isinstance(reply, Exception):
                     raise ManifestCaptureError(f"server transport raised {type(reply).__name__}")
-                return reply.message.model_dump_json(by_alias=True, exclude_unset=True)
+                wire: str = reply.message.model_dump_json(by_alias=True, exclude_unset=True)
+                return wire
 
             try:
                 yield send
@@ -491,7 +492,9 @@ def load_manifest(path: str | Path, environ: Mapping[str, str] | None = None) ->
     """Read one manifest with a byte bound and refuse a stale one."""
     from comsol_mcp.durable.io import read_file_bytes_bounded
 
-    document = json.loads(read_file_bytes_bounded(Path(path), max_bytes=MAX_MANIFEST_BYTES))
+    document: dict[str, Any] = json.loads(
+        read_file_bytes_bounded(Path(path), max_bytes=MAX_MANIFEST_BYTES)
+    )
     problems = verify_manifest(document, environ)
     if problems:
         raise ManifestStaleError(problems)
