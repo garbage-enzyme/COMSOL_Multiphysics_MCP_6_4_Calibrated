@@ -480,6 +480,14 @@ fn main() {
 }
 
 fn run() -> i32 {
+    // One-line identity report for save-time selector validation. The
+    // selector compares this version against the installed package line
+    // and the recorded artifact hash before enabling shim transport.
+    let arguments: Vec<String> = std::env::args().collect();
+    if arguments.len() == 2 && (arguments[1] == "--version" || arguments[1] == "-V") {
+        println!("comsol-mcp-shim {}", env!("CARGO_PKG_VERSION"));
+        return 0;
+    }
     let (out, writer_thread) = OutSink::spawn();
     let manifest_option = std::env::var(ENV_MANIFEST).ok();
     let manifest = match manifest_option.as_deref() {
