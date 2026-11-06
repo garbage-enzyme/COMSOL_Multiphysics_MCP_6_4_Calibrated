@@ -14,8 +14,13 @@
     "windows": {
       "triple": "x86_64-pc-windows-gnu",
       "toolchain": "stable-x86_64-pc-windows-gnu 1.99.1",
-      "reason": "The build host has no MSVC Build Tools; the GNU toolchain is self-contained. An MSVC lane needs its own reviewed build and acceptance before any release claims it.",
+      "reason": "The GNU toolchain is self-contained and was the first verified lane when MSVC link capability was unprobed. An MSVC lane has since been proven to link and pass the full protocol checks (see also_verified); the release-triple choice stays a caller decision at the release candidate.",
       "verified_on": "Windows 10.0.26200"
+    },
+    "windows_msvc_also_verified": {
+      "triple": "x86_64-pc-windows-msvc",
+      "toolchain": "1.99.1-x86_64-pc-windows-msvc (machine default after the 2026-11-07 toolchain fix)",
+      "evidence": "cargo fmt/clippy -D warnings/test/release build clean; MSVC binary passed the full P04 suite including the non-ASCII manifest (D:/mcp_tests/p0082/p04/p04-protocol-checks-windows-msvc.json)"
     },
     "linux": {
       "triple": "x86_64-unknown-linux-gnu",
