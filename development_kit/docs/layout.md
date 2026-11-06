@@ -104,6 +104,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/docs/layout.md` — The file lists tracked repository files and explains their purposes and limits.
 - `development_kit/docs/legacy_phase_compatibility.md` — The file records the frozen compatibility allowlist for historical aliases.
 - `development_kit/docs/release_checklist.md` — The file gives the ordered dependency, package, licensed, install, and restart release checklist.
+- `development_kit/docs/runtime_control_contract.md` — The file freezes the accepted 0.8.1 runtime control contract: runtime directory, process identity, solver lease, operation and job locks, lock order, termination authority, schema identities, and open decisions. It changes no behavior.
 - `development_kit/docs/surrogate_dnn_capability_matrix.md` — The file records proven COMSOL 6.4 surrogate-training and DNN ClientAPI capabilities. It covers the exact creation hierarchy, training-lifecycle methods, split and seed controls, and frozen limitations.
 
 ## Release contracts and fixtures
