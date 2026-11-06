@@ -17,12 +17,14 @@ import asyncio
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+import comsol_mcp.jobs.tasks_bridge as tasks_bridge_module
 from comsol_mcp.jobs.tasks_bridge import (
     DEFAULT_POLL_INTERVAL_MS,
     JOB_STATE_TO_TASK_STATUS,
@@ -76,12 +78,11 @@ def pause():
         time.sleep(0.01)
 if role=='a':
     if scenario=='tail':
-        original=module.read_complete_jsonl
-        def read(*args,**kwargs):
-            result=original(*args,**kwargs)
+        original=module.append_jsonl_record
+        def append(*args,**kwargs):
             if not (root/'paused').exists(): pause()
-            return result
-        module.read_complete_jsonl=read
+            return original(*args,**kwargs)
+        module.append_jsonl_record=append
     else:
         original=store.latest_for_job
         def latest(*args,**kwargs):
@@ -168,8 +169,9 @@ class FakeEngine:
         self.duplicate_fingerprints: set[str] = set()
         self.fail_submit = False
 
-    def submit(self, raw_spec: dict[str, Any]) -> dict[str, Any]:
+    def submit(self, raw_spec: dict[str, Any], request_id: str | None = None) -> dict[str, Any]:
         self.submit_calls.append(dict(raw_spec))
+        self.last_request_id = request_id
         if self.fail_submit:
             raise RuntimeError("engine refused the submission")
         fingerprint = spec_fingerprint(raw_spec)
@@ -281,17 +283,28 @@ def test_terminal_statuses_carry_the_right_payload(bridge: TasksBridge) -> None:
     row = bridge._store.latest_for_task(job_id)
     assert row is not None
 
-    engine.set_state(row.job_id, "completed", summary={"points": 3})
+    engine.set_state(
+        row.job_id,
+        "completed",
+        progress={"completed": 2, "total": 2},
+    )
     completed = bridge.get_task(job_id)
     assert completed["status"] == "completed"
     # Terminal payload is inline, and a completed tool error is NOT `failed`.
     assert completed["result"]["structuredContent"]["jobId"] == row.job_id
     assert completed["result"]["isError"] is False
+    assert completed["result"]["structuredContent"]["resultReference"] == {
+        "kind": "durable_progress",
+        "completed": 2,
+        "total": 2,
+    }
+    assert completed["result"]["structuredContent"]["lastError"] is None
 
-    engine.set_state(row.job_id, "failed", error="solver blew up")
+    engine.set_state(row.job_id, "failed", last_error="solver blew up")
     failed = bridge.get_task(job_id)
     assert failed["status"] == "failed"
     assert failed["error"]["message"] == "solver blew up"
+    assert failed["error"]["data"]["jobId"] == row.job_id
 
 
 def test_a_completed_tool_error_maps_to_completed_not_failed(bridge: TasksBridge) -> None:
@@ -299,10 +312,11 @@ def test_a_completed_tool_error_maps_to_completed_not_failed(bridge: TasksBridge
     handle = _submit(bridge)
     row = bridge._store.latest_for_task(handle["taskId"])
     assert row is not None
-    _engine(bridge).set_state(row.job_id, "completed", job_error=True)
+    _engine(bridge).set_state(row.job_id, "completed", last_error="preflight refused the probe")
     detail = bridge.get_task(handle["taskId"])
     assert detail["status"] == "completed"
     assert detail["result"]["isError"] is True
+    assert detail["result"]["structuredContent"]["lastError"] == "preflight refused the probe"
     assert "error" not in detail
 
 
@@ -335,6 +349,33 @@ def test_the_mapping_is_durable_before_the_handle_is_returned(bridge: TasksBridg
     row = reopened.latest_for_task(handle["taskId"])
     assert row is not None
     assert row.job_id == handle["taskId"] or row.job_id
+
+
+def test_a_crash_between_submit_and_mapping_append_self_heals(tmp_path: Path) -> None:
+    """A crash after the durable job exists but before the mapping row is
+    appended leaves no orphan: duplicate detection returns the same job and a
+    fresh mapping row binds to it instead of launching a second job."""
+    engine = FakeEngine()
+    store = TasksMappingStore(tmp_path / "tasks")
+    first = TasksBridge(engine=engine, store=store, owner="owner-a")
+    _submit(first)
+    (job_id,) = _engine(first)._jobs.keys()
+
+    # The crash window: the engine (durable job) survives, the mapping store
+    # was never written, and the client retries the identical spec.
+    retried_store = TasksMappingStore(tmp_path / "retried-tasks")
+    retried = TasksBridge(engine=engine, store=retried_store, owner="owner-a")
+
+    handle = _submit(retried)
+
+    assert handle["duplicate_submission"] is True
+    rows = retried_store.rows()
+    assert len(rows) == 1
+    assert rows[0].job_id == job_id
+    assert rows[0].task_id == handle["taskId"]
+    # Exactly one durable job exists across both submissions.
+    assert len(_engine(retried).submit_calls) == 2
+    assert len(_engine(retried)._jobs) == 1
 
 
 def test_a_restart_rebinds_the_same_task_id(tmp_path: Path) -> None:
@@ -794,3 +835,679 @@ def test_legacy_revision_cannot_receive_a_stable_task_envelope(tmp_path, revisio
     assert result == ordinary
     assert not engine.submit_calls
     assert not (tmp_path / "tasks").exists()
+
+
+def test_payload_error_details_are_bounded_and_path_free(bridge: TasksBridge) -> None:
+    handle = _submit(bridge)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    long_detail = "x" * 700
+    _engine(bridge).set_state(
+        row.job_id,
+        "completed",
+        last_error=(
+            f"preflight failed opening D:\private\evidence\{row.job_id}\probe.json "
+            f"after {long_detail}"
+        ),
+    )
+    detail = bridge.get_task(handle["taskId"])
+
+    assert detail["status"] == "completed"
+    payload = detail["result"]["structuredContent"]
+    assert detail["result"]["isError"] is True
+    assert "D:" not in payload["lastError"]
+    assert "private" not in payload["lastError"]
+    assert payload["lastError"].startswith("preflight failed opening probe.json after ")
+    assert len(payload["lastError"]) <= 512
+
+
+def test_tasks_payload_agrees_with_the_ordinary_job_path_and_survives_restart(
+    tmp_path: Path,
+) -> None:
+    engine = FakeEngine()
+    store_root = tmp_path / "tasks"
+    bridge = TasksBridge(engine=engine, store=TasksMappingStore(store_root), owner="owner-a")
+    handle = _submit(bridge)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    engine.set_state(
+        row.job_id,
+        "completed",
+        attempt=3,
+        progress={"completed": 7, "total": 9},
+    )
+
+    ordinary = engine.status(row.job_id)
+    detail = bridge.get_task(handle["taskId"])
+    structured = detail["result"]["structuredContent"]
+
+    assert structured["jobId"] == row.job_id == ordinary.get("job_id")
+    assert structured["status"] == ordinary["status"]
+    assert structured["attempt"] == ordinary["attempt"]
+    assert structured["resultReference"]["completed"] == ordinary["progress"]["completed"]
+    assert structured["resultReference"]["total"] == ordinary["progress"]["total"]
+
+    restarted = TasksBridge(engine=engine, store=TasksMappingStore(store_root), owner="owner-a")
+    again = restarted.get_task(handle["taskId"])
+    assert again["result"]["structuredContent"] == structured
+
+
+def test_terminal_task_expiry_enforces_declared_retention(tmp_path: Path) -> None:
+    now = {"ms": 1_000_000}
+    bridge = TasksBridge(
+        engine=FakeEngine(),
+        store=TasksMappingStore(tmp_path / "tasks"),
+        owner="owner-a",
+        clock_ms=lambda: now["ms"],
+    )
+    handle = _submit(bridge, ttl_ms=60_000)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    _engine(bridge).set_state(row.job_id, "completed")
+
+    now["ms"] += 59_999
+    assert bridge.get_task(handle["taskId"])["status"] == "completed"
+
+    # The boundary instant itself counts as expired.
+    now["ms"] += 1
+    with pytest.raises(TaskNotFound):
+        bridge.get_task(handle["taskId"])
+
+    # A restarted bridge enforces the same retention from the same row.
+    restarted = TasksBridge(
+        engine=FakeEngine(),
+        store=TasksMappingStore(tmp_path / "tasks"),
+        owner="owner-a",
+        clock_ms=lambda: now["ms"],
+    )
+    with pytest.raises(TaskNotFound):
+        restarted.get_task(handle["taskId"])
+
+
+def test_expiry_never_cancels_a_running_job_or_deletes_evidence(tmp_path: Path) -> None:
+    now = {"ms": 1_000_000}
+    engine = FakeEngine()
+    bridge = TasksBridge(
+        engine=engine,
+        store=TasksMappingStore(tmp_path / "tasks"),
+        owner="owner-a",
+        clock_ms=lambda: now["ms"],
+    )
+    handle = _submit(bridge, ttl_ms=60_000)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    engine.set_state(row.job_id, "running")
+
+    now["ms"] += 10 * 60_000
+    detail = bridge.get_task(handle["taskId"])
+
+    assert detail["status"] == "working"
+    assert engine.cancel_calls == []
+    assert bridge._store.latest_for_task(handle["taskId"]) is not None
+
+
+def test_null_ttl_retains_the_mapping_forever(tmp_path: Path) -> None:
+    now = {"ms": 1_000_000}
+    bridge = TasksBridge(
+        engine=FakeEngine(),
+        store=TasksMappingStore(tmp_path / "tasks"),
+        owner="owner-a",
+        clock_ms=lambda: now["ms"],
+    )
+    handle = _submit(bridge, ttl_ms=None)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    _engine(bridge).set_state(row.job_id, "completed")
+
+    now["ms"] += 10 * 365 * 24 * 60 * 60 * 1000
+    assert bridge.get_task(handle["taskId"])["status"] == "completed"
+
+
+def test_duplicate_submit_keeps_the_original_mapping_metadata(tmp_path: Path) -> None:
+    bridge = TasksBridge(
+        engine=FakeEngine(),
+        store=TasksMappingStore(tmp_path / "tasks"),
+        owner="owner-a",
+    )
+    spec = {
+        "job_type": "staged_sweep",
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+    }
+    first = bridge.submit_task(spec, client_extensions=OPT_IN, ttl_ms=60_000)
+    rows_after_first = list(bridge._store.rows())
+
+    second = bridge.submit_task(spec, client_extensions=OPT_IN, ttl_ms=9_000_000)
+
+    assert second["taskId"] == first["taskId"]
+    assert second["ttlMs"] == first["ttlMs"] == 60_000
+    assert second["pollIntervalMs"] == first["pollIntervalMs"]
+    assert second["duplicate_submission"] is True
+    assert list(bridge._store.rows()) == rows_after_first
+
+
+def test_capacity_admission_refuses_new_tasks_before_the_engine(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import comsol_mcp.jobs.tasks_bridge as module
+
+    engine = FakeEngine()
+    store = TasksMappingStore(tmp_path / "tasks")
+    bridge = TasksBridge(engine=engine, store=store, owner="owner-a")
+    for index in range(8):
+        bridge.submit_task(
+            {
+                "job_type": "staged_sweep",
+                "parameter_name": "wl",
+                "parameter_values": [float(index)],
+            },
+            client_extensions=OPT_IN,
+        )
+    monkeypatch.setattr(module, "MAX_TASK_ROWS", 8)
+    with pytest.raises(TasksMappingError) as excinfo:
+        bridge.submit_task(
+            {
+                "job_type": "staged_sweep",
+                "parameter_name": "wl",
+                "parameter_values": [99.0],
+            },
+            client_extensions=OPT_IN,
+        )
+    assert excinfo.value.code == "tasks_store_capacity"
+    # The durable engine was never touched for the refused task.
+    assert len(engine._jobs) == 8
+    assert len(store.rows()) == 8
+
+    # A staged_sweep duplicate is NOT a mapping reuse: the real engine never
+    # deduplicates that family, so an identical spec still creates a new
+    # durable job that needs its own reserved row.
+    with pytest.raises(TasksMappingError) as retry_info:
+        bridge.submit_task(
+            {
+                "job_type": "staged_sweep",
+                "parameter_name": "wl",
+                "parameter_values": [0.0],
+            },
+            client_extensions=OPT_IN,
+        )
+    assert retry_info.value.code == "tasks_store_capacity"
+    assert len(store.rows()) == 8
+
+    # An engine-deduplicated family reuses the mapping row at capacity: with
+    # one row of headroom the first validation_matrix task appends, and its
+    # identical retry at the full bound reuses that row.
+    vm_spec = {
+        "job_type": "validation_matrix",
+        "points": [{"x": 1.0}],
+    }
+    monkeypatch.setattr(module, "MAX_TASK_ROWS", 9)
+    vm_first = bridge.submit_task(dict(vm_spec), client_extensions=OPT_IN)
+    assert len(store.rows()) == 9
+    monkeypatch.setattr(module, "MAX_TASK_ROWS", 8)
+    vm_retry = bridge.submit_task(dict(vm_spec), client_extensions=OPT_IN)
+    assert vm_retry["taskId"] == vm_first["taskId"]
+    # Nine rows are durable; rows() is tail-bounded by design at the reduced
+    # cap, but addressability (latest_for_task) is not.
+    assert len(store.journal_path.read_text(encoding="utf-8").splitlines()) == 9
+    assert store.latest_for_task(vm_first["taskId"]) is not None
+
+
+def test_journal_size_bound_refuses_appends_without_dropping_rows(tmp_path: Path) -> None:
+    import comsol_mcp.jobs.tasks_bridge as module
+
+    store = TasksMappingStore(tmp_path / "tasks")
+    store.root.mkdir(parents=True, exist_ok=True)
+    store.journal_path.write_text('{"kept": true}\n', encoding="ascii")
+    original = module.TASKS_FILE_MAX_BYTES
+    module.TASKS_FILE_MAX_BYTES = 16
+    try:
+        with pytest.raises(TasksMappingError) as excinfo:
+            store.append(
+                module.TaskRow(
+                    task_id="t" * 8,
+                    job_id="job" + "0" * 29,
+                    created_at_ms=1,
+                    ttl_ms=None,
+                    poll_interval_ms=1000,
+                    spec_fingerprint="f" * 64,
+                    owner="owner-a",
+                    request_client=None,
+                )
+            )
+        assert excinfo.value.code == "tasks_file_capacity"
+    finally:
+        module.TASKS_FILE_MAX_BYTES = original
+    assert store.journal_path.read_text(encoding="ascii") == '{"kept": true}\n'
+
+
+def test_blocking_submit_does_not_stall_the_event_loop(tmp_path: Path) -> None:
+    import asyncio
+
+    release = threading.Event()
+    submitted = threading.Event()
+    engine = FakeEngine()
+
+    original_submit = engine.submit
+
+    def slow_submit(spec):
+        submitted.set()
+        assert release.wait(timeout=5), "test never released the blocked submit"
+        return original_submit(spec)
+
+    engine.submit = slow_submit
+    bridge = TasksBridge(engine=engine, store=TasksMappingStore(tmp_path / "tasks"), owner="o")
+    extension = build_tasks_extension(bridge)
+    interceptor = extension.intercept_tool_call
+
+    class _Params:
+        name = "job_submit"
+        arguments = {
+            "job_type": "staged_sweep",
+            "parameter_name": "wl",
+            "parameter_values": [1.0],
+        }
+
+    class _Ctx:
+        protocol_version = TASKS_WIRE_GENERATION
+        meta = {"io.modelcontextprotocol/clientCapabilities": {"extensions": OPT_IN}}
+
+    async def scenario():
+        submit_task = asyncio.create_task(
+            interceptor(_Params(), _Ctx(), lambda _ctx: (_ for _ in ()).throw(AssertionError()))
+        )
+
+        async def await_submitted():
+            while not submitted.is_set():
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(await_submitted(), timeout=2)
+        # While the submit is blocked in its worker thread, another coroutine
+        # must still make progress on the same loop.
+        progressed = []
+
+        async def heartbeat():
+            progressed.append(True)
+
+        await asyncio.wait_for(heartbeat(), timeout=0.5)
+        assert progressed == [True]
+        assert not submit_task.done()
+        release.set()
+        handle = await asyncio.wait_for(submit_task, timeout=5)
+        return handle
+
+    handle = asyncio.run(scenario())
+    assert handle["resultType"] == "task"
+
+
+def test_context_scoping_survives_the_worker_thread_boundary(tmp_path: Path) -> None:
+    """Expected-attempt cancellation contextvars must cross the executor."""
+    import asyncio
+    import contextvars
+
+    marker = contextvars.ContextVar("tasks_test_marker", default="unset")
+    engine = FakeEngine()
+    bridge = TasksBridge(engine=engine, store=TasksMappingStore(tmp_path / "t2"), owner="o")
+    extension = build_tasks_extension(bridge)
+    observed = {}
+
+    original = bridge.submit_task
+
+    def recording_submit(*args, **kwargs):
+        observed["marker"] = marker.get()
+        return original(*args, **kwargs)
+
+    bridge.submit_task = recording_submit
+
+    class _Params:
+        name = "job_submit"
+        arguments = {
+            "job_type": "staged_sweep",
+            "parameter_name": "wl",
+            "parameter_values": [1.0],
+        }
+
+    class _Ctx:
+        protocol_version = TASKS_WIRE_GENERATION
+        meta = {"io.modelcontextprotocol/clientCapabilities": {"extensions": OPT_IN}}
+
+    async def scenario():
+        token = marker.set("request-scoped")
+        try:
+            return await extension.intercept_tool_call(
+                _Params(), _Ctx(), lambda _ctx: (_ for _ in ()).throw(AssertionError())
+            )
+        finally:
+            marker.reset(token)
+
+    handle = asyncio.run(scenario())
+    assert handle["resultType"] == "task"
+    assert observed["marker"] == "request-scoped"
+
+
+def _row_document(job_id: str, created: int = 1) -> dict[str, Any]:
+    import hashlib
+
+    return {
+        "task_id": "t" + hashlib.sha256(job_id.encode()).hexdigest()[:16],
+        "job_id": job_id,
+        "created_at_ms": created,
+        "ttl_ms": None,
+        "poll_interval_ms": 1000,
+        "spec_fingerprint": "f" * 64,
+        "owner": "owner-a",
+        "request_client": None,
+    }
+
+
+def test_corrupt_mapping_fails_closed_and_recovers_with_quarantine(tmp_path: Path) -> None:
+    import json as _json
+
+    store = TasksMappingStore(tmp_path / "tasks")
+    store.root.mkdir(parents=True)
+    good = _json.dumps(_row_document("job-good"))
+    store.journal_path.write_text(good + "\n", encoding="ascii")
+
+    # A corrupt middle record: every action fails closed before any launch.
+    engine = FakeEngine()
+    bridge = TasksBridge(engine=engine, store=store, owner="owner-a")
+    store.journal_path.write_text(
+        good
+        + "\n"
+        + '{"task_id": "broken"'
+        + "\n"
+        + _json.dumps(_row_document("job-after"))
+        + "\n",
+        encoding="ascii",
+    )
+    with pytest.raises(TasksMappingError) as excinfo:
+        bridge.get_task("anything")
+    assert excinfo.value.code == "mapping_corrupt"
+    damaged_bytes = store.journal_path.read_bytes()
+
+    with pytest.raises(TasksMappingError, match="mapping journal is corrupt"):
+        bridge.submit_task(
+            {"job_type": "staged_sweep", "parameter_name": "wl", "parameter_values": [1.0]},
+            client_extensions=OPT_IN,
+        )
+    assert engine._jobs == {}
+
+    report = store.recover()
+
+    assert report["salvaged_rows"] == 1
+    assert report["stopped_at_damage"] is True
+    quarantine = store.root / report["quarantine"]
+    assert quarantine.read_bytes() == damaged_bytes
+    rows = store.rows()
+    assert [row.job_id for row in rows] == ["job-good"]
+
+    # Post-recovery duplicate submission reuses the salvaged mapping's job
+    # only when the engine deduplicates to it; a fresh spec launches once.
+    handle = bridge.submit_task(
+        {"job_type": "staged_sweep", "parameter_name": "wl", "parameter_values": [1.0]},
+        client_extensions=OPT_IN,
+    )
+    assert handle["resultType"] == "task"
+    restarted = TasksBridge(
+        engine=engine, store=TasksMappingStore(tmp_path / "tasks"), owner="owner-a"
+    )
+    assert len(restarted._store.rows()) == len(store.rows())
+
+
+def test_torn_tail_is_not_corruption_and_bad_middle_row_fails_closed(tmp_path: Path) -> None:
+    import json as _json
+
+    store = TasksMappingStore(tmp_path / "tasks")
+    store.root.mkdir(parents=True)
+    good = _json.dumps(_row_document("job-tail"))
+    store.journal_path.write_bytes((good + "\n").encode("ascii") + b'{"partial":')
+    assert [row.job_id for row in store.rows()] == ["job-tail"]
+
+    bad_fields = _json.dumps({"task_id": "x", "unexpected": True})
+    store.journal_path.write_text(good + "\n" + bad_fields + "\n", encoding="ascii")
+    with pytest.raises(TasksMappingError) as excinfo:
+        store.rows()
+    assert excinfo.value.code == "mapping_corrupt"
+
+    report = store.recover()
+    assert report == {
+        "quarantine": report["quarantine"],
+        "salvaged_rows": 1,
+        "stopped_at_damage": True,
+    }
+    assert [row.job_id for row in store.rows()] == ["job-tail"]
+
+
+def test_terminal_job_with_unverified_owned_cleanup_reports_pending(bridge: TasksBridge) -> None:
+    """A terminal job's own cleanup_pending evidence must not be contradicted."""
+    handle = _submit(bridge)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    # A native job commits failure and cleanup_pending in one durable write.
+    _engine(bridge).set_state(
+        row.job_id,
+        "failed",
+        cleanup_pending=True,
+        owned_cleanup={"success": False, "errors": ["lease_release_refused"]},
+    )
+
+    receipt = bridge.cleanup_receipt(handle["taskId"])
+
+    assert receipt["taskStatus"] == "failed"
+    assert receipt["cleanupComplete"] is False
+    assert receipt["pendingReason"] == "owned_cleanup_unverified"
+
+
+def test_terminal_job_with_clean_owned_cleanup_reports_complete(bridge: TasksBridge) -> None:
+    handle = _submit(bridge)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    _engine(bridge).set_state(
+        row.job_id,
+        "completed",
+        cleanup_pending=False,
+        owned_cleanup={"success": True, "errors": []},
+    )
+
+    receipt = bridge.cleanup_receipt(handle["taskId"])
+
+    assert receipt["cleanupComplete"] is True
+    assert receipt["pendingReason"] is None
+
+
+def test_concurrent_submissions_cannot_cross_the_row_capacity(tmp_path: Path) -> None:
+    """Capacity admission is atomic with the mapping append (C081-04)."""
+    from unittest.mock import patch
+
+    import comsol_mcp.jobs.tasks_bridge as module
+
+    class CountingEngine:
+        def submit(self, spec, request_id=None):
+            return {"job_id": "job-" + spec["work"], "status": "submitted"}
+
+        def status(self, job_id):
+            return {"job_id": job_id, "status": "running"}
+
+    handles: list[dict] = []
+    errors: list[str] = []
+
+    def submit_concurrent(label: str) -> None:
+        try:
+            bridge = TasksBridge(
+                engine=CountingEngine(),
+                store=TasksMappingStore(tmp_path / "rows"),
+                owner="owner-a",
+            )
+            handles.append(bridge.submit_task({"work": label}, client_extensions=OPT_IN))
+        except TasksMappingError as exc:
+            errors.append(exc.code)
+
+    with patch.object(module, "MAX_TASK_ROWS", 1):
+        threads = [
+            threading.Thread(target=submit_concurrent, args=(label,)) for label in ("a", "b")
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    reopened = TasksMappingStore(tmp_path / "rows")
+    # Exactly one task is acknowledged, one row is durable, and the second
+    # admission is refused at capacity - never appended then hidden by the
+    # reader's tail bound.
+    assert len(handles) == 1
+    assert len(reopened.journal_path.read_text(encoding="utf-8").splitlines()) == 1
+    assert len(reopened.rows()) == 1
+    assert errors == ["tasks_store_capacity"]
+
+
+def test_byte_capacity_refusal_precedes_engine_dispatch(tmp_path: Path) -> None:
+    """A refused task never dispatches a job the client cannot address (C081-05)."""
+    from unittest.mock import patch
+
+    import comsol_mcp.jobs.tasks_bridge as module
+
+    engine = FakeEngine()
+    store = TasksMappingStore(tmp_path / "bytes")
+    bridge = TasksBridge(engine=engine, store=store, owner="owner-a")
+
+    with patch.object(module, "TASKS_FILE_MAX_BYTES", 1):
+        with pytest.raises(TasksMappingError) as excinfo:
+            bridge.submit_task({"work": 1}, client_extensions=OPT_IN)
+
+    assert excinfo.value.code == "tasks_file_capacity"
+    assert engine.submit_calls == []
+    assert store.rows() == []
+
+
+def test_structured_last_error_and_unc_locators_project_truthfully(bridge: TasksBridge) -> None:
+    """C081-07/C081-09: real producer shapes and private network locations."""
+    handle = _submit(bridge)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    _engine(bridge).set_state(
+        row.job_id,
+        "failed",
+        last_error={
+            "type": "ValueError",
+            "message": r"failed at \\private-server\research\secret\model.mph: bad sweep",
+        },
+    )
+    detail = bridge.get_task(handle["taskId"])
+    # The JSON-RPC fault flattens to bounded, path-free message text; the
+    # structured shape belongs to the completed payload's structuredContent.
+    assert detail["error"]["message"] == "failed at model.mph: bad sweep"
+
+    _engine(bridge).set_state(
+        row.job_id,
+        "completed",
+        last_error={
+            "type": "ValueError",
+            "message": r"failed at \\private-server\research\secret\model.mph: bad sweep",
+        },
+    )
+    completed = bridge.get_task(handle["taskId"])
+    last_error = completed["result"]["structuredContent"]["lastError"]
+    assert last_error == {"type": "ValueError", "message": "failed at model.mph: bad sweep"}
+
+    direct = tasks_bridge_module._bounded_error_detail(
+        r"worker died reading /home/research/secret/run.py mid-sweep"
+    )
+    assert direct == "worker died reading run.py mid-sweep"
+
+
+def test_recorded_result_manifest_is_referenced_verbatim(bridge: TasksBridge) -> None:
+    """A completed sweep's manifest identity replaces progress metadata."""
+    import hashlib as _hashlib
+
+    handle = _submit(bridge)
+    row = bridge._store.latest_for_task(handle["taskId"])
+    assert row is not None
+    digest = _hashlib.sha256(b"manifest bytes").hexdigest()
+    _engine(bridge).set_state(
+        row.job_id,
+        "completed",
+        progress={"completed": 1, "total": 1},
+        result_manifest={"name": "results.csv.manifest.json", "sha256": digest},
+    )
+    detail = bridge.get_task(handle["taskId"])
+    reference = detail["result"]["structuredContent"]["resultReference"]
+    assert reference == {
+        "kind": "durable_result_manifest",
+        "name": "results.csv.manifest.json",
+        "sha256": digest,
+    }
+
+
+def test_profiled_engine_accepts_explicit_null_request_id():
+    """C081D-03: explicit null is the schema-legal spelling of omission."""
+    from types import SimpleNamespace
+
+    from comsol_mcp.jobs.tasks_public_engine import ProfiledTasksEngine, TasksMappingError
+
+    engine = ProfiledTasksEngine()
+    observed = []
+
+    def fn(**kwargs):
+        observed.append(kwargs)
+        return {"success": True, "job_id": "same", "status": "submitted", "duplicate": True}
+
+    engine.bind(
+        SimpleNamespace(
+            _tool_manager=SimpleNamespace(_tools={"job_submit": SimpleNamespace(fn=fn)})
+        )
+    )
+    spec = {"job_type": "staged_sweep", "parameter_name": "wl", "parameter_values": [1.0]}
+    engine.submit({"spec": spec, "request_id": None})
+    assert observed[-1] == {"spec": spec}
+    engine.submit({"spec": spec}, request_id="r-1")
+    assert observed[-1] == {"spec": spec, "request_id": "r-1"}
+    engine.submit({"spec": spec, "request_id": "env-1"})
+    assert observed[-1] == {"spec": spec, "request_id": "env-1"}
+    with pytest.raises(TasksMappingError):
+        engine.submit({"spec": spec, "request_id": 5})
+
+
+def test_same_request_replay_passes_capacity_via_resolver(tmp_path, monkeypatch):
+    """C081D-04: durable replay resolution precedes new-row admission."""
+    import comsol_mcp.jobs.tasks_bridge as module
+    from comsol_mcp.jobs.manager import JobManager
+    from comsol_mcp.jobs.store import process_identity
+    from comsol_mcp.jobs.tasks_bridge import TasksBridge, TasksMappingStore
+    from development_kit.tests.test_validation_worker import _raw_spec  # noqa: F401
+
+    source = tmp_path / "model.mph"
+    source.write_bytes(b"model")
+    manager = JobManager(tmp_path / "jobs", preflight=lambda **kw: {"ready": True})
+    manager._launch_worker = lambda job_id, module: process_identity(0) if False else _identity()
+
+    def _identity():
+        import os as _os
+
+        return process_identity(_os.getpid())
+
+    class Engine:
+        def submit(self, args, request_id=None):
+            return manager.submit(args["spec"], request_id=request_id)
+
+        def resolve_request_replay(self, args, request_id):
+            return manager.resolve_request_replay(args["spec"], request_id)
+
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+    }
+    bridge = TasksBridge(engine=Engine(), store=TasksMappingStore(tmp_path / "tasks"), owner="a")
+    arguments = {"spec": spec, "request_id": "same-1"}
+    monkeypatch.setattr(module, "MAX_TASK_ROWS", 1)
+    first = bridge.submit_task(dict(arguments), request_id="same-1", client_extensions=OPT_IN)
+    # The same-request retry needs no new job or row: it replays at capacity.
+    retry = bridge.submit_task(dict(arguments), request_id="same-1", client_extensions=OPT_IN)
+    assert retry["taskId"] == first["taskId"]
+    # A genuinely independent staged submission at the bound still refuses.
+    other = {"spec": {**spec, "parameter_values": [2.0]}, "request_id": "other-1"}
+    with pytest.raises(TasksMappingError) as excinfo:
+        bridge.submit_task(dict(other), request_id="other-1", client_extensions=OPT_IN)
+    assert excinfo.value.code == "tasks_store_capacity"

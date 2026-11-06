@@ -191,10 +191,17 @@ def _optimizer_solve_budget(total_solves: object, *, finalist_solves: int = 1) -
 
 def _initial_values_si(support: Mapping[str, Any], values: list[float]) -> dict[str, float]:
     scales = {"m": 1.0, "um": 1e-6, "nm": 1e-9}
-    return {
-        item["variable_id"]: value * scales[item["unit"]]
-        for item, value in zip(support["variables"], values, strict=True)
-    }
+    initial: dict[str, float] = {}
+    for item, value in zip(support["variables"], values, strict=True):
+        try:
+            factor = scales[item["unit"]]
+        except KeyError as exc:
+            raise ValueError(
+                f"control variable {item['variable_id']!r} carries unsupported unit "
+                f"{item['unit']!r}; the native runtime converts only m, um, and nm"
+            ) from exc
+        initial[item["variable_id"]] = value * factor
+    return initial
 
 
 def _check_execution_budget(started: float, root: Path, budget: Mapping[str, Any]) -> None:
@@ -426,14 +433,13 @@ def execute_native_adjoint_optimization(
         study.run()
         dataset = _dataset_for_solution(model, solver["solution_tag"])
         variables = [item["variable_id"] for item in support["variables"]]
+        # D-02: the policy path reports geometry in metres and the plain path
+        # in model units; each branch computes its values exactly once instead
+        # of computing unitless values and overwriting them under policy.
         evaluated = model.evaluate(
             [support["objective"]["expression"], *variables], dataset=dataset
         )
         final = _numeric_series(evaluated[0])[-1]
-        final_variables = {
-            name: _numeric_series(value)[-1]
-            for name, value in zip(variables, evaluated[1:], strict=True)
-        }
         if policy is not None:
             final_variables = {
                 name: _numeric_series(
@@ -441,6 +447,12 @@ def execute_native_adjoint_optimization(
                 )[-1]
                 for name in variables
             }
+        else:
+            final_variables = {
+                name: _numeric_series(value)[-1]
+                for name, value in zip(variables, evaluated[1:], strict=True)
+            }
+        if policy is not None:
             receipt["optimizer_constraints"] = []
             _constraint_evidence(
                 model,

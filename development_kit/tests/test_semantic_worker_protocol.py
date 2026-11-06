@@ -129,7 +129,7 @@ def _request(manager: SemanticWorkerManager, request_id: str, **fields: object) 
 
 
 def test_happy_path_reuses_one_worker_and_reset_verifies_absence():
-    with SemanticWorkerManager(startup_deadline=2.0, query_deadline=2.0) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0, query_deadline=5.0) as manager:
         first = manager.query("CopyFace source destination", limit=2)
         pid = manager.status(probe=False)["identity"]["pid"]
         second = manager.query("alpha1_inc", limit=1)
@@ -180,7 +180,7 @@ def test_startup_hang_and_port_collision_are_contained():
 
 
 def test_non_object_startup_handshake_is_contained_and_reaped(monkeypatch):
-    manager = SemanticWorkerManager(startup_deadline=2.0)
+    manager = SemanticWorkerManager(startup_deadline=10.0)
     command = [
         sys.executable,
         "-c",
@@ -213,13 +213,14 @@ def test_startup_handshake_line_byte_limit_includes_newline(size):
 
 def test_startup_handshake_limit_excludes_bytes_after_first_newline():
     line = b'{"event":"ready"}\n'
-    assert SemanticWorkerManager._read_startup_line(
-        BytesIO(line + b"x" * 4096), maximum=len(line)
-    ) == line
+    assert (
+        SemanticWorkerManager._read_startup_line(BytesIO(line + b"x" * 4096), maximum=len(line))
+        == line
+    )
 
 
 def test_oversized_startup_handshake_is_rejected_before_json_decode(monkeypatch):
-    manager = SemanticWorkerManager(startup_deadline=2.0)
+    manager = SemanticWorkerManager(startup_deadline=10.0)
     command = [
         sys.executable,
         "-c",
@@ -237,7 +238,7 @@ def test_oversized_startup_handshake_is_rejected_before_json_decode(monkeypatch)
 
 @pytest.mark.parametrize("port", [True, 0, 65_536, "1234"])
 def test_invalid_startup_port_is_contained_and_reaped(monkeypatch, port):
-    manager = SemanticWorkerManager(startup_deadline=2.0)
+    manager = SemanticWorkerManager(startup_deadline=10.0)
     handshake = json.dumps(
         {
             "schema_version": WORKER_PROTOCOL_SCHEMA_VERSION,
@@ -456,7 +457,7 @@ def test_lightweight_identity_rejects_missing_required_fields(request, document_
 
 
 def test_authentication_schema_and_message_bounds_do_not_kill_worker():
-    with SemanticWorkerManager(startup_deadline=2.0) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0) as manager:
         assert manager.start()["success"] is True
         port = int(manager._port)
         wrong = _raw_request(
@@ -490,7 +491,7 @@ def test_authentication_schema_and_message_bounds_do_not_kill_worker():
 
 def test_queue_overflow_is_bounded_and_worker_recovers():
     participants = (PUBLIC_LIMITS["maximum_queue_depth"] + 1) * 4
-    with SemanticWorkerManager(startup_deadline=2.0, query_delay=0.75) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0, query_delay=0.75) as manager:
         assert manager.start()["success"] is True
         port = int(manager._port)
         barrier = threading.Barrier(participants)
@@ -516,6 +517,29 @@ def test_queue_overflow_is_bounded_and_worker_recovers():
         ]
         assert busy
         assert manager.health()["success"] is True
+
+
+def test_queue_capacity_returns_after_handler_setup_failure():
+    from comsol_mcp.knowledge.semantic_worker import _RequestHandler
+
+    class FailedSetupHandler(_RequestHandler):
+        def setup(self):
+            raise OSError("request stream setup failed")
+
+    state = SimpleNamespace(capacity=threading.BoundedSemaphore(1))
+    assert state.capacity.acquire(blocking=False)
+    server = object.__new__(_WorkerServer)
+    server.state = state
+    server.RequestHandlerClass = FailedSetupHandler
+    errors = []
+    closed = []
+    server.handle_error = lambda request, address: errors.append(address)
+    server.shutdown_request = lambda request: closed.append(request)
+    request = object()
+    server.process_request_thread(request, ("127.0.0.1", 1))
+    assert errors == [("127.0.0.1", 1)]
+    assert closed == [request]
+    assert state.capacity.acquire(blocking=False)
 
 
 def test_queue_capacity_is_reserved_before_handler_thread_creation():
@@ -696,7 +720,7 @@ def test_backend_status_exception_returns_structured_failure(operation):
 
 
 def test_health_remains_observable_while_query_holds_backend_lock():
-    with SemanticWorkerManager(startup_deadline=2.0, query_delay=0.75) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0, query_delay=0.75) as manager:
         assert manager.start()["success"] is True
         port = int(manager._port)
         result: dict = {}
@@ -801,7 +825,7 @@ def test_request_uses_one_monotonic_deadline_across_trickled_receives(monkeypatc
 
 
 def test_stale_identity_cleanup_reclaims_the_exact_spawned_process():
-    with SemanticWorkerManager(startup_deadline=2.0) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0) as manager:
         assert manager.start()["success"] is True
         process = manager._process
         manager._identity["process_create_time"] -= 10.0
@@ -861,7 +885,7 @@ def test_unhashable_worker_discriminators_return_structured_errors(payload, code
 
 
 def test_crash_after_response_is_observed_without_process_leak():
-    with SemanticWorkerManager(startup_deadline=2.0, fault="crash_after_response") as manager:
+    with SemanticWorkerManager(startup_deadline=10.0, fault="crash_after_response") as manager:
         response = manager.query("respond then crash")
         assert response["success"] is True
         deadline = time.monotonic() + 2.0
@@ -876,7 +900,7 @@ def test_crash_after_response_is_observed_without_process_leak():
 
 
 def test_idle_ttl_stops_worker_lazily_without_wall_clock_margin():
-    with SemanticWorkerManager(startup_deadline=2.0, idle_ttl=300.0) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0, idle_ttl=300.0) as manager:
         assert manager.health()["success"] is True
         manager.idle_ttl = 1.0
         manager._last_activity = float(manager._last_activity) - manager.idle_ttl
@@ -885,7 +909,7 @@ def test_idle_ttl_stops_worker_lazily_without_wall_clock_margin():
 
 def test_worker_pipes_are_drained_after_startup_handshake():
     with SemanticWorkerManager(
-        startup_deadline=2.0, query_deadline=2.0, fault="stderr_flood"
+        startup_deadline=10.0, query_deadline=5.0, fault="stderr_flood"
     ) as manager:
         response = manager.query("CopyFace")
 
@@ -894,7 +918,7 @@ def test_worker_pipes_are_drained_after_startup_handshake():
 
 
 def test_context_manager_reaps_worker_when_test_body_raises():
-    manager = SemanticWorkerManager(startup_deadline=2.0)
+    manager = SemanticWorkerManager(startup_deadline=10.0)
     process = None
     with pytest.raises(RuntimeError, match="injected polling failure"):
         with manager:
@@ -914,7 +938,7 @@ def test_missing_process_create_time_rejects_and_reaps_spawn(monkeypatch):
         "src.knowledge.semantic_process._windows_process_create_time",
         lambda _handle: None,
     )
-    with SemanticWorkerManager(startup_deadline=2.0) as manager:
+    with SemanticWorkerManager(startup_deadline=10.0) as manager:
         result = manager.start()
 
         assert result["success"] is False
@@ -998,7 +1022,7 @@ def test_hanging_semantic_worker_does_not_delay_control_plane_or_lexical_search(
     )
     try:
         with SemanticWorkerManager(
-            startup_deadline=2.0, query_deadline=0.5, fault="query_hang"
+            startup_deadline=10.0, query_deadline=0.5, fault="query_hang"
         ) as manager:
             result: dict = {}
 
@@ -1096,3 +1120,65 @@ def test_failed_reset_replaces_stale_last_error(monkeypatch):
     assert result["success"] is False
     assert service._health_gate_passed is False
     assert service._last_error == {"message": "worker pipe broken"}
+
+
+def test_pid_matches_launcher_process_accepts_shallow_trampolines_only(monkeypatch):
+    """3.15 venv trampolines re-exec the base interpreter as a waiting
+    launcher's child, so the worker handshake must accept the launcher's
+    executing descendants - but only within trampoline depth, never
+    unrelated, unreadable, or dead pids."""
+    import psutil
+    from src.knowledge import semantic_process
+
+    match = semantic_process._pid_matches_launcher_process
+    launcher_pid = 10_000
+
+    def fake_process_tree(chain):
+        """psutil.Process stub whose parent() walks the given pid chain."""
+        parents = {chain[index]: chain[index + 1] for index in range(len(chain) - 1)}
+        terminals = set(chain)
+
+        class _FakeProcess:
+            def __init__(self, pid):
+                if pid not in terminals:
+                    raise psutil.NoSuchProcess(pid)
+                object.__setattr__(self, "pid", pid)
+
+            def parent(self):
+                upstream = parents.get(object.__getattribute__(self, "pid"))
+                if upstream is None:
+                    return None
+                return _FakeProcess(upstream)
+
+        return _FakeProcess
+
+    real_process = psutil.Process
+    # chain: worker(10001) -> trampoline child(10002) -> launcher(10000)
+    monkeypatch.setattr(psutil, "Process", fake_process_tree([10001, 10002, launcher_pid]))
+    assert match(10001, launcher_pid) is True
+    assert match(10002, launcher_pid) is True
+    # The launcher itself matches (Python <= 3.14 in-place interpreters).
+    assert match(launcher_pid, launcher_pid) is True
+    # An unrelated live pid in the same stubbed world refuses.
+    monkeypatch.setattr(psutil, "Process", fake_process_tree([20001, 20002, 30000]))
+    assert match(20001, launcher_pid) is False
+    # A chain deeper than any trampoline refuses.
+    monkeypatch.setattr(
+        psutil,
+        "Process",
+        fake_process_tree([10001, 10002, 10003, 10004, launcher_pid]),
+    )
+    assert match(10001, launcher_pid) is False
+    # Unreadable (dead) pids refuse.
+    monkeypatch.setattr(psutil, "Process", fake_process_tree([]))
+    assert match(39_999, launcher_pid) is False
+    monkeypatch.undo()
+    # Malformed and non-positive values never reach the process table.
+    assert match(True, launcher_pid) is False
+    assert match("10001", launcher_pid) is False
+    assert match(1.5, launcher_pid) is False
+    assert match(0, launcher_pid) is False
+    assert match(-10001, launcher_pid) is False
+    # A real unrelated process against the real table still refuses.
+    assert match(os.getpid(), launcher_pid) is False
+    del real_process

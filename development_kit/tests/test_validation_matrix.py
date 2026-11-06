@@ -51,6 +51,26 @@ def _spec(source, points=None, **overrides) -> dict:
     return value
 
 
+@pytest.mark.parametrize("unit", ["mm", "cm", "angstrom", "UM"])
+def test_normalization_refuses_units_unavailable_to_collectors(tmp_path, unit):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"controlled fixture")
+    point = _point()
+    point["wavelength"]["unit"] = unit
+    with pytest.raises(ValueError, match="wavelength.unit"):
+        normalize_validation_matrix_spec(_spec(source, points=[point]))
+
+
+@pytest.mark.parametrize("unit", ["m", "um", "nm", " um "])
+def test_normalization_retains_supported_wavelength_units(tmp_path, unit):
+    source = tmp_path / "fixture.mph"
+    source.write_bytes(b"controlled fixture")
+    point = _point()
+    point["wavelength"]["unit"] = unit
+    result = normalize_validation_matrix_spec(_spec(source, points=[point]))
+    assert result["points"][0]["wavelength"]["unit"] == unit.strip()
+
+
 def test_normalization_is_solver_free_and_binds_exact_point_identity(tmp_path):
     source = tmp_path / "fixture.mph"
     source.write_bytes(b"controlled fixture")
@@ -362,3 +382,27 @@ def test_nested_collector_inputs_require_string_keys(tmp_path):
 
     with pytest.raises(ValueError, match="keys must be strings"):
         normalize_validation_matrix_spec(_spec(source, points=[point]))
+
+
+def test_point_limit_schema_and_runtime_share_one_supported_maximum():
+    import json
+    from pathlib import Path
+
+    from pydantic import TypeAdapter
+
+    from comsol_mcp.contracts.job_submission import (
+        MAX_JOB_COLLECTION,
+        MAX_VALIDATION_MATRIX_POINTS,
+        ValidationMatrixInput,
+    )
+
+    schema = TypeAdapter(ValidationMatrixInput).json_schema()
+    declared = schema["properties"]["point_limit"]["maximum"]
+    assert declared == MAX_VALIDATION_MATRIX_POINTS == 32
+    assert declared < MAX_JOB_COLLECTION
+
+    snapshot = json.loads(
+        (Path(__file__).parent / "snapshots" / "full_tool_schemas.json").read_text(encoding="utf-8")
+    )
+    text = json.dumps(snapshot)
+    assert '"maximum": 32' in text or "'maximum': 32" in text

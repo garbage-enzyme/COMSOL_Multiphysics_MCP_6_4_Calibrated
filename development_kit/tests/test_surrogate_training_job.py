@@ -354,3 +354,55 @@ def test_surrogate_worker_refuses_foreign_job_type(tmp_path: Path) -> None:
     job_id = manager.submit({"job_type": "test_sequence", "delays": [0.01]})["job_id"]
     with pytest.raises(ValueError, match="refuses non-surrogate jobs"):
         surrogate_training_worker.run(str(manager.store.root), job_id)
+
+
+def test_torn_epoch_tail_is_recovered_instead_of_corrupt(ascii_tmp_path):
+    import json as _json
+
+    from src.jobs.surrogate_training_worker import _read_completed_epochs
+
+    path = ascii_tmp_path / "epochs.jsonl"
+    good = _json.dumps({"epoch": 0, "seeds": [1], "loss": 0.5})
+    path.write_text(good + "\n" + '{"epoch": 1, "loss": 0.4', encoding="utf-8")
+
+    completed = _read_completed_epochs(path, total=4)
+
+    assert completed == {0}
+    assert path.read_text(encoding="utf-8") == good + "\n"
+
+    midfile = good + "\n" + "not json\n" + _json.dumps({"epoch": 2}) + "\n"
+    path.write_text(midfile, encoding="utf-8")
+    with pytest.raises(ValueError, match="epoch journal is corrupt"):
+        _read_completed_epochs(path, total=4)
+
+
+def test_preflight_binds_the_running_driver_identity(monkeypatch, ascii_tmp_path):
+    import comsol_mcp.jobs.surrogate_training as training_module
+    from src.jobs.manager import JobManager
+
+    def _raise(_spec):
+        raise ValueError("surrogate-training driver identity differs")
+
+    monkeypatch.setattr(
+        training_module,
+        "validate_surrogate_training_driver_identity",
+        _raise,
+        raising=True,
+    )
+    manager = JobManager(ascii_tmp_path / "jobs2")
+    spec = {"job_type": "surrogate_training"}
+    result = manager._preflight_surrogate_training(spec)
+    assert result["ready"] is False
+    assert "driver_identity_not_bound" in result["blockers"]
+    assert result["bound_identities"]["driver_identity"] is None
+
+    real_current = training_module.current_surrogate_training_driver_identity
+
+    def _ok(spec):
+        spec["driver_identity"] = dict(real_current())
+        return dict(real_current())
+
+    monkeypatch.setattr(training_module, "validate_surrogate_training_driver_identity", _ok)
+    green = manager._preflight_surrogate_training({"job_type": "surrogate_training"})
+    assert "driver_identity_not_bound" not in green["blockers"]
+    assert green["bound_identities"]["driver_identity"] == dict(real_current())

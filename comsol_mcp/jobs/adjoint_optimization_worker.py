@@ -68,6 +68,8 @@ def _run_native(root: str, job_id: str) -> int:
     attempt = int(store.read_state(job_id).get("attempt", 1))
     ownership = None
     lease_acquired = False
+    completion_patch = None
+    result_code = 1
     try:
         store.bind_worker_identity(job_id, process_identity(os.getpid()))
         store.update_state(
@@ -139,7 +141,9 @@ def _run_native(root: str, job_id: str) -> int:
             kind="iteration",
             payload={
                 "iteration_id": "native-final",
-                "iteration_index": spec["optimizer"]["budget"]["max_iterations"],
+                # This is the single retained final candidate, not a measured
+                # count of native optimizer iterations.
+                "iteration_index": 0,
                 "candidate_fingerprint": candidate_fingerprint,
                 "objective_value": receipt["fresh_forward_objective"],
                 "status": "accepted",
@@ -149,24 +153,18 @@ def _run_native(root: str, job_id: str) -> int:
             },
         )
         store.update_state(job_id, "smoke_validated", event="adjoint_native_validated")
-        store.update_state(
-            job_id,
-            "completed",
-            patch={
-                "progress": {
-                    "completed": spec["optimizer"]["budget"]["max_iterations"],
-                    "total": spec["optimizer"]["budget"]["max_iterations"],
-                },
-                "solver_started": True,
-                "native_optimizer_receipt_fingerprint": receipt_fingerprint,
-                "last_iteration_row_sha256": iteration["row_sha256"],
-                "source_unchanged": receipt["cleanup"]["source_unchanged"],
-            },
-            event="completed",
-        )
-        return 0
+        completion_patch = {
+            "progress": {"completed": 1, "total": 1},
+            "progress_unit": "validated_final_candidates",
+            "native_iterations_completed": None,
+            "solver_started": True,
+            "native_optimizer_receipt_fingerprint": receipt_fingerprint,
+            "last_iteration_row_sha256": iteration["row_sha256"],
+            "source_unchanged": receipt["cleanup"]["source_unchanged"],
+        }
+        result_code = 0
     except Exception as exc:
-        return _observe_worker_failure(
+        result_code = _observe_worker_failure(
             store,
             job_id,
             attempt,
@@ -174,11 +172,39 @@ def _run_native(root: str, job_id: str) -> int:
             stopping_message="Stopped during native optimization",
         )
     finally:
+        cleanup_errors = []
         if ownership is not None and lease_acquired:
             try:
-                ownership.release()
+                release = ownership.release()
+                if not isinstance(release, dict) or release.get("success") is not True:
+                    cleanup_errors.append("lease_release_refused")
             except Exception as exc:
+                cleanup_errors.append(f"lease_release:{type(exc).__name__}")
                 print(f"lease release failed: {type(exc).__name__}", file=sys.stderr, flush=True)
+        if lease_acquired:
+            patch = {
+                "owned_cleanup": {"success": not cleanup_errors, "errors": cleanup_errors},
+                "cleanup_pending": bool(cleanup_errors),
+            }
+            current = store.read_state(job_id)["status"]
+            if completion_patch is not None and current == "smoke_validated":
+                patch.update(completion_patch)
+                if cleanup_errors:
+                    patch["last_error"] = {
+                        "type": "OwnedCleanupUnverified",
+                        "message": "Native optimizer lease cleanup could not be verified.",
+                    }
+                store.update_state(
+                    job_id,
+                    "failed" if cleanup_errors else "completed",
+                    patch=patch,
+                    event="owned_cleanup_unverified" if cleanup_errors else "completed",
+                )
+            else:
+                store.update_state(job_id, patch=patch, event="owned_cleanup_recorded")
+            if cleanup_errors:
+                result_code = 1
+    return result_code
 
 
 def _observe_worker_failure(
@@ -239,39 +265,44 @@ def run(root: str, job_id: str) -> int:
             for row in read_adjoint_rows(rows_path, job_fingerprint=spec["spec_fingerprint"])
             if row.get("attempt") == attempt
         ]
-        if {"gradient", "iteration"} - {row.get("kind") for row in existing}:
+        # D-01: a crash between the two row appends must not duplicate the
+        # already-persisted row on resume - only the MISSING kind is added.
+        missing_kinds = {"gradient", "iteration"} - {row.get("kind") for row in existing}
+        if missing_kinds:
             gradient_fp = domain_sha256_v2("comsol_mcp.synthetic_gradient", {"values": [0.0]})
             check_fp = domain_sha256_v2("comsol_mcp.synthetic_gradient_check", {"passed": True})
-            append_adjoint_row(
-                rows_path,
-                job_fingerprint=spec["spec_fingerprint"],
-                attempt=attempt,
-                kind="gradient",
-                payload={
-                    "iteration_id": "it-0",
-                    "gradient_fingerprint": gradient_fp,
-                    "check_fingerprint": check_fp,
-                    "evidence_state": "gradient_validated",
-                },
-            )
-            append_adjoint_row(
-                rows_path,
-                job_fingerprint=spec["spec_fingerprint"],
-                attempt=attempt,
-                kind="iteration",
-                payload={
-                    "iteration_id": "it-0",
-                    "iteration_index": 0,
-                    "candidate_fingerprint": domain_sha256_v2(
-                        "comsol_mcp.synthetic_candidate", {"values": spec["initial_values"]}
-                    ),
-                    "objective_value": 0.0,
-                    "status": "accepted",
-                    "gradient_fingerprint": gradient_fp,
-                    "forward_fingerprint": check_fp,
-                    "reason_code": "synthetic_contract_only",
-                },
-            )
+            if "gradient" in missing_kinds:
+                append_adjoint_row(
+                    rows_path,
+                    job_fingerprint=spec["spec_fingerprint"],
+                    attempt=attempt,
+                    kind="gradient",
+                    payload={
+                        "iteration_id": "it-0",
+                        "gradient_fingerprint": gradient_fp,
+                        "check_fingerprint": check_fp,
+                        "evidence_state": "gradient_validated",
+                    },
+                )
+            if "iteration" in missing_kinds:
+                append_adjoint_row(
+                    rows_path,
+                    job_fingerprint=spec["spec_fingerprint"],
+                    attempt=attempt,
+                    kind="iteration",
+                    payload={
+                        "iteration_id": "it-0",
+                        "iteration_index": 0,
+                        "candidate_fingerprint": domain_sha256_v2(
+                            "comsol_mcp.synthetic_candidate", {"values": spec["initial_values"]}
+                        ),
+                        "objective_value": 0.0,
+                        "status": "accepted",
+                        "gradient_fingerprint": gradient_fp,
+                        "forward_fingerprint": check_fp,
+                        "reason_code": "synthetic_contract_only",
+                    },
+                )
         store.update_state(job_id, "smoke_validated", event="adjoint_synthetic_validated")
         store.update_state(
             job_id,

@@ -11,6 +11,8 @@ from src.tools.ownership import _default_runtime_dir
 
 
 def test_windows_uses_reported_programdata_without_probing_drive_layout(monkeypatch):
+    monkeypatch.delenv("COMSOL_MCP_RUNTIME_DIR", raising=False)
+    monkeypatch.delenv("COMSOL_MCP_JOBS_DIR", raising=False)
     monkeypatch.setattr(
         runtime_paths,
         "settings_environment",
@@ -20,6 +22,16 @@ def test_windows_uses_reported_programdata_without_probing_drive_layout(monkeypa
 
     assert _default_runtime_dir() == Path("C:/ProgramData/comsol_mcp_runtime")
     assert default_jobs_root() == Path("C:/ProgramData/comsol_mcp_runtime/jobs")
+
+
+def test_missing_system_root_rejects_non_ascii_temp_with_actionable_error(monkeypatch, tmp_path):
+    non_ascii = tmp_path / "用户"
+    monkeypatch.setattr(runtime_paths, "settings_environment", lambda _environ=None: {})
+    monkeypatch.setattr(runtime_paths, "_is_windows", lambda: True)
+    monkeypatch.setattr(runtime_paths.tempfile, "gettempdir", lambda: str(non_ascii))
+
+    with pytest.raises(RuntimeError, match="set COMSOL_MCP_RUNTIME_DIR"):
+        runtime_paths.default_runtime_dir({})
 
 
 def test_missing_system_root_uses_observed_ascii_temp_without_drive_assumptions(

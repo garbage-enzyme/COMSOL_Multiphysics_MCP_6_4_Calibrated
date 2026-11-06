@@ -47,6 +47,7 @@ Frozen behaviours
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -79,9 +80,13 @@ MAX_TASK_ROWS = 4096
 #: Bound on the serialized size of one persisted mapping row.
 MAX_TASK_ROW_BYTES = 64 * 1024
 
-#: Default retention. TTL limits *addressability*, never evidence.
-DEFAULT_TASK_TTL_MS = 24 * 60 * 60 * 1000
+#: Bound on the serialized size of the whole mapping journal. Admission
+#: refuses before the durable engine is touched, so reaching this bound
+#: never discards a retained mapping.
+TASKS_FILE_MAX_BYTES = 32 * 1024 * 1024
 
+#: Retention is caller-declared through ttlMs and limits *addressability*,
+#: never evidence; an omitted or null ttlMs retains the mapping forever.
 #: Default poll interval advertised to a client.
 DEFAULT_POLL_INTERVAL_MS = 1000
 
@@ -128,7 +133,7 @@ class DurableJobEngine(Protocol):
     solver-free tests and cannot reach into engine internals.
     """
 
-    def submit(self, raw_spec: dict[str, Any]) -> dict[str, Any]: ...
+    def submit(self, raw_spec: dict[str, Any], request_id: str | None = None) -> dict[str, Any]: ...
 
     def status(self, job_id: str) -> dict[str, Any]: ...
 
@@ -269,7 +274,32 @@ class TasksMappingStore:
         if report.get("state") == "incomplete":
             with self.journal_path.open("r+b") as handle:
                 handle.truncate(int(report["complete_byte_count"]))
+        try:
+            journal_bytes = self.journal_path.stat().st_size
+        except OSError:
+            journal_bytes = 0
+        if journal_bytes + len(encoded) > TASKS_FILE_MAX_BYTES:
+            raise TasksMappingError(
+                "tasks_file_capacity", "task mapping journal exceeds its size bound"
+            )
         append_jsonl_record(self.journal_path, payload)
+
+    def has_byte_headroom(self, prospective_bytes: int) -> bool:
+        """Whether an append of the given encoded size fits the byte bound.
+
+        Capacity is measured against the complete-record prefix, matching the
+        append path's own torn-tail truncation, so a reservation made before
+        dispatch cannot be invalidated by the repair.
+        """
+        try:
+            report = read_complete_jsonl(self.journal_path)
+            if report.get("state") == "incomplete":
+                journal_bytes = int(report["complete_byte_count"])
+            else:
+                journal_bytes = self.journal_path.stat().st_size
+        except OSError:
+            journal_bytes = 0
+        return journal_bytes + int(prospective_bytes) <= TASKS_FILE_MAX_BYTES
 
     def rows(self) -> list[TaskRow]:
         """Return the complete, well-formed rows from the append-only journal.
@@ -291,20 +321,84 @@ class TasksMappingStore:
             raise TasksMappingError(
                 "mapping_oversized", "task mapping journal exceeds its size bound"
             )
+        if state == "corrupt":
+            # Damaged bytes are never silently skipped: every task action
+            # fails closed until an explicit recovery quarantines the journal
+            # and rebuilds it from validated rows.
+            raise TasksMappingError(
+                "mapping_corrupt",
+                "task mapping journal is corrupt; recovery is required before any task action",
+            )
         records = report.get("records")
         if not isinstance(records, list):
             return []
         rows: list[TaskRow] = []
         for document in records[-MAX_TASK_ROWS:]:
             if not isinstance(document, dict):
-                continue
+                raise TasksMappingError(
+                    "mapping_corrupt",
+                    "task mapping journal holds a non-object record; recovery is required",
+                )
             try:
                 rows.append(self._row(document))
-            except TasksMappingError:
-                # A malformed historical row must not erase the readings of the
-                # rows that are well formed, but it also must not be trusted.
-                continue
+            except TasksMappingError as exc:
+                raise TasksMappingError(
+                    "mapping_corrupt",
+                    "task mapping journal holds an invalid row; recovery is required",
+                ) from exc
         return rows
+
+    def recover(self) -> dict[str, Any]:
+        """Quarantine damaged bytes and rebuild a validated mapping journal.
+
+        The damaged journal is moved aside byte-for-byte before anything is
+        rewritten, and the replacement journal is rebuilt only from rows that
+        pass full validation, stopping at the first damaged record - later
+        rows cannot be validated as unmodified. A torn trailing record is not
+        damage: the complete prefix is already readable and needs no recovery.
+        """
+        with self.transaction():
+            try:
+                raw = self.journal_path.read_bytes()
+            except OSError as exc:
+                raise TasksMappingError(
+                    "mapping_unreadable", "task mapping journal is unreadable"
+                ) from exc
+            if len(raw) > TASKS_FILE_MAX_BYTES:
+                raise TasksMappingError(
+                    "mapping_oversized", "task mapping journal exceeds its size bound"
+                )
+            quarantine = self.root / (
+                self.journal_path.name + f".corrupt-{int(time.time() * 1000)}"
+            )
+            if quarantine.exists():
+                raise TasksMappingError(
+                    "mapping_corrupt", "a quarantine already exists; resolve it first"
+                )
+            self.journal_path.rename(quarantine)
+            salvaged: list[TaskRow] = []
+            stopped_at_damage = False
+            for line in raw.splitlines():
+                if not line:
+                    stopped_at_damage = True
+                    break
+                try:
+                    document = json.loads(line.decode("utf-8"))
+                    if not isinstance(document, dict):
+                        raise ValueError("record is not an object")
+                    salvaged.append(self._row(document))
+                except UnicodeDecodeError, json.JSONDecodeError, ValueError, TasksMappingError:
+                    stopped_at_damage = True
+                    break
+            self.journal_path.parent.mkdir(parents=True, exist_ok=True)
+            self.journal_path.write_bytes(b"")
+            for row in salvaged:
+                self.append(row)
+            return {
+                "quarantine": quarantine.name,
+                "salvaged_rows": len(salvaged),
+                "stopped_at_damage": stopped_at_damage,
+            }
 
     @staticmethod
     def _row(document: Mapping[str, Any]) -> TaskRow:
@@ -421,6 +515,7 @@ class TasksBridge:
         ttl_ms: object = None,
         poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS,
         generation: object = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         """Create or reuse a durable job and return a durably-bound task handle."""
         validate_extension_generation(generation)
@@ -433,11 +528,81 @@ class TasksBridge:
         interval = _finite_int(poll_interval_ms, "pollIntervalMs", minimum=1, maximum=2**53 - 1)
         fingerprint = spec_fingerprint(raw_spec)
 
-        # Reuse an existing durable job for an identical retry so a duplicate
-        # submission cannot launch a second simulation.
-        submission = self._engine.submit(dict(raw_spec))
-        job_id = _bounded(submission.get("job_id"), "job_id", 256)
+        # The whole admission - capacity reservation, engine dispatch, and the
+        # mapping append - runs inside one mapping transaction so two
+        # concurrent submissions cannot both pass an outside-the-lock
+        # capacity check, and a byte-capacity refusal can never arrive after
+        # the durable engine has already dispatched work.
         with self._store.transaction():
+            # Capacity admission before the durable engine is touched: at the
+            # row bound a task whose dispatch will need a NEW mapping row is
+            # refused without creating a job, so no retained or unexpired
+            # task is ever silently evicted by the reader's tail bound. A
+            # matching spec fingerprint only guarantees job-identity reuse
+            # for engine-deduplicated job families; for every other family
+            # an identical spec still creates a new durable job and needs
+            # its own reserved mapping row.
+            duplicate_row = next(
+                (
+                    row
+                    for row in self._store.rows_for_owner(self._owner)
+                    if row.spec_fingerprint == fingerprint
+                ),
+                None,
+            )
+            from comsol_mcp.jobs.manager import ENGINE_DUPLICATE_JOB_TYPES
+
+            # The public adapter submits the argument envelope {spec: ...};
+            # the engine family lives inside it. A flat engine payload keeps
+            # its top-level job_type.
+            capacity_spec: Mapping[str, Any] = raw_spec
+            if "job_type" not in raw_spec:
+                inner = raw_spec.get("spec")
+                if isinstance(inner, Mapping):
+                    capacity_spec = inner
+            reuses_mapping = (
+                duplicate_row is not None
+                and str(capacity_spec.get("job_type")) in ENGINE_DUPLICATE_JOB_TYPES
+            )
+            if not reuses_mapping and request_id is not None:
+                # A durably bound same-request replay needs neither a new
+                # job nor a new mapping row: resolve it before new-row
+                # admission so a genuine retry is never refused at capacity.
+                # Engines without a non-dispatching resolver keep the safe
+                # refusal.
+                resolver = getattr(self._engine, "resolve_request_replay", None)
+                if callable(resolver):
+                    replay = resolver(raw_spec, request_id)
+                    if (
+                        isinstance(replay, Mapping)
+                        and isinstance(replay.get("job_id"), str)
+                        and self._store.latest_for_job(replay["job_id"]) is not None
+                    ):
+                        reuses_mapping = True
+            if not reuses_mapping:
+                if len(self._store.rows()) >= MAX_TASK_ROWS:
+                    raise TasksMappingError(
+                        "tasks_store_capacity",
+                        "task mapping store is at its row capacity; refuse a new task",
+                    )
+                if not self._store.has_byte_headroom(MAX_TASK_ROW_BYTES):
+                    # Reserve the worst-case encoded row before dispatch: the
+                    # append-side exact check cannot then fail after the
+                    # engine created a job the client would never see.
+                    raise TasksMappingError(
+                        "tasks_file_capacity", "task mapping journal exceeds its size bound"
+                    )
+
+            # Reuse an existing durable job for an identical retry so a duplicate
+            # submission cannot launch a second simulation.
+            if request_id is not None:
+                from comsol_mcp.jobs.manager import _validate_request_id
+
+                _validate_request_id(request_id)
+                submission = self._engine.submit(dict(raw_spec), request_id=request_id)
+            else:
+                submission = self._engine.submit(dict(raw_spec))
+            job_id = _bounded(submission.get("job_id"), "job_id", 256)
             existing = self._store.latest_for_job(job_id)
 
             if existing is not None and existing.owner != self._owner:
@@ -446,40 +611,44 @@ class TasksBridge:
                     "an identical durable job belongs to another task owner",
                 )
 
-            created = self._clock_ms()
             if existing is not None:
-                task_id = existing.task_id
-                created = existing.created_at_ms
+                # A duplicate submission reuses the original mapping unchanged:
+                # the same task id, retention, poll interval and recorded
+                # client, with no appended row, so a retry can never silently
+                # change retention or split the task identity.
+                row = existing
             else:
                 # Pre-generate the id so the durable mapping row is written *before*
                 # any task-shaped result is returned.
-                task_id = self._new_task_id()
-            row = TaskRow(
-                task_id=task_id,
-                job_id=job_id,
-                created_at_ms=created,
-                ttl_ms=ttl,
-                poll_interval_ms=interval,
-                spec_fingerprint=fingerprint,
-                owner=self._owner,
-                request_client=request_client,
-            )
-            self._store.append(row)
-            persisted = self._store.latest_for_task(task_id)
+                row = TaskRow(
+                    task_id=self._new_task_id(),
+                    job_id=job_id,
+                    created_at_ms=self._clock_ms(),
+                    ttl_ms=ttl,
+                    poll_interval_ms=interval,
+                    spec_fingerprint=fingerprint,
+                    owner=self._owner,
+                    request_client=request_client,
+                )
+                self._store.append(row)
+            persisted = self._store.latest_for_task(row.task_id)
             if persisted is None:
                 raise TasksMappingError(
                     "mapping_not_durable",
                     "the task mapping row was not durable after writing; refusing to acknowledge",
                 )
         task_status = task_status_from_job_state(submission.get("status"))
+        # The handle echoes the durable mapping's own metadata, so a duplicate
+        # submission reports the original retention and poll interval rather
+        # than the retry's requested values.
         return {
             "resultType": "task",
-            "taskId": task_id,
+            "taskId": row.task_id,
             "status": task_status,
-            "createdAt": _iso_ms(created),
-            "lastUpdatedAt": _iso_ms(created),
-            "ttlMs": ttl,
-            "pollIntervalMs": interval,
+            "createdAt": _iso_ms(row.created_at_ms),
+            "lastUpdatedAt": _iso_ms(row.created_at_ms),
+            "ttlMs": row.ttl_ms,
+            "pollIntervalMs": row.poll_interval_ms,
             "duplicate_submission": bool(submission.get("duplicate")),
             "jobStatus": submission.get("status"),
         }
@@ -567,12 +736,24 @@ class TasksBridge:
         """Report cleanup separately from protocol cancellation.
 
         Cancellation completes only when the owned job is terminal. A protocol
-        acknowledgement alone never yields a completed cleanup receipt.
+        acknowledgement alone never yields a completed cleanup receipt, and a
+        terminal job whose own durable record says its owned cleanup is
+        unverified never reports a completed cleanup either: the receipt must
+        not contradict the job's own evidence.
         """
         row = self._require_row(task_id)
         state = self._job_state(row.job_id)
         status = _task_status_for(row, state)
         terminal = status in TERMINAL_TASK_STATUSES
+        cleanup_pending = bool(state.get("cleanup_pending"))
+        owned_cleanup = state.get("owned_cleanup")
+        if isinstance(owned_cleanup, Mapping) and owned_cleanup.get("success") is False:
+            cleanup_pending = True
+        pending_reason = None
+        if not terminal:
+            pending_reason = "job_not_terminal"
+        elif cleanup_pending:
+            pending_reason = "owned_cleanup_unverified"
         body = {
             "schema_name": "comsol_mcp.task_cleanup_receipt",
             "schema_version": "1.0.0",
@@ -581,8 +762,8 @@ class TasksBridge:
             "owner": row.owner,
             "taskStatus": status,
             "jobState": state.get("status"),
-            "cleanupComplete": terminal,
-            "pendingReason": None if terminal else "job_not_terminal",
+            "cleanupComplete": pending_reason is None,
+            "pendingReason": pending_reason,
             "protocolAcknowledgementIsNotCleanup": True,
         }
         return {**body, "cleanup_receipt_sha256": canonical_sha256_v1(body)}
@@ -597,7 +778,29 @@ class TasksBridge:
         if row.owner != self._owner:
             # A task id is only controllable by the owner that created it.
             raise TaskNotFound("task_not_found", f"unknown or expired task id {identifier!r}")
+        if self._task_expired(row):
+            raise TaskNotFound("task_not_found", f"unknown or expired task id {identifier!r}")
         return row
+
+    def _task_expired(self, row: TaskRow) -> bool:
+        """Enforce the declared addressability retention.
+
+        The retention origin is the mapping row's creation instant and the
+        boundary instant itself counts as expired. Expiry applies only to
+        terminal tasks: a running job stays addressable whatever its age, so
+        expiry can never cancel a job, delete evidence or force a
+        resubmission. A null ttlMs retains the mapping forever, and an
+        unreadable durable job cannot extend addressability either.
+        """
+        if row.ttl_ms is None:
+            return False
+        if self._clock_ms() - row.created_at_ms < row.ttl_ms:
+            return False
+        try:
+            state = self._job_state(row.job_id)
+        except TaskNotFound:
+            return True
+        return task_status_from_job_state(state.get("status")) in TERMINAL_TASK_STATUSES
 
     def _job_state(self, job_id: str) -> dict[str, Any]:
         try:
@@ -622,9 +825,17 @@ def _completed_payload(state: Mapping[str, Any]) -> dict[str, Any]:
     """Inline exactly what the synchronous call would have returned.
 
     A tool-level ``isError`` completion belongs here as ``completed``; the
-    extension reserves ``failed`` for JSON-RPC faults.
+    extension reserves ``failed`` for JSON-RPC faults. The projection reads
+    only fields the durable JobStore really writes - status, attempt,
+    progress and ``last_error`` - and never invents summary or artifact data
+    that no producer records. Absolute path locators are stripped from error
+    text so a Tasks payload stays free of private host locations.
     """
-    summary = state.get("summary")
+    raw_progress = state.get("progress")
+    progress: Mapping[str, Any] = raw_progress if isinstance(raw_progress, Mapping) else {}
+    completed_rows = progress.get("completed")
+    total_rows = progress.get("total")
+    last_error = _bounded_error_detail(state.get("last_error"))
     payload: dict[str, Any] = {
         "content": [
             {
@@ -632,31 +843,122 @@ def _completed_payload(state: Mapping[str, Any]) -> dict[str, Any]:
                 "text": "The durable job reached a terminal state; see structuredContent.",
             }
         ],
-        "isError": bool(state.get("job_error")) if isinstance(state, Mapping) else False,
+        # A completed job that still recorded an error detail is the truthful
+        # tool-level error channel; a clean completion stays isError=false.
+        "isError": last_error is not None,
         "structuredContent": {
             "jobId": state.get("job_id"),
             "status": state.get("status"),
             "attempt": state.get("attempt"),
-            "summary": summary if isinstance(summary, dict) else None,
-            "artifactReferences": state.get("artifacts")
-            if isinstance(state.get("artifacts"), list)
-            else [],
+            "resultReference": _result_reference(state, completed_rows, total_rows),
+            "lastError": last_error,
         },
     }
     return payload
 
 
+def _result_reference(
+    state: Mapping[str, Any], completed_rows: object, total_rows: object
+) -> dict[str, Any]:
+    """Reference exactly the result identity the durable state records.
+
+    A completed sweep records its results-manifest identity in the terminal
+    state; when that record is present it is referenced verbatim. Without
+    it the reference stays honestly labeled progress metadata - the
+    projection never invents an artifact reference no producer wrote.
+    """
+    manifest = state.get("result_manifest")
+    if isinstance(manifest, Mapping):
+        reference: dict[str, Any] = {"kind": "durable_result_manifest"}
+        name = manifest.get("name")
+        digest = manifest.get("sha256")
+        if isinstance(name, str) and name.strip():
+            reference["name"] = name.strip()[:128]
+        if isinstance(digest, str) and len(digest) == 64:
+            reference["sha256"] = digest
+        if len(reference) > 1:
+            return reference
+    return {
+        "kind": "durable_progress",
+        "completed": completed_rows if isinstance(completed_rows, int) else None,
+        "total": total_rows if isinstance(total_rows, int) else None,
+    }
+
+
 def _failed_payload(state: Mapping[str, Any]) -> dict[str, Any]:
     """A protocol-level fault, kept separate from a completed tool error."""
+    raw_progress = state.get("progress")
+    progress: Mapping[str, Any] = raw_progress if isinstance(raw_progress, Mapping) else {}
+    completed_rows = progress.get("completed")
+    total_rows = progress.get("total")
     return {
         "code": -32603,
-        "message": str(state.get("error") or "the durable job did not complete"),
+        "message": _error_message_text(state.get("last_error"))
+        or "the durable job did not complete",
         "data": {
             "jobId": state.get("job_id"),
             "status": state.get("status"),
             "attempt": state.get("attempt"),
+            "resultReference": _result_reference(state, completed_rows, total_rows),
         },
     }
+
+
+_ERROR_DETAIL_BOUND = 512
+_ERROR_TYPE_BOUND = 128
+# Absolute host locators are reduced to their final component so a Tasks
+# payload never carries private locations: drive-letter paths, UNC shares,
+# and POSIX-absolute prefixes alike. Redaction keeps the final component so
+# the message stays diagnosable ("model.mph failed") without the host path.
+_ABSOLUTE_PATH_LOCATOR = re.compile(
+    r"(?:"
+    r"[A-Za-z]:[\\/](?:[^\\/:*?\"<>|\r\n]*[\\/])*"  # C:\a\b\ (drive letter)
+    r"|\\\\[^\\/:*?\"<>|\r\n]+[\\/](?:[^\\/:*?\"<>|\r\n]*[\\/])+"  # \\server\share\
+    r"|/(?:[^/:*?\"<>|\r\n]+/)+"  # /posix/absolute/ prefixes
+    r")"
+)
+
+
+def _redacted_error_text(text: str) -> str | None:
+    """Bound one error string and strip absolute host path locators."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    bounded = text.strip()[:_ERROR_DETAIL_BOUND]
+    return _ABSOLUTE_PATH_LOCATOR.sub("", bounded).strip() or None
+
+
+def _bounded_error_detail(value: object) -> str | dict[str, Any] | None:
+    """Project the durable error faithfully, bounded and path-free.
+
+    The durable ``last_error`` arrives either as plain text or as the
+    structured ``{"type", "message"}`` shape the workers write; the Tasks
+    payload keeps the producer's shape rather than flattening the real
+    failure cause into a generic string, and both shapes are bounded and
+    stripped of private host locations.
+    """
+    if isinstance(value, Mapping):
+        error_type = value.get("type")
+        message = value.get("message")
+        if not isinstance(error_type, str) or not isinstance(message, str):
+            return None
+        redacted = _redacted_error_text(message)
+        if redacted is None:
+            return None
+        return {
+            "type": error_type.strip()[:_ERROR_TYPE_BOUND] or "Error",
+            "message": redacted,
+        }
+    if isinstance(value, str):
+        return _redacted_error_text(value)
+    return None
+
+
+def _error_message_text(value: object) -> str | None:
+    """Flatten a durable error to bounded, path-free message text."""
+    detail = _bounded_error_detail(value)
+    if isinstance(detail, Mapping):
+        return str(detail["message"])
+    return detail
 
 
 def _bounded_receipt(receipt: object) -> dict[str, Any]:
@@ -688,10 +990,10 @@ OWNED_FILES = ("tasks.jsonl",)
 
 __all__ = [
     "DEFAULT_POLL_INTERVAL_MS",
-    "DEFAULT_TASK_TTL_MS",
     "JOB_STATE_TO_TASK_STATUS",
     "MAX_TASK_ROWS",
     "MAX_TASK_ROW_BYTES",
+    "TASKS_FILE_MAX_BYTES",
     "OWNED_FILES",
     "REFUSED_TASKS_GENERATIONS",
     "SCHEMA_NAME",

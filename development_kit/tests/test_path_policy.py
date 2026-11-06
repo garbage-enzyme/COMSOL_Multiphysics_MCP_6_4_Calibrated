@@ -729,3 +729,401 @@ def test_configured_reparse_root_is_rejected(tmp_path, ascii_root):
                 ARTIFACT_WRITE_ROOT_ENV: str(ascii_root / "artifacts"),
             }
         )
+
+
+def test_job_spec_nested_paths_are_contained_before_admission(tmp_path, ascii_root, monkeypatch):
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    manifest = write_root / "adjoint.manifest.json"
+    manifest.write_text("{}", encoding="ascii")
+
+    def job_submit(*, spec=None):
+        pass
+
+    _args, normalized, _evidence, read_pins, _write_pins = validate_tool_paths(
+        job_submit,
+        (),
+        {
+            "spec": {
+                "job_type": "adjoint_optimization",
+                "submission_manifest_path": str(manifest),
+            }
+        },
+        tool_name="job_submit",
+        profile_name="experimental",
+    )
+
+    assert normalized["spec"]["submission_manifest_path"] == str(manifest.resolve())
+    assert {pin.path for pin in read_pins} == {manifest.resolve()}
+
+    outside = tmp_path / "outside.manifest.json"
+    outside.write_text("{}", encoding="ascii")
+    with pytest.raises(ValueError):
+        validate_tool_paths(
+            job_submit,
+            (),
+            {
+                "spec": {
+                    "job_type": "adjoint_optimization",
+                    "submission_manifest_path": str(outside),
+                }
+            },
+            tool_name="job_submit",
+            profile_name="experimental",
+        )
+
+    with pytest.raises(ValueError):
+        validate_tool_paths(
+            job_submit,
+            (),
+            {
+                "spec": {
+                    "job_type": "thermo_optomechanical_replay",
+                    "specification_path": str(outside),
+                }
+            },
+            tool_name="job_submit",
+            profile_name="core",
+        )
+
+
+def test_job_spec_temporary_directory_must_stay_inside_the_write_root(
+    tmp_path, ascii_root, monkeypatch
+):
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    scratch = write_root / "scratch"
+    scratch.mkdir()
+
+    def job_submit(*, spec=None):
+        pass
+
+    _args, normalized, _evidence, _read_pins, _write_pins = validate_tool_paths(
+        job_submit,
+        (),
+        {"spec": {"job_type": "validation_matrix", "comsol_temporary_directory": str(scratch)}},
+        tool_name="job_submit",
+        profile_name="experimental",
+    )
+
+    assert normalized["spec"]["comsol_temporary_directory"] == str(scratch.resolve())
+
+    outside_directory = tmp_path / "outside-scratch"
+    outside_directory.mkdir()
+    with pytest.raises(ValueError):
+        validate_tool_paths(
+            job_submit,
+            (),
+            {
+                "spec": {
+                    "job_type": "validation_matrix",
+                    "comsol_temporary_directory": str(outside_directory),
+                }
+            },
+            tool_name="job_submit",
+            profile_name="experimental",
+        )
+
+
+def test_job_spec_symlink_indirection_is_refused(tmp_path, ascii_root, monkeypatch):
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    try:
+        escape = tmp_path / "escape.manifest.json"
+        escape.write_text("{}", encoding="ascii")
+        linked = write_root / "linked.manifest.json"
+        linked.symlink_to(escape)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    def job_submit(*, spec=None):
+        pass
+
+    with pytest.raises(ValueError):
+        validate_tool_paths(
+            job_submit,
+            (),
+            {
+                "spec": {
+                    "job_type": "adjoint_optimization",
+                    "submission_manifest_path": str(linked),
+                }
+            },
+            tool_name="job_submit",
+            profile_name="experimental",
+        )
+
+
+def test_continuation_rejects_lexically_invalid_paths_without_any_probe(
+    tmp_path, ascii_root, monkeypatch
+):
+    import src.path_policy as path_policy_module
+
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+
+    probes = []
+
+    class ProbingPath(path_policy_module.Path):
+        def exists(self, *args, **kwargs):
+            probes.append(str(self))
+            return super().exists(*args, **kwargs)
+
+        def stat(self, *args, **kwargs):
+            probes.append(str(self))
+            return super().stat(*args, **kwargs)
+
+    monkeypatch.setattr(path_policy_module, "Path", ProbingPath)
+
+    def staged_sweep(*, source_model_path=None, csv_path=None, resume_csv=False):
+        pass
+
+    for bad_value, message in (
+        ("\\\\fileserver\\share\\rows.csv", "UNC paths are not allowed"),
+        ("\\\\.\\PHYSICALDRIVE0\\rows.csv", "device and extended-length paths"),
+        ("C:\\artifacts\\..\\escape\\rows.csv", "path traversal escapes"),
+        ("", "nonempty bounded string"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            validate_tool_paths(
+                staged_sweep,
+                (),
+                {"csv_path": bad_value, "resume_csv": True},
+                tool_name="study_staged_parametric_sweep",
+                profile_name="experimental",
+            )
+    # Resolving the configured roots legitimately stats the roots themselves;
+    # the invariant is that nothing ever probes the rejected input or any
+    # remote/device target it names.
+    joined = "\n".join(probes)
+    assert "fileserver" not in joined
+    assert "PHYSICALDRIVE" not in joined
+    assert "escape" not in joined
+
+
+def test_valid_continuation_still_routes_through_artifact_update(tmp_path, ascii_root, monkeypatch):
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    csv_path = write_root / "rows.csv"
+    csv_path.write_text("old rows", encoding="ascii")
+
+    def staged_sweep(*, source_model_path=None, csv_path=None, resume_csv=False):
+        pass
+
+    _args, normalized, _evidence, _read_pins, write_pins = validate_tool_paths(
+        staged_sweep,
+        (),
+        {"csv_path": str(csv_path), "resume_csv": True},
+        tool_name="study_staged_parametric_sweep",
+        profile_name="experimental",
+    )
+
+    assert normalized["csv_path"] == str(csv_path.resolve())
+    assert write_pins and write_pins[0].target == csv_path.resolve()
+
+
+def test_nested_manifest_source_is_expanded_and_contained_before_any_read(
+    tmp_path, ascii_root, monkeypatch
+):
+    import hashlib
+
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    read_root.mkdir(parents=True, exist_ok=True)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    outside_model = tmp_path / "outside.mph"
+    outside_model.write_bytes(b"outside model")
+    inner_model = read_root / "inner.mph"
+    inner_model.write_bytes(b"inner model")
+    document = {"schema_name": "comsol_mcp.thermo_optomechanical_replay"}
+    manifest = write_root / "specification.json"
+
+    def write_manifest(source):
+        payload = json.dumps({**document, "source_model_path": str(source)}).encode("utf-8")
+        manifest.write_bytes(payload)
+        return hashlib.sha256(payload).hexdigest()
+
+    def job_submit(*, spec=None):
+        pass
+
+    outside_opened = []
+    original_open = Path.open
+
+    def observed_open(path, *args, **kwargs):
+        if path.resolve() == outside_model.resolve():
+            outside_opened.append(str(path))
+        return original_open(path, *args, **kwargs)
+
+    # An inside-root manifest whose inner source escapes the read roots is
+    # refused before the escaping file is ever opened.
+    write_manifest(outside_model)
+    import unittest.mock as mock
+
+    with mock.patch.object(Path, "open", observed_open):
+        with pytest.raises(ValueError, match="escapes the configured read roots"):
+            validate_tool_paths(
+                job_submit,
+                (),
+                {
+                    "spec": {
+                        "job_type": "thermo_optomechanical_replay",
+                        "specification_path": str(manifest),
+                    }
+                },
+                tool_name="job_submit",
+                profile_name="experimental",
+            )
+    assert outside_opened == []
+
+    # A contained inner source is validated and pinned like any direct input.
+    write_manifest(inner_model)
+    _args, _normalized, _evidence, read_pins, _write_pins = validate_tool_paths(
+        job_submit,
+        (),
+        {
+            "spec": {
+                "job_type": "thermo_optomechanical_replay",
+                "specification_path": str(manifest),
+            }
+        },
+        tool_name="job_submit",
+        profile_name="experimental",
+    )
+    assert inner_model.resolve() in {pin.path for pin in read_pins}
+
+    # A declared digest binds the manifest content at validation time, so a
+    # replaced manifest is refused before expansion reads any inner path.
+    digest = write_manifest(inner_model)
+    write_manifest(outside_model)
+    with pytest.raises(ValueError, match="does not match the .* content"):
+        validate_tool_paths(
+            job_submit,
+            (),
+            {
+                "spec": {
+                    "job_type": "thermo_optomechanical_replay",
+                    "specification_path": str(manifest),
+                    "specification_sha256": digest,
+                }
+            },
+            tool_name="job_submit",
+            profile_name="experimental",
+        )
+    assert outside_opened == []
+
+
+def test_adjoint_manifest_and_preview_are_contained(tmp_path, ascii_root, monkeypatch):
+    import hashlib
+
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    read_root.mkdir(parents=True, exist_ok=True)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    outside_model = tmp_path / "outside.mph"
+    outside_model.write_bytes(b"outside")
+    manifest = write_root / "adjoint.manifest.json"
+    payload = json.dumps(
+        {
+            "schema_name": "comsol_mcp.adjoint_optimization.manifest",
+            "schema_version": "1.0.0",
+            "source_model_path": str(outside_model),
+        }
+    ).encode("utf-8")
+    manifest.write_bytes(payload)
+
+    def tool(*, spec=None):
+        pass
+
+    spec = {
+        "job_type": "adjoint_optimization",
+        "submission_manifest_path": str(manifest),
+        "submission_manifest_sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    import unittest.mock as mock
+
+    opened = []
+    original_open = Path.open
+
+    def observed_open(path, *args, **kwargs):
+        if path.resolve() == outside_model.resolve():
+            opened.append(str(path))
+        return original_open(path, *args, **kwargs)
+
+    with mock.patch.object(Path, "open", observed_open):
+        for tool_name in ("job_submit", "job_spec_preview"):
+            opened.clear()
+            with pytest.raises(ValueError, match="escapes the configured read roots"):
+                validate_tool_paths(
+                    tool,
+                    (),
+                    {"spec": dict(spec)},
+                    tool_name=tool_name,
+                    profile_name="experimental",
+                )
+            assert opened == []
+
+
+def test_typed_job_spec_models_receive_containment(tmp_path, ascii_root, monkeypatch):
+    from comsol_mcp.contracts.job_submission import StagedSweepInput
+
+    _, read_root, write_root = _policy(tmp_path, ascii_root)
+    read_root.mkdir(parents=True, exist_ok=True)
+    write_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(MODEL_READ_ROOTS_ENV, str(read_root))
+    monkeypatch.setenv(ARTIFACT_WRITE_ROOT_ENV, str(write_root))
+    outside = tmp_path / "outside.mph"
+    outside.write_bytes(b"outside")
+    inside = read_root / "in.mph"
+    inside.write_bytes(b"in")
+
+    def job_submit(*, spec=None):
+        return {"dispatched_type": type(spec).__name__}
+
+    typed_outside = StagedSweepInput(
+        job_type="staged_sweep",
+        source_model_path=str(outside),
+        parameter_name="wl",
+        parameter_values=[1.0],
+        expressions=["ewfd.Rtotal"],
+    )
+    with pytest.raises(ValueError, match="escapes the configured read roots"):
+        validate_tool_paths(
+            job_submit,
+            (),
+            {"spec": typed_outside},
+            tool_name="job_submit",
+            profile_name="core",
+        )
+
+    typed_inside = StagedSweepInput(
+        job_type="staged_sweep",
+        source_model_path=str(inside),
+        parameter_name="wl",
+        parameter_values=[1.0],
+        expressions=["ewfd.Rtotal"],
+    )
+    args, kwargs, evidence, read_pins, _write_pins = validate_tool_paths(
+        job_submit,
+        (),
+        {"spec": typed_inside},
+        tool_name="job_submit",
+        profile_name="core",
+    )
+    # The strict typed instance stays the dispatched argument, the validated
+    # identity was written back onto it, and the check actually ran.
+    assert evidence["validated_input_count"] == 1
+    assert kwargs["spec"].source_model_path == str(inside.resolve())
+    assert kwargs["spec"].__class__.__name__ == "StagedSweepInput"
+    assert inside.resolve() in {pin.path for pin in read_pins}

@@ -585,6 +585,12 @@ class MphBackendBase:
         try:
             if plan.previous.form == "str":
                 java.set(plan.name, plan.previous.value)
+            elif plan.previous.form == "int":
+                # The forward path converts ints through str() because a bare
+                # Python int can raise JPype's ambiguous-overload error; the
+                # rollback must take the identical route or restoring an int
+                # property fails and loses failure atomicity.
+                java.set(plan.name, str(plan.previous.value))
             elif plan.previous.form == "float":
                 java.set(plan.name, repr(plan.previous.value))
             else:
@@ -873,6 +879,18 @@ class MphBackendBase:
             raise AdapterError(
                 "adapter_unavailable",
                 "the supplied client does not own the supplied model",
+                operation="session_open",
+            )
+        if self._client is not None and not self._attached:
+            # Attaching over a session this backend itself opened would drop
+            # the only reference to the owned client without clearing it, and
+            # ``close_session`` would then treat it as adopted and never clean
+            # it up: a silent leak of the backend's own resource. Require the
+            # caller to close the owned session first.
+            raise AdapterError(
+                "adapter_unavailable",
+                "attach_client cannot adopt a client while this backend holds "
+                "its own open session; close the owned session first",
                 operation="session_open",
             )
         self._client = client

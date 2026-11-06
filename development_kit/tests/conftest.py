@@ -28,7 +28,10 @@ def _create_ascii_temp_dir(*, candidates=None) -> Path:
             return Path(tempfile.mkdtemp(prefix="comsol-mcp-test-", dir=parent))
         except OSError:
             continue
-    raise OSError("no writable ASCII temporary directory is available")
+    raise OSError(
+        "no writable ASCII temporary directory is available; "
+        "set COMSOL_MCP_TEST_ASCII_ROOT to an absolute ASCII path"
+    )
 
 
 @pytest.fixture
@@ -36,5 +39,31 @@ def ascii_tmp_path():
     root = _create_ascii_temp_dir()
     try:
         yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _synthetic_runtime_isolation():
+    """Scope one synthetic runtime root per test worker before any ownership.
+
+    The production default shares one runtime directory (and therefore one
+    solver lease) across agent processes on purpose. Synthetic tests running in
+    parallel workers must not contend on that shared default, so each worker
+    session derives its own ASCII runtime root and selects it through the
+    supported configuration variable; subprocesses inherit it with the rest of
+    the environment. An explicitly configured value always wins - this never
+    overrides caller configuration, and it is test isolation, never solver
+    authorization.
+    """
+    from development_kit.tests.platform_fixtures import select_synthetic_runtime_dir
+
+    root = select_synthetic_runtime_dir()
+    if root is None:
+        yield
+        return
+    os.environ["COMSOL_MCP_RUNTIME_DIR"] = str(root)
+    try:
+        yield
     finally:
         shutil.rmtree(root, ignore_errors=True)

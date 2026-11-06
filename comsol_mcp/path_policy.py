@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import hashlib
 import inspect
+import json
 import os
 import re
 import stat
@@ -350,6 +351,23 @@ def _root_id(path: Path) -> str:
     return hashlib.sha256(normalized).hexdigest()[:16]
 
 
+def _lexically_valid_artifact_path(value: Any) -> bool:
+    """Report whether a continuation target passes the lexical gate.
+
+    Continuation used to be decided by probing the filesystem directly, so a
+    UNC or device path was looked up on the network or host before the policy
+    refused it. The lexical gate now decides whether a probe may happen at
+    all; only a lexically valid target is probed for existence, and a
+    rejected value falls through to the write validator, which raises the
+    same stable refusal shape without touching the filesystem.
+    """
+    try:
+        _reject_lexical_path(value, require_ascii=True)
+    except ValueError:
+        return False
+    return True
+
+
 def _is_relative_to(path: Path, root: Path) -> bool:
     try:
         return os.path.commonpath(
@@ -667,6 +685,40 @@ _MODEL_READ_ARGUMENTS = {
 _SHARED_SOURCE_READ_ARGUMENTS = {
     "shared_model_lock": ("immutable_source_path",),
 }
+# Nested path fields that ride inside a job_submit spec mapping, keyed by the
+# spec's job_type. Each entry names the field and the containment kind the
+# policy applies before admission reads, job creation or worker launch.
+_JOB_SPEC_PATH_FIELDS: dict[str, tuple[tuple[str, str], ...]] = {
+    "adjoint_optimization": (("submission_manifest_path", "artifact_read"),),
+    "thermo_optomechanical_replay": (("specification_path", "artifact_read"),),
+    "validation_matrix": (("comsol_temporary_directory", "artifact_write_directory"),),
+}
+# A validated spec field may itself be a JSON manifest that names further
+# paths. Expansion opens only the already-validated manifest, under the same
+# byte bound the owning contract enforces, and validates every declared inner
+# reference before the tool's own normalizer can stat, read, or hash it - so
+# a contained profile cannot smuggle an outside-root source through manifest
+# indirection. When the spec carries a caller-declared digest for the
+# manifest, validation pins the content to that digest: a replacement between
+# validation and normalization then fails the normalizer's own digest check
+# instead of reopening an unvalidated path.
+# Each entry is (manifest field, digest field or None, inner field, inner kind).
+_JOB_SPEC_MANIFEST_FIELDS: dict[str, tuple[tuple[str, str | None, str, str], ...]] = {
+    "thermo_optomechanical_replay": (
+        ("specification_path", "specification_sha256", "source_model_path", "model_read"),
+    ),
+    "adjoint_optimization": (
+        (
+            "submission_manifest_path",
+            "submission_manifest_sha256",
+            "source_model_path",
+            "model_read",
+        ),
+    ),
+}
+# Matches MAX_THERMO_OPTOMECHANICAL_SPEC_BYTES in the owning contract; kept
+# local so the policy module never imports from the jobs layer.
+_JOB_SPEC_MANIFEST_MAX_BYTES = 4 * 1024 * 1024
 _ARTIFACT_READ_ARGUMENTS = {
     "wave_optics_point_audit": ("air_reference_artifact_path",),
     # B04: offline export manifest must stay inside the owned artifact root.
@@ -731,6 +783,18 @@ _ALWAYS_ENFORCED_TOOLS = frozenset(
 )
 
 
+def path_policy_enforced(tool_name: str, profile_name: str) -> bool:
+    """Report the authoritative enforcement decision for one tool call.
+
+    This is the single condition ``validate_tool_paths`` applies: contained
+    profiles validate every tool, and the full profile exempts only tools that
+    are not on the always-enforced list. Failure evidence must report this
+    decision instead of guessing from the profile name alone, because an
+    always-enforced tool stays enforced under the full profile.
+    """
+    return profile_name != "full" or tool_name in _ALWAYS_ENFORCED_TOOLS
+
+
 def validate_tool_paths(
     function: Any,
     args: tuple[Any, ...],
@@ -746,7 +810,7 @@ def validate_tool_paths(
     tuple[ValidatedWritePin, ...],
 ]:
     """Validate and normalize known caller-selected path arguments."""
-    if profile_name == "full" and tool_name not in _ALWAYS_ENFORCED_TOOLS:
+    if not path_policy_enforced(tool_name, profile_name):
         return (
             args,
             kwargs,
@@ -794,24 +858,116 @@ def validate_tool_paths(
             if required:
                 raise ValueError(f"{tool_name}.{argument} is required by the contained path policy")
             continue
-        continuation = (
-            argument in {"csv_path", "manifest_path"}
-            and bool(bound.arguments.get("append_csv") or bound.arguments.get("resume_csv"))
+        continuation = argument in {"csv_path", "manifest_path"} and bool(
+            bound.arguments.get("append_csv") or bound.arguments.get("resume_csv")
         )
-        if continuation and Path(value).exists():
+        if continuation and _lexically_valid_artifact_path(value):
             decision = policy.validate_artifact_update(value)
         else:
             decision = policy.validate_artifact_write(value, directory=directory)
         bound.arguments[argument] = str(decision.normalized_path)
         decisions.append(decision)
-    if tool_name == "job_submit":
+    if tool_name in {"job_submit", "job_spec_preview"}:
+        # job_spec_preview expands the same manifests job_submit submits, so
+        # its spec rides through the identical containment: a preview may
+        # never stat, read, or hash a source the submission path would
+        # refuse.
         spec = bound.arguments.get("spec")
-        if isinstance(spec, Mapping) and spec.get("source_model_path") is not None:
-            decision = policy.validate_model_read(spec["source_model_path"], suffixes=(".mph",))
+        # The registered public tools receive typed pydantic input models,
+        # not mappings. Validate a dumped copy - strict models refuse dict
+        # coercion, so the typed instance stays the dispatched argument and
+        # validated identities are written back onto it by field.
+        typed_instance = None
+        if not isinstance(spec, Mapping) and hasattr(spec, "model_dump"):
+            dumped = spec.model_dump(mode="python")
+            if isinstance(dumped, Mapping):
+                typed_instance = spec
+                spec = dumped
+        if isinstance(spec, Mapping):
             normalized_spec = dict(spec)
-            normalized_spec["source_model_path"] = str(decision.normalized_path)
-            bound.arguments["spec"] = normalized_spec
-            decisions.append(decision)
+            if spec.get("source_model_path") is not None:
+                decision = policy.validate_model_read(spec["source_model_path"], suffixes=(".mph",))
+                normalized_spec["source_model_path"] = str(decision.normalized_path)
+                decisions.append(decision)
+            # Nested paths ride inside the job spec mapping, so the declared
+            # per-tool argument tables above never see them. Each supported
+            # job type names its nested path fields and the containment kind;
+            # routing them here rejects outside-root indirection before any
+            # admission read, job creation or worker launch.
+            for field, kind in _JOB_SPEC_PATH_FIELDS.get(str(spec.get("job_type")), ()):
+                value = spec.get(field)
+                if value is None:
+                    continue
+                if kind == "artifact_read":
+                    decision = policy.validate_artifact_read(value)
+                elif kind == "artifact_write_directory":
+                    decision = policy.validate_artifact_write(value, directory=True)
+                else:  # pragma: no cover - table entries are internal constants
+                    raise ValueError(f"unsupported nested path kind for job spec field {field}")
+                normalized_spec[field] = str(decision.normalized_path)
+                decisions.append(decision)
+            for (
+                manifest_field,
+                digest_field,
+                inner_field,
+                inner_kind,
+            ) in _JOB_SPEC_MANIFEST_FIELDS.get(str(spec.get("job_type")), ()):
+                manifest_value = normalized_spec.get(manifest_field)
+                if manifest_value is None:
+                    continue
+                try:
+                    with open(manifest_value, "rb") as handle:
+                        payload = handle.read(_JOB_SPEC_MANIFEST_MAX_BYTES + 1)
+                except OSError as exc:
+                    raise ValueError(
+                        f"{tool_name}.spec.{manifest_field} could not be read for path expansion"
+                    ) from exc
+                if len(payload) > _JOB_SPEC_MANIFEST_MAX_BYTES:
+                    raise ValueError(
+                        f"{tool_name}.spec.{manifest_field} exceeds the manifest byte bound"
+                    )
+                if digest_field is not None:
+                    declared = spec.get(digest_field)
+                    if isinstance(declared, str) and declared.strip():
+                        actual = hashlib.sha256(payload).hexdigest()
+                        if actual != declared.strip().lower():
+                            raise ValueError(
+                                f"{tool_name}.spec.{digest_field} does not match the "
+                                f"{manifest_field} content"
+                            )
+                try:
+                    document = json.loads(payload.decode("utf-8"))
+                except (UnicodeError, json.JSONDecodeError) as exc:
+                    raise ValueError(
+                        f"{tool_name}.spec.{manifest_field} is not a readable JSON manifest"
+                    ) from exc
+                inner_value = document.get(inner_field) if isinstance(document, dict) else None
+                if inner_value is None:
+                    continue
+                if inner_kind == "model_read":
+                    decision = policy.validate_model_read(inner_value, suffixes=(".mph",))
+                elif inner_kind == "artifact_read":
+                    decision = policy.validate_artifact_read(inner_value)
+                else:  # pragma: no cover - table entries are internal constants
+                    raise ValueError(
+                        f"unsupported nested manifest path kind for {manifest_field}.{inner_field}"
+                    )
+                decisions.append(decision)
+            if typed_instance is not None:
+                # Write ONLY the validated path identities back onto the
+                # typed instance; the dispatched argument keeps its strict
+                # model type and its original field set.
+                validated_fields = {"source_model_path"}
+                validated_fields.update(
+                    field for field, _kind in _JOB_SPEC_PATH_FIELDS.get(
+                        str(spec.get("job_type")), ()
+                    )
+                )
+                for field in validated_fields:
+                    if normalized_spec.get(field) != spec.get(field):
+                        setattr(typed_instance, field, normalized_spec[field])
+            else:
+                bound.arguments["spec"] = normalized_spec
     evidence = {
         **policy.capability(enforced=True),
         "validated_input_count": len(decisions),
@@ -835,6 +991,7 @@ __all__ = [
     "ReadPinError",
     "ValidatedReadPin",
     "ValidatedWritePin",
+    "path_policy_enforced",
     "validated_read_pin",
     "read_contained_file_snapshot",
     "pin_validated_reads",

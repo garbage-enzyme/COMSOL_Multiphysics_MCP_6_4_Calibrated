@@ -16,9 +16,9 @@ from development_kit.scripts import quality_gate as quality_gate_module
 from development_kit.scripts.quality_gate import (
     POLICY_PATH,
     _create_short_pytest_roots,
-    _hosted_serial_shard_command,
     _main_pytest_command,
     _serial_pytest_command,
+    _verify_execution_partition,
     evaluate_coverage,
     load_coverage_policy,
     run_quality_gate,
@@ -27,25 +27,59 @@ from development_kit.scripts.quality_gate import (
 )
 
 
-def test_hosted_quality_main_suite_is_serial_but_local_suite_keeps_four_workers(
-    tmp_path: Path,
-) -> None:
-    hosted = _main_pytest_command(tmp_path, hosted_ci=True)
-    local = _main_pytest_command(tmp_path, hosted_ci=False)
+def test_main_suite_runs_the_same_parallel_lane_hosted_and_locally(tmp_path: Path) -> None:
+    hosted = _main_pytest_command(tmp_path, hosted_ci=True, junit_path=tmp_path / "same.xml")
+    local = _main_pytest_command(tmp_path, hosted_ci=False, junit_path=tmp_path / "same.xml")
 
-    assert "-n" not in hosted
-    assert "--dist" not in hosted
-    assert local[local.index("-n") + 1] == "4"
-    assert local[local.index("--dist") + 1] == "loadscope"
-    assert local[local.index("--basetemp") + 1] == str(tmp_path)
+    assert hosted == local
+    assert hosted[hosted.index("-n") + 1] == "4"
+    assert hosted[hosted.index("--dist") + 1] == "loadscope"
+    assert hosted[hosted.index("--basetemp") + 1] == str(tmp_path)
+    assert hosted[hosted.index("--junitxml") + 1] == str(tmp_path / "same.xml")
+    assert "--cov=comsol_mcp" in hosted
+    assert "--cov-branch" in hosted
 
 
-def test_hosted_shards_are_plain_serial_pytest_processes(tmp_path: Path) -> None:
-    command = _hosted_serial_shard_command(tmp_path / "tests", tmp_path / "coverage")
-    assert any(item.endswith("serial_test_shards.py") for item in command)
-    assert command[command.index("--shards") + 1] == "2"
-    assert "-n" not in command
-    assert "--coverage-root" in command
+def test_execution_partition_accepts_an_exact_junit_report(tmp_path: Path) -> None:
+    junit = tmp_path / "main-junit.xml"
+    junit.write_text(
+        "<testsuites><testsuite tests='3' name='main'>"
+        "<testcase classname='tests.test_a' name='one'/>"
+        "<testcase classname='tests.test_a' name='two'/>"
+        "<testcase classname='tests.test_b' name='one'/>"
+        "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+
+    receipt = _verify_execution_partition(junit, collected=3)
+
+    assert receipt == {"collected": 3, "executed": 3, "exact_partition": True}
+
+
+def test_execution_partition_rejects_count_mismatch_and_duplicates(tmp_path: Path) -> None:
+    duplicated = tmp_path / "duplicated.xml"
+    duplicated.write_text(
+        "<testsuites><testsuite tests='3' name='main'>"
+        "<testcase classname='tests.test_a' name='one'/>"
+        "<testcase classname='tests.test_a' name='one'/>"
+        "<testcase classname='tests.test_b' name='two'/>"
+        "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="more than once"):
+        _verify_execution_partition(duplicated, collected=3)
+
+    short = tmp_path / "short.xml"
+    short.write_text(
+        "<testsuites><testsuite tests='3' name='main'>"
+        "<testcase classname='tests.test_a' name='one'/>"
+        "<testcase classname='tests.test_a' name='two'/>"
+        "<testcase classname='tests.test_b' name='one'/>"
+        "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="collection counted 4"):
+        _verify_execution_partition(short, collected=4)
 
 
 def test_configured_pytest_roots_remain_direct_short_siblings(monkeypatch) -> None:

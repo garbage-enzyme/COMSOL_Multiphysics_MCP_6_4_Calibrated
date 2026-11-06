@@ -450,3 +450,46 @@ def test_first_run_explicit_settings_path_creates_parent_before_lock(tmp_path, m
     assert result["state"] == "launched"
     assert launched["yes"] is True
     assert target.parent.is_dir()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows sharing-violation semantics")
+def test_publish_handshake_retries_through_a_brief_reader_overlap(
+    ascii_tmp_path: Path, monkeypatch
+) -> None:
+    import os
+    import threading
+
+    root = ascii_tmp_path / "settings_gui"
+    root.mkdir()
+    path = root / ".settings-gui-0123456789abcdef0123456789abcdef.json"
+    path.write_bytes(handshake_module.handshake_bytes("pending"))
+    monkeypatch.setattr(handshake_module, "HANDSHAKE_PUBLISH_RETRY_SECONDS", 1.5)
+    descriptor = os.open(path, os.O_RDONLY)
+    release = threading.Timer(0.2, os.close, args=(descriptor,))
+    release.start()
+    try:
+        assert publish_handshake("ready", {handshake_module.HANDSHAKE_ENV: str(path)}) is True
+        assert path.read_bytes() == handshake_module.handshake_bytes("ready")
+    finally:
+        release.join()
+    assert not list(root.glob("*.tmp"))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows sharing-violation semantics")
+def test_publish_handshake_gives_up_after_a_permanent_sharing_failure(
+    ascii_tmp_path: Path, monkeypatch
+) -> None:
+    import os
+
+    root = ascii_tmp_path / "settings_gui"
+    root.mkdir()
+    path = root / ".settings-gui-0123456789abcdef0123456789abcdef.json"
+    path.write_bytes(handshake_module.handshake_bytes("pending"))
+    monkeypatch.setattr(handshake_module, "HANDSHAKE_PUBLISH_RETRY_SECONDS", 0.3)
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        assert publish_handshake("ready", {handshake_module.HANDSHAKE_ENV: str(path)}) is False
+        assert path.read_bytes() == handshake_module.handshake_bytes("pending")
+    finally:
+        os.close(descriptor)
+    assert not list(root.glob("*.tmp"))

@@ -48,6 +48,21 @@ def _raw_parameter_description(model: Any, name: str) -> Any:
         return model.description(name)
 
 
+def _descriptions_equivalent(actual: Any, expected: Any) -> bool:
+    """Compare descriptions treating clientapi null and empty text as unset.
+
+    A description cleared through the wrapper setter reads back as an empty
+    string, while the untouched clientapi value may surface as Java null, so
+    the two unset spellings must compare equal or a clean rollback would
+    report a false readback mismatch.
+    """
+    actual_unset = actual is None or str(actual) == ""
+    expected_unset = expected is None or str(expected) == ""
+    if actual_unset or expected_unset:
+        return actual_unset and expected_unset
+    return str(actual) == str(expected)
+
+
 def _restore_parameter(
     model: Any,
     name: str,
@@ -67,9 +82,10 @@ def _restore_parameter(
     else:
         # The three-argument java setter was unavailable, so a stale
         # description from the failed transaction must be cleared through the
-        # wrapper API; otherwise the readback check reports a false mismatch.
+        # wrapper API. MPh's wrapper treats a None text as the getter, not a
+        # clear, so the clear goes through the setter with an empty string.
         try:
-            model.description(name, None)
+            model.description(name, "")
         except AttributeError, TypeError:
             pass
 
@@ -93,8 +109,9 @@ def set_parameter(
         actual_value = str(model.parameter(name, evaluate=False))
         actual_description = _raw_parameter_description(model, name)
         description_matches = (
-            description is None and (not existed or actual_description == old_description)
-        ) or (description is not None and actual_description == description)
+            description is None
+            and (not existed or _descriptions_equivalent(actual_description, old_description))
+        ) or (description is not None and _descriptions_equivalent(actual_description, description))
         if actual_value != value or not description_matches:
             raise ValueError("parameter readback mismatch")
     except Exception as exc:
@@ -102,9 +119,10 @@ def set_parameter(
         try:
             if existed:
                 _restore_parameter(model, name, old_value, old_description)
-                if (
-                    str(model.parameter(name, evaluate=False)) != old_value
-                    or _raw_parameter_description(model, name) != old_description
+                if str(
+                    model.parameter(name, evaluate=False)
+                ) != old_value or not _descriptions_equivalent(
+                    _raw_parameter_description(model, name), old_description
                 ):
                     raise ValueError("restored parameter readback mismatch")
             else:

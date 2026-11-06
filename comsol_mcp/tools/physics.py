@@ -507,7 +507,7 @@ def setup_flow_boundaries(
         result = add_boundary_condition(
             model,
             physics_name,
-            "InletBoundary",
+            "Inlet",
             [boundary],
             properties={"U0": inlet_velocity},
             feature_prefix="inl",
@@ -526,7 +526,7 @@ def setup_flow_boundaries(
         result = add_boundary_condition(
             model,
             physics_name,
-            "OutletBoundary",
+            "Outlet",
             [boundary],
             properties={"p0": outlet_pressure},
             feature_prefix="out",
@@ -585,9 +585,13 @@ def setup_heat_boundaries(
         (
             "convection",
             convection_boundaries,
-            "ConvectiveHeatFlux",
+            "HeatFluxBoundary",
             "conv",
-            {"h": convection_coeff, "Text": ambient_temp},
+            {
+                "HeatFluxType": "ConvectiveHeatFlux",
+                "h": convection_coeff,
+                "Text": ambient_temp,
+            },
             {"h": convection_coeff, "T_amb": ambient_temp},
         ),
     )
@@ -1235,7 +1239,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
         Common boundary conditions for Heat Transfer:
         - "Temperature": Fixed temperature
         - "HeatFlux": Heat flux boundary
-        - "ConvectiveHeatFlux": Convection cooling
+        - "HeatFluxBoundary" with "HeatFluxType" "ConvectiveHeatFlux": Convection cooling
         - "ThermalInsulation": Thermal insulation (adiabatic)
 
         Common for Solid Mechanics:
@@ -1566,20 +1570,20 @@ def register_physics_tools(mcp: MCPServer) -> None:
                     "step3": "Use physics_configure_boundary to set conditions",
                 },
                 "boundary_condition_types": {
-                    "InletBoundary": "Set inlet velocity (U0 parameter)",
-                    "OutletBoundary": "Set outlet pressure (p0 parameter, default 0)",
+                    "Inlet": "Set inlet velocity (U0 parameter)",
+                    "Outlet": "Set outlet pressure (p0 parameter, default 0)",
                     "Wall": "No-slip wall (default for unspecified boundaries)",
                     "Symmetry": "Symmetry plane",
                 },
                 "example_usage": {
                     "inlet": (
                         "physics_configure_boundary(physics_name='Laminar Flow', "
-                        "boundary_condition='InletBoundary', boundary_selection=[1, 2], "
+                        "boundary_condition='Inlet', boundary_selection=[1, 2], "
                         "properties={'U0': '1[mm/s]'})"
                     ),
                     "outlet": (
                         "physics_configure_boundary(physics_name='Laminar Flow', "
-                        "boundary_condition='OutletBoundary', boundary_selection=[3])"
+                        "boundary_condition='Outlet', boundary_selection=[3])"
                     ),
                 },
                 "next_step": (
@@ -1676,7 +1680,7 @@ def register_physics_tools(mcp: MCPServer) -> None:
                 "boundary_condition_types": {
                     "TemperatureBoundary": "Fixed temperature (heat sink/source)",
                     "HeatFluxBoundary": "Prescribed heat flux (heat source)",
-                    "ConvectiveHeatFlux": "Convection cooling/heating",
+                    "HeatFluxBoundary/ConvectiveHeatFlux": "Convection cooling/heating",
                     "Symmetry": "Symmetry plane (adiabatic)",
                     "ThermalInsulation": "Thermal insulation (default)",
                 },
@@ -1780,13 +1784,13 @@ def register_physics_tools(mcp: MCPServer) -> None:
         Common boundary condition types by physics:
 
         Heat Transfer (ht):
-        - Temperature: Set T0 (temperature)
-        - HeatFlux: Set q0 (heat flux)
-        - ConvectiveHeatFlux: Set h (coefficient), Text (ambient temp)
+        - TemperatureBoundary: Set T0 (temperature)
+        - HeatFluxBoundary: Set q0 (heat flux)
+        - HeatFluxBoundary/ConvectiveHeatFlux: Set h (coefficient), Text (ambient)
 
         Laminar Flow (spf):
-        - InletBoundary: Set U0 (velocity)
-        - OutletBoundary: Set p0 (pressure)
+        - Inlet: Set U0 (velocity)
+        - Outlet: Set p0 (pressure)
         - Wall: No-slip wall
 
         Solid Mechanics (solid):

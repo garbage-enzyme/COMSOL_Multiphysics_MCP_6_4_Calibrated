@@ -5,8 +5,7 @@ The fake backend stands in for a real lane so the protocol's rules, error
 translation, and rollback semantics are exercised as behaviour.
 
 The parity tests compare two backends that differ **only** in declared lane and
-in the two capabilities measured in
-``D:\\mcp_tests\\a75s4inv\\mph_131_140_differences.md``.
+in the two capabilities measured in the lane-reconnaissance notes.
 """
 
 from __future__ import annotations
@@ -217,7 +216,7 @@ def test_a_jvm_string_proxy_is_unwrapped_for_the_backend() -> None:
     Measured on COMSOL 6.4.0.293: the study step's `plist` read back as
     `jpype._jstring` / `java.lang.String`, so `isinstance(value, str)` was False
     and a strict conversion reported a spurious `property_type_mismatch` (see
-    `D:\\mcp_tests\\a75s4type\\java_types.json`). Only backend-produced values are
+    the Java proxy-type probe). Only backend-produced values are
     unwrapped; caller input stays strictly checked.
     """
 
@@ -429,12 +428,21 @@ def test_node_lookup_resolves_and_reports_a_missing_tag() -> None:
     node = backend.find_node(["component", "comp1"])
     assert node.tag == "comp1"
     assert node.path == ("component", "comp1")
-    assert [child.tag for child in backend.children(node)] == ["L"]
+    assert list(backend.children(node)) == []
     with pytest.raises(AdapterError) as excinfo:
         backend.find_node(["component", "absent"])
     assert excinfo.value.reason_code == "node_not_found"
     with pytest.raises(AdapterError):
         backend.find_node([])
+
+
+def test_fake_children_follow_created_nodes_and_removal() -> None:
+    backend = _opened()
+    study = backend.create_node("study", "std1")
+    step = backend.create_node("study_step", "step1", parent_tag="std1", feature_type="Stationary")
+    assert list(backend.children(study)) == [step]
+    backend.remove_node("study_step", "std1/step1")
+    assert list(backend.children(study)) == []
 
 
 def test_model_identity_calls_methods_rather_than_stringifying_them() -> None:
@@ -452,12 +460,12 @@ def test_model_identity_calls_methods_rather_than_stringifying_them() -> None:
             return "s4a_probe"
 
         def file(self) -> str:
-            return "D:/mcp_tests/a75s4lic/s4a_probe.mph"
+            return "E:/licensed/s4a_probe.mph"
 
     identity = MphBackendBase()._model_identity(MethodStyleModel())  # noqa: SLF001
     assert identity.name == "s4a_probe"
     assert "bound method" not in identity.name
-    assert identity.file == "D:/mcp_tests/a75s4lic/s4a_probe.mph"
+    assert identity.file == "E:/licensed/s4a_probe.mph"
     assert identity.content_sha256 is None
 
 
@@ -705,7 +713,7 @@ def test_a_real_numpy_style_scalar_array_is_normalized() -> None:
 
     This is measured licensed behaviour, not an assumption: `model.evaluate("a1")`
     returned `array(1.5)` and `model.evaluate("1+1")` returned `array(2.)` on
-    COMSOL 6.4.0.293 (see `D:\\mcp_tests\\a75s4ev\\eval_shape.json`). The
+    COMSOL 6.4.0.293 (see the measured eval-shape receipt). The
     normalizer must therefore duck-type a numpy-like object through `tolist`.
     """
 
@@ -1348,3 +1356,27 @@ def test_an_adopted_client_is_released_rather_than_cleared() -> None:
     opened.close_session()
     assert owned_client.cleared is True
     assert opened.cleared_clients == [owned_client]
+
+
+def test_a_failed_int_write_rolls_back_through_the_int_route() -> None:
+    backend = _opened(
+        properties={"comp1": {"count": 7}}, failures={"property_write": "backend_internal_error"}
+    )
+    node = backend.find_node(["comp1"])
+    plan = backend.plan_write(node, "count", ConvertedValue(11, "int", "int"))
+    receipt = backend.apply_write(plan)
+    assert receipt.applied is False
+    assert receipt.rolled_back is True
+    assert backend.property_value("comp1", "count") == 7
+
+
+def test_attach_client_refuses_while_an_owned_session_is_open() -> None:
+    from comsol_mcp.adapter.protocol import AdapterError
+
+    backend = _opened(properties={"comp1": {}})
+    client = type("Client", (), {"models": staticmethod(lambda: [])})()
+    model = object()
+    with pytest.raises(AdapterError, match="close the owned session first"):
+        backend.attach_client(model, client=client)
+    backend.close_session()
+    backend.attach_client(model, client=client)

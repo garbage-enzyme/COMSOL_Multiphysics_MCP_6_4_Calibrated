@@ -7,7 +7,7 @@ English | [中文](README_CN.md)
 [![CI](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
-![Release: 0.8.0](https://img.shields.io/badge/release-0.8.0-blue)
+![Candidate: 0.8.1](https://img.shields.io/badge/candidate-0.8.1-blue)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-red)
 [![GitHub stars](https://img.shields.io/github/stars/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated?style=social)](https://github.com/garbage-enzyme/COMSOL_Multiphysics_MCP_6_4_Calibrated/stargazers)
 
@@ -165,7 +165,7 @@ a crash before the session is saved.
 - **Shared Desktop collaboration (default-off).** The independent `shared_server.enabled` feature works with every tool profile. It attaches to a manually started local COMSOL Server and adopts exactly one server-held model. It enforces non-owning leases and revision locks, and runs durable attached jobs. Detach preserves the user's Server, Desktop, listener, and model. At most two independent solver owners may run in parallel, each with one core. The server refuses multi-core solver use, a third owner, and cross-owner model access.
 - **COMSOL Model Manager (default-off).** `model_manager.enabled` adds bounded Model Manager tools to any profile. The separate `model_manager.upload_enabled` setting controls saving to Model Manager. Opening, running, and downloading remain available with uploads disabled. Session sharing enables neither switch. Uploads require an explicit derived source identity. The server refuses an existing destination, revision mismatch, or overwrite. A durable journal records every attempt, including refusals.
 - **Wave Optics validation.** A focused profile provides read-only model preflight and a one-wavelength evidence audit for periodic metasurfaces.
-- **Progressive discovery.** `capabilities` returns compact registry identity and counts instead of all 193 artifact-schema entries. The read-only `catalog` tool returns domain/tool summaries, one domain with full tool input schemas, one tool, or one named schema. The server holds the authoritative registry. Its fingerprint binds the compact summary and on-demand results. The separate `discovery.pagination_enabled` switch enables experimental `tools/list` cursor pages. It defaults to off, so first-page-only clients receive the complete ordinary list. When enabled, each page states the total. Clients must use that metadata and fetch subsequent pages to discover all tools.
+- **Progressive discovery.** `capabilities` returns compact registry identity and counts instead of all 141 artifact-schema entries. The read-only `catalog` tool returns domain/tool summaries, one domain with full tool input schemas, one tool, or one named schema. The server holds the authoritative registry. Its fingerprint binds the compact summary and on-demand results. The separate `discovery.pagination_enabled` switch enables experimental `tools/list` cursor pages. It defaults to off, so first-page-only clients receive the complete ordinary list. When enabled, each page states the total. Clients must use that metadata and fetch subsequent pages to discover all tools.
 - **Bounded offline manuals (default-off).** `manuals.root` identifies the original COMSOL PDF tree. After local index generation, `lexical_docs.enabled` adds SQLite FTS5/BM25 search and page retrieval. An isolated process returns bounded source/page citations.
 - **Optional semantic retrieval.** The isolated `semantic_docs.enabled` feature works with every profile. Its baseline model failed the quality and memory promotion gates. Lexical manual search remains the recommended default.
 
@@ -239,8 +239,10 @@ Restart after changing it.
 | `core` (default) | Compact, mature control plane: status, ownership, session/model inspection, and one-point solve/evaluation. |
 | `basic_fem` | `core` plus typed conventional FEM construction, named selections, Pressure Acoustics and mathematical PDE interfaces, derived-geometry edits, bounded exports, and the Python-free standalone launcher tools. |
 | `wave_optics` | Recommended for metasurfaces: `core` plus derived-geometry edits, material preview, locale-safe field discovery and bounded NPZ/manifest extraction, periodic-mesh audit/smoke, visual-review contracts, Wave Optics preflight, and point/reference audits. Durable staged jobs remain under `job_submit`. |
+| `electro_chemistry` | Isolated Electrochemistry Module profile: `core` plus electrochemistry discovery, interface creation, electrode reaction, and electrolyte tools. Not merged into `full`. |
 | `experimental` | Explicit opt-in generic creation, async, property escape hatches, and project helpers. |
-| `full` | Broad compatibility/discovery surface containing every non-feature-gated tool. |
+| `full` | Broad compatibility/discovery surface containing every non-feature-gated tool except the isolated `electro_chemistry` additions. |
+| `comsolless_read_only` | Computers without a COMSOL installation: offline model/evidence inspection tools only; nothing can start COMSOL or Java. |
 
 Version 0.8 removes the research campaign, optimizer, robustness, spectral,
 convergence, thermal-analysis, and robust-shape tools from discovery. There are
@@ -317,6 +319,7 @@ other:
 | --- | --- |
 | `lexical_docs.enabled=true` | Two isolated SQLite FTS5/BM25 manual-search and exact-page tools. |
 | `shared_server.enabled=true` | Protected shared Desktop/attached-Server workflow with explicit confirmation and exact process/listener/model identity. |
+| `model_manager.enabled=true` | Five bounded COMSOL Model Manager tools (status, open, run, download, upload). Default off, combinable with any profile, and independent of `shared_server.enabled`; the separate `model_manager.upload_enabled` setting additionally gates uploading caller-designated derived copies, while open, run, and download never depend on it and overwrite or revision conflicts are still refused. |
 | `semantic_docs.enabled=true` | Three isolated experimental vector-assisted manual-retrieval tools. |
 
 Call `capabilities` to discover the active profile, exact registered tools, target versions, disabled groups, and restart requirements without starting COMSOL. The bounded `deployment_identity` reports the loading source and frozen profile/schema and catalog hashes. After restart, compare these values to detect same-version stale installs or source shadowing. The response does not expose local paths.
@@ -575,13 +578,15 @@ client, process, or lease residue.
 - MPh `>=1.3.1,<1.5`, MCP SDK `>=2.2.0,<2.3`, `pydantic`, and `psutil>=5.9.0`
 - COMSOL's Java 21 runtime in the verified configuration
 
-Python 3.14 remains the main development and production lane. Standard Windows
-x64 Python 3.15 has a separate experimental compatibility CI lane, currently
-pinned to 3.15.0rc2. It builds JPype 1.7.1, PyYAML 6.0.3 and the exact
-Pydantic 2.13.5/core 2.46.5 pair from source where wheels are unavailable.
-MSVC/Windows SDK, a JDK with Ant, and Rust are required for those builds.
-This lane excludes the experimental `semantic-docs` extra and does not establish
-licensed COMSOL compatibility or free-threaded Python support.
+Python 3.14 remains the primary build, release and production lane. Standard
+Windows x64 Python 3.15 is a formal supported lane (caller decision,
+2026-10-26/30): its CI lane runs the full solver-free suite, package/install
+and stdio gates, currently pinned to 3.15.2 (final). It builds
+JPype 1.7.1, PyYAML 6.0.3 and the exact Pydantic 2.13.5/core 2.46.5 pair
+from source where cp315 wheels are unavailable. MSVC/Windows SDK, a JDK with
+Ant, and Rust are required for those builds. This lane excludes the
+experimental `semantic-docs` extra and does not establish licensed COMSOL
+compatibility or free-threaded Python support.
 
 This project is under active development, so dependency ranges and locked
 versions may change without a long deprecation window. Before updating an

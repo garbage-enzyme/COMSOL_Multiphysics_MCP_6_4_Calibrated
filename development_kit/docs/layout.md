@@ -362,6 +362,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/tests/test_runtime_paths.py` — The tests cover shared ASCII-safe runtime and lease paths.
 - `development_kit/tests/test_schema_registry.py` — The tests cover named schema coverage and version support resolution.
 - `development_kit/tests/test_security_gate.py` — The tests cover vulnerability report parsing and expiring allowlist policy.
+- `development_kit/tests/test_worker_runtime_isolation.py` — The tests cover per-worker synthetic runtime-root isolation and shared-default exclusion.
 - `development_kit/tests/test_progressive_discovery.py` — The tests cover the cold-start byte budget, catalog, and cursor paging boundaries.
 - `development_kit/tests/test_semantic_contracts.py` — The tests cover semantic benchmark contracts, limits, and import safety.
 - `development_kit/tests/test_semantic_index.py` — The tests cover immutable semantic index construction and publication.
@@ -698,6 +699,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `settings_gui/tests/test_i18n.py` — The tests cover gettext completeness, placeholders, and reproducible PO and MO outputs.
 - `settings_gui/tests/test_icon.py` — The module verifies the packaged ICO dimensions, encoding, transparency-capable depth, and size bound.
 - `settings_gui/tests/test_model_controller.py` — The tests cover complete field bindings and controller state transitions.
+- `settings_gui/tests/test_model.py` — The tests cover raw-document loading, including nested unknown-key reporting instead of silent dropping.
 - `settings_gui/tests/test_manual_index.py` — The tests cover isolated manual-index task progress, cancellation, and cleanup.
 - `settings_gui/tests/test_storage.py` — The tests cover Windows mutex, sharing, conflict, recovery, and atomic-write behavior.
 
@@ -747,3 +749,5 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/scripts/native_gradient_gate_checks.py` — The repository-only helper checks numerical native gate receipts; it is excluded from runtime packages.
 
 - `development_kit/scripts/native_optimizer_gate_checks.py` — The repository-only helper checks numerical native gate receipts; it is excluded from runtime packages.
+- `development_kit/tests/test_tasks_owner_binding.py` — The tests cover binding Tasks to the normalized effective owner.
+- `development_kit/tests/test_native_measurement_gate.py` — The tests cover the explicit scientific-gate policy for native condition measurements.

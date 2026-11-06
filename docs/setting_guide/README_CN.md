@@ -269,6 +269,7 @@ PDF/页数和百分比。新索引通过 SQLite 完整性、元数据和行数�
     "artifact_write_root": "%PROGRAMDATA%/comsol_mcp/artifacts"
   },
   "shared_server": {"enabled": false},
+  "model_manager": {"enabled": false, "upload_enabled": false},
   "discovery": {"pagination_enabled": false},
   "evidence_integrity": {
     "checks": {

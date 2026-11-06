@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
+from comsol_mcp.contracts.job_submission import MAX_VALIDATION_MATRIX_POINTS
 from comsol_mcp.contracts.native_condition import (
     NATIVE_CONDITION_COLLECTOR,
     NATIVE_CONDITION_COLLECTORS,
@@ -24,7 +25,6 @@ from comsol_mcp.utils.validation import strict_json_number
 from .resource_admission import normalize_resource_policy
 from .store import JOB_SCHEMA_VERSION
 
-MAX_VALIDATION_MATRIX_POINTS = 32
 MAX_COLLECTORS_PER_POINT = 4
 MAX_EXPECTED_ARTIFACTS_PER_POINT = 16
 MAX_COLLECTOR_INPUT_BYTES = 64 * 1024
@@ -100,6 +100,8 @@ def _normalize_wavelength(value: object, point_name: str) -> dict[str, Any]:
     unit = raw["unit"]
     if not isinstance(unit, str) or not unit.strip() or len(unit) > 32:
         raise ValueError(f"{point_name}.wavelength.unit must be a bounded nonempty string")
+    if unit.strip() not in {"m", "um", "nm"}:
+        raise ValueError(f"{point_name}.wavelength.unit must be m, um, or nm")
     parameter = raw["parameter"]
     if not isinstance(parameter, str) or not _TAG.fullmatch(parameter):
         raise ValueError(f"{point_name}.wavelength.parameter must be one exact tag")

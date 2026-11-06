@@ -2,7 +2,7 @@
 
 Status: proven on a licensed isolated session. Gate satisfied.
 Release: `0.7.5` / `alpha7.5`
-Evidence root: `D:\mcp_tests\a75s0p06`
+Evidence root: the licensed capability archive recorded in the S0 gate receipt
 Primary receipt: `s0_capability.json`
 Receipt SHA-256: `9581c9ef32eba3e012ead3f63c7a17ed19a65e04accc7d5fec735edfbc604678`
 Probe source: `development_kit/scripts/surrogate_dnn_capability_probe.py`
@@ -169,14 +169,14 @@ frozen into the public contract:
    the live surface disagree (75 vs 30 documented DNN properties), so the live
    readback is authoritative.
 
-Licensed receipt: `D:\mcp_tests\a75s0p06\s0_capability.json`.
+Licensed receipt: `s0_capability.json`.
 
 ## 10. S4 adapter findings — resolved against live COMSOL
 
 The typed adapter (`comsol_mcp/surrogate/dnn_adapter.py`) and its licensed
 bridge (`comsol_mcp/surrogate/dnn_clientapi_backend.py`) were applied to a real
 COMSOL 6.4.0.293 session. Licensed receipt:
-`D:\mcp_tests\a75s4g13\s4_gate.json`
+`s4_gate.json`
 (sha256 `985a61abc59f3cc4523077b51ef6aeb9d79905ecd52ba4e46513a3312278cc34`).
 
 Findings that the reference tables did **not** state and that only the live run
@@ -205,8 +205,8 @@ lease, descendants, and listeners were all released.
 
 Training, held-out test evaluation, and continuation were run on a real
 COMSOL 6.4.0.293 session. Licensed receipts:
-`D:\mcp_tests\a75s6d01\diag.json` (data-format diagnostic) and
-`D:\mcp_tests\a75s6g09\s6_gate.json`
+`diag.json` (data-format diagnostic) and
+`s6_gate.json`
 (sha256 `4c2919bb0ff508467e2fe5f28fbead9805b6eb6237bff9ba29c5ddc6f36af2e9`).
 
 Four findings blocked training and were resolved by experiment rather than
@@ -253,7 +253,7 @@ therefore derived from the bounded experiment above, not from the example.
 
 Export, artifact hashing, consistency, and registry integration were run on a
 real COMSOL 6.4.0.293 session. Licensed receipt:
-`D:\mcp_tests\a75s7g02\s7_gate.json`
+`s7_gate.json`
 (sha256 `6bb58f1ac657e546d0796260992e7d63af5824d067b1959738299c9408a59613`).
 
 One finding corrected an assumption that had been carried since S0:
@@ -298,7 +298,7 @@ physical validation of the synthetic training function.
 ## 13. S8 bounded campaign findings — resolved against live COMSOL
 
 The full prediction-to-FEM escalation path was run on a real COMSOL 6.4.0.293
-session. Licensed receipt: `D:\mcp_tests\a75s8g03\s8_gate.json`
+session. Licensed receipt: `s8_gate.json`
 (sha256 `5f77791eae32274163caeae356a51aac715e8f628dc893d74f3b6c9902cfdd14`).
 
 Three findings determined the accepted design:
@@ -422,7 +422,7 @@ backend class instead of to the installed MPh version.
 | COMSOL returns **JVM proxies**: `getString` yields a JPype `java.lang.String` (`jpype._jstring`), so `isinstance(value, str)` is False on a value that prints as a string. | Backend-produced values are unwrapped by exact Java type name before strict conversion. Caller-supplied values remain strictly checked, so this does not reintroduce the implicit coercion the protocol forbids. |
 
 Licensed evidence (receipt
-`D:\mcp_tests\a75s4lic\s4a_licensed_receipt.json`, sha256
+`s4a_licensed_receipt.json`, sha256
 `a7cddfffb312105cc634128bd295bb8100ce541dda6a2f3f7ba572c33102ffb2`): a real 1D
 coefficient-form PDE model was built and solved. `evaluate("a1")` returned `1.5`
 as a float. Node lookup resolved real types (`Component`, `solid`, `Interval`,

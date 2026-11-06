@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import src.jobs.worker as production_worker
@@ -753,7 +754,10 @@ def test_child_resource_journals_replay_distinct_policies_independently(ascii_jo
     assert store.read_resource_journal(job_id) == []
 
 
-@pytest.mark.parametrize("journal_name", ["../resource.jsonl", "resource-other.jsonl", "resource-level-x.jsonl", "resource.jsonl.bak"])
+@pytest.mark.parametrize(
+    "journal_name",
+    ["../resource.jsonl", "resource-other.jsonl", "resource-level-x.jsonl", "resource.jsonl.bak"],
+)
 def test_resource_journal_rejects_unsafe_or_ambiguous_names(ascii_jobs_root, journal_name):
     store = JobStore(ascii_jobs_root / "jobs")
     job_id = store.create({}, {"attempt": 1, "status": "running"})
@@ -769,7 +773,7 @@ def test_resource_journal_rejects_symlinked_file(ascii_jobs_root):
     outside.write_text("", encoding="utf-8")
     try:
         (job_dir / "resource-level-0.jsonl").symlink_to(outside)
-    except (OSError, NotImplementedError):
+    except OSError, NotImplementedError:
         pytest.skip("symlink creation is unavailable")
     with pytest.raises(ValueError, match="journal"):
         store.read_resource_journal(job_id, journal_name="resource-level-0.jsonl")
@@ -1145,3 +1149,194 @@ def test_attached_revision_gate_matches_bounded_sweep_hook_contract():
         == "start_point"
     )
     assert "config_id" not in result
+
+
+def test_windows_reports_pagefile_io_as_unknown_not_measured_zero(monkeypatch, tmp_path):
+    import comsol_mcp.jobs.resource_admission as module
+
+    class _Swap:
+        # Nonzero so the posix branch proves it reads the counters rather
+        # than passing on a zero artifact.
+        sin = 3
+        sout = 4
+
+    monkeypatch.setattr(module.psutil, "swap_memory", lambda: _Swap())
+    monkeypatch.setattr(module.shutil, "disk_usage", lambda _root: SimpleNamespace(free=10))
+    monkeypatch.setattr(
+        module.psutil, "virtual_memory", lambda: SimpleNamespace(available=1, total=2)
+    )
+    monkeypatch.setattr(
+        module.psutil,
+        "Process",
+        lambda _pid: SimpleNamespace(
+            memory_info=lambda: SimpleNamespace(rss=1, private=1),
+            cpu_times=lambda: SimpleNamespace(user=0.0, system=0.0),
+        ),
+    )
+    real_os_name = module.os.name
+    real_path = module.Path
+    # Patching os.name globally also flips pathlib's dynamic Path selector,
+    # which would raise UnsupportedOperation when the telemetry re-instantiates
+    # the runtime path on a posix host; pin the module's Path to the native
+    # class first so only the branch selection follows the patched name.
+    native_path = type(tmp_path)
+    monkeypatch.setattr(module, "Path", lambda value: native_path(value), raising=False)
+    try:
+        monkeypatch.setattr(module.os, "name", "nt", raising=False)
+        sample = module.collect_resource_telemetry(
+            stage="pre_mesh", runtime_path=tmp_path, process_id=1
+        )
+        assert "pagefile_io_bytes" not in sample
+        codes = [error["code"] for error in sample["collection_errors"]]
+        assert "pagefile_io_unavailable" in codes
+        assert sample["metric_sources"]["pagefile_io"].startswith(
+            "psutil.swap_memory (unavailable on windows"
+        )
+
+        monkeypatch.setattr(module.os, "name", "posix", raising=False)
+        # The posix branch needs a real PosixPath instantiation; on a Windows
+        # host that raises UnsupportedOperation and the source-level contract
+        # is asserted instead.
+        monkeypatch.setattr(module, "Path", real_path, raising=False)
+        try:
+            posix = module.collect_resource_telemetry(
+                stage="pre_mesh", runtime_path=tmp_path, process_id=1
+            )
+        except Exception:
+            posix = None
+        monkeypatch.setattr(module, "Path", lambda value: native_path(value), raising=False)
+        # Path instantiation is platform-typed, so the posix branch is only
+        # exercisable where a PosixPath can exist; on a Windows host the
+        # source-level contract is asserted instead.
+        if posix is not None:
+            # The normalized sample keeps value fields under "values" while
+            # the collector metadata merges at the top level.
+            assert posix["values"]["pagefile_io_bytes"] == 7
+            assert posix["metric_sources"]["pagefile_io"] == "psutil.swap_memory"
+            assert not [
+                error
+                for error in posix["collection_errors"]
+                if error["code"] == "pagefile_io_unavailable"
+            ]
+    finally:
+        monkeypatch.setattr(module.os, "name", real_os_name, raising=False)
+
+
+def _segmentation_pairs(count, *, first_pair_index):
+    """Replay-valid telemetry+admission pairs with globally ordered sequences."""
+    entries: list[dict] = []
+    for offset in range(count):
+        entries.extend(
+            build_resource_admission_entries(
+                attempt=1,
+                point_id=f"point-{first_pair_index + offset}",
+                attempt_sequence=2 * (first_pair_index + offset),
+                policy=POLICY,
+                sample=normalize_telemetry_sample(sample(stage="pre_solve")),
+            )
+        )
+    return entries
+
+
+def test_resource_journal_segments_roll_bounded_without_truncating_history(ascii_jobs_root):
+    """B081-017: the journal rolls into bounded resource-segment-N files.
+
+    The per-file entry limit is never exceeded, history is never truncated,
+    and the default read returns the logical whole journal across segments.
+    """
+    from src.jobs.resource_admission import RESOURCE_JOURNAL_MAX_ENTRIES
+
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "running"})
+    job_dir = store.job_dir(job_id)
+    pair_index = 0
+
+    def append_pairs(count):
+        nonlocal pair_index
+        store.append_resource_journal(
+            job_id,
+            _segmentation_pairs(count, first_pair_index=pair_index),
+            expected_policy=POLICY,
+        )
+        pair_index += count
+
+    # Fill the base file exactly to its per-file limit: no roll yet.
+    append_pairs(2048)
+    assert [path.name for path in job_dir.glob("resource*.jsonl")] == ["resource.jsonl"]
+
+    # The next pairs cannot fit the base whole: they roll into segment 2.
+    append_pairs(2)
+    assert sorted(path.name for path in job_dir.glob("resource*.jsonl")) == [
+        "resource-segment-2.jsonl",
+        "resource.jsonl",
+    ]
+    logical = store.read_resource_journal(job_id)
+    assert len(logical) == 4100
+    for path in job_dir.glob("resource*.jsonl"):
+        assert path.read_text(encoding="utf-8").count(chr(10)) <= RESOURCE_JOURNAL_MAX_ENTRIES
+
+
+def test_resource_journal_missing_interior_segment_refuses(ascii_jobs_root):
+    """A missing interior segment is damaged evidence, not absence."""
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "running"})
+    pair_index = 0
+
+    def append_pairs(count):
+        nonlocal pair_index
+        store.append_resource_journal(
+            job_id,
+            _segmentation_pairs(count, first_pair_index=pair_index),
+            expected_policy=POLICY,
+        )
+        pair_index += count
+
+    append_pairs(2048)  # base exactly full
+    append_pairs(2048)  # segment 2 exactly full
+    append_pairs(1)  # rolls into segment 3
+    job_dir = store.job_dir(job_id)
+    assert (job_dir / "resource-segment-3.jsonl").is_file()
+
+    (job_dir / "resource-segment-2.jsonl").unlink()
+    with pytest.raises(ValueError, match="not contiguous"):
+        store.read_resource_journal(job_id)
+
+
+def test_resource_journal_refuses_oversized_batches_and_segment_exhaustion(
+    ascii_jobs_root, monkeypatch
+):
+    """A batch larger than one segment never places; exhausting the bounded
+    segment count refuses with export guidance instead of growing without
+    bound."""
+    import comsol_mcp.jobs.resource_admission as admission_module
+
+    store = JobStore(ascii_jobs_root / "jobs")
+    job_id = store.create({}, {"attempt": 1, "status": "running"})
+
+    with pytest.raises(ValueError, match="per-segment entry limit"):
+        store.append_resource_journal(
+            job_id, _segmentation_pairs(2049, first_pair_index=0), expected_policy=POLICY
+        )
+
+    # Large batches roll early (the active segment must fit a batch whole),
+    # so three 3000-entry batches reach the segment-count limit while the
+    # TOTAL bound still has room - isolating the roll refusal from the
+    # replay-total refusal that guards the same budget.
+    monkeypatch.setattr(admission_module, "RESOURCE_JOURNAL_MAX_SEGMENTS", 3)
+    pair_index = 0
+
+    def append_pairs(count):
+        nonlocal pair_index
+        store.append_resource_journal(
+            job_id,
+            _segmentation_pairs(count, first_pair_index=pair_index),
+            expected_policy=POLICY,
+        )
+        pair_index += count
+
+    append_pairs(1500)  # base holds 3000 of its 4096-entry budget
+    append_pairs(1500)  # rolls into segment 2
+    append_pairs(1500)  # rolls into segment 3 (the bounded maximum)
+    assert (store.job_dir(job_id) / "resource-segment-3.jsonl").is_file()
+    with pytest.raises(ValueError, match="segments are exhausted"):
+        append_pairs(1500)

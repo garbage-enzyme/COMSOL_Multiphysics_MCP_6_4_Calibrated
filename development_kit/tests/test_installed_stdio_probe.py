@@ -191,12 +191,17 @@ def test_passive_evidence_requires_exact_negative_observations():
     )
 
 
-def test_installed_preview_arguments_are_bounded_and_solver_free():
-    arguments = _preview_arguments()
+def test_installed_preview_arguments_are_bounded_and_solver_free(tmp_path):
+    arguments = _preview_arguments(tmp_path)
     spec = arguments["spec"]
     assert spec["job_type"] == "staged_sweep"
     assert spec["parameter_values"] == [5.0]
     assert spec["expressions"] == ["R", "T"]
+    # The current path policy refuses relative source paths, so the probe
+    # must always send the absolute fixture it creates under its workdir.
+    assert Path(spec["source_model_path"]).is_absolute()
+    normalized = spec["source_model_path"].replace("/", chr(92))
+    assert normalized.endswith("fixtures" + chr(92) + "solver-free.mph")
 
 
 @pytest.mark.parametrize("failure", ["discovery", "transport", "unexpected_success"])

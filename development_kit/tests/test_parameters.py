@@ -410,8 +410,70 @@ def test_restore_parameter_fallback_clears_stale_description():
 
     assert ("parameter", "wl", "4.0e-6") in calls
     # A stale description from the failed transaction must be cleared so the
-    # readback check does not report a false mismatch.
-    assert ("description", "wl", None) in calls
+    # readback check does not report a false mismatch. MPh's wrapper treats a
+    # None text as the getter, so the clear goes through the setter.
+    assert ("description", "wl", "") in calls
+
+
+def test_restore_parameter_fallback_clears_through_the_real_wrapper_contract():
+    class _MphLikeModel:
+        # No java attribute: the pythonic fallback branch must run.
+        def __init__(self):
+            self.values = {}
+            self.text = "stale"
+
+        def parameter(self, name, value):
+            self.values[name] = value
+
+        def description(self, name, value=None):
+            if value is None:
+                return self.text
+            self.text = value
+            return None
+
+    model = _MphLikeModel()
+    parameters._restore_parameter(model, "wl", "4.0e-6", None)
+
+    assert model.values["wl"] == "4.0e-6"
+    assert model.text == ""
+
+
+def test_rollback_clears_written_description_through_the_fallback_path():
+    class _MphLikeJavalessModel:
+        java = None
+
+        def __init__(self):
+            self.values = {"wl": "1[m]"}
+            self.text = None
+
+        def parameters(self, evaluate=False):
+            assert evaluate is False
+            return dict(self.values)
+
+        def parameter(self, name, value=None, evaluate=False):
+            assert evaluate is False
+            if value is not None:
+                self.values[name] = value
+                return None
+            # The written value reads back wrong, which triggers the rollback
+            # after the description was already written.
+            return "3[m]" if self.values[name] == "2[m]" else self.values[name]
+
+        def description(self, name, value=None):
+            if value is None:
+                return self.text
+            self.text = value
+            return None
+
+    model = _MphLikeJavalessModel()
+
+    result = parameters.set_parameter(model, "wl", "2[m]", description="new")
+
+    assert result["success"] is False
+    assert result["rolled_back"] is True
+    assert result["rollback_errors"] == []
+    assert model.values["wl"] == "1[m]"
+    assert model.text == ""
 
 
 def test_restore_parameter_tolerates_wrappers_without_clear_support():
@@ -422,8 +484,8 @@ def test_restore_parameter_tolerates_wrappers_without_clear_support():
             pass
 
         def description(self, name, value):
-            if value is None:
-                raise TypeError("description cannot be unset")
+            if value == "":
+                raise TypeError("description cannot be cleared")
 
     # The clear attempt fails, but the restore itself must not raise.
     parameters._restore_parameter(_StrictModel(), "wl", "4.0e-6", None)

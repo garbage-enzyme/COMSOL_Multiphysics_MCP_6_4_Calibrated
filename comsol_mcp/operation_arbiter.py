@@ -146,13 +146,21 @@ class OperationArbiter:
         return unlink_if_content(self.lock_path, expected_bytes)
 
     def inspect(self) -> dict[str, Any]:
-        """Inspect the operation lock without acquiring or recovering it."""
+        """Inspect the operation lock without acquiring or recovering it.
+
+        A malformed lock reports the same bytes and the exact removal route
+        ``try_acquire`` takes, so an operator reading the status knows the
+        blocker is self-healing on the next acquisition attempt rather than
+        waiting for manual deletion.
+        """
         lock, _original, error = self._read_lock()
         if error:
             return {
                 "state": "uncertain",
-                "retryable": False,
-                "retry_after_ms": None,
+                "retryable": error == "operation lock is malformed",
+                "retry_after_ms": RETRY_AFTER_MS
+                if error == "operation lock is malformed"
+                else None,
                 "error": error,
                 "active_operation": None,
             }
@@ -215,6 +223,16 @@ class OperationArbiter:
                             os.close(directory)
                 except FileExistsError:
                     lock, original, error = self._read_lock()
+                    if error == "operation lock is malformed":
+                        # A malformed lock is never parsed, so ownership cannot
+                        # be decided; the file cannot be a live lock (live
+                        # locks are written atomically by this protocol), and
+                        # leaving it in place blocks every comsol_bound tool
+                        # until manual deletion. Remove it by its exact bytes
+                        # and immediately retry the exclusive create.
+                        if original is not None and self._remove_stale(original):
+                            recovered_stale = True
+                            continue
                     if error or lock is None or original is None:
                         retryable = error == "operation lock is malformed"
                         return None, {
@@ -390,7 +408,10 @@ def guard_tool_call(
     def guarded(*args: Any, **kwargs: Any) -> Any:
         from comsol_mcp.evidence.integrity_controls import annotate_tool_response
         from comsol_mcp.path_policy import (
+            PATH_POLICY_SCHEMA,
+            PATH_POLICY_VERSION,
             ReadPinError,
+            path_policy_enforced,
             pin_validated_reads,
             pin_validated_writes,
             validate_tool_paths,
@@ -417,9 +438,9 @@ def guard_tool_call(
                     "success": False,
                     "error": str(exc),
                     "path_policy": {
-                        "schema_name": "comsol_mcp.path_policy",
-                        "schema_version": "1.0.0",
-                        "enforced": profile_name != "full",
+                        "schema_name": PATH_POLICY_SCHEMA,
+                        "schema_version": PATH_POLICY_VERSION,
+                        "enforced": path_policy_enforced(tool_name, profile_name),
                         "accepted": False,
                         "error_type": type(exc).__name__,
                     },
@@ -472,7 +493,24 @@ def guard_tool_call(
                     or session_manager.current_model
                 )
                 current_revision = session_manager.get_model_revision(revision_model_name)
-                if current_revision is None and profile_name == "full":
+                if expected_model_revision is not None and current_revision is None:
+                    result = {
+                        "success": False,
+                        "error": (
+                            "expected_model_revision cannot be verified: "
+                            "the model has no tracked revision."
+                        ),
+                    }
+                elif (
+                    expected_model_revision is not None
+                    and expected_model_revision != current_revision["revision_sha256"]
+                ):
+                    result = {
+                        "success": False,
+                        "error": "expected_model_revision does not match current model state.",
+                        "model_revision": current_revision,
+                    }
+                elif current_revision is None and profile_name == "full":
                     with pin_validated_reads(read_pins):
                         with pin_validated_writes(write_pins):
                             result = function(*normalized_args, **normalized_kwargs)
@@ -481,14 +519,10 @@ def guard_tool_call(
                         "success": False,
                         "error": "A tracked model revision is required for this operation.",
                     }
-                elif (
-                    profile_name != "full"
-                    and expected_model_revision != current_revision["revision_sha256"]
-                ):
+                elif expected_model_revision is None and profile_name != "full":
                     result = {
                         "success": False,
-                        "error": "expected_model_revision does not match current model state.",
-                        "model_revision": current_revision,
+                        "error": "expected_model_revision is required for this operation.",
                     }
                 else:
                     with pin_validated_reads(read_pins):
@@ -576,7 +610,10 @@ def _guard_async_tool_call(
     async def guarded(*args: Any, **kwargs: Any) -> Any:
         from comsol_mcp.evidence.integrity_controls import annotate_tool_response
         from comsol_mcp.path_policy import (
+            PATH_POLICY_SCHEMA,
+            PATH_POLICY_VERSION,
             ReadPinError,
+            path_policy_enforced,
             pin_validated_reads,
             pin_validated_writes,
             validate_tool_paths,
@@ -601,9 +638,9 @@ def _guard_async_tool_call(
                     "success": False,
                     "error": str(exc),
                     "path_policy": {
-                        "schema_name": "comsol_mcp.path_policy",
-                        "schema_version": "1.0.0",
-                        "enforced": profile_name != "full",
+                        "schema_name": PATH_POLICY_SCHEMA,
+                        "schema_version": PATH_POLICY_VERSION,
+                        "enforced": path_policy_enforced(tool_name, profile_name),
                         "accepted": False,
                         "error_type": type(exc).__name__,
                     },

@@ -275,7 +275,7 @@ def check_prediction_consistency(
         raise ValueError("prediction sets must have the same row count")
 
     worst_absolute = 0.0
-    worst_relative: float | None = 0.0
+    worst_relative: float | None = None
     violating: list[int] = []
     for index in range(len(in_model)):
         for dimension in range(len(in_model[0])):
@@ -285,9 +285,9 @@ def check_prediction_consistency(
             worst_absolute = max(worst_absolute, difference)
             if expected != 0.0:
                 ratio = difference / abs(expected)
-                worst_relative = max(worst_relative or 0.0, ratio)
-            else:
-                worst_relative = None
+                # A zero-expected entry defines no ratio; it must not discard
+                # or restart the running maximum over entries that do.
+                worst_relative = ratio if worst_relative is None else max(worst_relative, ratio)
             within_absolute = difference <= absolute_tolerance
             within_relative = expected != 0.0 and difference <= relative_tolerance * abs(expected)
             if not (within_absolute or within_relative):

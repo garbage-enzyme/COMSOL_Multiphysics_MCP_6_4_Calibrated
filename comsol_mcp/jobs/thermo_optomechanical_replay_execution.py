@@ -107,7 +107,7 @@ class ThermoOptomechanicalComsolExecutor:
 
     def _load_source(self) -> Any:
         self.client.clear()
-        self.model = self.client.load(str(self.source))
+        self.model = self._load_model(self.source)
         self._active_dataset = None
         return self.model
 
@@ -125,9 +125,36 @@ class ThermoOptomechanicalComsolExecutor:
         if not self.derived_path.is_file():
             raise RuntimeError("derived thermo-optomechanical model is missing")
         self.client.clear()
-        self.model = self.client.load(str(self.derived_path))
+        self.model = self._load_model(self.derived_path)
         self._active_dataset = None
         return self.model
+
+    def _load_checkpoint(self) -> Any:
+        """Reload the pre-transfer state saved by an earlier transfer attempt."""
+        if not self.checkpoint_path.is_file():
+            raise RuntimeError("pre-transfer checkpoint is missing")
+        self.client.clear()
+        self.model = self._load_model(self.checkpoint_path)
+        self._active_dataset = None
+        return self.model
+
+    def _load_model(self, path: Path) -> Any:
+        try:
+            return self.client.load(str(path))
+        except Exception as exc:
+            stacktrace = getattr(exc, "stacktrace", None)
+            if not callable(stacktrace):
+                raise
+            trace = str(stacktrace())
+            if not (
+                "org.slf4j.impl.SLF4JLoggerFactory.getSLF4JLoggerFactory" in trace
+                and "com.comsol.heat.util.ashrae" in trace
+            ):
+                raise
+            # COMSOL can initialize its logging backend on the first failed
+            # Heat Transfer load. Discard the partial model and retry once.
+            self.client.clear()
+            return self.client.load(str(path))
 
     def _save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -395,6 +422,11 @@ class ThermoOptomechanicalComsolExecutor:
 
     def _thermal_structural(self) -> Mapping[str, Any]:
         self._verify_source()
+        # Rebuilding the pre-transfer state invalidates any checkpoint an
+        # earlier transfer attempt left behind: the next transfer must start
+        # from this fresh state, not from a stale checkpoint.
+        if self.checkpoint_path.is_file():
+            self.checkpoint_path.unlink()
         if not self.derived_path.is_file():
             if self.model is None:
                 self._load_source()
@@ -476,7 +508,11 @@ class ThermoOptomechanicalComsolExecutor:
                 "element_count": element_count,
                 "vertex_count": vertex_count,
                 "minimum_quality": minimum_quality,
-                "inverted_element_count": 0 if minimum_quality > 0.0 else 1,
+                # No inversion count is measured by this stage; a strictly
+                # positive minimum quality implies no inverted elements, and
+                # the degenerate case stays unknown instead of guessed.
+                "inverted_element_count": 0 if minimum_quality > 0.0 else None,
+                "inverted_element_count_disposition": "inferred_from_minimum_quality",
             },
             "frame": {
                 "identity_sha256": frame_identity,
@@ -490,7 +526,14 @@ class ThermoOptomechanicalComsolExecutor:
         }
 
     def _deformation_transfer(self) -> Mapping[str, Any]:
-        self._load_derived()
+        if self.checkpoint_path.is_file():
+            # An interrupted transfer attempt left the pre-transfer state
+            # checkpointed and possibly wrote the deformed derived model.
+            # Restarting from the checkpoint never stacks a second
+            # deformation onto the already-deformed geometry.
+            self._load_checkpoint()
+        else:
+            self._load_derived()
         self._save(self.checkpoint_path)
         checkpoint_sha = _sha256_file(self.checkpoint_path)
         source_geometry = _fingerprint(
@@ -526,13 +569,36 @@ class ThermoOptomechanicalComsolExecutor:
             "source_geometry_sha256": source_geometry,
             "deformed_geometry_sha256": deformed_geometry,
             "readback_exact": _displacement_readback_matches(displacement_readback, displacement),
-            "rollback_verified": _sha256_file(self.checkpoint_path) == checkpoint_sha,
+            # Checkpoint integrity is not exercised rollback: no stage reload
+            # happens here. A rollback claim would require reloading the
+            # checkpoint and comparing independent model readbacks.
+            "checkpoint_integrity_verified": _sha256_file(self.checkpoint_path) == checkpoint_sha,
+            "rollback_exercised": False,
+            "rollback_evidence": "checkpoint_integrity_only_no_rollback_in_transfer_stage",
         }
 
     def _set_wavelength_branch(self, wavelength: float, branch: str) -> None:
         self._parameter("wavelength_parameter", wavelength, "m")
         branch_value = {"TE": 0.0, "TM": 1.0, "S": 2.0, "P": 3.0}[branch]
         self._parameter("polarization_parameter", branch_value)
+
+    def _solved_wavelength(self, requested: float) -> float:
+        if self._active_dataset is None:
+            raise RuntimeError("optical wavelength result dataset is not bound")
+        parameter = self.spec["model_contract"]["wavelength_parameter"]
+        evaluated = _scalar(
+            self.model.evaluate(parameter, dataset=self._active_dataset),
+            "evaluated optical wavelength",
+        )
+        solved = _scalar(
+            self.model.evaluate("c_const/freq", dataset=self._active_dataset),
+            "frequency-derived optical wavelength",
+        )
+        if not _wavelength_readback_matches(evaluated, requested) or not (
+            _wavelength_readback_matches(solved, requested)
+        ):
+            raise RuntimeError("COMSOL optical solved wavelength differs from the request")
+        return solved
 
     def _rta(self) -> dict[str, Any]:
         r_value = self._evaluate("reflectance")
@@ -585,18 +651,12 @@ class ThermoOptomechanicalComsolExecutor:
                 self._load_source()
                 self._set_wavelength_branch(wavelength, branch)
                 self._study("optical_study_tag")
-                baseline_wavelength = _scalar(
-                    self.model.evaluate(self.spec["model_contract"]["wavelength_parameter"]),
-                    "baseline wavelength",
-                )
+                baseline_wavelength = self._solved_wavelength(wavelength)
                 baseline = self._rta()
                 self._load_derived()
                 self._set_wavelength_branch(wavelength, branch)
                 self._study("optical_study_tag")
-                solved_wavelength = _scalar(
-                    self.model.evaluate(self.spec["model_contract"]["wavelength_parameter"]),
-                    "deformed wavelength",
-                )
+                solved_wavelength = self._solved_wavelength(wavelength)
                 if not _wavelength_readback_matches(
                     baseline_wavelength, wavelength
                 ) or not _wavelength_readback_matches(solved_wavelength, wavelength):
@@ -622,6 +682,12 @@ class ThermoOptomechanicalComsolExecutor:
                 - self.spec["thermal_expansion"]["reference_temperature_K"]
             )
         )
+        # Each control carries its provenance: "measured" values are computed
+        # from live observations of this run, "structural" values come from
+        # reading model structure or the closed contract, and "declared"
+        # values restate a spec field. An unconditional contract guarantee is
+        # a structural assertion - it must never be reported as an executed
+        # control observation.
         controls = {
             "positive_expansion": (
                 expansion_error
@@ -631,37 +697,71 @@ class ThermoOptomechanicalComsolExecutor:
                     * self.spec["acceptance_policy"]["expansion_relative_tolerance"],
                 ),
                 "analytic_expansion_matches",
+                "measured",
+                "executed_control",
             ),
-            "zero_cte": (zero_cte <= tolerance, "zero_cte_preserves_geometry"),
+            "zero_cte": (
+                zero_cte <= tolerance,
+                "zero_cte_preserves_geometry",
+                "measured",
+                "executed_control",
+            ),
             "zero_temperature_rise": (
                 zero_temperature <= tolerance,
                 "zero_temperature_rise_preserves_geometry",
+                "measured",
+                "executed_control",
             ),
             "fixed_boundary": (
                 self._selection_count(self.spec["model_contract"]["fixed_boundary_selection"]) > 0,
                 "fixed_boundary_read_back",
+                "structural",
+                "executed_control",
             ),
             "convection": (
                 self.spec["thermal_load"]["convection_coefficient_W_per_m2_K"] > 0.0,
                 "convection_is_explicit",
+                "declared",
+                "declared_value",
             ),
-            "wrong_selection": (True, "undeclared_selection_rejected_by_closed_contract"),
+            "wrong_selection": (
+                True,
+                "undeclared_selection_rejected_by_closed_contract",
+                "structural",
+                "structural_assertion",
+            ),
             "temperature_unit": (
                 self.spec["thermal_load"]["temperature_unit"] == "K",
                 "kelvin_contract_enforced",
+                "declared",
+                "declared_value",
             ),
-            "missing_material_state": (True, "missing_state_rejected_before_launch"),
+            "missing_material_state": (
+                True,
+                "missing_state_rejected_before_launch",
+                "structural",
+                "structural_assertion",
+            ),
             "bad_mesh": (
                 mesh_quality >= self.spec["acceptance_policy"]["minimum_mesh_quality"],
                 "mesh_quality_gate_applied",
+                "measured",
+                "executed_control",
             ),
-            "rollback": (rollback_ok, "parameter_rollback_readback_exact"),
+            "rollback": (
+                rollback_ok,
+                "parameter_rollback_readback_exact",
+                "measured",
+                "executed_control",
+            ),
         }
         control_results = [
             {
                 "control_id": control,
                 "passed": bool(controls[control][0]),
                 "reason_code": controls[control][1],
+                "provenance": controls[control][2],
+                "disposition": controls[control][3],
             }
             for control in self.spec["validation_controls"]
         ]

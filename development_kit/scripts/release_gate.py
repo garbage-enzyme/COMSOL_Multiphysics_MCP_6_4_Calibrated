@@ -291,9 +291,43 @@ def _reject_internal_evidence_root_text(name: str, text: str) -> None:
     pattern case-folds and tolerates any run of separators.
     """
     if not _inside_shipped_package(name):
+        _reject_development_kit_evidence_root_text(name, text)
         return
     if _INTERNAL_EVIDENCE_ROOT_TEXT.search(text):
         raise RuntimeError(f"package source embeds an internal evidence-root path: {name}")
+
+
+#: Development-kit members that legitimately name the shared evidence root as
+#: part of the gate's own test fixtures. Every entry states why the literal
+#: must remain; anything else under ``development_kit/`` is advisory-refused.
+_DEVELOPMENT_KIT_EVIDENCE_ROOT_ALLOWLIST = {
+    # The refusal regression itself must poison its fixture with the exact
+    # literal the shipped-package scan refuses.
+    "tests/test_release_engineering.py": "gate self-test fixtures exercise the refusal",
+}
+
+
+def _reject_development_kit_evidence_root_text(name: str, text: str) -> None:
+    """Advisory-refuse development-kit text embedding evidence-root receipt paths.
+
+    The development kit is tracked in a public repository although it never
+    enters a wheel or sdist, so a private receipt locator there is published
+    even though it ships nowhere. Governance documents keep their legitimate
+    scratch-root references through the explicit allowlist; a non-allowlisted
+    development-kit member naming the evidence root is refused so new locators
+    cannot appear silently.
+    """
+    parts = PurePosixPath(name).parts
+    if "development_kit" not in parts[:-1]:
+        return
+    if not _INTERNAL_EVIDENCE_ROOT_TEXT.search(text):
+        return
+    relative = str(PurePosixPath(*parts[parts.index("development_kit") + 1 :]))
+    if relative not in _DEVELOPMENT_KIT_EVIDENCE_ROOT_ALLOWLIST:
+        raise RuntimeError(
+            "development kit member embeds an internal evidence-root path "
+            f"without an allowlist entry: {name}"
+        )
 
 
 def _distribution_inventory(path: Path) -> dict:

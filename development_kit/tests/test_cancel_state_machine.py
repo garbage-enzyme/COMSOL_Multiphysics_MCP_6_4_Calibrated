@@ -6,11 +6,34 @@ The module name keeps the historical cancellation-determinism scope.
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from src.jobs import cancel_worker
 from src.jobs.store import JobStore, atomic_write_json, process_identity, read_json
+
+
+def _scope_fake_time(
+    monkeypatch: pytest.MonkeyPatch,
+    module: Any,
+    clock: FakeClock | None = None,
+    *,
+    sleep: Any = None,
+) -> None:
+    """Bind time fakes to one module's own attribute, never the global module.
+
+    Patching the time module in place also fakes every other module's sleeps
+    and clocks in this process, so a real durable-lock wait under parallel
+    load would advance a fake clock and corrupt the elapsed-bound assertions.
+    """
+    import time as real_time
+
+    if clock is not None:
+        fake = SimpleNamespace(time=clock.time, monotonic=clock.monotonic, sleep=clock.sleep)
+    else:
+        fake = SimpleNamespace(time=real_time.time, monotonic=real_time.monotonic, sleep=sleep)
+    monkeypatch.setattr(module, "time", fake)
 
 
 class FakeClock:
@@ -152,9 +175,13 @@ def _install_fakes(
     *,
     solver_cleanup: dict[str, Any] | None = None,
 ) -> None:
-    monkeypatch.setattr(cancel_worker.time, "time", clock.time)
-    monkeypatch.setattr(cancel_worker.time, "monotonic", clock.monotonic)
-    monkeypatch.setattr(cancel_worker.time, "sleep", clock.sleep)
+    # Bind the fake clock to cancel_worker's own module attribute, not the
+    # global time module: patching time.sleep globally also fakes the sleeps
+    # of every durable store lock wait in the process, so a real lock
+    # contention under parallel load inflated the scripted elapsed time and
+    # turned this suite intermittent on hosted runners.
+    fake_time = SimpleNamespace(time=clock.time, monotonic=clock.monotonic, sleep=clock.sleep)
+    monkeypatch.setattr(cancel_worker, "time", fake_time)
     monkeypatch.setattr(cancel_worker, "process_identity", lambda _pid: processes.coordinator)
     monkeypatch.setattr(cancel_worker, "inspect_identity", processes.inspect)
     monkeypatch.setattr(cancel_worker, "capture_owned_descendants", processes.capture)
@@ -404,8 +431,7 @@ def test_cleanup_verification_poll_is_bounded_and_waits_for_exit(monkeypatch):
             "verdicts": [{"identity": identity, "state": state, "reason": state}],
         }
 
-    monkeypatch.setattr(cancel_worker.time, "monotonic", clock.monotonic)
-    monkeypatch.setattr(cancel_worker.time, "sleep", clock.sleep)
+    _scope_fake_time(monkeypatch, cancel_worker, clock)
     monkeypatch.setattr(cancel_worker, "verify_absent", delayed_verify)
 
     verified = cancel_worker._wait_for_process_absence([identity], 0.5)
@@ -594,8 +620,7 @@ def test_cleanup_verification_poll_reaches_the_always_active_timeout(monkeypatch
             "verdicts": [{"identity": identity, "state": "active", "reason": "active"}],
         }
 
-    monkeypatch.setattr(cancel_worker.time, "monotonic", clock.monotonic)
-    monkeypatch.setattr(cancel_worker.time, "sleep", clock.sleep)
+    _scope_fake_time(monkeypatch, cancel_worker, clock)
     monkeypatch.setattr(cancel_worker, "verify_absent", active_verify)
 
     verified = cancel_worker._wait_for_process_absence([identity], 0.1)
@@ -634,7 +659,7 @@ def test_coordinator_helper_retries_wrapped_reads_and_uses_action_verdict(jobs_r
         return real_read(self, target_job_id)
 
     monkeypatch.setattr(JobStore, "read_state", transient_read)
-    monkeypatch.setattr(coordinator_claim_kill.time, "sleep", lambda _seconds: None)
+    _scope_fake_time(monkeypatch, coordinator_claim_kill, sleep=lambda _seconds: None)
     monkeypatch.setattr(
         coordinator_claim_kill,
         "terminate_exact",
@@ -775,8 +800,7 @@ def test_cancel_acceptance_rejects_early_wrong_and_unverified_terminal_states():
 @pytest.mark.parametrize("final", ["active", "stale", "uncertain"])
 def test_transient_capture_recheck_is_bounded_and_keeps_uncertainty(monkeypatch, final):
     clock = FakeClock()
-    monkeypatch.setattr(cancel_worker.time, "monotonic", clock.monotonic)
-    monkeypatch.setattr(cancel_worker.time, "sleep", clock.sleep)
+    _scope_fake_time(monkeypatch, cancel_worker, clock)
     observations = []
     worker = {"pid": 12, "process_create_time": 1.0, "command_signature": "exact"}
 
@@ -808,8 +832,7 @@ def test_cleanup_verification_rechecks_uncertainty_without_extending_budget(
         observations.append(state)
         return {"absent": state == "stale", "verdicts": [{"identity": identity, "state": state}]}
 
-    monkeypatch.setattr(cancel_worker.time, "monotonic", clock.monotonic)
-    monkeypatch.setattr(cancel_worker.time, "sleep", clock.sleep)
+    _scope_fake_time(monkeypatch, cancel_worker, clock)
     monkeypatch.setattr(cancel_worker, "verify_absent", uncertain_verify)
     verified = cancel_worker._wait_for_process_absence([identity], 0.1)
     assert verified["absent"] is (eventual_state == "stale")

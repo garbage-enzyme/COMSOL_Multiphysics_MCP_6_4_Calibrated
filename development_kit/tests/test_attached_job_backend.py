@@ -1262,3 +1262,160 @@ def test_attached_cancel_cleanup_requires_recorded_model_preservation(ascii_job_
     assert result["attached_external_resources"]["model_preservation_status"] == (
         "not_automatically_rechecked_after_worker_exit"
     )
+
+
+def test_attached_submission_forwards_request_identity_and_replays_pre_handoff(tmp_path):
+    """C081C-04: the attached branch keeps request authority end to end."""
+    from unittest.mock import MagicMock
+
+    from comsol_mcp.tools.jobs import _submit_job
+
+    source = tmp_path / "model.mph"
+    source.write_bytes(b"attached model")
+
+    class FakeManager:
+        def __init__(self):
+            self.calls = []
+            self.replays = {}
+
+        def submit(self, spec, request_id=None, source_fingerprint=None):
+            self.calls.append((dict(spec), request_id, source_fingerprint))
+            return {"success": True, "job_id": "job-a1", "status": "submitted"}
+
+        def resolve_attached_retry(self, request_id, source_fingerprint):
+            self.resolved = (request_id, source_fingerprint)
+            return self.replays.get(request_id)
+
+    manager = FakeManager()
+    session = MagicMock()
+    session.prepare_attached_job_handoff.return_value = {
+        "success": True,
+        "model": {},
+        "execution_backend": {"kind": "attached_shared_server"},
+    }
+    spec = {
+        "job_type": "staged_sweep",
+        "source_model_path": str(source),
+        "parameter_name": "wl",
+        "parameter_values": [1.0],
+        "expressions": ["ewfd.Rtotal"],
+        "execution_backend": {
+            "kind": "attached_shared_server",
+            "expected_lock_sha256": "0" * 64,
+            "expected_revision_sha256": "1" * 64,
+            "user_confirmed_automation_exclusive": True,
+        },
+    }
+
+    result = _submit_job(
+        spec,
+        profile_name="core",
+        shared_enabled=True,
+        manager=manager,
+        session_manager=session,
+        request_id="attach-1",
+    )
+    assert result["success"] is True
+    submitted_spec, request_id, source_fp = manager.calls[0]
+    assert request_id == "attach-1"
+    assert source_fp is not None
+
+    # A lost-response retry resolves its bound outcome BEFORE the handoff
+    # repeats its side effects.
+    manager.replays["attach-1"] = {"success": True, "job_id": "job-a1", "duplicate": True}
+    handoff_calls_before = session.prepare_attached_job_handoff.call_count
+    retry = _submit_job(
+        spec,
+        profile_name="core",
+        shared_enabled=True,
+        manager=manager,
+        session_manager=session,
+        request_id="attach-1",
+    )
+    assert retry.get("duplicate") is True
+    assert session.prepare_attached_job_handoff.call_count == handoff_calls_before
+    assert len(manager.calls) == 1
+
+
+def test_attached_retry_with_changed_backend_identity_refuses():
+    """C081D-02: the caller-side fingerprint covers the whole request."""
+    import tempfile
+    from unittest.mock import MagicMock
+
+    from comsol_mcp.tools.jobs import _submit_job
+
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "model.mph"
+        source.write_bytes(b"attached model")
+
+        fingerprints = []
+
+        class FakeManager:
+            def submit(self, spec, request_id=None, source_fingerprint=None):
+                fingerprints.append(source_fingerprint)
+                return {"success": True, "job_id": "job-a2"}
+
+            def resolve_attached_retry(self, request_id, source_fingerprint):
+                if not fingerprints:
+                    return None
+                if fingerprints[0] != source_fingerprint:
+                    raise ValueError(
+                        "request_id is already durably bound to a different submission"
+                    )
+                return {"success": True, "job_id": "job-a2", "duplicate": True}
+
+        manager = FakeManager()
+        session = MagicMock()
+        session.prepare_attached_job_handoff.return_value = {
+            "success": True,
+            "model": {},
+            "execution_backend": {"kind": "attached_shared_server"},
+        }
+        base = {
+            "job_type": "staged_sweep",
+            "source_model_path": str(source),
+            "parameter_name": "wl",
+            "parameter_values": [1.0],
+            "expressions": ["ewfd.Rtotal"],
+            "execution_backend": {
+                "kind": "attached_shared_server",
+                "expected_lock_sha256": "a" * 64,
+                "expected_revision_sha256": "b" * 64,
+                "user_confirmed_automation_exclusive": True,
+            },
+        }
+        _submit_job(
+            dict(base),
+            profile_name="wave_optics",
+            shared_enabled=True,
+            manager=manager,
+            session_manager=session,
+            request_id="att-1",
+        )
+        changed = dict(
+            base,
+            execution_backend=dict(
+                base["execution_backend"],
+                expected_lock_sha256="c" * 64,
+                expected_revision_sha256="d" * 64,
+            ),
+        )
+        with pytest.raises(ValueError, match="already durably bound"):
+            _submit_job(
+                dict(changed),
+                profile_name="wave_optics",
+                shared_enabled=True,
+                manager=manager,
+                session_manager=session,
+                request_id="att-1",
+            )
+        replay = _submit_job(
+            dict(base),
+            profile_name="wave_optics",
+            shared_enabled=True,
+            manager=manager,
+            session_manager=session,
+            request_id="att-1",
+        )
+        assert replay.get("duplicate") is True
+        assert session.prepare_attached_job_handoff.call_count == 1

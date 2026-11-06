@@ -17,7 +17,10 @@ $Process = Start-Process -FilePath $PowerShellPath -ArgumentList @(
     '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
     ('"' + $Child + '"'), '-TestRoot', ('"' + $TestRoot + '"')
 ) -RedirectStandardOutput $Stdout -RedirectStandardError $Stderr -WindowStyle Hidden -PassThru
-$Deadline = [DateTime]::UtcNow.AddSeconds(15)
+# A shared hosted runner can starve the child for tens of seconds before its
+# block-buffered stdout flushes the first banner; the child staying alive is
+# the slow-start signature, so the latch window must outlast it.
+$Deadline = [DateTime]::UtcNow.AddSeconds(45)
 $Alive = $true
 $Output = ''
 $BannerSeen = $false

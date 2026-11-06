@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Mapping
 
 from mcp.server.mcpserver import MCPServer
 from pydantic import Field
@@ -30,11 +30,23 @@ class _LazyJobManager:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._get(), name)
 
-    def submit(self, spec: dict[str, Any]) -> Any:
+    def submit(
+        self,
+        spec: dict[str, Any],
+        request_id: str | None = None,
+        source_fingerprint: str | None = None,
+    ) -> Any:
         from comsol_mcp.platform_support import require_native_solver
 
         require_native_solver()
-        return self._get().submit(spec)
+        kwargs: dict[str, Any] = {}
+        if request_id is not None:
+            kwargs["request_id"] = request_id
+        if source_fingerprint is not None:
+            kwargs["source_fingerprint"] = source_fingerprint
+        if not kwargs:
+            return self._get().submit(spec)
+        return self._get().submit(spec, **kwargs)
 
     def resume(self, job_id: str) -> Any:
         from comsol_mcp.platform_support import require_native_solver
@@ -199,6 +211,7 @@ def _submit_job(
     shared_enabled: bool,
     manager: Any = None,
     session_manager: Any = None,
+    request_id: str | None = None,
 ) -> dict[str, Any]:
     manager = job_manager if manager is None else manager
     spec = validate_job_submission(spec)
@@ -207,7 +220,9 @@ def _submit_job(
     execution_request = spec.get("execution_backend")
     if execution_request is None:
         try:
-            return manager.submit(spec)
+            if request_id is None:
+                return manager.submit(spec)
+            return manager.submit(spec, request_id=request_id)
         except JobLaunchError as exc:
             recovery = {
                 "success": False,
@@ -221,26 +236,131 @@ def _submit_job(
     if spec.get("job_type") != "staged_sweep":
         raise ValueError("attached execution is currently supported only for staged_sweep jobs")
     from comsol_mcp.jobs.attached_backend import normalize_attached_execution_request
-    from comsol_mcp.jobs.manager import validate_staged_sweep_spec
     from comsol_mcp.tools.shared_session import shared_session_manager
 
-    request = normalize_attached_execution_request(execution_request)
+    # Normalize early for its refusing side effect on invalid requests;
+    # the attached flow re-derives the normalized fields it needs.
+    normalize_attached_execution_request(execution_request)
     session_manager = session_manager or shared_session_manager
+    # Resolve durable request authority BEFORE the session handoff repeats
+    # its side effects: a lost-response retry with the same caller-side
+    # fingerprint replays its bound outcome without another handoff. The
+    # fingerprint covers the FULL caller request - the standalone sweep
+    # fields AND the attached backend identity (lock and revision hashes,
+    # confirmation) - so a retry that changed any requested backend field
+    # is a different request and must refuse, not replay.
+    from comsol_mcp.jobs.manager import public_request_fingerprint
+
+    source_fingerprint = public_request_fingerprint(spec)
+    if request_id is not None and source_fingerprint is not None:
+        # Reserve the request durably BEFORE any handoff side effect, then
+        # resolve any prior binding: an identical in-flight retry observes
+        # the reservation instead of re-entering the lifecycle, and a
+        # changed identity refuses before a second detach could occur.
+        reserver = getattr(manager, "reserve_attached_request", None)
+        if callable(reserver):
+            reserved = reserver(request_id, source_fingerprint)
+            if isinstance(reserved, dict):
+                return reserved
+        else:
+            resolver = getattr(manager, "resolve_attached_retry", None)
+            if callable(resolver):
+                replay = resolver(request_id, source_fingerprint)
+                if isinstance(replay, dict):
+                    return replay
+    # Mark this process as the active attached flow for the request BEFORE
+    # the handoff's side effects: a concurrent identical retry observes the
+    # reservation as in flight; if this flow dies, the stale guard lets the
+    # next retry recover instead of wedging the request.
+    guard_owner = manager if hasattr(manager, "arm_attached_guard") else None
+    if request_id is not None and guard_owner is not None:
+        guard_owner.arm_attached_guard(request_id)
+    try:
+        return _submit_job_attached_flow(
+            spec,
+            profile_name=profile_name,
+            shared_enabled=shared_enabled,
+            manager=manager,
+            session_manager=session_manager,
+            request_id=request_id,
+        )
+    finally:
+        if request_id is not None and guard_owner is not None:
+            guard_owner.disarm_attached_guard(request_id)
+
+
+def _submit_job_attached_flow(
+    spec,
+    *,
+    profile_name: str,
+    shared_enabled: bool,
+    manager,
+    session_manager,
+    request_id,
+):
+    from comsol_mcp.jobs.attached_backend import normalize_attached_execution_request
+    from comsol_mcp.jobs.manager import (
+        JobLaunchError,
+        public_request_fingerprint,
+        validate_staged_sweep_spec,
+    )
+
+    request = normalize_attached_execution_request(spec.get("execution_backend"))
     standalone_fields = dict(spec)
     standalone_fields.pop("execution_backend")
     validated = validate_staged_sweep_spec(standalone_fields)
-    handoff = session_manager.prepare_attached_job_handoff(
-        expected_lock_sha256=request["expected_lock_sha256"],
-        expected_revision_sha256=request["expected_revision_sha256"],
-        source_model_path=validated["source_model_path"],
-        user_confirmed_automation_exclusive=(request["user_confirmed_automation_exclusive"]),
-    )
-    if not handoff.get("success"):
-        return {
-            "success": False,
-            "state": "attached_handoff_failed",
-            "attached_handoff": _attached_handoff_summary(handoff),
-        }
+    source_fingerprint = public_request_fingerprint(spec)
+
+    def _usable_receipt(candidate: object) -> dict[str, Any] | None:
+        if not isinstance(candidate, dict):
+            return None
+        if not candidate.get("success"):
+            return None
+        if not isinstance(candidate.get("execution_backend"), Mapping):
+            return None
+        return candidate
+
+    # Recovery of an interrupted attached admission: the lifecycle detach
+    # may already have succeeded while this request's publication never
+    # happened (the reserving flow died or lost the response). Repeating
+    # the handoff would fail - the model is no longer locked - so the
+    # DURABLE request-binding receipt, then the session's own completed
+    # handoff receipt, reconcile the identity before admission completes
+    # under the reserved id.
+    handoff = None
+    if request_id is not None:
+        receipt_reader = getattr(manager, "attached_handoff_receipt", None)
+        if callable(receipt_reader):
+            handoff = _usable_receipt(receipt_reader(request_id))
+        if handoff is None:
+            completed = getattr(session_manager, "completed_attached_handoff", None)
+            if callable(completed):
+                handoff = _usable_receipt(
+                    completed(
+                        expected_lock_sha256=request["expected_lock_sha256"],
+                        expected_revision_sha256=request["expected_revision_sha256"],
+                        source_model_path=validated["source_model_path"],
+                    )
+                )
+    if handoff is None:
+        handoff = session_manager.prepare_attached_job_handoff(
+            expected_lock_sha256=request["expected_lock_sha256"],
+            expected_revision_sha256=request["expected_revision_sha256"],
+            source_model_path=validated["source_model_path"],
+            user_confirmed_automation_exclusive=(request["user_confirmed_automation_exclusive"]),
+        )
+        if not handoff.get("success"):
+            return {
+                "success": False,
+                "state": "attached_handoff_failed",
+                "attached_handoff": _attached_handoff_summary(handoff),
+            }
+        receipt_writer = getattr(manager, "record_attached_handoff", None)
+        if request_id is not None and callable(receipt_writer):
+            # Durable preservation of the successful handoff identity
+            # BEFORE the admission that publishes the job: a crash past
+            # this point recovers without repeating the detach.
+            receipt_writer(request_id, handoff)
     expanded = dict(spec)
     expanded["execution_backend"] = handoff["execution_backend"]
 
@@ -271,7 +391,12 @@ def _submit_job(
         )
 
     try:
-        submitted = manager.submit(expanded)
+        if request_id is None:
+            submitted = manager.submit(expanded)
+        else:
+            submitted = manager.submit(
+                expanded, request_id=request_id, source_fingerprint=source_fingerprint
+            )
     except Exception as exc:
         if isinstance(exc, JobLaunchError):
             recovery = {
@@ -336,13 +461,14 @@ def register_job_tools(mcp: MCPServer) -> None:
     shared_enabled = bool(selection is not None and selection.feature_enabled("shared_server"))
 
     @mcp.tool()
-    def job_submit(spec: JobSubmissionSpec) -> dict[str, Any]:
+    def job_submit(spec: JobSubmissionSpec, request_id: str | None = None) -> dict[str, Any]:
         """Validate and detach one bounded standalone or attached durable job."""
         return _job_call(
             "job_submit",
             lambda: _submit_job(
                 spec,
                 profile_name=profile_name,
+                request_id=request_id,
                 shared_enabled=shared_enabled,
             ),
         )

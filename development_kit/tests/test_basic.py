@@ -616,6 +616,61 @@ class TestSessionManager:
         assert not clone_dir.exists()
         sm._client = None
 
+    def test_remove_model_drops_the_tracked_java_tag_entry(self):
+        from src.tools.session import SessionManager
+
+        class FakeClient:
+            def remove(self, model):
+                return None
+
+        class TaggedModel:
+            def name(self):
+                return "leaky"
+
+            def tag(self):
+                return "mod1"
+
+        sm = SessionManager()
+        sm._client = FakeClient()
+        sm._models = {}
+        sm._model_cleanup_paths = {}
+        sm.add_model(TaggedModel())
+        assert "leaky" in sm._model_java_tags
+
+        assert sm.remove_model("leaky") is True
+        assert "leaky" not in sm._model_java_tags
+
+        # A same-name re-registration without a Java tag must not inherit the
+        # removed model's tag: get_status would then report a session_model
+        # identity for a model the client never loaded.
+        class UntaggedModel:
+            def name(self):
+                return "leaky"
+
+        sm.add_model(UntaggedModel())
+        assert sm._model_java_tags.get("leaky") is None
+        sm._client = None
+
+    def test_disconnect_clears_model_java_tags(self):
+        from src.tools.session import SessionManager
+
+        class FakeClient:
+            def clear(self):
+                return None
+
+            def disconnect(self):
+                return None
+
+        sm = SessionManager()
+        sm._client = FakeClient()
+        sm._models = {"model": object()}
+        sm._model_java_tags = {"model": "mod1"}
+
+        result = sm.disconnect()
+
+        assert result["success"] is True
+        assert sm._model_java_tags == {}
+
     def test_clear_models_preserves_connected_client(self):
         from src.tools.session import SessionManager
 
@@ -1610,3 +1665,43 @@ class TestSessionManager:
         assert len(details["cleanup_errors"]) == 2
         status = sm.get_status()
         assert status["cleanup_pending"] is True
+
+
+def test_mph_proxy_patches_never_damage_the_real_module():
+    """Monkeypatch cycles on the lazy mph proxies must not delete or leak
+    attributes on the REAL mph module (pytest 9.2 records undo state from
+    the target __dict__; a proxy that forwarded writes into the module let
+    that undo delete mph.Client for every later test)."""
+    import mph as real_mph
+    import src.tools.session as session_module
+    from _pytest.monkeypatch import MonkeyPatch
+
+    real_client = real_mph.Client
+    assert session_module.mph.Client is real_client
+
+    for _ in range(2):
+        patcher = MonkeyPatch()
+        sentinel = object()
+        try:
+            patcher.setattr(session_module.mph, "Client", sentinel)
+            # The patch is visible through the proxy without touching the
+            # real module.
+            assert session_module.mph.Client is sentinel
+            assert real_mph.Client is real_client
+        finally:
+            patcher.undo()
+        # After undo the real module is intact and the proxy reads fall
+        # back to it again - no deleted attribute, no leaked sentinel.
+        assert real_mph.Client is real_client
+        assert session_module.mph.Client is real_client
+
+    # The session-module proxy round-trips the same way.
+    patcher = MonkeyPatch()
+    try:
+        patcher.setattr(session_module.mph_session, "client", None)
+        assert session_module.mph_session.client is None
+    finally:
+        patcher.undo()
+    import mph.session as real_mph_session
+
+    assert session_module.mph_session.client is real_mph_session.client

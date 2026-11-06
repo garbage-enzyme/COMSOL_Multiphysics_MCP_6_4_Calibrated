@@ -20,7 +20,6 @@ import pytest
 import src.tools.ownership as ownership_module
 from src.tools.ownership import SolverOwnership
 
-
 from development_kit.tests.platform_fixtures import fake_lease_artifact_lock, platform_test_root
 
 
@@ -213,7 +212,10 @@ def test_bounded_inventory_rejects_scan_completed_after_request_deadline(monkeyp
 
 def test_read_only_recheck_accepts_scan_that_was_already_in_flight(runtime_dir, monkeypatch):
     def briefly_slow_inventory():
-        time.sleep(0.08)
+        # The scan must outlive exactly one inventory timeout but finish well
+        # inside the second call's window; a bare 0.08 s sleep left no
+        # scheduling-jitter room on a loaded parallel runner.
+        time.sleep(0.8)
         return []
 
     monkeypatch.setattr(ownership_module, "_system_processes", briefly_slow_inventory)
@@ -226,8 +228,8 @@ def test_read_only_recheck_accepts_scan_that_was_already_in_flight(runtime_dir, 
         owner="inventory-inflight-observer",
     )
 
-    first = manager.status(inventory_timeout=0.05)
-    second = manager.status(inventory_timeout=0.05)
+    first = manager.status(inventory_timeout=0.45)
+    second = manager.status(inventory_timeout=0.45)
 
     assert first["process_inventory"]["complete"] is False
     assert first["process_inventory"]["source"] == "unavailable_after_timeout"

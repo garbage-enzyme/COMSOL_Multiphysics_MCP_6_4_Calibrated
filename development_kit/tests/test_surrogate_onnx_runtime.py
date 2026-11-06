@@ -181,9 +181,20 @@ def test_supported_operator_set_is_declared() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_identity_gemm_reproduces_its_input() -> None:
+@pytest.mark.parametrize("data_type,field,code", [(1, 4, "f"), (11, 10, "d")])
+def test_packed_tensor_encoding_preserves_values(data_type, field, code):
+    from comsol_mcp.surrogate.onnx_runtime import _decode_tensor
+
+    tensor = _ld(1, _varint(2) + _varint(2)) + _vi(2, data_type) + _ld(8, b"weights")
+    tensor += _ld(field, struct.pack(f"<4{code}", 1.0, 2.0, 3.0, 4.0))
+    decoded = _decode_tensor(tensor)
+    assert decoded["dims"] == [2, 2]
+    assert decoded["values"] == [1.0, 2.0, 3.0, 4.0]
+
+
+def test_identity_gemm_reproduces_its_input(tmp_path) -> None:
     path = _write(
-        __import__("pathlib").Path(__import__("tempfile").mkdtemp()),
+        tmp_path,
         "identity.onnx",
         _mlp_onnx(
             weight=[1.0, 0.0, 0.0, 1.0],
@@ -195,6 +206,30 @@ def test_identity_gemm_reproduces_its_input() -> None:
     model = load_onnx_model(path)
     result = evaluate_onnx_model(model, input_names=["a1", "a2"], points=[[3.0, 4.0]])
     assert result[0] == pytest.approx([3.0, 4.0])
+
+
+def test_transposed_gemm_input_is_refused_instead_of_silently_ignored(tmp_path) -> None:
+    path = _write(
+        tmp_path,
+        "transposed-input.onnx",
+        _onnx(
+            [_node("Gemm", ["input", "W"], ["output"], {"transA": 1})],
+            [_tensor("W", [2, 2], [1.0, 0.0, 0.0, 1.0])],
+            ["input"],
+        ),
+    )
+    with pytest.raises(OnnxDecodeError, match="transA"):
+        evaluate_onnx_model(load_onnx_model(path), input_names=["a", "b"], points=[[3.0, 4.0]])
+
+
+def test_gemm_dynamic_weights_are_refused_with_a_decode_error(tmp_path) -> None:
+    path = _write(
+        tmp_path,
+        "dynamic-weights.onnx",
+        _onnx([_node("Gemm", ["input", "input"], ["output"])], [], ["input"]),
+    )
+    with pytest.raises(OnnxDecodeError, match="initializer"):
+        evaluate_onnx_model(load_onnx_model(path), input_names=["a", "b"], points=[[3.0, 4.0]])
 
 
 def test_tanh_activation_matches_the_analytic_value(tmp_path) -> None:
@@ -463,15 +498,16 @@ def test_onnx_runtime_uses_only_the_standard_library() -> None:
 # --------------------------------------------------------------------------
 
 # A real ONNX export produced by COMSOL 6.4.0.293 from a trained 2->16->8->1
-# network (receipt D:\mcp_tests\a75s7g02).  Its training target was
+# network (receipt in the licensed S7 gate archive).  Its training target was
 # qoi = sin(a1)cos(a2) + 0.1*a1*a2 over a1 in [1.0, 2.75], a2 in [2.0, 4.5].
 REAL_COMSOL_ONNX_SHA256 = "a417ee487ad5d8c8fc25919aa47f2782b5c9b7f0a979ee255da8aa841860ecca"
 
 
 def _real_comsol_onnx_path():
-    from pathlib import Path
 
-    candidate = Path(r"D:\mcp_tests\a75s7g02\workspace\surrogate_export_a.onnx")
+    from development_kit.tests.platform_fixtures import platform_test_root
+
+    candidate = platform_test_root("s7gate") / "workspace" / "surrogate_export_a.onnx"
     return candidate if candidate.is_file() else None
 
 

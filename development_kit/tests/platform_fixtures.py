@@ -40,6 +40,39 @@ def platform_test_root(label: str = "") -> Path:
     return root / label
 
 
+def synthetic_runtime_root() -> Path:
+    """Create a fresh ASCII runtime root isolated to this test worker.
+
+    The production default deliberately shares one runtime directory (and one
+    solver lease) across agent processes; that is intentional exclusion, not a
+    defect. Synthetic tests must not contend on it. Each pytest-xdist worker is
+    a separate process, so a unique directory per call also separates workers,
+    and the returned path propagates to subprocesses through the environment
+    variable that selects it.
+    """
+    import tempfile
+    import uuid
+
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    parent = platform_test_root("runtime-isolation")
+    parent.mkdir(parents=True, exist_ok=True)
+    return Path(
+        tempfile.mkdtemp(prefix=f"comsol-mcp-rt-{worker}-{uuid.uuid4().hex[:8]}-", dir=parent)
+    )
+
+
+def select_synthetic_runtime_dir() -> Path | None:
+    """Return an isolated root, or None when a runtime dir is already configured.
+
+    An explicitly configured runtime directory always wins: test isolation
+    must never override caller configuration, and selecting a synthetic root
+    is never solver authorization.
+    """
+    if os.environ.get("COMSOL_MCP_RUNTIME_DIR"):
+        return None
+    return synthetic_runtime_root()
+
+
 def create_directory_link(target: str, link: str) -> None:
     """Create a Windows junction or a POSIX directory symlink."""
     if os.name == "nt":

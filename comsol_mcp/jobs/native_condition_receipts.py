@@ -11,6 +11,46 @@ from comsol_mcp.durable import domain_sha256_v2
 CONDITION_RECEIPT_SCHEMA_NAME = "comsol_mcp.robust_condition_receipt"
 CONDITION_RECEIPT_SCHEMA_VERSION = "1.0.0"
 
+DEFAULT_RANGE_EPSILON = 1e-9
+DEFAULT_CLOSURE_ABS_TOLERANCE = 1e-4
+
+
+def evaluate_scientific_gate(
+    reflectance: float,
+    transmittance: float,
+    absorption: float,
+    *,
+    range_epsilon: float = DEFAULT_RANGE_EPSILON,
+    closure_abs_tolerance: float = DEFAULT_CLOSURE_ABS_TOLERANCE,
+) -> dict[str, Any]:
+    """Evaluate the physical-range and power-closure policy explicitly.
+
+    Finite raw measurements are always kept; this gate classifies them so a
+    raw forward value is never silently promoted into a physical acceptance
+    decision, and so a tiny negative residual from floating-point noise stays
+    a measurement instead of destroying the evidence. The thresholds live in
+    one explicit policy contract that callers may tighten or loosen for their
+    own campaign; the identity, finiteness and mesh checks remain structural
+    and still refuse before any receipt exists.
+    """
+    range_checks = {
+        name: -range_epsilon <= value <= 1.0 + range_epsilon
+        for name, value in (
+            ("reflectance", reflectance),
+            ("transmittance", transmittance),
+            ("absorption", absorption),
+        )
+    }
+    closure_residual = reflectance + transmittance + absorption - 1.0
+    passed = all(range_checks.values()) and abs(closure_residual) <= closure_abs_tolerance
+    return {
+        "passed": passed,
+        "range_checks": range_checks,
+        "range_epsilon": range_epsilon,
+        "closure_residual": closure_residual,
+        "closure_abs_tolerance": closure_abs_tolerance,
+    }
+
 
 def _finite(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -105,15 +145,7 @@ def _normalize_receipt(
     reflectance = _finite(result["reflectance"], "reflectance")
     transmittance = _finite(result["transmittance"], "transmittance")
     absorption = _finite(result["absorption"], "absorption")
-    for name, value in (
-        ("reflectance", reflectance),
-        ("transmittance", transmittance),
-        ("absorption", absorption),
-    ):
-        if not 0.0 <= value <= 1.0:
-            raise ValueError(f"robust condition {name} must be within [0, 1]")
-    if not math.isclose(reflectance + transmittance + absorption, 1.0, abs_tol=1e-4):
-        raise ValueError("robust condition power closure failed")
+    scientific_gate = evaluate_scientific_gate(reflectance, transmittance, absorption)
     elements = result["mesh_elements"]
     if isinstance(elements, bool) or not isinstance(elements, int) or elements < 1:
         raise ValueError("robust condition mesh element count is invalid")
@@ -144,7 +176,8 @@ def _normalize_receipt(
         "minimum_mesh_quality": minimum_quality,
         "dataset_id": str(result["dataset_id"]),
         "solution_id": str(result["solution_id"]),
-        "disposition": "measured",
+        "scientific_gate": scientific_gate,
+        "disposition": "measured" if scientific_gate["passed"] else "measured_gate_failed",
     }
     body["receipt_fingerprint"] = domain_sha256_v2(CONDITION_RECEIPT_SCHEMA_NAME, body)
     return body

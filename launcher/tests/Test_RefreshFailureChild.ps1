@@ -39,4 +39,7 @@ catch {
     }
 }
 Write-Host 'EXPECTED_REFRESH_FAILURE_TRIGGER status_json_corrupted'
+# Flush the redirected stdout handle so the parent latch does not depend
+# on the 4 KiB block buffer filling under load.
+[Console]::Out.Flush()
 [void](Show-DurableJobMonitor -Config $Config -NoTopMost)

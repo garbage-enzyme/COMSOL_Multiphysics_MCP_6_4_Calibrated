@@ -662,7 +662,10 @@ class SolverOwnership:
     ):
         self.runtime_dir = Path(runtime_dir) if runtime_dir else _default_runtime_dir()
         if not _is_ascii_path(self.runtime_dir):
-            raise ValueError("COMSOL runtime/lease path must contain ASCII characters only")
+            raise ValueError(
+                "COMSOL runtime/lease path must contain ASCII characters only; "
+                "set COMSOL_MCP_RUNTIME_DIR to an absolute ASCII path"
+            )
         self.lease_path = self.runtime_dir / "solver_owner.json"
         self.lease_operation_lock_path = self.runtime_dir / ".solver_owner.operation.lock"
         self._process_provider = process_provider or _system_processes

@@ -99,12 +99,11 @@ def test_command_line_drift_and_executable_mismatch_refuse_action():
 def test_incomplete_identity_bindings_fail_closed():
     with pytest.raises(ObservationError):
         verify_exact_ownership({"pid": 1}, {"pid": 1})
-    with pytest.raises(ObservationError):
-        normalize = None
-        from comsol_mcp.jobs.observation import normalize_process_identity
+    from comsol_mcp.jobs.observation import normalize_process_identity
 
-        normalize = normalize_process_identity({**_identity(), "pid": -5})
-        assert normalize
+    # A negative pid is rejected: the raising call itself is the assertion.
+    with pytest.raises(ObservationError):
+        normalize_process_identity({**_identity(), "pid": -5})
 
 
 # ---------------------------------------------------------------------------

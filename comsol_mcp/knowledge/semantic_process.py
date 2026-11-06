@@ -40,6 +40,42 @@ def _command_signature(command: list[str]) -> str:
     return hashlib.sha256("\0".join(command).encode("utf-8", errors="replace")).hexdigest()
 
 
+#: Windows venv trampolines (Python 3.15+) re-exec the base interpreter as
+#: a child, so the worker's reported pid can be a descendant of the
+#: Popen pid instead of equal to it. Trampoline chains are shallow.
+_LAUNCHER_TREE_MAX_DEPTH = 3
+
+
+def _pid_matches_launcher_process(reported_pid: object, launcher_pid: int) -> bool:
+    """Whether reported_pid is the launched process or its executing child.
+
+    Accepts the Popen pid itself (in-place interpreters, Python <= 3.14
+    venvs) or a live descendant found by walking the reported pid's parent
+    chain up to a bounded depth. Anything unreadable, unrelated, or deeper
+    than a trampoline chain refuses: the handshake stays fail-closed.
+    """
+    if isinstance(reported_pid, bool) or not isinstance(reported_pid, int):
+        return False
+    if reported_pid <= 0:
+        return False
+    if reported_pid == launcher_pid:
+        return True
+    try:
+        import psutil
+
+        current = psutil.Process(reported_pid)
+        for _ in range(_LAUNCHER_TREE_MAX_DEPTH):
+            parent = current.parent()
+            if parent is None:
+                return False
+            if parent.pid == launcher_pid:
+                return True
+            current = parent
+    except Exception:  # noqa: S110 - unreadable process identity is a refusal
+        return False
+    return False
+
+
 def _windows_process_create_time(handle: int) -> float | None:
     if os.name != "nt":
         return None
@@ -510,7 +546,7 @@ class SemanticWorkerManager:
                 if (
                     ready.get("schema_version") != WORKER_PROTOCOL_SCHEMA_VERSION
                     or ready.get("event") != "ready"
-                    or ready.get("pid") != process.pid
+                    or not _pid_matches_launcher_process(ready.get("pid"), process.pid)
                     or ready.get("host") != "127.0.0.1"
                 ):
                     raise RuntimeError("invalid worker startup handshake")

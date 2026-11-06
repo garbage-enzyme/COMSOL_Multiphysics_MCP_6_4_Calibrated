@@ -16,7 +16,7 @@ class BarrierEngine:
     def __init__(self, root: Path):
         self.root = root
 
-    def submit(self, spec):
+    def submit(self, spec, request_id=None):
         fingerprint = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()
         job_id = "job-" + fingerprint[:32]
         path = self.root / (job_id + ".json")

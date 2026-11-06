@@ -125,10 +125,14 @@ def test_watchdog_identity_confirmation_is_bounded_and_strict(monkeypatch, failu
         return {**expected, "command_signature": "0" * 64} if failure == "mismatch" else expected
 
     monkeypatch.setattr(module, "process_identity", observe)
-    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(
-        module.time, "sleep", lambda interval: clock.__setitem__(0, clock[0] + interval)
+    import time as real_time
+
+    fake_time = SimpleNamespace(
+        time=real_time.time,
+        monotonic=lambda: clock[0],
+        sleep=lambda interval: clock.__setitem__(0, clock[0] + interval),
     )
+    monkeypatch.setattr(module, "time", fake_time)
     process = SimpleNamespace(pid=123, poll=lambda: 0 if failure == "exited" else None)
     if failure is None:
         assert module._wait_for_launched_identity(process, command) == expected
@@ -168,6 +172,79 @@ def _write_manifest(tmp_path):
         "resource_policy": _resource_policy(),
     }
     return envelope, source, manifest
+
+
+@pytest.mark.parametrize("release_mode", ["success", "refused", "exception"])
+@pytest.mark.parametrize("runtime_mode", ["success", "failure", "cancel"])
+def test_native_completion_waits_for_lease_cleanup(
+    ascii_tmp_path, monkeypatch, release_mode, runtime_mode
+):
+    from comsol_mcp.jobs import adjoint_optimization_worker as worker
+    from comsol_mcp.tools import ownership as ownership_module
+
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
+    manager = JobManager(
+        ascii_tmp_path / "jobs", preflight=lambda **_kwargs: {"success": True, "ready": True}
+    )
+    monkeypatch.setattr(manager, "_launch_worker", lambda *_args: process_identity(os.getpid()))
+    job_id = manager.submit(envelope)["job_id"]
+    store = manager.store
+    release_observations = []
+
+    class Owner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            return {"ready": True}
+
+        def acquire(self, **_kwargs):
+            return {"success": True}
+
+        def release(self):
+            release_observations.append(store.read_state(job_id)["status"])
+            if release_mode == "exception":
+                raise OSError("injected lease sharing failure")
+            return {"success": release_mode == "success"}
+
+    monkeypatch.setattr(ownership_module, "SolverOwnership", Owner)
+    monkeypatch.setattr(worker, "contain_current_process_tree", lambda: True)
+    monkeypatch.setattr(worker, "_await_licensed_wall_watchdog", lambda *_args: {})
+
+    def execute(*_args):
+        if runtime_mode == "cancel":
+            store.update_state(job_id, "cancel_requested", event="test_cancel")
+        if runtime_mode != "success":
+            raise RuntimeError("injected runtime failure")
+        return {
+            "success": True,
+            "final_variables_si": {"x": 1.0},
+            "fresh_forward_objective": 0.5,
+            "cleanup": {"source_unchanged": True},
+        }
+
+    monkeypatch.setattr(
+        native_adjoint_runtime,
+        "execute_native_adjoint_optimization",
+        execute,
+    )
+    code = worker._run_native(str(store.root), job_id)
+    state = store.read_state(job_id)
+    assert state["owned_cleanup"]["success"] is (release_mode == "success")
+    assert state["cleanup_pending"] is (release_mode != "success")
+    if runtime_mode != "success":
+        assert state["status"] != "completed"
+        assert release_observations == [state["status"]]
+        assert code == (0 if runtime_mode == "cancel" and release_mode == "success" else 1)
+        if runtime_mode == "failure":
+            assert state["last_error"]["message"] == "injected runtime failure"
+        return
+    assert release_observations == ["smoke_validated"]
+    assert state["status"] == ("completed" if release_mode == "success" else "failed")
+    assert code == (0 if release_mode == "success" else 1)
+    assert state["progress"] == {"completed": 1, "total": 1}
+    assert state["progress_unit"] == "validated_final_candidates"
+    assert state["native_iterations_completed"] is None
 
 
 def test_submission_requires_explicit_ascii_manifest_and_resources(ascii_tmp_path):
@@ -868,3 +945,55 @@ def test_explicit_runtime_loading_checks_physics_and_actual_solve_budget(
     assert values["nsolvemax"] == "20"
     assert calls.count("loading") == 4
     assert receipt["cleanup"] == {"client_clear": True, "source_unchanged": True}
+
+
+def test_synthetic_worker_resume_does_not_duplicate_persisted_row(ascii_tmp_path, monkeypatch):
+    """D-01: a crash between the gradient and iteration row appends leaves
+    only the gradient row persisted; the resumed worker must add exactly the
+    MISSING iteration row instead of duplicating the gradient row."""
+    envelope, _, _ = _write_manifest(ascii_tmp_path)
+    manager = JobManager(
+        ascii_tmp_path / "jobs",
+        preflight=lambda **_kwargs: {"success": True, "ready": True},
+    )
+    monkeypatch.setattr(
+        manager,
+        "_launch_worker",
+        lambda _job_id, _module: process_identity(os.getpid()),
+    )
+    result = manager.submit(envelope)
+    job_id = result["job_id"]
+    store = manager.store
+    rows_path = store.job_dir(job_id) / "optimization_rows.jsonl"
+    spec_fingerprint = store.read_spec(job_id)["spec_fingerprint"]
+    from comsol_mcp.jobs.adjoint_rows import append_adjoint_row, domain_sha256_v2, read_adjoint_rows
+
+    # Simulate the crash window: the gradient row was persisted, the
+    # iteration row was not, and the job returned to a startable state.
+    append_adjoint_row(
+        rows_path,
+        job_fingerprint=spec_fingerprint,
+        attempt=1,
+        kind="gradient",
+        payload={
+            "iteration_id": "it-0",
+            "gradient_fingerprint": domain_sha256_v2(
+                "comsol_mcp.synthetic_gradient", {"values": [0.0]}
+            ),
+            "check_fingerprint": domain_sha256_v2(
+                "comsol_mcp.synthetic_gradient_check", {"passed": True}
+            ),
+            "evidence_state": "gradient_validated",
+        },
+    )
+    store.update_state(job_id, "starting", event="resume_after_crash_window")
+
+    assert run_adjoint_worker(str(store.root), job_id) == 0
+    rows = [
+        row
+        for row in read_adjoint_rows(rows_path, job_fingerprint=spec_fingerprint)
+        if row.get("attempt") == 1
+    ]
+    kinds = [row["kind"] for row in rows]
+    assert kinds.count("gradient") == 1
+    assert kinds.count("iteration") == 1

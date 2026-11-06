@@ -184,11 +184,14 @@ build/modules, license, scheduler, storage, and output requirements first.
 
 | Profile | Intended use |
 | --- | --- |
-| `core` | Compact default control plane and lexical manuals. |
+| `core` | Compact default control plane; lexical manuals stay behind the default-off `lexical_docs` gate. |
 | `basic_fem` | Conventional FEM construction, bounded exports, and the Python-free standalone launcher tools. |
 | `wave_optics` | Periodic optics, metasurfaces, bounded field discovery/extraction, preflight, and evidence audits. |
+| `electro_chemistry` | Isolated Electrochemistry Module profile: electrochemistry discovery, interface creation, electrode reaction, and electrolyte tools; not merged into `full`. |
 | `experimental` | Explicit opt-in generic tools and retained native execution contracts. |
-| `full` | Broad non-feature compatibility surface. Not recommended by default. |
+| `full` | Broad non-feature compatibility surface excluding the isolated `electro_chemistry` additions. Not recommended by default. |
+| `comsolless_read_only` | Computers without COMSOL installed: offline inspection tools only; nothing can start COMSOL or Java. |
+
 
 Select the profile in the Settings GUI. Developers and agents may set the
 equivalent `profile.name` field in JSON. Omitting it selects `core`. The profile

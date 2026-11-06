@@ -476,6 +476,27 @@ def _policy_rule(
     return result
 
 
+def _usable_volume_loss(measurement: dict[str, Any]) -> bool:
+    """Whether at least one declared loss record carries a usable finite value.
+
+    A record whose expression failed to evaluate carries an error and no
+    value: it stays recorded as evidence of the attempt, but it is never
+    usable loss evidence, so required volume-loss evidence must not pass on
+    error-only records (C081R-01). Raw values count as-is - a caller-declared
+    normalization is not required for availability, only for normalized
+    comparisons.
+    """
+    for item in measurement.get("losses", {}).get("items", []):
+        if not isinstance(item, dict):
+            continue
+        value = item.get("value")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if math.isfinite(value):
+            return True
+    return False
+
+
 def _evidence_available(measurement: dict[str, Any], name: str) -> bool:
     mapping = {
         "wavelength_controls": bool(measurement.get("wavelength", {}).get("complete")),
@@ -488,7 +509,7 @@ def _evidence_available(measurement: dict[str, Any], name: str) -> bool:
         "top_air_region": bool(
             measurement.get("polarization", {}).get("structure_total_field", {}).get("complete")
         ),
-        "volume_loss": bool(measurement.get("losses", {}).get("items")),
+        "volume_loss": _usable_volume_loss(measurement),
         "source_integrity": bool(measurement.get("integrity", {}).get("source_unchanged")),
         "mesh_evidence": bool(measurement.get("mesh", {}).get("element_count") is not None),
     }
@@ -600,17 +621,34 @@ def evaluate_validation_policy(
                     threshold=threshold,
                 )
             )
-    normalized_losses = [
-        item.get("normalized_value")
-        for item in measurement.get("losses", {}).get("items", [])
-        if isinstance(item.get("normalized_value"), (int, float))
+    # C081S-01: a requested aggregate loss-match comparison must sum EVERY
+    # declared contribution. Summing only the records that happen to carry a
+    # normalized value let one failed expression silently shrink the sum to
+    # the remaining subset, which could match 1-R-T and publish a pass with
+    # incomplete evidence. An aggregate with any unusable contribution
+    # (failed expression, failed or zero normalization) is UNAVAILABLE
+    # evidence - reported as missing, never as a measured physical failure
+    # and never as a silently partial sum.
+    loss_items = [
+        item for item in measurement.get("losses", {}).get("items", []) if isinstance(item, dict)
     ]
     loss_target = power.get("one_minus_R_minus_T")
-    loss_difference = (
-        abs(sum(float(value) for value in normalized_losses) - float(loss_target))
-        if normalized_losses and isinstance(loss_target, (int, float))
-        else None
+    incomplete_losses = sorted(
+        item.get("label", "<unlabeled>")
+        for item in loss_items
+        if isinstance(item.get("normalized_value"), bool)
+        or not isinstance(item.get("normalized_value"), (int, float))
+        or not math.isfinite(item["normalized_value"])
     )
+    loss_match_requested = "loss_match_abs" in tolerances or "loss_match_rel" in tolerances
+    loss_difference: float | None = None
+    if loss_match_requested and not loss_items and isinstance(loss_target, (int, float)):
+        # No declared losses at all: the aggregate has nothing to sum.
+        incomplete_losses = ["<no declared losses>"]
+    if loss_match_requested and not incomplete_losses and isinstance(loss_target, (int, float)):
+        loss_difference = abs(
+            sum(float(item["normalized_value"]) for item in loss_items) - float(loss_target)
+        )
     if "loss_match_abs" in tolerances:
         threshold = float(tolerances["loss_match_abs"])
         rules.append(
@@ -621,7 +659,13 @@ def evaluate_validation_policy(
                 else ("pass" if loss_difference <= threshold else "fail"),
                 measured=loss_difference,
                 threshold=threshold,
-                reason="sum(caller-normalized losses) versus 1-R-T",
+                reason=(
+                    "sum(caller-normalized losses) versus 1-R-T"
+                    if loss_difference is not None
+                    else "aggregate loss evidence incomplete: no usable "
+                    + "normalized contribution for "
+                    + ", ".join(incomplete_losses[:5])
+                ),
             )
         )
     if "loss_match_rel" in tolerances:
@@ -637,7 +681,13 @@ def evaluate_validation_policy(
                 "missing" if relative is None else ("pass" if relative <= threshold else "fail"),
                 measured=relative,
                 threshold=threshold,
-                reason="sum(caller-normalized losses) versus 1-R-T",
+                reason=(
+                    "sum(caller-normalized losses) versus 1-R-T"
+                    if relative is not None
+                    else "aggregate loss evidence incomplete: no usable "
+                    + "normalized contribution for "
+                    + ", ".join(incomplete_losses[:5])
+                ),
             )
         )
 
@@ -915,12 +965,17 @@ def _load_air_reference(
     if not isinstance(stats, dict):
         warnings.append({"code": "air_reference_field_statistics_missing", "path": str(path)})
         return None, warnings
+    stokes = record.get("stokes_xy")
+    if not isinstance(stokes, dict) and isinstance(field, dict):
+        stokes = field.get("stokes_xy")
+    if not isinstance(stokes, dict):
+        stokes = payload.get("stokes_xy", {})
     reference = {
         "config_id": config_id,
         "source_path": str(path),
         "source_sha256": source_hash,
         "component_statistics": stats,
-        "stokes_xy": payload.get("stokes_xy", {}),
+        "stokes_xy": stokes,
         "provenance": payload.get("provenance"),
     }
     if (

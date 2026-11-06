@@ -2705,7 +2705,7 @@
             "title": "Max Retries"
           },
           "point_limit": {
-            "maximum": 2048,
+            "maximum": 32,
             "minimum": 1,
             "title": "Point Limit",
             "type": "integer"
@@ -3328,7 +3328,7 @@
             "title": "Max Retries"
           },
           "point_limit": {
-            "maximum": 2048,
+            "maximum": 32,
             "minimum": 1,
             "title": "Point Limit",
             "type": "integer"
@@ -3400,6 +3400,19 @@
     "additionalProperties": false,
     "maxProperties": 256,
     "properties": {
+      "request_id": {
+        "anyOf": [
+          {
+            "maxLength": 16384,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Request Id"
+      },
       "spec": {
         "discriminator": {
           "mapping": {

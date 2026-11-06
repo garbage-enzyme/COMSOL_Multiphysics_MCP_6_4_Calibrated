@@ -121,7 +121,7 @@ def _write(path: Path, document: dict) -> Path:
 @pytest.fixture()
 def owned_root(tmp_path_factory, monkeypatch):
     """An ASCII owned artifact root, which the path policy requires."""
-    root = platform_test_root("a75s10t")
+    root = platform_test_root("surrogate-public-tools")
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("COMSOL_MCP_ARTIFACT_WRITE_ROOT", str(root))
     monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(root))
@@ -1296,7 +1296,7 @@ def test_dispatch_validates_real_documents(owned_root) -> None:
 
 
 def test_dispatch_refuses_a_path_outside_the_owned_root(owned_root) -> None:
-    outside = platform_test_root("a75s10outside")
+    outside = platform_test_root("surrogate-public-outside")
     outside.mkdir(parents=True, exist_ok=True)
     target = outside / "data.csv"
     target.write_bytes(b"a,b\r\n1,2\r\n")

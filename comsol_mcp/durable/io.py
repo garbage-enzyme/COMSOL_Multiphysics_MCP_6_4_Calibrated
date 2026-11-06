@@ -37,6 +37,10 @@ class _FileSizeLimitError(ValueError):
     pass
 
 
+class FileIdentityChangedError(ValueError):
+    """A regular file was atomically replaced before its descriptor opened."""
+
+
 def _open_parent_without_links(path: Path) -> int:
     """Open each absolute POSIX ancestor relative to its verified parent."""
     parent = Path(os.path.abspath(path.parent))
@@ -81,7 +85,7 @@ def _open_regular_file_descriptor(
         if not stat.S_ISREG(opened.st_mode):
             raise ValueError("bounded reading requires a regular file")
         if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
-            raise ValueError("file identity changed before bounded reading")
+            raise FileIdentityChangedError("file identity changed before bounded reading")
         return descriptor, opened
     except BaseException:
         os.close(descriptor)
@@ -625,6 +629,7 @@ def read_complete_jsonl(
         data = read_file_bytes_bounded(candidate, max_bytes=max_bytes)
     except _FileSizeLimitError:
         return {"state": "oversized", "records": [], "complete_byte_count": 0}
+    source_sha256 = hashlib.sha256(data).hexdigest()
     complete_end = data.rfind(b"\n") + 1
     complete = data[:complete_end]
     trailing = data[complete_end:]
@@ -642,6 +647,7 @@ def read_complete_jsonl(
             "records": [],
             "complete_byte_count": 0,
             "error_type": type(exc).__name__,
+            "source_sha256": source_sha256,
         }
     state = "incomplete" if trailing else "current_valid"
     if version_field is not None:
@@ -668,6 +674,7 @@ def read_complete_jsonl(
         "records": records,
         "complete_byte_count": complete_end,
         "trailing_byte_count": len(trailing),
+        "source_sha256": source_sha256,
     }
 
 

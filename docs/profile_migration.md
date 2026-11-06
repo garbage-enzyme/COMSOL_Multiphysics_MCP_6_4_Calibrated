@@ -12,7 +12,6 @@ independent, default-off Boolean feature gates.
 | Periodic Wave Optics preflight, evidence audit, visual-review contracts | `wave_optics` profile | Experimental. Licensed acceptance is version/model-specific |
 | Isolated Electrochemistry Module discovery, interface creation, electrode reaction, electrolyte setup | `electro_chemistry` profile | Experimental. Requires Electrochemistry Module. Not merged into default/full |
 | Generic or risky legacy helpers | `experimental` profile | Experimental |
-| Robust shape preview, durable submit, and evidence inspection/verification | `experimental` profile | Experimental and default-off |
 | Maximum legacy discovery compatibility | `full` profile | Compatibility only |
 | Isolated SQLite lexical manuals | `lexical_docs.enabled=true` | Verified. Default-off |
 | Isolated vector-assisted manuals | `semantic_docs.enabled=true` | Experimental (promotion rejected) |

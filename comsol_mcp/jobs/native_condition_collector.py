@@ -77,6 +77,13 @@ def execute_native_condition_collector(
         raw = backend.evaluate_condition(condition, condition_tensor_expressions(spec, condition))
         atomic_write_json(root / "forward-raw.json", dict(raw))
         forward = _normalize_receipt(condition, raw, backend.controls, spec["mesh_admission"])
+        atomic_write_json(root / "forward-receipt.json", dict(forward))
+        if forward["disposition"] != "measured":
+            # The finite raw values and the gate verdict are already durable
+            # (forward-raw.json and forward-receipt.json); refuse here so a
+            # gate-failed raw forward measurement is never promoted into
+            # observation or acceptance evidence.
+            raise ValueError("robust condition scientific measurement gate failed")
         observations = [
             {
                 "condition_id": condition["condition_id"],

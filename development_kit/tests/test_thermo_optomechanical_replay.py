@@ -27,6 +27,7 @@ from src.jobs.thermo_optomechanical_replay_execution import (
     ThermoOptomechanicalComsolExecutor,
 )
 from src.jobs.thermo_optomechanical_replay_rows import (
+    _validate_stage_payload,
     append_thermo_optomechanical_stage_row,
     build_stage_evidence,
     read_thermo_optomechanical_stage_rows,
@@ -107,6 +108,25 @@ def test_licensed_fixture_manifest_is_valid_before_comsol_start(ascii_tmp_path):
     assert spec["source_model_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
     assert spec["model_contract"]["expressions"]["transfer_displacement_max"] == "dmeshH1"
     assert spec["model_contract"]["expressions"]["displacement_max"] == "umaxH1"
+
+
+def test_omitted_unit_defaults_are_materialized_into_the_spec(ascii_tmp_path):
+    submission = _raw_spec(ascii_tmp_path / "unit-defaults")
+    manifest_path = Path(submission["specification_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for unit_key in ("temperature_unit", "heat_source_unit", "convection_coefficient_unit"):
+        del manifest["thermal_load"][unit_key]
+    payload = json.dumps(manifest).encode("utf-8")
+    manifest_path.write_bytes(payload)
+    submission["specification_sha256"] = hashlib.sha256(payload).hexdigest()
+
+    spec = normalize_thermo_optomechanical_replay_spec(submission)
+
+    # The executor indexes these unit literals; a caller legitimately omitting
+    # them must receive the contract defaults instead of a KeyError mid-replay.
+    assert spec["thermal_load"]["temperature_unit"] == "K"
+    assert spec["thermal_load"]["heat_source_unit"] == "W/m^3"
+    assert spec["thermal_load"]["convection_coefficient_unit"] == "W/(m^2*K)"
 
 
 def test_licensed_gate_cleanup_failure_preserves_verdict_and_writes_fallback(tmp_path, monkeypatch):
@@ -249,6 +269,21 @@ def _raw_spec(root: Path) -> dict:
     }
 
 
+_SYNTHETIC_CONTROL_LABELS = {
+    "wrong_selection": ("structural", "structural_assertion"),
+    "missing_material_state": ("structural", "structural_assertion"),
+    "convection": ("declared", "declared_value"),
+    "temperature_unit": ("declared", "declared_value"),
+}
+
+
+def _synthetic_control_provenance(control_id):
+    provenance, disposition = _SYNTHETIC_CONTROL_LABELS.get(
+        control_id, ("measured", "executed_control")
+    )
+    return {"provenance": provenance, "disposition": disposition}
+
+
 def _payload(stage_id: str, spec: dict) -> dict:
     contract = spec["model_contract"]
     if stage_id == "preflight":
@@ -311,6 +346,7 @@ def _payload(stage_id: str, spec: dict) -> dict:
                 "vertex_count": 80,
                 "minimum_quality": 0.8,
                 "inverted_element_count": 0,
+                "inverted_element_count_disposition": "inferred_from_minimum_quality",
             },
             "frame": {
                 "identity_sha256": "e" * 64,
@@ -327,7 +363,9 @@ def _payload(stage_id: str, spec: dict) -> dict:
             "source_geometry_sha256": "f" * 64,
             "deformed_geometry_sha256": "1" * 64,
             "readback_exact": True,
-            "rollback_verified": True,
+            "checkpoint_integrity_verified": True,
+            "rollback_exercised": False,
+            "rollback_evidence": "checkpoint_integrity_only_no_rollback_in_transfer_stage",
         }
     rows = []
     for wavelength in spec["optical_replay"]["wavelengths_m"]:
@@ -345,7 +383,12 @@ def _payload(stage_id: str, spec: dict) -> dict:
     return {
         "rows": rows,
         "control_results": [
-            {"control_id": item, "passed": True, "reason_code": "synthetic_control_passed"}
+            {
+                "control_id": item,
+                "passed": True,
+                "reason_code": "synthetic_control_passed",
+                **_synthetic_control_provenance(item),
+            }
             for item in spec["validation_controls"]
         ],
         "source_unchanged": True,
@@ -588,9 +631,26 @@ def test_optical_evidence_preserves_tiny_negative_absorption_but_rejects_active_
     evidence = build_stage_evidence(spec, "optical_replay", payload)
     assert evidence["payload"]["rows"][0]["deformed_rta"]["A"] == -1.0e-18
 
+    # A finite but unphysical measurement is real evidence: it stays
+    # durable with an explicit measured rejection instead of being erased.
     payload["rows"][0]["deformed_rta"]["A"] = -1.0e-8
-    with pytest.raises(ValueError, match="non-passive"):
-        build_stage_evidence(spec, "optical_replay", payload)
+    rejected = build_stage_evidence(spec, "optical_replay", payload)
+    assert rejected["scientific_disposition"] == "measured_gate_failed"
+    assert rejected["rejection_reason_codes"] == ["optical_rta_nonpassive_deformed_rta_row_0"]
+    assert rejected["payload"]["rows"][0]["deformed_rta"]["A"] == -1.0e-8
+    # A verdict that drifts from the measured rows is refused even when the
+    # tamperer re-hashes the evidence: the validator re-derives the verdict.
+    from src.jobs.thermo_optomechanical_replay_rows import (
+        _fingerprint,
+        _validate_common_evidence,
+    )
+
+    tampered = dict(rejected)
+    tampered["scientific_disposition"] = "measured_gate_passed"
+    tampered.pop("evidence_sha256")
+    tampered["evidence_sha256"] = _fingerprint(tampered)
+    with pytest.raises(ValueError, match="disposition must match"):
+        _validate_common_evidence(tampered, spec, "optical_replay")
 
 
 @pytest.mark.parametrize(
@@ -615,11 +675,6 @@ def test_optical_evidence_preserves_tiny_negative_absorption_but_rejects_active_
             "optical_replay",
             lambda payload: payload.__setitem__("derived_model_sha256", None),
             "derived_model_sha256",
-        ),
-        (
-            "optical_replay",
-            lambda payload: payload["rows"][0]["baseline_rta"].__setitem__("closure_residual", 0.5),
-            "non-passive R/T/A",
         ),
         (
             "state_evidence",
@@ -723,6 +778,30 @@ def test_executor_binds_the_study_solution_dataset_before_evaluation(ascii_tmp_p
     executor._bind_study_dataset("std_ts")
     assert executor._evaluate("temperature_min") == 2.5
     assert model.evaluations == [("Tmin", model.datasets[0])]
+
+
+@pytest.mark.parametrize("drift", ["none", "parameter", "frequency"])
+def test_optical_wavelength_binds_parameter_and_solution(ascii_tmp_path, drift):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "wave"))
+    executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
+    dataset = object()
+    executor._active_dataset = dataset
+    calls = []
+
+    class Model:
+        def evaluate(self, expression, **kwargs):
+            assert kwargs == {"dataset": dataset}
+            calls.append(expression)
+            shifted = expression == ("lambda0" if drift == "parameter" else "c_const/freq")
+            return 2e-6 if drift != "none" and shifted else 1.5e-6
+
+    executor.model = Model()
+    if drift == "none":
+        assert executor._solved_wavelength(1.5e-6) == 1.5e-6
+    else:
+        with pytest.raises(RuntimeError, match="solved wavelength differs"):
+            executor._solved_wavelength(1.5e-6)
+    assert calls == ["lambda0", "c_const/freq"]
 
 
 def test_thermal_structure_readbacks_bind_before_mesh_and_expansion(ascii_tmp_path):
@@ -871,6 +950,67 @@ def test_transfer_uses_declared_mesh_displacement_without_structural_fallback(
     else:
         assert executor._deformation_transfer()["readback_exact"] is True
         assert calls == ["transfer_displacement_max", "transfer_displacement_max"]
+
+
+def test_interrupted_transfer_restarts_from_the_pretransfer_checkpoint(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "transfer-resume")
+    )
+    executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
+    loaded = []
+    executor._load_derived = lambda: loaded.append("derived")
+    executor._load_checkpoint = lambda: loaded.append("checkpoint")
+    executor._set_moving_mesh_active = lambda _enabled: None
+    executor._study = lambda _key: None
+    executor._bind_study_dataset = lambda _tag: None
+    executor._evaluate = lambda _key: 1.0e-6
+
+    def save(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"model")
+
+    executor._save = save
+
+    # First pass: no checkpoint exists, so the pre-transfer derived model is
+    # loaded, checkpointed, and reloaded after the transfer rebind.
+    executor._deformation_transfer()
+    assert loaded == ["derived", "derived"]
+    assert executor.checkpoint_path.is_file()
+
+    # Interrupted resume: the checkpoint now exists and derived.mph holds the
+    # already-deformed model; the transfer must restart from the checkpoint
+    # instead of stacking a second deformation. The trailing derived reload is
+    # the post-transfer rebind.
+    executor._deformation_transfer()
+    assert loaded == ["derived", "derived", "checkpoint", "derived"]
+
+
+def test_thermal_rerun_deletes_a_stale_transfer_checkpoint(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "thermal-invalidate")
+    )
+    executor = ThermoOptomechanicalComsolExecutor(None, spec, ascii_tmp_path / "job")
+    executor.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    executor.checkpoint_path.write_bytes(b"stale checkpoint")
+    executor.derived_path.write_bytes(b"derived")
+    executor._verify_source = lambda: None
+    executor._load_source = lambda: None
+    executor._load_derived = lambda: None
+    executor._apply_positive_parameters = lambda: None
+    executor._set_moving_mesh_active = lambda _enabled: None
+    executor._study = lambda _key: None
+    executor._bind_study_dataset = lambda _tag: None
+    executor._evaluate = lambda _key: 0.0
+    executor._save = lambda path: (
+        path.parent.mkdir(parents=True, exist_ok=True),
+        path.write_bytes(b"model"),
+    )
+
+    executor._thermal_structural()
+
+    # Rebuilding the pre-transfer state invalidated the stale checkpoint, so
+    # the next transfer cannot restart from a state that predates this solve.
+    assert not executor.checkpoint_path.exists()
 
 
 def test_displacement_readback_tolerates_last_ulp_but_not_material_drift():
@@ -1641,3 +1781,218 @@ def test_spec_size_bound_includes_the_persisted_fingerprint(ascii_tmp_path, monk
 
     with pytest.raises(ValueError, match="exceeds its bound"):
         replay_spec_module.normalize_thermo_optomechanical_replay_spec(raw)
+
+
+def test_summary_separates_executed_structural_and_declared_control_counts(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "counts"))
+    root = ascii_tmp_path / "counts-artifacts"
+    result = run_thermo_optomechanical_replay(
+        spec, root, attempt=1, stage_executor=lambda stage, d, s: _payload(stage, s)
+    )
+    summary = result["summary"]
+
+    structural = {"wrong_selection", "missing_material_state"}
+    declared = {"convection", "temperature_unit"}
+    executed = set(spec["validation_controls"]) - structural - declared
+    assert summary["control_count"] == len(spec["validation_controls"])
+    assert summary["executed_control_count"] == len(executed)
+    assert summary["structural_assertion_count"] == len(
+        structural & set(spec["validation_controls"])
+    )
+    assert summary["declared_value_count"] == len(declared & set(spec["validation_controls"]))
+    assert (
+        summary["executed_control_count"]
+        + summary["structural_assertion_count"]
+        + summary["declared_value_count"]
+        == summary["control_count"]
+    )
+
+
+def test_a_failing_control_is_structurally_valid_rejection_evidence(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "mut"))
+    for broken in ("convection", "fixed_boundary", "wrong_selection"):
+        payload = _payload("optical_replay", spec)
+        for row in payload["control_results"]:
+            if row["control_id"] == broken:
+                row["passed"] = False
+        # A well-formed failed control persists as scientific rejection
+        # evidence; the summary, not the validator, rejects the run.
+        _validate_stage_payload("optical_replay", payload, spec)
+    nonboolean = _payload("optical_replay", spec)
+    nonboolean["control_results"][0]["passed"] = "false"
+    with pytest.raises(ValueError, match="control matrix is incomplete"):
+        _validate_stage_payload("optical_replay", nonboolean, spec)
+
+
+def test_control_rows_without_provenance_are_rejected(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "oldshape"))
+    payload = _payload("optical_replay", spec)
+    legacy = [
+        {
+            "control_id": item["control_id"],
+            "passed": item["passed"],
+            "reason_code": item["reason_code"],
+        }
+        for item in payload["control_results"]
+    ]
+    with pytest.raises(ValueError, match="control matrix is incomplete"):
+        _validate_stage_payload("optical_replay", {**payload, "control_results": legacy}, spec)
+
+    invalid = [dict(item) for item in payload["control_results"]]
+    invalid[0]["provenance"] = "guessed"
+    with pytest.raises(ValueError, match="control matrix is incomplete"):
+        _validate_stage_payload("optical_replay", {**payload, "control_results": invalid}, spec)
+
+
+def test_transfer_evidence_distinguishes_checkpoint_integrity_from_rollback(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "rb"))
+    payload = _payload("deformation_transfer", spec)
+
+    assert payload["checkpoint_integrity_verified"] is True
+    assert payload["rollback_exercised"] is False
+    assert payload["rollback_evidence"] == "checkpoint_integrity_only_no_rollback_in_transfer_stage"
+    # An unsupported exercised-rollback claim is refused by the validator.
+    forged = dict(payload)
+    forged["rollback_exercised"] = True
+    with pytest.raises(ValueError, match="deformation transfer evidence is invalid"):
+        _validate_stage_payload("deformation_transfer", forged, spec)
+
+
+def test_inversion_statistic_is_reported_as_inferred_not_measured(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "inv"))
+    payload = _payload("state_evidence", spec)
+
+    assert payload["mesh"]["inverted_element_count"] in (0, None)
+    assert payload["mesh"]["inverted_element_count_disposition"] == "inferred_from_minimum_quality"
+    # An evidence row claiming a measured inversion count without the
+    # inference disposition is refused.
+    forged = json.loads(json.dumps(payload))
+    del forged["mesh"]["inverted_element_count_disposition"]
+    with pytest.raises(ValueError, match="mesh evidence"):
+        _validate_stage_payload("state_evidence", forged, spec)
+
+
+def test_a_well_formed_failed_control_persists_and_rejects_without_rerun(ascii_tmp_path):
+    spec = normalize_thermo_optomechanical_replay_spec(_raw_spec(ascii_tmp_path / "rej"))
+    root = ascii_tmp_path / "rej-artifacts"
+    calls = []
+
+    def executor(stage_id, stage_dir, current_spec):
+        calls.append(stage_id)
+        payload = _payload(stage_id, current_spec)
+        if stage_id == "optical_replay":
+            for row in payload["control_results"]:
+                if row["control_id"] == "convection":
+                    row["passed"] = False
+        return payload
+
+    result = run_thermo_optomechanical_replay(spec, root, attempt=1, stage_executor=executor)
+
+    assert result["summary"]["scientific_disposition"] == "rejected"
+    assert "control_matrix_failed" in result["summary"]["reason_codes"]
+    rows = read_thermo_optomechanical_stage_rows(
+        root / "thermo_optomechanical_stages.jsonl", spec, artifact_root=root
+    )
+    optical = next(row for row in rows if row["stage_id"] == "optical_replay")
+    failed = [
+        item
+        for item in _load_stage_evidence_public(root, "optical_replay")["control_results"]
+        if item["control_id"] == "convection"
+    ]
+    assert failed and failed[0]["passed"] is False
+    assert optical["execution_state"] == "completed"
+
+    resumed = run_thermo_optomechanical_replay(spec, root, attempt=2, stage_executor=executor)
+    assert resumed["summary"]["scientific_disposition"] == "rejected"
+    assert calls.count("optical_replay") == 1
+
+
+def _load_stage_evidence_public(root, stage_id):
+    import json as _json
+
+    return _json.loads((root / stage_id / "evidence.json").read_text(encoding="utf-8"))["payload"]
+
+
+@pytest.mark.parametrize("repeat_failure", [False, True])
+def test_cold_heat_logging_load_retries_once_after_clearing_partial_model(repeat_failure):
+    from types import SimpleNamespace
+
+    from comsol_mcp.jobs.thermo_optomechanical_replay_execution import (
+        ThermoOptomechanicalComsolExecutor,
+    )
+
+    class ColdLoggingError(Exception):
+        def stacktrace(self):
+            return (
+                "org.slf4j.impl.SLF4JLoggerFactory.getSLF4JLoggerFactory\n"
+                "com.comsol.heat.util.ashrae.AmbientPropertiesUtil"
+            )
+
+    calls = []
+    model = object()
+
+    def load(path):
+        calls.append(("load", path))
+        if len(calls) == 1 or repeat_failure:
+            raise ColdLoggingError("physics initialization failed")
+        return model
+
+    executor = ThermoOptomechanicalComsolExecutor.__new__(ThermoOptomechanicalComsolExecutor)
+    executor.client = SimpleNamespace(load=load, clear=lambda: calls.append(("clear",)))
+    if repeat_failure:
+        with pytest.raises(ColdLoggingError):
+            executor._load_model(Path("checkpoint.mph"))
+    else:
+        assert executor._load_model(Path("checkpoint.mph")) is model
+    assert calls == [("load", "checkpoint.mph"), ("clear",), ("load", "checkpoint.mph")]
+
+
+@pytest.mark.parametrize("trace", [None, "unrelated error", "com.comsol.heat.util.ashrae"])
+def test_model_load_does_not_retry_other_failures(trace):
+    from types import SimpleNamespace
+
+    from comsol_mcp.jobs.thermo_optomechanical_replay_execution import (
+        ThermoOptomechanicalComsolExecutor,
+    )
+
+    error = RuntimeError("load failed")
+    if trace is not None:
+        error.stacktrace = lambda: trace
+    calls = []
+
+    def load(path):
+        calls.append(path)
+        raise error
+
+    executor = ThermoOptomechanicalComsolExecutor.__new__(ThermoOptomechanicalComsolExecutor)
+    executor.client = SimpleNamespace(load=load, clear=lambda: calls.append("clear"))
+    with pytest.raises(RuntimeError, match="load failed"):
+        executor._load_model(Path("checkpoint.mph"))
+    assert calls == ["checkpoint.mph"]
+
+
+def test_summary_rejects_on_retained_nonpassive_measurements(ascii_tmp_path):
+    """C081-08: finite unphysical rows stay durable and reject the summary."""
+    spec = normalize_thermo_optomechanical_replay_spec(
+        _raw_spec(ascii_tmp_path / "nonpassive-summary")
+    )
+
+    def executor(stage_id, _stage_dir, stage_spec):
+        payload = _payload(stage_id, stage_spec)
+        if stage_id == "optical_replay":
+            payload["rows"][0]["deformed_rta"]["R"] = 1.2
+            payload["rows"][0]["deformed_rta"]["T"] = 0.1
+            payload["rows"][0]["deformed_rta"]["A"] = -0.3
+            payload["rows"][0]["deformed_rta"]["closure_residual"] = 0.0
+        return payload
+
+    root = ascii_tmp_path / "nonpassive-summary" / "job"
+    result = run_thermo_optomechanical_replay(spec, root, attempt=1, stage_executor=executor)
+
+    summary = result["summary"]
+    assert summary["scientific_disposition"] == "rejected"
+    assert "optical_rta_nonpassive" in summary["reason_codes"]
+    # The measured rows themselves survive as durable stage evidence.
+    optical = (root / "optical_replay" / "evidence.json").read_text(encoding="utf-8")
+    assert '"measured_gate_failed"' in optical
+    assert '"R": 1.2' in optical

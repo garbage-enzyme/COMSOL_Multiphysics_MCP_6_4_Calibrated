@@ -203,6 +203,9 @@ def test_public_preview_and_submit_reach_native_matrix_without_a_solver(
     ascii_tmp_path, monkeypatch, gradients
 ):
     monkeypatch.setattr("comsol_mcp.platform_support.native_solver_enabled", lambda: True)
+    # Typed public specs are path-contained since 0.8.1: the synthetic
+    # source must live inside an allowed model read root.
+    monkeypatch.setenv("COMSOL_MCP_MODEL_READ_ROOTS", str(ascii_tmp_path))
     raw = _raw(ascii_tmp_path) if gradients else _forward_raw(ascii_tmp_path)
     received = []
 
