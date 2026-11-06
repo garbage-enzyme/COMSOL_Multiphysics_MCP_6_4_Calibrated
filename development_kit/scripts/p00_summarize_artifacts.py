@@ -64,9 +64,7 @@ def main() -> int:
     refusals = [r for r in runs if "refused" in r]
 
     idle_by_variant: dict[str, list[float]] = defaultdict(list)
-    latency_by_variant: dict[str, dict[str, list[float]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
+    latency_by_variant: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     threads_by_variant: dict[str, list[int]] = defaultdict(list)
 
     def variant_label(run: dict[str, Any]) -> str:
@@ -101,9 +99,7 @@ def main() -> int:
         stages = run.get("stages") or []
         if stages:
             import_table[run["stage_label"]] = {
-                "tree_private_commit_mb": round(
-                    stages[0]["tree_private_commit_bytes"] / 2**20, 1
-                ),
+                "tree_private_commit_mb": round(stages[0]["tree_private_commit_bytes"] / 2**20, 1),
                 "variant": run["variant"],
             }
 
@@ -127,23 +123,23 @@ def main() -> int:
         },
         "settings_identity": {
             "variants": sorted({r["variant"] for r in server_runs}),
-            "settings_files": sorted(
-                p.name for p in root.glob("settings-*.json")
-            ),
+            "settings_files": sorted(p.name for p in root.glob("settings-*.json")),
             "lexical_index": "D:/comsol_docs_fts/manuals.sqlite3 (read-only reference)",
             "manuals_root": "D:/COMSOL64/Multiphysics/doc",
             "runtime_isolation": "evidence-root runtime dir per variant",
         },
         "scenario_definitions": {
-            "server": "installed comsol-mcp.exe over MCP stdio; stages spawned/initialize/discovery/first-call/warm-call/10s-idle/disconnect; launches per variant recorded in runs.jsonl",
+            "server": (
+                "installed comsol-mcp.exe over MCP stdio; stages spawned/initialize/"
+                "discovery/first-call/warm-call/10s-idle/disconnect; launches per "
+                "variant recorded in runs.jsonl"
+            ),
             "import": "fresh -I child per import stage; steady snapshot after 4 s",
             "live_census": "read-only census of production 0.7.8 hosts (census-live-20261106.json)",
         },
         "policy": {
             "commit_ceiling": 0.75,
-            "refused_runs": [
-                {"run_id": r["run_id"], "reason": r["refused"]} for r in refusals
-            ],
+            "refused_runs": [{"run_id": r["run_id"], "reason": r["refused"]} for r in refusals],
         },
         "run_counts": {
             "server_runs": len(server_runs),
@@ -172,22 +168,36 @@ def main() -> int:
             for variant, values in idle_by_variant.items()
         },
         "mechanism": {
-            "vm_probe": "vm-probe-4288.json: 1583.5 MB committed private in ~50 contiguous 32.0 MB RW regions",
+            "vm_probe": (
+                "vm-probe-4288.json: 1583.5 MB committed private in ~50 contiguous "
+                "32.0 MB RW regions"
+            ),
             "bounded_slope": "33.7 MB per BLAS thread (OPENBLAS_NUM_THREADS 1 vs 4 probes)",
             "numpy_pool_mb": 703,
             "scipy_pool_mb": 773,
-            "importer": "comsol_mcp.native_runtime.NATIVE_RUNTIME_MANIFEST preloads numpy, scipy, scipy.optimize, scipy.interpolate, scipy.spatial before the event loop for every non-offline profile",
-            "corpus_finding": "manuals/lexical features show no measurable idle-commit difference (wave-nolex and wave-nomanual equal prod-like within noise)",
-            "profile_finding": "core profile server equals prod-like idle because the native preload, not profile registration, imports the BLAS chain",
+            "importer": (
+                "comsol_mcp.native_runtime.NATIVE_RUNTIME_MANIFEST preloads numpy, scipy, "
+                "scipy.optimize, scipy.interpolate, scipy.spatial before the event loop "
+                "for every non-offline profile"
+            ),
+            "corpus_finding": (
+                "manuals/lexical features show no measurable idle-commit difference "
+                "(wave-nolex and wave-nomanual equal prod-like within noise)"
+            ),
+            "profile_finding": (
+                "core profile server equals prod-like idle because the native preload, "
+                "not profile registration, imports the BLAS chain"
+            ),
         },
         "uncertainty": {
             "launch_spread_prod_like_mb": mean_std(mb(prod_idle)),
-            "threads_python_child_prod_like": sorted(
-                set(threads_by_variant.get("prod-like", []))
-            ),
+            "threads_python_child_prod_like": sorted(set(threads_by_variant.get("prod-like", []))),
             "unresolved": [
                 "exact per-pool thread split between the two vendored OpenBLAS runtimes",
-                "long-lived host growth to 3087.8 MB (JVM started once in-session) is not attributed here",
+                (
+                    "long-lived host growth to 3087.8 MB (JVM started once in-session) "
+                    "is not attributed here"
+                ),
             ],
         },
         "p01_levers": {
@@ -199,7 +209,10 @@ def main() -> int:
                 if blas1_idle and prod_idle
                 else None,
             },
-            "lazy_native_preload": "contradicts the deliberate preload policy; plan requires keeping event-loop-blocking imports on preload paths or bounded workers",
+            "lazy_native_preload": (
+                "contradicts the deliberate preload policy; plan requires keeping "
+                "event-loop-blocking imports on preload paths or bounded workers"
+            ),
         },
     }
 
@@ -210,7 +223,11 @@ def main() -> int:
             variant: {key: mean_std(values) for key, values in keys.items()}
             for variant, keys in latency_by_variant.items()
         },
-        "notes": "initialize_s includes server cold registration when the client connects before registration completes; see stage timestamps in process-samples.jsonl for spawn-to-ready deltas",
+        "notes": (
+            "initialize_s includes server cold registration when the client connects "
+            "before registration completes; see stage timestamps in "
+            "process-samples.jsonl for spawn-to-ready deltas"
+        ),
     }
 
     STAGE_FALLBACK = (
@@ -232,8 +249,7 @@ def main() -> int:
     four_session = [
         r
         for r in server_runs
-        if r.get("sessions", 1) == 4
-        and not any("error" in s for s in r["session_results"])
+        if r.get("sessions", 1) == 4 and not any("error" in s for s in r["session_results"])
     ]
     four_idle_by_variant: dict[str, list[float]] = defaultdict(list)
     ceiling_overrides: list[dict[str, Any]] = []
@@ -245,7 +261,9 @@ def main() -> int:
                 {
                     "run_id": run["session_results"][0]["run_id"],
                     "effective_ceiling": run["ceiling_override"],
-                    "authority": "caller manual authorization 2026-11-06 (recursive idle-memory deadlock)",
+                    "authority": (
+                        "caller manual authorization 2026-11-06 (recursive idle-memory deadlock)"
+                    ),
                 }
             )
     target = {
@@ -255,7 +273,10 @@ def main() -> int:
             "single_host_idle_private_commit_mb_max": 200,
             "four_client_aggregate_idle_private_commit_mb_max": 750,
             "first_call_latency_regression_s_max": 0.5,
-            "basis": "prod-like-blas1 measured idle (mean %.1f MB per host); measured four-session aggregates below"
+            "basis": (
+                "prod-like-blas1 measured idle (mean %.1f MB per host); "
+                "measured four-session aggregates below"
+            )
             % (stats.mean(blas1_idle) / 2**20 if blas1_idle else -1),
             "measured_four_session_aggregate_mb": {
                 variant: mb(values) for variant, values in four_idle_by_variant.items()
@@ -268,7 +289,10 @@ def main() -> int:
             "Batch B/P01 implementation proceeds against the draft numbers."
         ),
         "ceiling_overrides_recorded": ceiling_overrides,
-        "rule": "targets are frozen only after caller acceptance; no implementation comparison starts before that",
+        "rule": (
+            "targets are frozen only after caller acceptance; no implementation "
+            "comparison starts before that"
+        ),
     }
 
     for name, payload in (

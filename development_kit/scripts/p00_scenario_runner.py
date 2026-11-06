@@ -103,7 +103,10 @@ LEXICAL_INDEX = "D:/comsol_docs_fts/manuals.sqlite3"
 VARIANTS: dict[str, Variant] = {
     "prod-like": Variant("prod-like", "wave_optics", MANUALS_ROOT, True),
     "prod-like-blas1": Variant(
-        "prod-like-blas1", "wave_optics", MANUALS_ROOT, True,
+        "prod-like-blas1",
+        "wave_optics",
+        MANUALS_ROOT,
+        True,
         {"OPENBLAS_NUM_THREADS": "1"},
     ),
     "wave-nolex": Variant("wave-nolex", "wave_optics", MANUALS_ROOT, False),
@@ -248,9 +251,7 @@ def descendants(root_pid: int) -> list[psutil.Process]:
     return found
 
 
-def snapshot_tree(
-    run_id: str, stage: str, root_pid: int, writer: SampleWriter
-) -> dict[str, Any]:
+def snapshot_tree(run_id: str, stage: str, root_pid: int, writer: SampleWriter) -> dict[str, Any]:
     """Sample one process tree plus machine state at a named stage."""
     machine = machine_commit()
     identities: list[dict[str, Any]] = []
@@ -261,16 +262,14 @@ def snapshot_tree(
     for proc in descendants(root_pid):
         try:
             identities.append(process_identity(proc))
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+        except psutil.NoSuchProcess, psutil.AccessDenied:
             continue
     writer.write(run_id, stage, identities, machine)
     return {
         "stage": stage,
         "captured_at_utc": utc_now(),
         "process_count": len(identities),
-        "tree_private_commit_bytes": sum(
-            p["private_commit_bytes"] or 0 for p in identities
-        ),
+        "tree_private_commit_bytes": sum(p["private_commit_bytes"] or 0 for p in identities),
         "machine_commit_fraction": machine["commit_fraction"],
     }
 
@@ -294,9 +293,9 @@ def preflight(
         per_session = int(_PER_SESSION_OVERRIDE_MB * 1_000_000)
     elif variant is not None and variant.env.get("OPENBLAS_NUM_THREADS") == "1":
         per_session = 300_000_000
-    predicted = (
-        machine["commit_total_bytes"] + sessions * per_session
-    ) / machine["commit_limit_bytes"]
+    predicted = (machine["commit_total_bytes"] + sessions * per_session) / machine[
+        "commit_limit_bytes"
+    ]
     if machine["commit_fraction"] > ceiling:
         machine["refusal"] = "commit_fraction_above_ceiling"
     elif solvers:
@@ -315,9 +314,10 @@ async def wait_for_server_tree(timeout_s: float = 20.0) -> int | None:
         for proc in descendants(os.getpid()):
             try:
                 cmdline = " ".join(proc.cmdline() or []).lower()
-            except Exception:
+                name = (proc.name() or "").lower()
+            except psutil.NoSuchProcess, psutil.AccessDenied:
                 continue
-            if "comsol-mcp" in (proc.name() or "").lower() or "comsol-mcp" in cmdline or "comsol_mcp.server" in cmdline:
+            if "comsol-mcp" in name or "comsol-mcp" in cmdline or "comsol_mcp.server" in cmdline:
                 return proc.pid
         await asyncio.sleep(0.2)
     return None
@@ -370,9 +370,7 @@ async def drive_session(
     latencies: dict[str, Any] = {}
     stages: list[dict[str, Any]] = []
     errlog = open(errlog_path, "ab")
-    params = StdioServerParameters(
-        command=command, args=server_args or [], env=env, errlog=errlog
-    )
+    params = StdioServerParameters(command=command, args=server_args or [], env=env, errlog=errlog)
     async with stdio_client(params) as (reader, writer_transport):
         server_pid = await wait_for_server_tree()
         latencies["server_tree_root_pid"] = server_pid
@@ -396,9 +394,7 @@ async def drive_session(
             stages.append(snapshot_tree(run_id, "after_discovery", server_pid, writer))
 
             start = time.perf_counter()
-            first = await asyncio.wait_for(
-                session.call_tool("capabilities", {}), timeout=120
-            )
+            first = await asyncio.wait_for(session.call_tool("capabilities", {}), timeout=120)
             latencies["first_call_s"] = round(time.perf_counter() - start, 4)
             latencies["first_call_ok"] = not getattr(
                 first, "is_error", getattr(first, "isError", True)
@@ -406,9 +402,7 @@ async def drive_session(
             stages.append(snapshot_tree(run_id, "after_first_call", server_pid, writer))
 
             start = time.perf_counter()
-            warm = await asyncio.wait_for(
-                session.call_tool("capabilities", {}), timeout=120
-            )
+            warm = await asyncio.wait_for(session.call_tool("capabilities", {}), timeout=120)
             latencies["warm_call_s"] = round(time.perf_counter() - start, 4)
             latencies["warm_call_ok"] = not getattr(
                 warm, "is_error", getattr(warm, "isError", True)
@@ -499,10 +493,10 @@ async def run_server_scenario(
             "server_args": server_args or [],
             "settings_path": str(settings_path),
             "env_overrides": variant.env,
-                "machine_before": machine,
-                "machine_after": machine_commit(),
-                "ceiling_override": None if args.ceiling == COMMIT_CEILING else args.ceiling,
-                "session_results": results,
+            "machine_before": machine,
+            "machine_after": machine_commit(),
+            "ceiling_override": None if args.ceiling == COMMIT_CEILING else args.ceiling,
+            "session_results": results,
         }
         append_run_summary(root, result)
         print(f"DONE {run_id}: " + json.dumps(result.get("latencies", {})))
@@ -517,8 +511,14 @@ IMPORT_STAGES: list[tuple[str, str]] = [
     ("numpy", "import numpy" + HOLD_SUFFIX),
     ("numpy-scipy", "import numpy, scipy.interpolate" + HOLD_SUFFIX),
     ("server-import", "import comsol_mcp.server" + HOLD_SUFFIX),
-    ("register-wave", "import comsol_mcp.server as s; s.register_all_tools(profile='wave_optics')" + HOLD_SUFFIX),
-    ("register-core", "import comsol_mcp.server as s; s.register_all_tools(profile='core')" + HOLD_SUFFIX),
+    (
+        "register-wave",
+        "import comsol_mcp.server as s; s.register_all_tools(profile='wave_optics')" + HOLD_SUFFIX,
+    ),
+    (
+        "register-core",
+        "import comsol_mcp.server as s; s.register_all_tools(profile='core')" + HOLD_SUFFIX,
+    ),
 ]
 
 
