@@ -260,6 +260,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/tests/semantic_test_support.py` — The module provides sanitized subprocess environments for semantic isolation tests.
 - `development_kit/tests/test_compatibility_registry.py` — The module solver-free tests the compatibility/skill registry matrix, hashes, and cold discovery.
 - `development_kit/tests/test_deployment_identity.py` — The tests cover package version, build identity, and fresh-process deployment consistency.
+- `development_kit/tests/test_discovery_manifest.py` — The tests cover discovery-manifest capture determinism, freshness bindings, tamper refusal, pagination coverage, hash-seed independence, and byte equality with the real stdio server.
 - `development_kit/tests/test_derived_geometry.py` — The tests cover typed derived-geometry edits without COMSOL.
 - `development_kit/tests/test_durable_job_control_plane.py` — The tests cover durable submission, reconciliation, status, cancellation, and resume behavior.
 - `development_kit/tests/test_durable_primitives.py` — The tests cover versioned canonical bytes, bounded hashing, atomic writes, and row recovery.
@@ -488,6 +489,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `comsol_mcp/surrogate/splits.py` — The module assigns whole leakage groups to disjoint train, validation, test, and scientific-holdout splits deterministically and detects declared leakage classes.
 - `comsol_mcp/compatibility_manifest.json` — The file declares exact licensed, dependency-only, and unknown runtime compatibility.
 - `comsol_mcp/deployment_manifest.json` — The file binds deployment identity to frozen tool and profile snapshots.
+- `comsol_mcp/discovery_manifest.py` — The module records the exact JSON-RPC discovery bytes for one startup configuration through the MCP SDK transport, binds them to package, interpreter, dependency, settings, and environment identities, and refuses stale or tampered manifests. It serves Python-free discovery in the planned Rust shim and never carries live state.
 - `comsol_mcp/environment_identity.py` — The module reports redacted Python, platform, dependency, and optional-feature identity.
 - `comsol_mcp/operation_arbiter.py` — The module serializes COMSOL-bound calls with a durable exact-process lock.
 - `comsol_mcp/path_policy.py` — The module enforces configured model-read and owned ASCII artifact roots.
