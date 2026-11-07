@@ -16,6 +16,7 @@ import psutil
 
 from comsol_mcp.durable.io import atomic_write_json, read_file_bytes_bounded
 from comsol_mcp.jobs.store import JobLock, process_identity, process_identity_state
+from comsol_mcp.process_launch import popen_independent_owner
 
 from .builder import EXECUTABLE_NAME
 from .inspection import (
@@ -199,10 +200,10 @@ def launch_standalone_campaign(
     ]
     flags = 0
     if os.name == "nt":
-        flags = (
-            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            | getattr(subprocess, "DETACHED_PROCESS", 0)
+        # A hidden console, not DETACHED_PROCESS: console children of a
+        # console-less process would each open a visible terminal window.
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
+            subprocess, "CREATE_NO_WINDOW", 0
         )
     try:
         lock_path = deployment / "assets" / "locks" / "mcp-launches.lock"
@@ -230,7 +231,8 @@ def launch_standalone_campaign(
                 stdout_path.open("xb", buffering=0) as stdout,
                 stderr_path.open("xb", buffering=0) as stderr,
             ):
-                process = popen_factory(
+                process, _breakaway = popen_independent_owner(
+                    popen_factory,
                     command,
                     cwd=deployment,
                     stdin=subprocess.DEVNULL,

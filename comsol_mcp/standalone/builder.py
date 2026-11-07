@@ -110,6 +110,7 @@ def _run_compiler_bounded(
             stderr=stderr_file,
             timeout=BUILD_TIMEOUT_SECONDS,
             check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         )
         stdout_file.seek(0)
         stdout = stdout_file.read(MAX_BUILD_LOG_BYTES + 1)

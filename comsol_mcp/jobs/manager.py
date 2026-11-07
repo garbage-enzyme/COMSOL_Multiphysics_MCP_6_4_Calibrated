@@ -18,6 +18,8 @@ from typing import Any, Callable, Protocol
 
 import psutil
 
+from comsol_mcp.process_launch import popen_independent_owner
+
 from .adjoint_optimization import expand_adjoint_optimization_manifest
 from .attached_backend import normalize_attached_execution_backend
 from .process_control import inspect_identity
@@ -388,6 +390,23 @@ def _verify_source_identities(spec: dict[str, Any]) -> None:
                 digest.update(chunk)
         if digest.hexdigest() != source["source_model_sha256"]:
             raise ValueError("Refusing resume because immutable source SHA-256 changed")
+
+
+def _detached_creation_flags() -> int:
+    """Creation flags for a worker that outlives its host without any window.
+
+    A new process group keeps the host's console control events away. A new
+    hidden console (CREATE_NO_WINDOW) replaces DETACHED_PROCESS: a process
+    with no console at all makes every console child it starts (for example
+    the interpreter behind a virtual-environment launcher) allocate a fresh
+    visible console, which the default terminal opens as a focus-stealing
+    window. Children of a hidden console inherit it and stay invisible.
+    """
+    if os.name != "nt":
+        return 0
+    return getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
+        subprocess, "CREATE_NO_WINDOW", 0
+    )
 
 
 _DETACHED_PROCESS_LOCK = threading.Lock()
@@ -1602,15 +1621,10 @@ class JobManager:
     def _launch_worker(self, job_id: str, module: str) -> dict[str, Any]:
         directory = self.store.job_dir(job_id)
         command = [sys.executable, "-m", module, str(self.store.root), job_id]
-        flags = 0
-        if os.name == "nt":
-            flags = (
-                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                | getattr(subprocess, "DETACHED_PROCESS", 0)
-            )
+        flags = _detached_creation_flags()
         with (directory / "worker.log").open("ab", buffering=0) as log:
-            process = subprocess.Popen(  # noqa: S603 - fixed interpreter/module argv
+            process, _breakaway = popen_independent_owner(
+                subprocess.Popen,
                 command,
                 stdin=subprocess.DEVNULL,
                 stdout=log,
@@ -1698,14 +1712,11 @@ class JobManager:
             str(attempt),
             repr(deadline),
         ]
-        flags = 0
-        if os.name == "nt":
-            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
-                subprocess, "DETACHED_PROCESS", 0
-            )
+        flags = _detached_creation_flags()
         try:
             with (directory / "worker.log").open("ab", buffering=0) as log:
-                process = subprocess.Popen(  # noqa: S603 - fixed interpreter/module argv
+                process, _breakaway = popen_independent_owner(
+                    subprocess.Popen,
                     command,
                     stdin=subprocess.DEVNULL,
                     stdout=log,
@@ -1833,13 +1844,10 @@ class JobManager:
             str(self.cancel_grace_seconds),
             str(self.cancel_terminate_seconds),
         ]
-        flags = 0
-        if os.name == "nt":
-            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
-                subprocess, "DETACHED_PROCESS", 0
-            )
+        flags = _detached_creation_flags()
         with (directory / "worker.log").open("ab", buffering=0) as log:
-            process = subprocess.Popen(  # noqa: S603 - fixed interpreter/module argv
+            process, _breakaway = popen_independent_owner(
+                subprocess.Popen,
                 command,
                 stdin=subprocess.DEVNULL,
                 stdout=log,

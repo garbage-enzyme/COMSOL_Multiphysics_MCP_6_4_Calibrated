@@ -5,12 +5,20 @@
 //! shim's lifetime, so the worker tree dies with the shim even on a hard
 //! kill of the shim process. Graceful shutdown still closes the worker
 //! stdin first; closing the job handle is the final, tree-wide kill.
+//!
+//! The job also sets `JOB_OBJECT_LIMIT_BREAKAWAY_OK`. Only a process created
+//! with an explicit `CREATE_BREAKAWAY_FROM_JOB` leaves the job; the worker
+//! requests it solely for the independent owners the 0.8.1 runtime contract
+//! (section 8) keeps alive across a host exit: durable job workers, their
+//! watchdog and cancel coordinator, the standalone driver, and the settings
+//! window. Every other descendant stays contained.
 
 #![cfg(windows)]
 
 use std::os::windows::io::AsRawHandle;
 use std::process::Child;
 
+const JOB_OBJECT_LIMIT_BREAKAWAY_OK: u32 = 0x0800;
 const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
 const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
 
@@ -74,7 +82,7 @@ impl JobHandle {
             let mut information = ExtendedLimitInformation {
                 per_process_user_time_limit: 0,
                 per_job_user_time_limit: 0,
-                limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+                limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK,
                 minimum_working_set_size: 0,
                 maximum_working_set_size: 0,
                 active_process_limit: 0,

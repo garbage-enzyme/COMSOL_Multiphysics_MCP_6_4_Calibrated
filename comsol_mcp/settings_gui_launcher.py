@@ -15,6 +15,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any
 
+from comsol_mcp.process_launch import popen_independent_owner
 from comsol_mcp.settings import resolve_settings_location
 from comsol_mcp.utils.runtime_paths import default_runtime_dir
 from settings_gui import GUI_RELEASE
@@ -238,7 +239,10 @@ def launch_settings_gui(
         subprocess, "DETACHED_PROCESS", 0
     )
     try:
-        process = popen_factory(
+        # The settings window must survive closing the agent session that
+        # opened it (the MCP Connection tab asks the user to do exactly that).
+        process, _breakaway = popen_independent_owner(
+            popen_factory,
             command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

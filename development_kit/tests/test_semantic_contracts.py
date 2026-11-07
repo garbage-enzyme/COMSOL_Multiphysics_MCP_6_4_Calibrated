@@ -537,7 +537,7 @@ sys.addaudithook(
 )
 process = subprocess.Popen(
     [sys.executable, '-c', 'pass'],
-    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW,
 )
 process.wait(timeout=10)
 print(json.dumps(events))

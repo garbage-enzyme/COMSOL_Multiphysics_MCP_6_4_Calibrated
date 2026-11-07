@@ -659,6 +659,9 @@ def run_bounded(operation: str, arguments: dict, timeout: float) -> dict:
             capture_output=True,
             timeout=max(0.05, float(timeout)),
             check=False,
+            # A hidden console: a host without a console must not make this
+            # console worker open a visible terminal window.
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         )
     except subprocess.TimeoutExpired:
         return {
