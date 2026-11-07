@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -57,11 +58,19 @@ def test_transport_python_round_trips(_isolated_settings):
     assert load_settings()["transport"] == "python"
 
 
+PLATFORM = (
+    "x86_64-pc-windows-msvc" if os.name == "nt" else "x86_64-unknown-linux-gnu"
+)
+RUNTIME_FIXTURE = (
+    "D:/mcp_tests/runtime-fixture" if os.name == "nt" else "/srv/comsol-mcp/runtime-fixture"
+)
 VALID_BINARY = {
-    "path": "D:/shim/comsol-mcp-shim.exe",
+    "path": (
+        "D:/shim/comsol-mcp-shim.exe" if os.name == "nt" else "/opt/shim/comsol-mcp-shim"
+    ),
     "sha256": "a" * 64,
     "version": "0.8.2-dev",
-    "platform": "x86_64-pc-windows-msvc",
+    "platform": PLATFORM,
 }
 
 
@@ -69,7 +78,7 @@ def _shim_document(settings_path, **overrides) -> dict:
     path = settings_path
     document = json.loads(path.read_text(encoding="utf-8"))
     document["transport"] = "shim"
-    document["runtime"] = {"directory": "D:/mcp_tests/runtime-fixture"}
+    document["runtime"] = {"directory": RUNTIME_FIXTURE}
     document["shim_binary"] = dict(VALID_BINARY)
     for key, value in overrides.items():
         if key == "runtime_directory":
