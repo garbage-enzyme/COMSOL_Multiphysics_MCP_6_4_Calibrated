@@ -68,26 +68,74 @@ msgstr "File not found."
 msgid "SHA-256 mismatch. Check the published hash."
 msgstr "SHA-256 mismatch. Check the published hash."
 
-msgid "Verified. SHA-256 matches. Version: {version}"
-msgstr "Verified. SHA-256 matches. Version: {version}"
-
 msgid "Switch transport"
 msgstr "Switch transport"
 
-msgid "Before switching, close every agent session that uses this server (including the one that opened this window). The button refuses while any server process is running."
-msgstr "Before switching, close every agent session that uses this server (including the one that opened this window). The button refuses while any server process is running."
+msgid "The standalone program path must be absolute."
+msgstr "The standalone program path must be absolute."
 
-msgid "Refused: server processes are still running. Close them and try again."
-msgstr "Refused: server processes are still running. Close them and try again."
+msgid "The file cannot be read."
+msgstr "The file cannot be read."
 
-msgid "Rust shim mode requires a standalone program path and SHA-256."
-msgstr "Rust shim mode requires a standalone program path and SHA-256."
+msgid "Enter the published SHA-256 first."
+msgstr "Enter the published SHA-256 first."
+
+msgid "The program did not run to report its version."
+msgstr "The program did not run to report its version."
+
+msgid "Unrecognized program: it is not a shim binary."
+msgstr "Unrecognized program: it is not a shim binary."
+
+msgid "Version mismatch: this program is {found}, the package expects {expected}."
+msgstr "Version mismatch: this program is {found}, the package expects {expected}."
+
+msgid "Platform mismatch: this program targets {found}; this computer needs {expected}."
+msgstr "Platform mismatch: this program targets {found}; this computer needs {expected}."
+
+msgid "Verified. SHA-256, version and platform match. Version: {version} ({platform})"
+msgstr "Verified. SHA-256, version and platform match. Version: {version} ({platform})"
+
+msgid "Current state"
+msgstr "Current state"
+
+msgid "Configured mode: {mode}"
+msgstr "Configured mode: {mode}"
+
+msgid "Verified active host: {mode} (a restart is required for the configured mode)"
+msgstr "Verified active host: {mode} (a restart is required for the configured mode)"
+
+msgid "Verified active host: none"
+msgstr "Verified active host: none"
+
+msgid "Active host: UNKNOWN ({parts})"
+msgstr "Active host: UNKNOWN ({parts})"
+
+msgid "Verified active hosts: {parts}"
+msgstr "Verified active hosts: {parts}"
+
+msgid "Before switching, close every agent session that uses this server (including the one that opened this window). The button refuses while any server process is running or any state is UNKNOWN."
+msgstr "Before switching, close every agent session that uses this server (including the one that opened this window). The button refuses while any server process is running or any state is UNKNOWN."
+
+msgid "Save or discard the other changes before switching transport."
+msgstr "Save or discard the other changes before switching transport."
+
+msgid "Refused: the standalone program must pass verification before switching to Rust shim mode."
+msgstr "Refused: the standalone program must pass verification before switching to Rust shim mode."
+
+msgid "Refused: server processes are still running ({found}). Close them and try again."
+msgstr "Refused: server processes are still running ({found}). Close them and try again."
+
+msgid "Refused: the running state is UNKNOWN ({found}). Resolve it (or grant access) and try again."
+msgstr "Refused: the running state is UNKNOWN ({found}). Resolve it (or grant access) and try again."
+
+msgid "Refused: the change is not valid ({detail})."
+msgstr "Refused: the change is not valid ({detail})."
+
+msgid "Saved: configured mode is now {mode}. It becomes active only after an agent client starts it; this window does not claim it is active."
+msgstr "Saved: configured mode is now {mode}. It becomes active only after an agent client starts it; this window does not claim it is active."
 
 msgid "Confirm transport switch"
 msgstr "Confirm transport switch"
-
-msgid "Transport set to {mode}. It takes effect on next start."
-msgstr "Transport set to {mode}. It takes effect on next start."
 
 msgid "Choose how agent clients connect to the COMSOL MCP server. Switching requires a dedicated confirmation and only takes effect after every agent session closes and restarts."
 msgstr "Choose how agent clients connect to the COMSOL MCP server. Switching requires a dedicated confirmation and only takes effect after every agent session closes and restarts."
@@ -397,6 +445,12 @@ msgstr "Absolute path to the shim binary. Required when transport is 'shim'."
 
 msgid "Expected SHA-256 of the shim binary. Required when transport is 'shim'."
 msgstr "Expected SHA-256 of the shim binary. Required when transport is 'shim'."
+
+msgid "Version the verified shim binary reports. Set by the switch confirmation."
+msgstr "Version the verified shim binary reports. Set by the switch confirmation."
+
+msgid "Target triple the verified shim binary reports. Set by the switch confirmation."
+msgstr "Target triple the verified shim binary reports. Set by the switch confirmation."
 
 msgid "Enter a valid absolute path or clear this setting."
 msgstr "Enter a valid absolute path or clear this setting."

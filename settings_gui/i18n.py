@@ -42,15 +42,32 @@ MESSAGE_IDS = (
     "Enter the standalone program path first.",
     "File not found.",
     "SHA-256 mismatch. Check the published hash.",
-    "Verified. SHA-256 matches. Version: {version}",
     "Switch transport",
-    "Before switching, close every agent session that uses this "
-    "server (including the one that opened this window). The "
-    "button refuses while any server process is running.",
-    "Refused: server processes are still running. Close them and try again.",
-    "Rust shim mode requires a standalone program path and SHA-256.",
+    "The standalone program path must be absolute.",
+    "The file cannot be read.",
+    "Enter the published SHA-256 first.",
+    "The program did not run to report its version.",
+    "Unrecognized program: it is not a shim binary.",
+    "Version mismatch: this program is {found}, the package expects {expected}.",
+    "Platform mismatch: this program targets {found}; this computer needs {expected}.",
+    "Verified. SHA-256, version and platform match. Version: {version} ({platform})",
+    "Current state",
+    "Configured mode: {mode}",
+    "Verified active host: {mode} (a restart is required for the configured mode)",
+    "Verified active host: none",
+    "Active host: UNKNOWN ({parts})",
+    "Verified active hosts: {parts}",
+    "Before switching, close every agent session that uses this server "
+    "(including the one that opened this window). The button refuses while "
+    "any server process is running or any state is UNKNOWN.",
+    "Save or discard the other changes before switching transport.",
+    "Refused: the standalone program must pass verification before switching to Rust shim mode.",
+    "Refused: server processes are still running ({found}). Close them and try again.",
+    "Refused: the running state is UNKNOWN ({found}). Resolve it (or grant access) and try again.",
+    "Refused: the change is not valid ({detail}).",
+    "Saved: configured mode is now {mode}. It becomes active only after an "
+    "agent client starts it; this window does not claim it is active.",
     "Confirm transport switch",
-    "Transport set to {mode}. It takes effect on next start.",
     "Choose how agent clients connect to the COMSOL MCP server. "
     "Switching requires a dedicated confirmation and only takes "
     "effect after every agent session closes and restarts.",
@@ -205,6 +222,8 @@ MESSAGE_IDS = (
     ),
     "Absolute path to the shim binary. Required when transport is 'shim'.",
     "Expected SHA-256 of the shim binary. Required when transport is 'shim'.",
+    "Version the verified shim binary reports. Set by the switch confirmation.",
+    "Target triple the verified shim binary reports. Set by the switch confirmation.",
     "Enter a valid absolute path or clear this setting.",
     "Enter an ASCII-only full path, or leave this setting empty.",
     "Enter a valid absolute path.",

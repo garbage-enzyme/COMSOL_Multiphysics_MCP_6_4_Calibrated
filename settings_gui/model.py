@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from comsol_mcp.settings import GUI_LANGUAGES, GUI_SCALES, normalize_settings_document
 from comsol_mcp.tools.profiles import PROFILE_NAMES
@@ -338,12 +338,32 @@ FIELDS = (
         True,
         help_id="Expected SHA-256 of the shim binary. Required when transport is 'shim'.",
     ),
+    FieldDescriptor(
+        "shim_binary.version",
+        "transport",
+        "text",
+        True,
+        help_id="Version the verified shim binary reports. Set by the switch confirmation.",
+    ),
+    FieldDescriptor(
+        "shim_binary.platform",
+        "transport",
+        "text",
+        True,
+        help_id="Target triple the verified shim binary reports. Set by the switch confirmation.",
+    ),
 )
 FIELD_BY_KEY = {field.key: field for field in FIELDS}
 # Keys whose widgets the transport tab builds by hand.
 # Keys whose widgets are built by hand on custom tabs (transport, about).
 # The auto-field loop skips these; validation still tracks them.
-CUSTOM_TAB_KEYS = {"transport", "shim_binary.path", "shim_binary.sha256"}
+CUSTOM_TAB_KEYS = {
+    "transport",
+    "shim_binary.path",
+    "shim_binary.sha256",
+    "shim_binary.version",
+    "shim_binary.platform",
+}
 
 # Human-readable field titles (batch I*). The key appears in grey at the
 # start of the help text, not as the label. Titles are i18n-translated.
@@ -547,6 +567,12 @@ class SettingsFormModel:
         self.document = deepcopy(self.canonical)
         self.baseline = deepcopy(self.canonical)
         self.validate()
+
+    def adopt_saved(self, document: Mapping[str, Any]) -> None:
+        """Adopt a document another save path just published as the baseline."""
+        self.document = deepcopy(dict(document))
+        self.validate()
+        self.mark_saved()
 
 
 __all__ = [

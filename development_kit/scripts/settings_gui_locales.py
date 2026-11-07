@@ -63,25 +63,14 @@ ZH_CN = {
     "Standalone program path": "独立程序路径",
     "Check program": "校验程序",
     "Enter the standalone program path first.": "请先输入独立程序路径。",
-    "Rust shim mode requires a standalone program path and SHA-256.": "Rust shim 模式需要独立程序路径和 SHA-256。",
     "Transport mode": "传输模式",
     "Python direct (default, fully compatible)": "Python 直连（默认，完全兼容）",
     "Rust shim (lower memory, experimental)": "Rust shim（低内存，实验性）",
             "SHA-256": "SHA-256 校验",
             "File not found.": "文件不存在。",
     "SHA-256 mismatch. Check the published hash.": "SHA-256 不匹配。请核对已发布的哈希值。",
-    "Verified. SHA-256 matches. Version: {version}": "校验通过。SHA-256 匹配。版本：{version}",
     "Switch transport": "切换传输方式",
-    "Before switching, close every agent session that uses this "
-    "server (including the one that opened this window). The "
-    "button refuses while any server process is running.": (
-        "切换前，请关闭所有使用本服务器的 agent 会话"
-        "（包括帮你打开本窗口的那个）。有服务器进程运行时按钮会拒绝切换。"
-    ),
-    "Refused: server processes are still running. "
-    "Close them and try again.": "已拒绝：仍有服务器进程在运行。请关闭后重试。",
         "Confirm transport switch": "确认切换传输方式",
-    "Transport set to {mode}. It takes effect on next start.": "传输方式已设为 {mode}。下次启动时生效。",
     "Choose how agent clients connect to the COMSOL MCP server. "
     "Switching requires a dedicated confirmation and only takes "
     "effect after every agent session closes and restarts.": (
@@ -167,6 +156,8 @@ ZH_CN = {
     ): "传输方式单值。'python' 保持 Python 直连入口；'shim' 选用 Rust 启动器。",
     "Absolute path to the shim binary. Required when transport is 'shim'.": "shim 二进制的绝对路径。transport 为 'shim' 时必需。",
     "Expected SHA-256 of the shim binary. Required when transport is 'shim'.": "shim 二进制的预期 SHA-256。transport 为 'shim' 时必需。",
+    "Version the verified shim binary reports. Set by the switch confirmation.": "已验证的 shim 独立程序报告的版本。由切换确认写入。",
+    "Target triple the verified shim binary reports. Set by the switch confirmation.": "已验证的 shim 独立程序报告的目标平台三元组。由切换确认写入。",
     "Enter a valid absolute path or clear this setting.": "请输入有效的绝对路径，或清空此项。",
     "Enter an ASCII-only full path, or leave this setting empty.": "请输入仅含 ASCII 字符的完整路径，或将此项留空。",
     "Enter a valid absolute path.": "请输入有效的绝对路径。",
@@ -213,6 +204,27 @@ ZH_CN = {
     "Choose or generate a valid SQLite manual index before enabling search.": "请先选择或生成有效的 SQLite 手册索引，再启用搜索。",
     "Semantic search is not ready": "语义搜索尚未就绪",
     "Enable manual search and choose valid lexical, semantic-index, and model assets first.": "请先启用手册搜索，并选择有效的词法索引、语义索引和模型资源。",
+    "The standalone program path must be absolute.": "独立程序路径必须是绝对路径。",
+    "The file cannot be read.": "无法读取该文件。",
+    "Enter the published SHA-256 first.": "请先输入已发布的 SHA-256。",
+    "The program did not run to report its version.": "该程序未能运行以报告版本。",
+    "Unrecognized program: it is not a shim binary.": "无法识别的程序：它不是 shim 独立程序。",
+    "Version mismatch: this program is {found}, the package expects {expected}.": "版本不匹配：该程序为 {found}，本软件包需要 {expected}。",
+    "Platform mismatch: this program targets {found}; this computer needs {expected}.": "平台不匹配：该程序面向 {found}；本机需要 {expected}。",
+    "Verified. SHA-256, version and platform match. Version: {version} ({platform})": "校验通过。SHA-256、版本和平台均匹配。版本：{version}（{platform}）",
+    "Current state": "当前状态",
+    "Configured mode: {mode}": "已配置的模式：{mode}",
+    "Verified active host: {mode} (a restart is required for the configured mode)": "已验证的运行中主机：{mode}（需重启后已配置的模式才生效）",
+    "Verified active host: none": "已验证的运行中主机：无",
+    "Active host: UNKNOWN ({parts})": "运行中主机：未知（{parts}）",
+    "Verified active hosts: {parts}": "已验证的运行中主机：{parts}",
+    "Before switching, close every agent session that uses this server (including the one that opened this window). The button refuses while any server process is running or any state is UNKNOWN.": "切换前，请关闭所有使用本服务器的 agent 会话（包括帮你打开本窗口的那个）。只要有服务器进程在运行或任何状态未知，按钮都会拒绝切换。",
+    "Save or discard the other changes before switching transport.": "切换传输方式前，请先保存或放弃其他修改。",
+    "Refused: the standalone program must pass verification before switching to Rust shim mode.": "已拒绝：切换到 Rust shim 模式前，独立程序必须通过校验。",
+    "Refused: server processes are still running ({found}). Close them and try again.": "已拒绝：仍有服务器进程在运行（{found}）。请关闭后重试。",
+    "Refused: the running state is UNKNOWN ({found}). Resolve it (or grant access) and try again.": "已拒绝：运行状态未知（{found}）。请先解决（或授予访问权限）后重试。",
+    "Refused: the change is not valid ({detail}).": "已拒绝：该修改无效（{detail}）。",
+    "Saved: configured mode is now {mode}. It becomes active only after an agent client starts it; this window does not claim it is active.": "已保存：已配置的模式现在是 {mode}。只有在 agent 客户端启动它之后才会生效；本窗口不会声称它已在运行。",
 }
 
 ZH_TW = {
@@ -259,25 +271,14 @@ ZH_TW = {
     "Standalone program path": "獨立程式路徑",
     "Check program": "校驗程式",
     "Enter the standalone program path first.": "請先輸入獨立程式路徑。",
-    "Rust shim mode requires a standalone program path and SHA-256.": "Rust shim 模式需要獨立程式路徑和 SHA-256。",
     "Transport mode": "傳輸模式",
     "Python direct (default, fully compatible)": "Python 直連（預設，完全相容）",
     "Rust shim (lower memory, experimental)": "Rust shim（低記憶體，實驗性）",
             "SHA-256": "SHA-256 校驗",
             "File not found.": "檔案不存在。",
     "SHA-256 mismatch. Check the published hash.": "SHA-256 不匹配。請核對已發布的雜湊值。",
-    "Verified. SHA-256 matches. Version: {version}": "校驗通過。SHA-256 匹配。版本：{version}",
     "Switch transport": "切換傳輸方式",
-    "Before switching, close every agent session that uses this "
-    "server (including the one that opened this window). The "
-    "button refuses while any server process is running.": (
-        "切換前，請關閉所有使用本伺服器的 agent 連線"
-        "（包括幫你開啟本視窗的那個）。有伺服器程序執行時按鈕會拒絕切換。"
-    ),
-    "Refused: server processes are still running. "
-    "Close them and try again.": "已拒絕：仍有伺服器程序在執行。請關閉後重試。",
         "Confirm transport switch": "確認切換傳輸方式",
-    "Transport set to {mode}. It takes effect on next start.": "傳輸方式已設為 {mode}。下次啟動時生效。",
     "Choose how agent clients connect to the COMSOL MCP server. "
     "Switching requires a dedicated confirmation and only takes "
     "effect after every agent session closes and restarts.": (
@@ -363,6 +364,8 @@ ZH_TW = {
     ): "傳輸方式單值。'python' 保持 Python 直連入口；'shim' 選用 Rust 啟動器。",
     "Absolute path to the shim binary. Required when transport is 'shim'.": "shim 二進位的絕對路徑。transport 為 'shim' 時必需。",
     "Expected SHA-256 of the shim binary. Required when transport is 'shim'.": "shim 二進位的預期 SHA-256。transport 為 'shim' 時必需。",
+    "Version the verified shim binary reports. Set by the switch confirmation.": "已驗證的 shim 獨立程式回報的版本。由切換確認寫入。",
+    "Target triple the verified shim binary reports. Set by the switch confirmation.": "已驗證的 shim 獨立程式回報的目標平台三元組。由切換確認寫入。",
     "Enter a valid absolute path or clear this setting.": "請輸入有效的絕對路徑，或清除此項。",
     "Enter an ASCII-only full path, or leave this setting empty.": "請輸入僅含 ASCII 字元的完整路徑，或將此項留空。",
     "Enter a valid absolute path.": "請輸入有效的絕對路徑。",
@@ -409,6 +412,27 @@ ZH_TW = {
     "Choose or generate a valid SQLite manual index before enabling search.": "請先選擇或產生有效的 SQLite 手冊索引，再啟用搜尋。",
     "Semantic search is not ready": "語意搜尋尚未就緒",
     "Enable manual search and choose valid lexical, semantic-index, and model assets first.": "請先啟用手冊搜尋，並選擇有效的詞彙索引、語意索引和模型資源。",
+    "The standalone program path must be absolute.": "獨立程式路徑必須是絕對路徑。",
+    "The file cannot be read.": "無法讀取該檔案。",
+    "Enter the published SHA-256 first.": "請先輸入已發布的 SHA-256。",
+    "The program did not run to report its version.": "該程式未能執行以回報版本。",
+    "Unrecognized program: it is not a shim binary.": "無法識別的程式：它不是 shim 獨立程式。",
+    "Version mismatch: this program is {found}, the package expects {expected}.": "版本不匹配：該程式為 {found}，本套件需要 {expected}。",
+    "Platform mismatch: this program targets {found}; this computer needs {expected}.": "平台不匹配：該程式面向 {found}；本機需要 {expected}。",
+    "Verified. SHA-256, version and platform match. Version: {version} ({platform})": "校驗通過。SHA-256、版本和平台皆匹配。版本：{version}（{platform}）",
+    "Current state": "目前狀態",
+    "Configured mode: {mode}": "已設定的模式：{mode}",
+    "Verified active host: {mode} (a restart is required for the configured mode)": "已驗證的執行中主機：{mode}（需重新啟動後已設定的模式才生效）",
+    "Verified active host: none": "已驗證的執行中主機：無",
+    "Active host: UNKNOWN ({parts})": "執行中主機：未知（{parts}）",
+    "Verified active hosts: {parts}": "已驗證的執行中主機：{parts}",
+    "Before switching, close every agent session that uses this server (including the one that opened this window). The button refuses while any server process is running or any state is UNKNOWN.": "切換前，請關閉所有使用本伺服器的 agent 連線（包括幫你開啟本視窗的那個）。只要有伺服器程序在執行或任何狀態未知，按鈕都會拒絕切換。",
+    "Save or discard the other changes before switching transport.": "切換傳輸方式前，請先儲存或放棄其他修改。",
+    "Refused: the standalone program must pass verification before switching to Rust shim mode.": "已拒絕：切換到 Rust shim 模式前，獨立程式必須通過校驗。",
+    "Refused: server processes are still running ({found}). Close them and try again.": "已拒絕：仍有伺服器程序在執行（{found}）。請關閉後重試。",
+    "Refused: the running state is UNKNOWN ({found}). Resolve it (or grant access) and try again.": "已拒絕：執行狀態未知（{found}）。請先解決（或授予存取權限）後重試。",
+    "Refused: the change is not valid ({detail}).": "已拒絕：該修改無效（{detail}）。",
+    "Saved: configured mode is now {mode}. It becomes active only after an agent client starts it; this window does not claim it is active.": "已儲存：已設定的模式現在是 {mode}。只有在 agent 用戶端啟動它之後才會生效；本視窗不會聲稱它已在執行。",
 }
 
 

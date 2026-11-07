@@ -49,6 +49,18 @@ LINT_TARGETS = (
     "comsol_mcp/durable",
     # 0.8.2 P03: the discovery-manifest generator is lint-clean and stays covered.
     "comsol_mcp/discovery_manifest.py",
+    # 0.8.2 §10: host admission, transport selection and their probes.
+    "comsol_mcp/host_admission.py",
+    "comsol_mcp/process_launch.py",
+    "settings_gui/transport.py",
+    "settings_gui/tests/test_transport.py",
+    "development_kit/tests/test_process_launch.py",
+    "development_kit/tests/test_detached_launch_windows.py",
+    "development_kit/scripts/shim_independent_owner_probe.py",
+    "development_kit/tests/test_host_admission.py",
+    "development_kit/scripts/shim_probe_support.py",
+    "development_kit/scripts/startup_conflict_probe.py",
+    "development_kit/scripts/ownership_gate_probe.py",
     "comsol_mcp/contracts/simulation_configuration.py",
     "comsol_mcp/contracts/thermo_optomechanical.py",
     "comsol_mcp/evidence/simulation_configuration.py",
@@ -184,6 +196,13 @@ MYPY_GROUPS = (
     (
         "comsol_mcp/durable/canonical.py",
         "comsol_mcp/durable/io.py",
+    ),
+    (
+        "--follow-imports=skip",
+        # 0.8.2 §10: host admission and the transport selector logic.
+        "comsol_mcp/host_admission.py",
+        "comsol_mcp/process_launch.py",
+        "settings_gui/transport.py",
     ),
     (
         "--follow-imports=skip",

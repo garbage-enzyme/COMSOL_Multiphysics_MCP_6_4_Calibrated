@@ -13,6 +13,8 @@ import pytest
 
 import settings_gui.app as app_module
 from comsol_mcp.settings import (
+    SETTINGS_SCHEMA,
+    SETTINGS_VERSION,
     SettingsLocation,
     default_settings_document,
     normalize_settings_document,
@@ -98,11 +100,22 @@ def _application(document: dict | None = None, *, scaling: float | None = None):
 
 
 def _field_keys(app: SettingsApplication, tab_id: str) -> list[str]:
-    return [
-        str(frame.winfo_children()[0].cget("text"))
-        for frame in app.tabs[tab_id].content.winfo_children()
-        if frame.winfo_children()
-    ]
+    """Setting keys rendered on one tab, in creation (display) order.
+
+    Labels show human-readable titles (batch I*) and feature toggles sit in
+    a labelled frame, so keys are read from the help-label registry and
+    filtered by the tab that contains each widget.
+    """
+    content = app.tabs[tab_id].content
+
+    def inside(widget) -> bool:
+        while widget is not None:
+            if widget is content:
+                return True
+            widget = widget.master
+        return False
+
+    return [key for key, label in app.help_labels.items() if inside(label)]
 
 
 def _boolean_widget(app: SettingsApplication, key: str):
@@ -135,9 +148,9 @@ def _scenario_constructs_every_tab_and_field() -> None:
             if child.winfo_class() == "TLabel"
         }
         assert "alpha8.1  |  0.8.1" in header_labels
+        # The schema identity is read-only information on the About tab
+        # (batch I*): it has no editable variable, but it must be displayed.
         assert set(app.variables) == {
-            "schema_name",
-            "schema_version",
             "gui.language",
             "gui.scale",
             "profile.name",
@@ -189,6 +202,13 @@ def _scenario_constructs_every_tab_and_field() -> None:
             and child.cget("text") == controller.text("Generate Index")
         )
         assert int(generate_button.master.grid_info()["row"]) == 1
+        about_labels = {
+            str(child.cget("text"))
+            for child in app.tabs["about"].content.winfo_children()
+            if child.winfo_class() == "TLabel"
+        }
+        assert any(SETTINGS_SCHEMA in text for text in about_labels)
+        assert any(SETTINGS_VERSION in text for text in about_labels)
         app.notebook.select(TAB_IDS.index("about"))
         root.geometry("960x640")
         root.attributes("-alpha", 0.0)
@@ -273,7 +293,7 @@ def _scenario_language_rebuild() -> None:
         assert get_value(controller.model.document, "ownership.owner") == "operator"
         assert get_value(controller.model.document, "gui.language") == "en"
         assert app.variables["gui.language"].get() == "English (en)"
-        assert app.notebook.tab(0, "text") == "General"
+        assert app.notebook.tab(0, "text") == "Interface and Language"
         assert app.notebook.index(app.notebook.select()) == 3
     finally:
         app.close()
@@ -515,6 +535,208 @@ def _scenario_initial_auto_detect() -> None:
         app.close()
 
 
+def _transport_button(app: SettingsApplication, controller: SettingsController, label: str):
+    wanted = controller.text(label)
+    stack = [app.tabs["transport"].content]
+    while stack:
+        widget = stack.pop()
+        if widget.winfo_class() == "TButton" and widget.cget("text") == wanted:
+            return widget
+        stack.extend(widget.winfo_children())
+    raise AssertionError(f"button {label!r} not found")
+
+
+def _patched_transport(*, observation=None, check=None):
+    """Replace the host observer and binary check used by the real callbacks."""
+    import settings_gui.transport as transport_module
+
+    original = (transport_module.observe_hosts, transport_module.check_shim_binary)
+    if observation is not None:
+        transport_module.observe_hosts = lambda *_args, **_kwargs: observation
+    if check is not None:
+        transport_module.check_shim_binary = lambda *_args, **_kwargs: check
+    return transport_module, original
+
+
+def _restore_transport(transport_module, original) -> None:
+    transport_module.observe_hosts, transport_module.check_shim_binary = original
+
+
+def _verified_check():
+    import settings_gui.transport as transport_module
+
+    return transport_module.BinaryCheck(
+        True,
+        "verified",
+        path=str(Path(sys.executable)),
+        sha256="a" * 64,
+        version="0.8.2-dev",
+        platform="x86_64-pc-windows-msvc",
+    )
+
+
+def _scenario_transport_refuses_absent_binary() -> None:
+    import settings_gui.transport as transport_module
+
+    module, original = _patched_transport(observation=transport_module.HostObservation())
+    root, app, controller, store = _application()
+    try:
+        app._transport_var.set("shim")
+        app._shim_path_var.set(str(Path(sys.executable).with_name("absent-shim.exe")))
+        app._shim_sha256_var.set("0" * 64)
+        _transport_button(app, controller, "Confirm transport switch").invoke()
+        root.update_idletasks()
+        assert store.saved == []
+        assert str(app._switch_status.cget("text")) == controller.text(
+            "Refused: the standalone program must pass verification before switching "
+            "to Rust shim mode."
+        )
+        assert str(app._shim_check_label.cget("text")) == controller.text("File not found.")
+        assert get_value(controller.model.document, "transport") == "python"
+    finally:
+        app.close()
+        _restore_transport(module, original)
+
+
+def _scenario_transport_never_verifies_a_text_file() -> None:
+    import hashlib
+    import tempfile
+
+    import settings_gui.transport as transport_module
+
+    module, original = _patched_transport(observation=transport_module.HostObservation())
+    root, app, controller, store = _application()
+    with tempfile.TemporaryDirectory() as directory:
+        text_file = Path(directory) / "not-a-shim.txt"
+        text_file.write_text("This is not an executable.", encoding="utf-8")
+        try:
+            app._transport_var.set("shim")
+            app._shim_path_var.set(str(text_file))
+            app._shim_sha256_var.set(hashlib.sha256(text_file.read_bytes()).hexdigest())
+            _transport_button(app, controller, "Check program").invoke()
+            root.update_idletasks()
+            label = str(app._shim_check_label.cget("text"))
+            verified_prefix = controller.text(
+                "Verified. SHA-256, version and platform match. Version: {version} ({platform})"
+            ).split("{")[0]
+            assert not label.startswith(verified_prefix), label
+            assert str(app._shim_check_label.cget("foreground")) == "#b00"
+            _transport_button(app, controller, "Confirm transport switch").invoke()
+            root.update_idletasks()
+            assert store.saved == []
+            assert str(app._switch_status.cget("text")) == controller.text(
+                "Refused: the standalone program must pass verification before switching "
+                "to Rust shim mode."
+            )
+        finally:
+            app.close()
+            _restore_transport(module, original)
+
+
+def _scenario_transport_refuses_unknown_process_state() -> None:
+    import settings_gui.transport as transport_module
+
+    observation = transport_module.HostObservation(
+        unknowns=["python.exe (PID 4242): its command line cannot be read"]
+    )
+    module, original = _patched_transport(observation=observation, check=_verified_check())
+    root, app, controller, store = _application()
+    try:
+        app._transport_var.set("shim")
+        _transport_button(app, controller, "Confirm transport switch").invoke()
+        root.update_idletasks()
+        status = str(app._switch_status.cget("text"))
+        assert store.saved == []
+        assert status == controller.text(
+            "Refused: the running state is UNKNOWN ({found}). Resolve it (or grant "
+            "access) and try again."
+        ).format(found="python.exe (PID 4242): its command line cannot be read"), status
+    finally:
+        app.close()
+        _restore_transport(module, original)
+
+
+def _scenario_transport_refuses_running_host() -> None:
+    import settings_gui.transport as transport_module
+
+    observation = transport_module.HostObservation(hosts=["python.exe (PID 77)"])
+    module, original = _patched_transport(observation=observation, check=_verified_check())
+    root, app, controller, store = _application()
+    try:
+        app._transport_var.set("shim")
+        _transport_button(app, controller, "Confirm transport switch").invoke()
+        root.update_idletasks()
+        status = str(app._switch_status.cget("text"))
+        assert store.saved == []
+        assert status == controller.text(
+            "Refused: server processes are still running ({found}). Close them and try again."
+        ).format(found="python.exe (PID 77)"), status
+    finally:
+        app.close()
+        _restore_transport(module, original)
+
+
+def _scenario_transport_refuses_with_unsaved_edits() -> None:
+    import settings_gui.transport as transport_module
+
+    module, original = _patched_transport(
+        observation=transport_module.HostObservation(), check=_verified_check()
+    )
+    root, app, controller, store = _application()
+    try:
+        controller.update("ownership.owner", "operator", show_dirty_notice=False)
+        app._transport_var.set("shim")
+        _transport_button(app, controller, "Confirm transport switch").invoke()
+        root.update_idletasks()
+        assert store.saved == []
+        assert str(app._switch_status.cget("text")) == controller.text(
+            "Save or discard the other changes before switching transport."
+        )
+    finally:
+        app.close()
+        _restore_transport(module, original)
+
+
+def _scenario_transport_saves_configured_mode_only() -> None:
+    import settings_gui.transport as transport_module
+
+    module, original = _patched_transport(
+        observation=transport_module.HostObservation(), check=_verified_check()
+    )
+    root, app, controller, store = _application()
+    try:
+        app._transport_var.set("shim")
+        _transport_button(app, controller, "Confirm transport switch").invoke()
+        root.update_idletasks()
+        assert len(store.saved) == 1
+        saved = store.saved[0]
+        assert saved["transport"] == "shim"
+        assert saved["shim_binary"] == {
+            "path": str(Path(sys.executable)),
+            "sha256": "a" * 64,
+            "version": "0.8.2-dev",
+            "platform": "x86_64-pc-windows-msvc",
+        }
+        runtime_directory = saved["runtime"]["directory"]
+        assert "%" not in runtime_directory and Path(runtime_directory).is_absolute()
+        assert normalize_settings_document(deepcopy(saved))["errors"] == []
+        assert get_value(controller.model.document, "transport") == "shim"
+        assert controller.model.dirty is False
+        configured = str(app._transport_mode_label.cget("text"))
+        active = str(app._transport_active_label.cget("text"))
+        assert configured == controller.text("Configured mode: {mode}").format(mode="shim")
+        # A configuration-only save never reports the requested mode as active.
+        assert active == controller.text("Verified active host: none"), active
+        assert "shim" not in active
+        assert str(app._switch_status.cget("text")) == controller.text(
+            "Saved: configured mode is now {mode}. It becomes active only after an agent "
+            "client starts it; this window does not claim it is active."
+        ).format(mode="shim")
+    finally:
+        app.close()
+        _restore_transport(module, original)
+
+
 _TK_SCENARIOS = {
     "construct": _scenario_constructs_every_tab_and_field,
     "initial-auto-detect": _scenario_initial_auto_detect,
@@ -526,6 +748,12 @@ _TK_SCENARIOS = {
     "feature-checkboxes": _scenario_feature_checkboxes_compose,
     "doc-path-gates": _scenario_doc_path_controls_follow_feature_gates,
     "scale": _scenario_scale_rebuild,
+    "transport-absent-binary": _scenario_transport_refuses_absent_binary,
+    "transport-text-file": _scenario_transport_never_verifies_a_text_file,
+    "transport-unknown": _scenario_transport_refuses_unknown_process_state,
+    "transport-running": _scenario_transport_refuses_running_host,
+    "transport-dirty": _scenario_transport_refuses_with_unsaved_edits,
+    "transport-save": _scenario_transport_saves_configured_mode_only,
 }
 
 
@@ -555,6 +783,21 @@ def test_invalid_entry_is_red_and_write_actions_are_disabled() -> None:
 
 def test_official_legacy_comments_keep_write_actions_enabled() -> None:
     _run_tk_scenario("legacy-comments")
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "transport-absent-binary",
+        "transport-text-file",
+        "transport-unknown",
+        "transport-running",
+        "transport-dirty",
+        "transport-save",
+    ],
+)
+def test_transport_switch_behaviour_through_the_real_buttons(scenario: str) -> None:
+    _run_tk_scenario(scenario)
 
 
 def test_language_rebuild_preserves_unsaved_values_and_tab() -> None:

@@ -21,27 +21,20 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
-def _settings_document(runtime: Path, models: Path) -> str:
-    return json.dumps(
-        {
-            "schema_name": "comsol_mcp.settings",
-            "schema_version": "1.4.0",
-            "profile": {"name": "core"},
-            "runtime": {"directory": str(runtime), "jobs_directory": None},
-            "paths": {
-                "model_read_roots": [str(models)],
-                "artifact_write_root": str(runtime / "artifacts"),
-            },
-            "discovery": {"pagination_enabled": False},
-        }
-    )
+def _settings_document(runtime: Path, models: Path, shim: Path) -> str:
+    """Shim transport settings with the binary's own complete identity."""
+    import shim_probe_support as sp
+
+    document = sp.settings_document(transport="shim", runtime=runtime, models=models, shim=shim)
+    document["discovery"] = {"pagination_enabled": False}
+    return json.dumps(document)
 
 
 async def _probe_session(shim: str, manifest: str, environment: dict[str, str]) -> dict[str, Any]:
@@ -58,7 +51,7 @@ async def _probe_session(shim: str, manifest: str, environment: dict[str, str]) 
                 try:
                     name = (proc.name() or "").lower()
                     cmdline = " ".join(proc.cmdline() or []).lower()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                except psutil.NoSuchProcess, psutil.AccessDenied:
                     continue
                 if "comsol-mcp-shim" in name or "comsol-mcp-shim" in cmdline:
                     shim_pid = proc.pid
@@ -110,9 +103,7 @@ async def _probe_session(shim: str, manifest: str, environment: dict[str, str]) 
 
         # Warm call: retained worker.
         warm = await client.call_tool("capabilities", {})
-        observations["warm_call_ok"] = not getattr(
-            warm, "is_error", getattr(warm, "isError", True)
-        )
+        observations["warm_call_ok"] = not getattr(warm, "is_error", getattr(warm, "isError", True))
 
     # After disconnect: shim must be gone.
     if shim_pid is not None:
@@ -135,7 +126,7 @@ def main() -> int:
         models = workdir / "models"
         models.mkdir()
         runtime.mkdir()
-        settings.write_text(_settings_document(runtime, models), encoding="utf-8")
+        settings.write_text(_settings_document(runtime, models, args.shim), encoding="utf-8")
         manifest_path = workdir / "manifest.json"
 
         base = {k: v for k, v in os.environ.items() if not k.startswith("COMSOL_MCP_")}

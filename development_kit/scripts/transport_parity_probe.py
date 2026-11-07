@@ -8,6 +8,7 @@ and tool surface metadata.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import subprocess
@@ -16,6 +17,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sp = importlib.import_module("shim_probe_support")
 
 
 def _capabilities_via_subprocess(env: dict[str, str], command: list[str]) -> dict:
@@ -79,39 +82,26 @@ def main() -> int:
         settings_file = workdir / "settings.json"
         runtime.mkdir()
         models.mkdir()
-        settings_file.write_text(
-            json.dumps(
-                {
-                    "schema_name": "comsol_mcp.settings",
-                    "schema_version": "1.4.0",
-                    "profile": {"name": "core"},
-                    "runtime": {"directory": str(runtime)},
-                    "paths": {
-                        "model_read_roots": [str(models)],
-                        "artifact_write_root": str(runtime / "artifacts"),
-                    },
-                }
-            ),
-            encoding="utf-8",
+        sp.write_settings(
+            settings_file,
+            sp.settings_document(transport="python", runtime=runtime, models=models),
         )
 
-        env = dict(os.environ)
+        env = sp.base_environment()
         env["COMSOL_MCP_SETTINGS_PATH"] = str(settings_file)
-        env["COMSOL_MCP_PROFILE"] = "core"
-        env["PYTHONIOENCODING"] = "utf-8"
 
-        # Direct Python capabilities.
-        direct = _capabilities_via_subprocess(
-            env, [str(args.python), "-m", "comsol_mcp.server"]
-        )
+        # Direct Python capabilities under transport "python".
+        direct = _capabilities_via_subprocess(env, [str(args.python), "-m", "comsol_mcp.server"])
 
-        # Shim capabilities.
-        gen = subprocess.run(
-            [sys.executable, "-m", "comsol_mcp.discovery_manifest", "generate", "--output", str(manifest)],
-            cwd=str(ROOT), env=env, capture_output=True, timeout=240, check=False,
+        # The same settings with transport "shim" and the binary's identity;
+        # the manifest is generated under exactly these settings bytes.
+        sp.write_settings(
+            settings_file,
+            sp.settings_document(transport="shim", runtime=runtime, models=models, shim=args.shim),
         )
+        gen = sp.generate_manifest(args.python, settings_file, manifest)
         if gen.returncode != 0:
-            print(json.dumps({"error": "manifest generation failed"}))
+            print(json.dumps({"error": "manifest generation failed", "stderr": gen.stderr[-400:]}))
             return 2
 
         shim_env = dict(env)

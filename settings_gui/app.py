@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 import tkinter as tk
 import webbrowser
@@ -464,9 +463,7 @@ class SettingsApplication:
                 if field.key in _FEATURE_KEYS:
                     if _feature_row is None:
                         _feature_row = profile_parent.grid_size()[1]
-                        feature_frame.grid(
-                            row=_feature_row, column=0, sticky="ew", pady=(4, 8)
-                        )
+                        feature_frame.grid(row=_feature_row, column=0, sticky="ew", pady=(4, 8))
                     self._add_field(feature_frame, field)
                 else:
                     self._add_field(self.tabs[field.tab].content, field)
@@ -720,8 +717,10 @@ class SettingsApplication:
             self.controller.update(key, value)
 
     def _build_transport(self, parent: ttk.Frame) -> None:
-        """Build the MCP Connection tab: radio pair, binary identity, confirm."""
+        """Build the MCP Connection tab: mode selector, identity, active host."""
         import subprocess as _sp
+
+        from . import transport as transport_checking
 
         _ = self.controller.text
         ttk.Label(parent, text=_("MCP Connection"), font="TkHeadingFont").pack(anchor="w")
@@ -774,50 +773,96 @@ class SettingsApplication:
         ttk.Entry(hash_row, textvariable=self._shim_sha256_var, width=66).pack(
             side="left", padx=(8, 0), fill="x", expand=True
         )
-        self._shim_check_label = ttk.Label(shim_frame, text="")
+        self._shim_check_label = ttk.Label(shim_frame, text="", wraplength=520)
         self._shim_check_label.pack(anchor="w")
 
-        def _check_binary() -> None:
-            path = self._shim_path_var.get().strip()
-            digest = self._shim_sha256_var.get().strip()
-            if not path:
-                self._shim_check_label.config(
-                    text=_("Enter the standalone program path first."), foreground="#b00"
+        def _render_check(result: transport_checking.BinaryCheck) -> None:
+            messages = {
+                "path_missing": _("Enter the standalone program path first."),
+                "path_relative": _("The standalone program path must be absolute."),
+                "file_not_found": _("File not found."),
+                "file_unreadable": _("The file cannot be read."),
+                "sha256_missing": _("Enter the published SHA-256 first."),
+                "sha256_mismatch": _("SHA-256 mismatch. Check the published hash."),
+                "not_runnable": _("The program did not run to report its version."),
+                "version_unrecognized": _("Unrecognized program: it is not a shim binary."),
+                "version_mismatch": _(
+                    "Version mismatch: this program is {found}, the package expects {expected}."
+                ),
+                "platform_mismatch": _(
+                    "Platform mismatch: this program targets {found}; this computer needs "
+                    "{expected}."
+                ),
+                "verified": _(
+                    "Verified. SHA-256, version and platform match. Version: {version} ({platform})"
+                ),
+            }
+            if result.ok:
+                text = messages["verified"].format(version=result.version, platform=result.platform)
+                color = "#070"
+            elif result.reason_code == "version_mismatch":
+                text = messages["version_mismatch"].format(
+                    found=result.version or "?", expected=result.detail or "?"
                 )
-                return
-            import hashlib
-            from pathlib import Path
+                color = "#b00"
+            elif result.reason_code == "platform_mismatch":
+                text = messages["platform_mismatch"].format(
+                    found=result.platform or "?", expected=result.detail or "?"
+                )
+                color = "#b00"
+            else:
+                text = messages.get(result.reason_code, result.reason_code)
+                color = "#b00"
+            self._shim_check_label.config(text=text, foreground=color)
 
-            binary = Path(path)
-            if not binary.is_file():
-                self._shim_check_label.config(text=_("File not found."), foreground="#b00")
-                return
-            actual = hashlib.sha256(binary.read_bytes()).hexdigest()
-            if digest and actual != digest.casefold():
-                self._shim_check_label.config(
-                    text=_("SHA-256 mismatch. Check the published hash."), foreground="#b00"
-                )
-                return
-            flags = getattr(_sp, "CREATE_NO_WINDOW", 0)
-            try:
-                result = _sp.run(  # noqa: S603
-                    [str(binary), "--version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    creationflags=flags,
-                )
-                version = result.stdout.strip() if result.returncode == 0 else "?"
-            except OSError, _sp.TimeoutExpired:
-                version = "?"
-            self._shim_check_label.config(
-                text=_("Verified. SHA-256 matches. Version: {version}").format(version=version),
-                foreground="#070",
+        def _check_binary() -> None:
+            result = transport_checking.check_shim_binary(
+                self._shim_path_var.get(),
+                self._shim_sha256_var.get(),
+                runner=_sp.run,
             )
+            _render_check(result)
 
         ttk.Button(shim_frame, text=_("Check program"), command=_check_binary).pack(
             anchor="w", pady=(4, 0)
         )
+
+        status_frame = ttk.LabelFrame(parent, text=_("Current state"), padding=8)
+        status_frame.pack(fill="x", pady=(0, 8))
+        self._transport_mode_label = ttk.Label(status_frame, text="")
+        self._transport_mode_label.pack(anchor="w")
+        self._transport_active_label = ttk.Label(status_frame, text="")
+        self._transport_active_label.pack(anchor="w")
+
+        def _refresh_status() -> None:
+            document = self.controller.model.document
+            configured = str(get_value(document, "transport") or "python")
+            observation = transport_checking.observe_hosts(
+                transport_checking.configured_runtime_dir(document)
+            )
+            summary = transport_checking.describe_modes(configured, observation)
+            self._transport_mode_label.config(
+                text=_("Configured mode: {mode}").format(mode=summary["configured"])
+            )
+            if summary["pending_restart"]:
+                active = _(
+                    "Verified active host: {mode} (a restart is required for the configured mode)"
+                ).format(mode=summary["active_transport"])
+                color = "#b00"
+            elif summary["state"] == "none":
+                active = _("Verified active host: none")
+                color = "#070"
+            elif summary["state"] == "unknown":
+                parts = "; ".join(summary["unknowns"])
+                active = _("Active host: UNKNOWN ({parts})").format(parts=parts)
+                color = "#b00"
+            else:
+                parts = "; ".join(summary["hosts"])
+                active = _("Verified active hosts: {parts}").format(parts=parts)
+                color = "#b00"
+            self._transport_active_label.config(text=active, foreground=color)
+
+        _refresh_status()
 
         switch_frame = ttk.LabelFrame(parent, text=_("Switch transport"), padding=8)
         switch_frame.pack(fill="x", pady=(0, 8))
@@ -826,74 +871,95 @@ class SettingsApplication:
             text=_(
                 "Before switching, close every agent session that uses this "
                 "server (including the one that opened this window). The "
-                "button refuses while any server process is running."
+                "button refuses while any server process is running or any "
+                "state is UNKNOWN."
             ),
         ).pack(anchor="w", pady=(0, 6))
-        self._switch_status = ttk.Label(switch_frame, text="")
+        self._switch_status = ttk.Label(switch_frame, text="", wraplength=520)
         self._switch_status.pack(anchor="w")
 
-        def _detect_running_servers() -> list[str]:
-            import psutil
-
-            found = []
-            for proc in psutil.process_iter(["name", "cmdline"]):
-                try:
-                    name = (proc.info["name"] or "").lower()
-                    cmdline = " ".join(proc.info.get("cmdline") or []).lower()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):  # noqa: S112
-                    continue
-                if proc.pid == _sp.os.getpid():
-                    continue
-                # HI-04: match both hyphen (comsol-mcp.exe) and underscore
-                # (python -m comsol_mcp.server) entry points.
-                if "comsol-mcp" in name or "comsol-mcp" in cmdline or "comsol_mcp.server" in cmdline:
-                    if "settings" not in cmdline:
-                        found.append(f"{proc.info['name']} (PID {proc.pid})")
-            return found
-
         def _confirm_switch() -> None:
-            running = _detect_running_servers()
-            if running:
+            # The dedicated switch saves only the transport selection; other
+            # pending edits must be saved or discarded first.
+            if self.controller.model.dirty:
+                self._switch_status.config(
+                    text=_("Save or discard the other changes before switching transport."),
+                    foreground="#b00",
+                )
+                return
+            # Re-check the binary now: the recorded identity must be verified,
+            # not merely non-empty, before shim mode can be saved.
+            binary: transport_checking.BinaryCheck | None = None
+            if self._transport_var.get() == "shim":
+                binary = transport_checking.check_shim_binary(
+                    self._shim_path_var.get(),
+                    self._shim_sha256_var.get(),
+                    runner=_sp.run,
+                )
+                if not binary.ok:
+                    _render_check(binary)
+                    self._switch_status.config(
+                        text=_(
+                            "Refused: the standalone program must pass verification "
+                            "before switching to Rust shim mode."
+                        ),
+                        foreground="#b00",
+                    )
+                    return
+            document = self.controller.model.document
+            runtime_dir = transport_checking.configured_runtime_dir(document)
+            observation = transport_checking.observe_hosts(runtime_dir)
+            if observation.hosts:
                 self._switch_status.config(
                     text=_(
-                        "Refused: server processes are still running. Close them and try again."
+                        "Refused: server processes are still running ({found}). "
+                        "Close them and try again."
+                    ).format(found="; ".join(observation.hosts)),
+                    foreground="#b00",
+                )
+                return
+            if observation.unknowns:
+                self._switch_status.config(
+                    text=_(
+                        "Refused: the running state is UNKNOWN ({found}). Resolve "
+                        "it (or grant access) and try again."
+                    ).format(found="; ".join(observation.unknowns)),
+                    foreground="#b00",
+                )
+                return
+            try:
+                planned = transport_checking.plan_switch(
+                    document, self._transport_var.get(), binary
+                )
+            except transport_checking.SwitchRefused as exc:
+                self._switch_status.config(
+                    text=_("Refused: the change is not valid ({detail}).").format(
+                        detail=exc.detail
                     ),
                     foreground="#b00",
                 )
                 return
-            mode = self._transport_var.get()
-            if mode == "shim":
-                path = self._shim_path_var.get().strip()
-                digest = self._shim_sha256_var.get().strip()
-                if not path or not digest:
-                    self._switch_status.config(
-                        text=_("Rust shim mode requires a standalone program path and SHA-256."),
-                        foreground="#b00",
-                    )
-                    return
-            # Write directly to the settings file. This is a dedicated
-            # confirm action, deliberately separate from the general
-            # form save: the plan requires its own button and its own
-            # pre-flight process check.
-            from comsol_mcp.settings import resolve_settings_location
-
-            location = resolve_settings_location()
-            target = location.writable_path
+            # Publish the complete planned document through the same exact
+            # verified-bytes store as the general save: this dedicated confirm
+            # never rewrites the file by hand and never leaves it half-edited.
             try:
-                document = json.loads(target.read_text(encoding="utf-8"))
-            except OSError, ValueError:
-                document = {}
-            document["transport"] = mode
-            document["shim_binary"] = {
-                "path": self._shim_path_var.get().strip() or None,
-                "sha256": self._shim_sha256_var.get().strip() or None,
-            }
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(json.dumps(document, indent=2), encoding="utf-8")
+                self.controller.store.save(planned)
+            except Exception:  # noqa: BLE001 - the store reports its own failure
+                self._switch_status.config(
+                    text=_("Settings were not saved. Close conflicting editors and try again."),
+                    foreground="#b00",
+                )
+                return
+            self.controller.model.adopt_saved(planned)
+            self.controller.restart_pending = True
             self._switch_status.config(
-                text=_("Transport set to {mode}. It takes effect on next start.").format(mode=mode),
+                text=_(
+                    "Saved: configured mode is now {mode}. It becomes active only after "
+                    "an agent client starts it; this window does not claim it is active."
+                ).format(mode=self._transport_var.get()),
                 foreground="#070",
             )
+            _refresh_status()
 
         ttk.Button(switch_frame, text=_("Confirm transport switch"), command=_confirm_switch).pack(
             anchor="w", pady=(4, 0)
@@ -908,7 +974,9 @@ class SettingsApplication:
         from comsol_mcp.settings import SETTINGS_SCHEMA, SETTINGS_VERSION
 
         ttk.Label(parent, text=f"{_('Settings schema')}: {SETTINGS_SCHEMA}").pack(anchor="w")
-        ttk.Label(parent, text=f"{_('Settings schema version')}: {SETTINGS_VERSION}").pack(anchor="w")
+        ttk.Label(parent, text=f"{_('Settings schema version')}: {SETTINGS_VERSION}").pack(
+            anchor="w"
+        )
         ttk.Label(parent, text=_("Desktop shortcut"), font="TkHeadingFont").pack(
             anchor="w",
             pady=(18, 6),

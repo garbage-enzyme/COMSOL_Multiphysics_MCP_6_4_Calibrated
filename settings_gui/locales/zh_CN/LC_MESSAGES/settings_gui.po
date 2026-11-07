@@ -68,26 +68,74 @@ msgstr "文件不存在。"
 msgid "SHA-256 mismatch. Check the published hash."
 msgstr "SHA-256 不匹配。请核对已发布的哈希值。"
 
-msgid "Verified. SHA-256 matches. Version: {version}"
-msgstr "校验通过。SHA-256 匹配。版本：{version}"
-
 msgid "Switch transport"
 msgstr "切换传输方式"
 
-msgid "Before switching, close every agent session that uses this server (including the one that opened this window). The button refuses while any server process is running."
-msgstr "切换前，请关闭所有使用本服务器的 agent 会话（包括帮你打开本窗口的那个）。有服务器进程运行时按钮会拒绝切换。"
+msgid "The standalone program path must be absolute."
+msgstr "独立程序路径必须是绝对路径。"
 
-msgid "Refused: server processes are still running. Close them and try again."
-msgstr "已拒绝：仍有服务器进程在运行。请关闭后重试。"
+msgid "The file cannot be read."
+msgstr "无法读取该文件。"
 
-msgid "Rust shim mode requires a standalone program path and SHA-256."
-msgstr "Rust shim 模式需要独立程序路径和 SHA-256。"
+msgid "Enter the published SHA-256 first."
+msgstr "请先输入已发布的 SHA-256。"
+
+msgid "The program did not run to report its version."
+msgstr "该程序未能运行以报告版本。"
+
+msgid "Unrecognized program: it is not a shim binary."
+msgstr "无法识别的程序：它不是 shim 独立程序。"
+
+msgid "Version mismatch: this program is {found}, the package expects {expected}."
+msgstr "版本不匹配：该程序为 {found}，本软件包需要 {expected}。"
+
+msgid "Platform mismatch: this program targets {found}; this computer needs {expected}."
+msgstr "平台不匹配：该程序面向 {found}；本机需要 {expected}。"
+
+msgid "Verified. SHA-256, version and platform match. Version: {version} ({platform})"
+msgstr "校验通过。SHA-256、版本和平台均匹配。版本：{version}（{platform}）"
+
+msgid "Current state"
+msgstr "当前状态"
+
+msgid "Configured mode: {mode}"
+msgstr "已配置的模式：{mode}"
+
+msgid "Verified active host: {mode} (a restart is required for the configured mode)"
+msgstr "已验证的运行中主机：{mode}（需重启后已配置的模式才生效）"
+
+msgid "Verified active host: none"
+msgstr "已验证的运行中主机：无"
+
+msgid "Active host: UNKNOWN ({parts})"
+msgstr "运行中主机：未知（{parts}）"
+
+msgid "Verified active hosts: {parts}"
+msgstr "已验证的运行中主机：{parts}"
+
+msgid "Before switching, close every agent session that uses this server (including the one that opened this window). The button refuses while any server process is running or any state is UNKNOWN."
+msgstr "切换前，请关闭所有使用本服务器的 agent 会话（包括帮你打开本窗口的那个）。只要有服务器进程在运行或任何状态未知，按钮都会拒绝切换。"
+
+msgid "Save or discard the other changes before switching transport."
+msgstr "切换传输方式前，请先保存或放弃其他修改。"
+
+msgid "Refused: the standalone program must pass verification before switching to Rust shim mode."
+msgstr "已拒绝：切换到 Rust shim 模式前，独立程序必须通过校验。"
+
+msgid "Refused: server processes are still running ({found}). Close them and try again."
+msgstr "已拒绝：仍有服务器进程在运行（{found}）。请关闭后重试。"
+
+msgid "Refused: the running state is UNKNOWN ({found}). Resolve it (or grant access) and try again."
+msgstr "已拒绝：运行状态未知（{found}）。请先解决（或授予访问权限）后重试。"
+
+msgid "Refused: the change is not valid ({detail})."
+msgstr "已拒绝：该修改无效（{detail}）。"
+
+msgid "Saved: configured mode is now {mode}. It becomes active only after an agent client starts it; this window does not claim it is active."
+msgstr "已保存：已配置的模式现在是 {mode}。只有在 agent 客户端启动它之后才会生效；本窗口不会声称它已在运行。"
 
 msgid "Confirm transport switch"
 msgstr "确认切换传输方式"
-
-msgid "Transport set to {mode}. It takes effect on next start."
-msgstr "传输方式已设为 {mode}。下次启动时生效。"
 
 msgid "Choose how agent clients connect to the COMSOL MCP server. Switching requires a dedicated confirmation and only takes effect after every agent session closes and restarts."
 msgstr "选择 agent 客户端连接 COMSOL MCP 服务器的方式。切换需要单独确认，且仅在所有 agent 会话关闭并重启后生效。"
@@ -397,6 +445,12 @@ msgstr "shim 二进制的绝对路径。transport 为 'shim' 时必需。"
 
 msgid "Expected SHA-256 of the shim binary. Required when transport is 'shim'."
 msgstr "shim 二进制的预期 SHA-256。transport 为 'shim' 时必需。"
+
+msgid "Version the verified shim binary reports. Set by the switch confirmation."
+msgstr "已验证的 shim 独立程序报告的版本。由切换确认写入。"
+
+msgid "Target triple the verified shim binary reports. Set by the switch confirmation."
+msgstr "已验证的 shim 独立程序报告的目标平台三元组。由切换确认写入。"
 
 msgid "Enter a valid absolute path or clear this setting."
 msgstr "请输入有效的绝对路径，或清空此项。"

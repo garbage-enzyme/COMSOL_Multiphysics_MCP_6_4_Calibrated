@@ -11,16 +11,18 @@ bridge source and drives a real connection through each mode.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BRIDGE_DIR = ROOT / "dsh_bridge"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sp = importlib.import_module("shim_probe_support")
 
 
 def _node_available() -> bool:
@@ -33,7 +35,7 @@ def _node_available() -> bool:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return result.returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         return False
 
 
@@ -98,7 +100,9 @@ process.exit(0);
     env["SMOKE_PYTHON_CMD"] = python_command
     env["SMOKE_SHIM_CMD"] = shim_command or ""
     env["SMOKE_SHIM_MANIFEST"] = shim_manifest or ""
-    env["SMOKE_SHIM_WORKER"] = json.dumps([python_command, "-m", "comsol_mcp.server"]) if shim_command else ""
+    env["SMOKE_SHIM_WORKER"] = (
+        json.dumps([python_command, "-m", "comsol_mcp.server"]) if shim_command else ""
+    )
     env["SMOKE_WORKDIR"] = workdir
     env["SMOKE_BRIDGE_DIR"] = str(BRIDGE_DIR)
 
@@ -145,13 +149,13 @@ def _drive_mcp_session(command: list[str], env: dict, workdir: str) -> dict:
         try:
             proc.stdin.write(payload)
             proc.stdin.flush()
-        except (OSError, ValueError):
+        except OSError, ValueError:
             pass  # Pipe closed during a race; report from what we have.
 
     def _read() -> str:
         try:
             return proc.stdout.readline().decode()
-        except (OSError, ValueError):
+        except OSError, ValueError:
             return ""
 
     _write((json.dumps(init) + "\n").encode())
@@ -161,7 +165,7 @@ def _drive_mcp_session(command: list[str], env: dict, workdir: str) -> dict:
     tools_reply = _read()
     try:
         proc.stdin.close()
-    except (OSError, ValueError):
+    except OSError, ValueError:
         pass
     try:
         proc.wait(timeout=20)
@@ -183,7 +187,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--shim", required=True, type=Path)
     parser.add_argument("--python", required=True, type=Path)
-    parser.add_argument("--manifest", required=True, type=Path)
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help="ignored: the smoke generates a manifest bound to its own settings",
+    )
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
@@ -214,7 +223,7 @@ def main() -> int:
             ),
             encoding="utf-8",
         )
-        env_py = dict(os.environ)
+        env_py = sp.base_environment()
         env_py["COMSOL_MCP_SETTINGS_PATH"] = str(settings_path)
         env_py["COMSOL_MCP_PROFILE"] = "core"
         py_result = _drive_mcp_session(
@@ -223,24 +232,15 @@ def main() -> int:
         results["python_direct"] = py_result
 
         # === Test 2: Shim mode ===
-        settings_path.write_text(
-            json.dumps(
-                {
-                    "schema_name": "comsol_mcp.settings",
-                    "schema_version": "1.4.0",
-                    "profile": {"name": "core"},
-                    "runtime": {"directory": str(runtime)},
-                    "transport": "shim",
-                    "shim_binary": {
-                        "path": str(args.shim),
-                        "sha256": "0" * 64,
-                    },
-                }
-            ),
-            encoding="utf-8",
-        )
+        # Complete identity (path, SHA-256, version, platform) reported by the
+        # binary itself, and a manifest bound to these exact settings bytes.
+        shim_document = sp.settings_document(transport="shim", runtime=runtime, shim=args.shim)
+        sp.write_settings(settings_path, shim_document)
+        manifest_path = workdir / "manifest.json"
+        generated = sp.generate_manifest(args.python, settings_path, manifest_path)
+        results["manifest_generated"] = generated.returncode == 0
         env_shim = dict(env_py)
-        env_shim["COMSOL_MCP_DISCOVERY_MANIFEST"] = str(args.manifest)
+        env_shim["COMSOL_MCP_DISCOVERY_MANIFEST"] = str(manifest_path)
         env_shim["COMSOL_MCP_SHIM_CHILD"] = json.dumps(
             [str(args.python), "-m", "comsol_mcp.server"]
         )
@@ -262,42 +262,28 @@ def main() -> int:
             encoding="utf-8",
         )
         bridge_py = _run_bridge_smoke(
-            str(settings_path), str(args.shim), str(args.manifest), str(args.python), str(workdir)
+            str(settings_path), str(args.shim), str(manifest_path), str(args.python), str(workdir)
         )
         results["bridge_python_mode"] = bridge_py
 
         # Shim mode
-        settings_path.write_text(
-            json.dumps(
-                {
-                    "schema_name": "comsol_mcp.settings",
-                    "schema_version": "1.4.0",
-                    "profile": {"name": "core"},
-                    "runtime": {"directory": str(runtime)},
-                    "transport": "shim",
-                }
-            ),
-            encoding="utf-8",
-        )
+        sp.write_settings(settings_path, shim_document)
         bridge_shim = _run_bridge_smoke(
-            str(settings_path), str(args.shim), str(args.manifest), str(args.python), str(workdir)
+            str(settings_path), str(args.shim), str(manifest_path), str(args.python), str(workdir)
         )
         results["bridge_shim_mode"] = bridge_shim
 
     # Evaluate checks.
-    py_ok = (
-        py_result.get("server_name") == "COMSOL MCP"
-        and py_result.get("tool_count", 0) > 0
-    )
+    py_ok = py_result.get("server_name") == "COMSOL MCP" and py_result.get("tool_count", 0) > 0
     shim_ok = (
-        shim_result.get("server_name") == "COMSOL MCP"
-        and shim_result.get("tool_count", 0) > 0
+        shim_result.get("server_name") == "COMSOL MCP" and shim_result.get("tool_count", 0) > 0
     )
     same_surface = py_result.get("tool_count") == shim_result.get("tool_count")
     bridge_py_ok = bridge_py.get("exit_code") == 0
     bridge_shim_ok = bridge_shim.get("exit_code") == 0
 
     checks = {
+        "manifest_bound_to_shim_settings": results.get("manifest_generated") is True,
         "python_direct_works": py_ok,
         "shim_mode_works": shim_ok,
         "same_tool_surface": same_surface,

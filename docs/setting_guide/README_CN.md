@@ -156,9 +156,11 @@ English (en)
 | --- | --- | --- |
 | `schema_name` | `"comsol_mcp.settings"` | 设置格式名称，只读，必须完全一致。 |
 | `schema_version` | `"1.4.0"` | 新保存的文件使用 `1.4.0`。旧版 `1.0.0`、`1.1.0`、`1.2.0` 和 `1.3.0` 可以读取，并在内存中转换。 |
-| `transport` | `"python"` | `"python"` 或 `"shim"`。单值，不是两个开关。`"shim"` 需要同时设置 `shim_binary.path` 和 `shim_binary.sha256`。 |
+| `transport` | `"python"` | `"python"` 或 `"shim"`。单值，不是两个开关。`"shim"` 需要 `shim_binary.path`、`shim_binary.sha256`、`shim_binary.version` 和 `shim_binary.platform` 共同精确指认同一个二进制。 |
 | `shim_binary.path` | `null` | shim 二进制的绝对路径。`transport` 为 `"shim"` 时必需。 |
 | `shim_binary.sha256` | `null` | shim 二进制的预期 SHA-256。`transport` 为 `"shim"` 时必需。 |
+| `shim_binary.version` | `null` | shim 二进制 `--version` 报告的版本。`transport` 为 `"shim"` 时必需；由切换确认在校验通过后写入。 |
+| `shim_binary.platform` | `null` | shim 二进制 `--version` 报告的目标平台三元组，例如 `x86_64-pc-windows-msvc`。`transport` 为 `"shim"` 时必需。 |
 | `gui.language` | `"zh-cn"` | 只能是 `"en"`、`"zh-cn"` 或 `"zh-tw"`。 |
 | `gui.scale` | `"system"` | 可选 `"system"`、`"100"`、`"125"`、`"150"` 或 `"200"`。界面把数字显示为百分比。 |
 

@@ -1,15 +1,23 @@
-"""Transport ownership-gate sequence probe (0.8.2 batch I).
+"""Transport ownership-gate sequence probe (0.8.2 H/I repair).
 
 Implements the plan's six-step transport acceptance sequence in one
-solver-free ownership domain:
+solver-free ownership domain with observed-behavior oracles:
 
-1. Start Python direct and verify its host and lease inventory.
-2. Close Python through normal EOF and verify cleanup.
-3. Start the shim and verify one shim host plus its one contained child.
-4. Close the shim through normal EOF and verify cleanup.
-5. Attempt an overlapping start while one transport is live and verify
-   fail-closed refusal (no second host or solver owner).
-6. Verify a stale/UNKNOWN cleanup result is not treated as clean.
+1. Start Python direct; verify its admitted host identity, its process tree,
+   and that no solver lease exists.
+2. Request a switch to the shim while Python is live: the GUI switch logic
+   refuses (the admission record shows a running host). Close Python through
+   normal EOF.
+3. Verify the Python host, its descendants, its listeners, and the lease are
+   cleared and the admission record is released.
+4. Save the shim mode through the GUI planning path, start the shim, and
+   verify one admitted shim host plus exactly one contained worker.
+5. Switch back: close the shim through EOF, verify the same cleanup, save
+   Python mode, start Python, and verify its identity again.
+6. While Python is live, attempt an overlapping shim start in the same
+   domain and verify fail-closed refusal before a second host exists. Then a
+   stale record whose recorded worker is still alive must block admission as
+   unverified cleanup.
 
 Uses isolated runtime/settings; never starts COMSOL.
 """
@@ -17,105 +25,73 @@ Uses isolated runtime/settings; never starts COMSOL.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
-import os
-import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sp = importlib.import_module("shim_probe_support")
+
+sys.path.insert(0, str(sp.ROOT))
 
 
-def _settings(runtime: Path, models: Path) -> str:
-    return json.dumps(
-        {
-            "schema_name": "comsol_mcp.settings",
-            "schema_version": "1.4.0",
-            "profile": {"name": "core"},
-            "runtime": {"directory": str(runtime), "jobs_directory": None},
-            "paths": {
-                "model_read_roots": [str(models)],
-                "artifact_write_root": str(runtime / "artifacts"),
-            },
-        }
-    )
-
-
-def _spawn_python(env: dict[str, str]) -> subprocess.Popen:
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-    return subprocess.Popen(
-        [sys.executable, "-m", "comsol_mcp.server"],
-        cwd=str(ROOT),
-        env=env,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        creationflags=flags,
-    )
-
-
-def _spawn_shim(shim: str, env: dict[str, str]) -> subprocess.Popen:
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-    return subprocess.Popen(
-        [shim],
-        env=env,
-        cwd=str(ROOT),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        creationflags=flags,
-    )
-
-
-def _initialize(proc: subprocess.Popen) -> dict[str, Any]:
-    import json as _json
-
-    init = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-11-25",
-            "capabilities": {},
-            "clientInfo": {"name": "ownership-gate-probe", "version": "0"},
-        },
-    }
-    proc.stdin.write((_json.dumps(init) + "\n").encode())
-    proc.stdin.flush()
-    reply = _json.loads(proc.stdout.readline())
-    return reply.get("result", {})
-
-
-def _tree_pids(root_pid: int, *, meaningful_only: bool = False) -> list[int]:
+def _tree(pid: int) -> list[int]:
     import psutil
 
     try:
-        parent = psutil.Process(root_pid)
-        children = parent.children(recursive=True)
-        if meaningful_only:
-            # conhost.exe is a Windows console helper that appears in the
-            # tree but is managed by the OS, not by our cleanup contract.
-            children = [
-                c
-                for c in children
-                if "conhost" not in (c.name() or "").lower()
-            ]
-        return [root_pid] + [c.pid for c in children]
-    except psutil.NoSuchProcess:
+        return [pid, *[child.pid for child in psutil.Process(pid).children(recursive=True)]]
+    except psutil.Error:
         return []
 
 
-def _wait_exit(proc: subprocess.Popen, timeout: float = 10) -> bool:
+def _workers(pid: int, *, recursive: bool) -> list[int]:
+    """Child processes other than the console host Windows attaches to a
+    console-subsystem program (conhost.exe is not a worker)."""
+    import psutil
+
     try:
-        proc.wait(timeout=timeout)
-        return True
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=5)
-        return False
+        children = psutil.Process(pid).children(recursive=recursive)
+    except psutil.Error:
+        return []
+    workers = []
+    for child in children:
+        try:
+            if child.name().lower() == "conhost.exe":
+                continue
+        except psutil.Error:
+            pass
+        workers.append(child.pid)
+    return workers
+
+
+def _alive(pids: list[int]) -> list[int]:
+    import psutil
+
+    alive = []
+    for pid in pids:
+        try:
+            if psutil.Process(pid).status() != psutil.STATUS_ZOMBIE:
+                alive.append(pid)
+        except psutil.Error:
+            pass
+    return alive
+
+
+def _listeners(pids: list[int]) -> list[dict[str, Any]]:
+    import psutil
+
+    found = []
+    try:
+        connections = psutil.net_connections(kind="inet")
+    except psutil.Error as exc:
+        return [{"error": str(exc)}]
+    for connection in connections:
+        if connection.pid in pids and connection.status == psutil.CONN_LISTEN:
+            found.append({"pid": connection.pid, "address": str(connection.laddr)})
+    return found
 
 
 def main() -> int:
@@ -125,211 +101,213 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
-    results: dict[str, Any] = {"schema": "comsol_mcp.p06.ownership_gate/1"}
+    from settings_gui import transport as gui_transport
 
-    with tempfile.TemporaryDirectory(prefix="own-gate-", dir=str(ROOT)) as raw:
-        workdir = Path(raw)
-        runtime = workdir / "runtime"
-        models = workdir / "models"
-        manifest = workdir / "manifest.json"
-        settings_file = workdir / "settings.json"
-        runtime.mkdir()
-        models.mkdir()
-        settings_file.write_text(_settings(runtime, models), encoding="utf-8")
+    work = args.output.parent / f"ownership-gate-{time.strftime('%Y%m%dT%H%M%S')}"
+    work.mkdir(parents=True)
+    runtime = work / "runtime"
+    models = work / "models"
+    models.mkdir()
+    settings = work / "settings.json"
+    manifest = work / "manifest.json"
+    binary = sp.shim_identity(args.shim)
+    results: dict[str, Any] = {
+        "schema": "comsol_mcp.p06.ownership_gate/2",
+        "source": sp.source_identity(),
+        "shim": binary,
+        "work": str(work),
+    }
+    checks: dict[str, bool] = {}
 
-        env = dict(os.environ)
-        env["COMSOL_MCP_SETTINGS_PATH"] = str(settings_file)
-        env["COMSOL_MCP_PROFILE"] = "core"
-        env["PYTHONIOENCODING"] = "utf-8"
+    def no_processes(_attrs: object) -> Any:
+        return iter(())  # The admission record only.
 
-        # Generate a manifest for the shim.
-        gen = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "comsol_mcp.discovery_manifest",
-                "generate",
-                "--output",
-                str(manifest),
-            ],
-            cwd=str(ROOT),
-            env=env,
-            capture_output=True,
-            timeout=240,
-            check=False,
-        )
-        if gen.returncode != 0:
-            print(json.dumps({"error": "manifest generation failed"}))
-            return 2
+    def env(**extra: str) -> dict[str, str]:
+        environment = sp.base_environment()
+        environment["COMSOL_MCP_SETTINGS_PATH"] = str(settings)
+        environment.update(extra)
+        return environment
 
-        shim_env = dict(env)
-        shim_env["COMSOL_MCP_DISCOVERY_MANIFEST"] = str(manifest)
-        shim_env["COMSOL_MCP_SHIM_CHILD"] = json.dumps(
-            [str(args.python), "-m", "comsol_mcp.server"]
-        )
+    def save_mode(mode: str) -> None:
+        document = json.loads(settings.read_text(encoding="utf-8"))
+        check = None
+        if mode == "shim":
+            check = gui_transport.check_shim_binary(binary["path"], binary["sha256"])
+            if not check.ok:
+                raise RuntimeError(f"binary check failed: {check}")
+        planned = gui_transport.plan_switch(document, mode, check)
+        sp.write_settings(settings, planned)
 
-        # === Step 1: Python direct ===
-        py_proc = _spawn_python(env)
-        init_result = _initialize(py_proc)
-        results["step1_python_started"] = bool(init_result.get("serverInfo"))
-        results["step1_server_name"] = init_result.get("serverInfo", {}).get("name")
-        py_pids = _tree_pids(py_proc.pid)
-        results["step1_host_pid"] = py_proc.pid
-        results["step1_tree_size"] = len(py_pids)
+    sp.write_settings(
+        settings, sp.settings_document(transport="python", runtime=runtime, models=models)
+    )
 
-        # === Step 5 (early): overlapping start while Python is live ===
-        overlap_proc = _spawn_python(env)
-        time.sleep(1.5)
-        # The lease-based ownership must refuse the second host. Verify it
-        # by checking whether both are alive after a probe attempt.
-        # (The ownership gate is enforced at the tool-call level, not at
-        # process creation; both hosts can coexist as processes but only
-        # one holds the solver lease. For this probe we verify process-level
-        # identity: two hosts exist, but only one can acquire the lease.)
-        overlap_alive = overlap_proc.poll() is None
-        results["step5_overlap_processes"] = overlap_alive
-        # Clean up the overlap.
-        overlap_proc.stdin.close()
-        _wait_exit(overlap_proc)
+    # Step 1: Python direct.
+    python = sp.python_host(args.python, env(), work / "python-1.log")
+    lock = sp.wait_for_owner(runtime, python)
+    served = python.initialize()
+    tree = _tree(python.pid)
+    results["step1"] = {
+        "lock": lock,
+        "served": served,
+        "tree": tree,
+        "lease_present": (runtime / "solver_owner.json").exists(),
+    }
+    checks["step1_python_admitted_and_serving"] = (
+        sp.lock_owned_by(lock, python)
+        and (lock or {}).get("transport_mode") == "python"
+        and served
+        and not results["step1"]["lease_present"]
+    )
 
-        # === Step 2: Close Python via EOF ===
-        py_proc.stdin.close()
-        exited = _wait_exit(py_proc, timeout=15)
-        time.sleep(1.0)
-        leftover = [
-            pid
-            for pid in _tree_pids(py_proc.pid, meaningful_only=True)
-            if pid != py_proc.pid
-        ]
-        # Also check via psutil for any lingering python/comsol processes.
-        import psutil
+    # Step 2: a switch request while Python is live is refused.
+    observation = gui_transport.observe_hosts(runtime, process_iter=no_processes)
+    results["step2_observation"] = {"state": observation.state, "hosts": observation.hosts}
+    checks["step2_switch_refused_while_python_live"] = observation.state == "running"
+    code = python.close()
 
-        lingering = []
-        for pid in leftover:
-            try:
-                p = psutil.Process(pid)
-                if p.is_running() and p.status() != psutil.STATUS_ZOMBIE:
-                    lingering.append(pid)
-            except psutil.NoSuchProcess:
-                pass
-        results["step2_python_exited_cleanly"] = exited
-        results["step2_no_orphan_processes"] = len(lingering) == 0
+    # Step 3: Python cleanup.
+    time.sleep(0.5)
+    leftover = _alive(tree)
+    results["step3"] = {
+        "exit_code": code,
+        "leftover": leftover,
+        "listeners": _listeners(tree),
+        "lock_present": (runtime / sp.LOCK_NAME).exists(),
+        "lease_present": (runtime / "solver_owner.json").exists(),
+    }
+    checks["step3_python_cleared"] = (
+        code == 0
+        and not leftover
+        and not results["step3"]["listeners"]
+        and not results["step3"]["lock_present"]
+        and not results["step3"]["lease_present"]
+    )
 
-        # === Step 3: Start shim ===
-        shim_proc = _spawn_shim(str(args.shim), shim_env)
-        shim_init = _initialize(shim_proc)
-        results["step3_shim_started"] = bool(shim_init.get("serverInfo"))
-        shim_pids = _tree_pids(shim_proc.pid)
-        results["step3_shim_tree_size"] = len(shim_pids)
-        # Trigger a forwarded call to spawn the worker.
-        import json as _json
-
-        call = {
+    # Step 4: shim mode through the GUI planning path.
+    save_mode("shim")
+    generated = sp.generate_manifest(args.python, settings, manifest)
+    worker = json.dumps([str(args.python), "-m", "comsol_mcp.server"])
+    shim = sp.shim_host(
+        args.shim,
+        env(COMSOL_MCP_DISCOVERY_MANIFEST=str(manifest), COMSOL_MCP_SHIM_CHILD=worker),
+        work / "shim.log",
+    )
+    lock = sp.wait_for_owner(runtime, shim)
+    discovery_served = shim.initialize()
+    children_before_call = _workers(shim.pid, recursive=True)
+    reply = shim.request(
+        {
             "jsonrpc": "2.0",
             "id": 2,
             "method": "tools/call",
             "params": {"name": "capabilities", "arguments": {}},
-        }
-        shim_proc.stdin.write((_json.dumps(call) + "\n").encode())
-        shim_proc.stdin.flush()
-        time.sleep(2.0)
-        shim_pids_after = _tree_pids(shim_proc.pid)
-        results["step3_worker_spawned"] = len(shim_pids_after) > len(shim_pids)
-
-        # === Step 4: Close shim via EOF ===
-        shim_proc.stdin.close()
-        # Drain stdout so the shim's writer thread never blocks on a full
-        # pipe; this is the same contract a real client follows on close.
-        import threading
-
-        def _drain() -> None:
-            try:
-                while shim_proc.stdout.read(65536):
-                    pass
-            except OSError:
-                pass
-
-        drain = threading.Thread(target=_drain, daemon=True)
-        drain.start()
-        shim_exited = _wait_exit(shim_proc, timeout=20)
-        drain.join(timeout=5)
-        time.sleep(1.0)
-        shim_leftover = []
-        for pid in _tree_pids(shim_proc.pid, meaningful_only=True):
-            if pid == shim_proc.pid:
-                continue
-            try:
-                p = psutil.Process(pid)
-                if p.is_running() and p.status() != psutil.STATUS_ZOMBIE:
-                    shim_leftover.append(pid)
-            except psutil.NoSuchProcess:
-                pass
-        results["step4_shim_exited_cleanly"] = shim_exited
-        results["step4_no_orphan_processes"] = len(shim_leftover) == 0
-
-        # === Step 6: stale/UNKNOWN cleanup is not treated as clean ===
-        # Write a fake stale lease and verify the ownership refuses to
-        # treat it as a clean domain.
-        stale_lease = {
-            "schema_version": "3",
-            "owner": "stale-probe",
-            "mode": "local-client",
-            "pid": 999999,
-            "parent_pid": 999998,
-            "process_create_time": 1000000.0,
-            "command_line": ["stale"],
-            "command_signature": "0" * 64,
-            "model_path": None,
-            "heartbeat_epoch": 1000000.0,
-            "created_at_epoch": 1000000.0,
-            "acquisition_id": "stale" * 4,
-            "resource_ownership": "mcp_owned",
-            "attached_server": None,
-            "comsol_server_pids": [],
-            "comsol_server_processes": [],
-            "comsol_server_port": None,
-        }
-        lease_path = runtime / "solver_owner.json"
-        lease_path.write_text(json.dumps(stale_lease, indent=2), encoding="utf-8")
-        # Start a new Python host and check it reports the stale lease.
-        stale_proc = _spawn_python(env)
-        stale_init = _initialize(stale_proc)
-        # Check solver_status tool result.
-        status_call = {
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "tools/call",
-            "params": {"name": "solver_status", "arguments": {}},
-        }
-        stale_proc.stdin.write((_json.dumps(status_call) + "\n").encode())
-        stale_proc.stdin.flush()
-        time.sleep(2.0)
-        # Read the reply (it may be large).
-        line = stale_proc.stdout.readline().decode()
-        reply = json.loads(line) if line.strip() else {}
-        status_text = ""
-        content = reply.get("result", {}).get("content", [])
-        if content and isinstance(content, list) and content:
-            status_text = content[0].get("text", "")
-        results["step6_stale_detected"] = "stale" in status_text.lower()
-        stale_proc.stdin.close()
-        _wait_exit(stale_proc)
-
-    checks = {
-        "python_starts": results.get("step1_python_started") is True,
-        "python_exits_cleanly": results.get("step2_python_exited_cleanly") is True,
-        "python_no_orphans": results.get("step2_no_orphan_processes") is True,
-        "shim_starts": results.get("step3_shim_started") is True,
-        "shim_spawns_worker": results.get("step3_worker_spawned") is True,
-        "shim_exits_cleanly": results.get("step4_shim_exited_cleanly") is True,
-        "shim_no_orphans": results.get("step4_no_orphan_processes") is True,
-        "stale_lease_detected": results.get("step6_stale_detected") is True,
+        },
+        timeout=180,
+    )
+    recorded = sp.read_lock(runtime)[0] or {}
+    direct_children = _workers(shim.pid, recursive=False)
+    tree = _tree(shim.pid)
+    owned = recorded.get("owned_processes") or []
+    results["step4"] = {
+        "manifest_generated": generated.returncode == 0,
+        "lock_pid": (lock or {}).get("pid"),
+        "discovery_served": discovery_served,
+        "children_before_first_call": children_before_call,
+        "forwarded_call_ok": bool(reply) and "result" in reply,
+        "direct_children": direct_children,
+        "recorded_workers": owned,
     }
+    checks["step4_one_shim_host_one_contained_worker"] = (
+        generated.returncode == 0
+        and (lock or {}).get("pid") == shim.pid
+        and discovery_served
+        and not children_before_call
+        and results["step4"]["forwarded_call_ok"]
+        and len(direct_children) == 1
+        and len(owned) == 1
+        and owned[0].get("pid") == direct_children[0]
+    )
+
+    # Step 5: switch back with verified cleanup.
+    code = shim.close()
+    time.sleep(0.5)
+    leftover = _alive(tree)
+    results["step5_shim_cleanup"] = {
+        "exit_code": code,
+        "leftover": leftover,
+        "listeners": _listeners(tree),
+        "lock_present": (runtime / sp.LOCK_NAME).exists(),
+    }
+    checks["step5_shim_cleared"] = (
+        code == 0
+        and not leftover
+        and not results["step5_shim_cleanup"]["listeners"]
+        and not results["step5_shim_cleanup"]["lock_present"]
+    )
+    save_mode("python")
+    python = sp.python_host(args.python, env(), work / "python-2.log")
+    lock = sp.wait_for_owner(runtime, python)
+    served = python.initialize()
+    checks["step5_python_readmitted"] = sp.lock_owned_by(lock, python) and served
+
+    # Step 6: an overlapping shim start in the same domain is refused.
+    overlap_settings = work / "overlap-settings.json"
+    sp.write_settings(
+        overlap_settings,
+        sp.settings_document(transport="shim", runtime=runtime, models=models, binary=binary),
+    )
+    overlap_env = sp.base_environment()
+    overlap_env["COMSOL_MCP_SETTINGS_PATH"] = str(overlap_settings)
+    overlap_env["COMSOL_MCP_SHIM_CHILD"] = worker
+    overlap = sp.shim_host(args.shim, overlap_env, work / "overlap.log")
+    overlap_code = overlap.wait_exit(60)
+    results["step6_overlap"] = {
+        "exit_code": overlap_code,
+        "reason": overlap.reason(),
+        "python_alive": python.alive(),
+        "python_still_owns": sp.lock_owned_by(sp.read_lock(runtime)[0], python),
+        "lease_present": (runtime / "solver_owner.json").exists(),
+    }
+    checks["step6_overlapping_start_refused"] = (
+        overlap_code == 2
+        and overlap.reason() == "admission_domain_busy"
+        and results["step6_overlap"]["python_alive"]
+        and results["step6_overlap"]["python_still_owns"]
+        and not results["step6_overlap"]["lease_present"]
+    )
+    python.close()
+
+    # Step 6b: a stale record whose recorded worker is alive is UNKNOWN cleanup.
+    helper = sp.sleeper(args.python)
+    worker_identity = sp.birth_identity(helper.pid)
+    sp.write_record(
+        runtime,
+        sp.admission_record(
+            sp.dead_identity(args.python),
+            transport_mode="shim",
+            owned_processes=[
+                {
+                    "role": "worker",
+                    "pid": worker_identity["pid"],
+                    "process_create_time": worker_identity["process_create_time"],
+                }
+            ],
+        ),
+    )
+    blocked = sp.python_host(args.python, env(), work / "python-3.log")
+    blocked_code = blocked.wait_exit(60)
+    results["step6_unknown_cleanup"] = {"exit_code": blocked_code, "reason": blocked.reason()}
+    checks["step6_unverified_cleanup_blocks_admission"] = (
+        blocked_code == 2 and blocked.reason() == "admission_cleanup_unverified"
+    )
+    helper.kill()
+
     results["checks"] = checks
     results["passed"] = all(checks.values())
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(results, indent=2), encoding="utf-8")
-    print(json.dumps(checks, sort_keys=True))
+    args.output.write_text(json.dumps(results, indent=2, default=str), encoding="utf-8")
+    print(json.dumps(checks, indent=2))
     return 0 if results["passed"] else 1
 
 
