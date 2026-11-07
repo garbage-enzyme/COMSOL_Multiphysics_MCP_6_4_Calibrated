@@ -23,6 +23,7 @@ MESSAGE_IDS = (
     "COMSOL MCP Settings",
     "Interface and Language",
     "Feature Settings",
+    "Independent Feature Extensions",
     "Read/Write Directories",
     "MCP Connection",
     "Verification and Safety",

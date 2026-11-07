@@ -11,6 +11,9 @@ msgstr "Interface and Language"
 msgid "Feature Settings"
 msgstr "Feature Settings"
 
+msgid "Independent Feature Extensions"
+msgstr "Independent Feature Extensions"
+
 msgid "Read/Write Directories"
 msgstr "Read/Write Directories"
 

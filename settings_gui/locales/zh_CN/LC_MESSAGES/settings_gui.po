@@ -11,6 +11,9 @@ msgstr "界面和语言"
 msgid "Feature Settings"
 msgstr "功能设置"
 
+msgid "Independent Feature Extensions"
+msgstr "独立功能扩展"
+
 msgid "Read/Write Directories"
 msgstr "读写目录"
 

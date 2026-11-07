@@ -438,13 +438,38 @@ class SettingsApplication:
             self.tabs[tab_id] = tab
             self.notebook.add(tab, text=_(TAB_TITLES[tab_id]))
         docs_keys = {key for _title, keys in DOC_SECTIONS for key in keys}
+        # Batch I*: profile tab's independent feature toggles get a labelled
+        # frame ("Independent Feature Extensions"). Other fields render normally.
+        _FEATURE_KEYS = {
+            "shared_server.enabled",
+            "discovery.pagination_enabled",
+            "model_manager.enabled",
+            "model_manager.upload_enabled",
+        }
+        profile_parent = self.tabs["profile"].content
+        feature_frame = ttk.LabelFrame(
+            profile_parent,
+            text=_("Independent Feature Extensions"),
+            padding=8,
+        )
+        # Render the non-feature field (profile.name) first, then place the
+        # frame below it, then render feature fields inside the frame.
+        _feature_row = None  # Remember where to grid the frame.
         for field in FIELDS:
             if (
                 field.key not in docs_keys
                 and field.key not in CUSTOM_TAB_KEYS
                 and field.tab != "about"
             ):
-                self._add_field(self.tabs[field.tab].content, field)
+                if field.key in _FEATURE_KEYS:
+                    if _feature_row is None:
+                        _feature_row = profile_parent.grid_size()[1]
+                        feature_frame.grid(
+                            row=_feature_row, column=0, sticky="ew", pady=(4, 8)
+                        )
+                    self._add_field(feature_frame, field)
+                else:
+                    self._add_field(self.tabs[field.tab].content, field)
         docs_parent = self.tabs["docs"].content
         for title, keys in DOC_SECTIONS:
             row = docs_parent.grid_size()[1]
