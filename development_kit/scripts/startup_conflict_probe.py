@@ -148,7 +148,25 @@ def main() -> int:
         results["case3_one_admitted"] = refused_count >= 0  # At least one started
 
         # === Case 4: Manual shim launch with valid settings ===
-        _settings(settings_file, runtime, "shim", shim_binary=True)
+        # HI-02 fix: the shim now validates the binary hash, so we must
+        # use the actual binary path and its real SHA-256.
+        import hashlib as _hashlib
+
+        _shim_bytes = args.shim.read_bytes()
+        _shim_hash = _hashlib.sha256(_shim_bytes).hexdigest()
+        settings_file.write_text(
+            json.dumps(
+                {
+                    "schema_name": "comsol_mcp.settings",
+                    "schema_version": "1.4.0",
+                    "profile": {"name": "core"},
+                    "runtime": {"directory": str(runtime)},
+                    "transport": "shim",
+                    "shim_binary": {"path": str(args.shim), "sha256": _shim_hash},
+                }
+            ),
+            encoding="utf-8",
+        )
         # Clear any leftover admission lock from previous cases.
         lock_file = runtime / "host_admission.lock"
         if lock_file.exists():
