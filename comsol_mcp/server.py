@@ -2,6 +2,7 @@
 
 import logging
 import multiprocessing as mp
+import os
 from weakref import WeakKeyDictionary, WeakSet
 
 from mcp.server.mcpserver import MCPServer
@@ -196,8 +197,41 @@ def main() -> None:
     B11: resolve the profile before any native/JVM preload so the
     ``comsolless_read_only`` entry point stays a lightweight offline path.
     Other profiles keep the existing main-thread native preload contract.
+
+    0.8.2 §10: validate transport mode and acquire host admission before
+    serving. The Python direct host refuses to start when settings select
+    the shim, and refuses when another host already holds admission.
     """
     logging.basicConfig(level=logging.INFO)
+
+    # Transport gate: refuse mode mismatch or domain contention before any
+    # heavy import or preload. A shim-contained worker is exempt: its parent
+    # is the shim, which already holds admission.
+    from comsol_mcp.settings import load_settings, resolve_settings_location
+    from comsol_mcp.utils.runtime_paths import default_runtime_dir
+
+    _worker = os.environ.get("COMSOL_MCP_SHIM_WORKER") == "1"
+    if not _worker:
+        settings = load_settings()
+        location = resolve_settings_location()
+        from comsol_mcp.host_admission import HostAdmissionError, acquire, validate_transport_mode
+
+        try:
+            validate_transport_mode(
+                settings, actual_mode="python", settings_source=str(location.path)
+            )
+            admission = acquire(
+                default_runtime_dir(),
+                transport_mode="python",
+            )
+            logger.info("Host admission: PID %s, transport python", admission["pid"])
+        except HostAdmissionError as exc:
+            logger.error("Host admission refused: %s (%s)", exc, exc.reason_code)
+            import sys as _sys
+
+            _sys.stderr.write(f"comsol-mcp: refusing to start: {exc}\n")
+            _sys.exit(2)
+
     # Profile selection must precede heavy imports/preload.
     selection = resolve_profile()
     offline = getattr(selection, "name", None) == "comsolless_read_only"

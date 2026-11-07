@@ -336,6 +336,7 @@ fn spawn_worker(out: &OutSink, terminator: &str, era: &ClientEra) -> Result<Work
     let mut command = Command::new(program);
     command
         .args(args)
+        .env("COMSOL_MCP_SHIM_WORKER", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
@@ -464,6 +465,27 @@ fn request_meta_protocol(params: Option<&Value>) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Read the settings file and verify transport mode is "shim". Return an
+/// error message on mismatch; return None when the mode is correct or the
+/// settings file is unreadable (the Python server performs the full check).
+fn validate_transport_setting() -> Option<String> {
+    let settings_path = std::env::var("COMSOL_MCP_SETTINGS_PATH").ok()?;
+    let contents = std::fs::read_to_string(&settings_path).ok()?;
+    let settings: Value = serde_json::from_str(&contents).ok()?;
+    let mode = settings
+        .get("transport")
+        .and_then(Value::as_str)
+        .unwrap_or("python");
+    if mode != "shim" {
+        return Some(format!(
+            "settings select transport '{mode}' but this is the shim. \
+             Change the transport setting to 'shim' or launch the Python \
+             entry point directly. Settings: {settings_path}"
+        ));
+    }
+    None
+}
+
 fn error_reply(id: Option<&Value>, message: &str, terminator: &str, out: &OutSink) {
     let id = id.cloned().unwrap_or(Value::Null);
     let body = json!({
@@ -508,6 +530,15 @@ fn run() -> i32 {
         .as_ref()
         .map(|m| m.latest_handshake.clone())
         .unwrap_or_else(|| "2025-11-25".to_owned());
+
+    // 0.8.2 §10 startup gate: validate the configured transport mode. The
+    // shim refuses to start when settings select Python direct. Read the
+    // settings file (minimal JSON parse, no Python needed).
+    if let Some(problem) = validate_transport_setting() {
+        eprintln!("comsol-mcp-shim: refusing to start: {problem}");
+        return 2;
+    }
+
     let mut worker: Option<Worker> = None;
     let mut era: Option<ClientEra> = None;
     let mut stdin = std::io::BufReader::new(std::io::stdin());
