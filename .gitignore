@@ -34,3 +34,4 @@ pdf/
 
 # Rust shim build output
 /shim/target/
+bridge-smoke-*
