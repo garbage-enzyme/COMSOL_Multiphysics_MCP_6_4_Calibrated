@@ -486,6 +486,81 @@ fn validate_transport_setting() -> Option<String> {
     None
 }
 
+/// Resolve the runtime directory from the environment or the settings file.
+fn resolve_runtime_dir() -> Option<std::path::PathBuf> {
+    if let Ok(dir) = std::env::var("COMSOL_MCP_RUNTIME_DIR") {
+        return Some(std::path::PathBuf::from(dir));
+    }
+    let settings_path = std::env::var("COMSOL_MCP_SETTINGS_PATH").ok()?;
+    let contents = std::fs::read_to_string(&settings_path).ok()?;
+    let settings: Value = serde_json::from_str(&contents).ok()?;
+    settings
+        .pointer("/runtime/directory")
+        .and_then(Value::as_str)
+        .map(std::path::PathBuf::from)
+}
+
+/// Acquire the shared host-admission lock. The lock file uses the same
+/// schema as the Python side (`comsol_mcp.host_admission` 1.0.0). Returns
+/// the lock file path for later release.
+fn acquire_host_admission() -> Result<std::path::PathBuf, String> {
+    let runtime_dir = resolve_runtime_dir()
+        .ok_or_else(|| "cannot resolve the runtime directory for host admission".to_owned())?;
+    let lock_path = runtime_dir.join("host_admission.lock");
+    if !runtime_dir.exists() {
+        std::fs::create_dir_all(&runtime_dir)
+            .map_err(|e| format!("cannot create runtime directory: {e}"))?;
+    }
+
+    // Check for an existing lock. Refuse when another PID holds it; this
+    // conservative approach never reclaims a live-looking lock.
+    if let Ok(contents) = std::fs::read_to_string(&lock_path)
+        && let Ok(existing) = serde_json::from_str::<Value>(&contents)
+        && let Some(pid) = existing.get("pid").and_then(Value::as_i64)
+        && pid != std::process::id() as i64
+    {
+        let mode = existing
+            .get("transport_mode")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        return Err(format!(
+            "another host (PID {pid}, transport '{mode}') holds \
+             the admission lock for this domain. Close it and retry."
+        ));
+    }
+
+    // Write our lock (exclusive create).
+    let identity = json!({
+        "schema_name": "comsol_mcp.host_admission",
+        "schema_version": "1.0.0",
+        "transport_mode": "shim",
+        "pid": std::process::id(),
+        "acquired_at_epoch": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0),
+    });
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock_path)
+    {
+        Ok(mut file) => {
+            use std::io::Write;
+            let payload = serde_json::to_string_pretty(&identity).unwrap_or_default();
+            if let Err(e) = writeln!(file, "{payload}") {
+                let _ = std::fs::remove_file(&lock_path);
+                return Err(format!("cannot write admission lock: {e}"));
+            }
+            Ok(lock_path)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            Err("another process acquired host admission concurrently".to_owned())
+        }
+        Err(e) => Err(format!("cannot create admission lock: {e}")),
+    }
+}
+
 fn error_reply(id: Option<&Value>, message: &str, terminator: &str, out: &OutSink) {
     let id = id.cloned().unwrap_or(Value::Null);
     let body = json!({
@@ -538,6 +613,28 @@ fn run() -> i32 {
         eprintln!("comsol-mcp-shim: refusing to start: {problem}");
         return 2;
     }
+
+    // 0.8.2 §10 interactive launch: when stdin is a terminal (no protocol
+    // client), explain the stdio launch method and exit without starting
+    // Python or COMSOL. Preserve the explicit version-report command.
+    use std::io::IsTerminal;
+    if std::io::stdin().is_terminal() {
+        eprintln!("comsol-mcp-shim: this is an MCP stdio server, not an interactive program.");
+        eprintln!("To use it, configure an MCP client (ZCode, Codex, Claude) to launch this");
+        eprintln!("binary as its MCP server command. The client communicates over stdin/stdout.");
+        eprintln!("For the version, run: comsol-mcp-shim --version");
+        return 0;
+    }
+
+    // 0.8.2 §10 host admission: acquire the shared admission lock for the
+    // canonical ownership domain before serving any request.
+    let admission = match acquire_host_admission() {
+        Ok(lock) => Some(lock),
+        Err(problem) => {
+            eprintln!("comsol-mcp-shim: refusing to start: {problem}");
+            return 2;
+        }
+    };
 
     let mut worker: Option<Worker> = None;
     let mut era: Option<ClientEra> = None;
@@ -723,6 +820,12 @@ fn run() -> i32 {
     }
     drop(out); // Close the bounded queue; the writer drains and exits.
     let _ = writer_thread.join();
+
+    // Release the host-admission lock on clean exit.
+    if let Some(path) = &admission {
+        let _ = std::fs::remove_file(path);
+    }
+
     0
 }
 

@@ -211,6 +211,42 @@ def main() -> None:
     from comsol_mcp.utils.runtime_paths import default_runtime_dir
 
     _worker = os.environ.get("COMSOL_MCP_SHIM_WORKER") == "1"
+    if _worker:
+        # §10 worker launch binding: verify an ancestor's executable is the
+        # shim binary. Walk up the ancestor chain to handle venv redirectors.
+        # Check the executable path, not the command line: a probe script
+        # that merely mentions the shim path in its arguments must not pass.
+        try:
+            import psutil as _psutil
+
+            _current = _psutil.Process()
+            _found_shim_parent = False
+            for _ in range(5):  # Bounded ancestor walk.
+                try:
+                    _parent = _current.parent()
+                except (_psutil.NoSuchProcess, _psutil.AccessDenied):
+                    break
+                if _parent is None:
+                    break
+                try:
+                    _exe = (_parent.exe() or "").lower()
+                except (_psutil.NoSuchProcess, _psutil.AccessDenied):
+                    _exe = ""
+                _name = (_parent.name() or "").lower()
+                if "comsol-mcp-shim" in _exe or "comsol-mcp-shim" in _name:
+                    _found_shim_parent = True
+                    break
+                _current = _parent
+            if not _found_shim_parent:
+                import sys as _sys
+
+                _sys.stderr.write(
+                    "comsol-mcp: refusing to start: COMSOL_MCP_SHIM_WORKER is set "
+                    "but no ancestor executable is the shim binary.\n"
+                )
+                _sys.exit(2)
+        except ImportError:
+            pass  # psutil unavailable in a stripped environment; trust the flag.
     if not _worker:
         settings = load_settings()
         location = resolve_settings_location()
@@ -252,7 +288,28 @@ def main() -> None:
 
     # Use the same factory as embedded and installed callers.  The legacy
     # module-global server does not carry the Tasks extension or its engine.
-    create_server(profile=selection).run()
+    # Release the host-admission lock on clean exit (crash leaves a stale
+    # lock that the next acquirer reclaims by process identity).
+    _admission_released = False
+
+    def _release_admission() -> None:
+        nonlocal _admission_released
+        if _admission_released:
+            return
+        _admission_released = True
+        try:
+            from comsol_mcp.host_admission import release as _release
+            _release(default_runtime_dir())
+        except Exception:
+            pass
+
+    import atexit as _atexit
+
+    _atexit.register(_release_admission)
+    try:
+        create_server(profile=selection).run()
+    finally:
+        _release_admission()
 
 
 def _is_transport_entrypoint() -> bool:
