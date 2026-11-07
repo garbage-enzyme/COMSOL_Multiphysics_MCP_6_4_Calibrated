@@ -5,17 +5,29 @@ msgstr "Project-Id-Version: comsol-mcp alpha8.1\nMIME-Version: 1.0\nContent-Type
 msgid "COMSOL MCP Settings"
 msgstr "COMSOL MCP 設定"
 
-msgid "General"
-msgstr "一般"
+msgid "Interface and Language"
+msgstr "介面和語言"
 
-msgid "Profile"
-msgstr "工具設定檔"
+msgid "Feature Settings"
+msgstr "功能設定"
 
-msgid "Runtime"
-msgstr "執行路徑"
+msgid "Read/Write Directories"
+msgstr "讀寫目錄"
 
 msgid "MCP Connection"
 msgstr "MCP 連線方式"
+
+msgid "Verification and Safety"
+msgstr "驗證與安全"
+
+msgid "Manual Auto-Retrieval"
+msgstr "手冊自動檢索"
+
+msgid "Solver Ownership"
+msgstr "模擬器所有權"
+
+msgid "About"
+msgstr "關於"
 
 msgid "Transport mode"
 msgstr "傳輸模式"
@@ -26,20 +38,26 @@ msgstr "Python 直連（預設，完全相容）"
 msgid "Rust shim (lower memory, experimental)"
 msgstr "Rust shim（低記憶體，實驗性）"
 
-msgid "Shim binary (required for Rust shim mode)"
-msgstr "Shim 二進位（Rust shim 模式必需）"
+msgid "Standalone program (required for Rust shim mode)"
+msgstr "獨立程式（Rust shim 模式必需）"
 
-msgid "Binary path"
-msgstr "二進位路徑"
+msgid "Standalone program path"
+msgstr "獨立程式路徑"
+
+msgid "Settings schema identity."
+msgstr "設定檔使用的格式標識。"
+
+msgid "Settings schema version."
+msgstr "設定檔使用的格式版本。"
 
 msgid "SHA-256"
 msgstr "SHA-256 校驗"
 
-msgid "Check binary"
-msgstr "校驗二進位"
+msgid "Check program"
+msgstr "校驗程式"
 
-msgid "Enter the shim binary path first."
-msgstr "請先輸入 shim 二進位路徑。"
+msgid "Enter the standalone program path first."
+msgstr "請先輸入獨立程式路徑。"
 
 msgid "File not found."
 msgstr "檔案不存在。"
@@ -59,8 +77,8 @@ msgstr "切換前，請關閉所有使用本伺服器的 agent 連線（包括�
 msgid "Refused: server processes are still running. Close them and try again."
 msgstr "已拒絕：仍有伺服器程序在執行。請關閉後重試。"
 
-msgid "Rust shim mode requires a binary path and SHA-256."
-msgstr "Rust shim 模式需要二進位路徑和 SHA-256。"
+msgid "Rust shim mode requires a standalone program path and SHA-256."
+msgstr "Rust shim 模式需要獨立程式路徑和 SHA-256。"
 
 msgid "Confirm transport switch"
 msgstr "確認切換傳輸方式"
@@ -73,18 +91,6 @@ msgstr "選擇 agent 用戶端連線 COMSOL MCP 伺服器的方式。切換需�
 
 msgid "COMSOL/Java"
 msgstr "COMSOL/Java"
-
-msgid "Evidence"
-msgstr "證據"
-
-msgid "Docs"
-msgstr "文件"
-
-msgid "Owner"
-msgstr "擁有者"
-
-msgid "About"
-msgstr "關於"
 
 msgid "Changes take effect only after restarting Codex or the owning MCP client."
 msgstr "變更僅在重新啟動 Codex 或目前的 MCP 用戶端後生效。"
@@ -194,11 +200,86 @@ msgstr "简体中文"
 msgid "繁體中文"
 msgstr "繁體中文"
 
-msgid "Internal settings format name. You do not need to change it."
-msgstr "設定檔內部使用的格式名稱，不需要修改。"
+msgid "Settings schema"
+msgstr "設定格式名稱"
 
-msgid "Settings format version used when this file is saved."
-msgstr "儲存檔案時使用的設定格式版本。"
+msgid "Settings schema version"
+msgstr "設定格式版本"
+
+msgid "Language"
+msgstr "介面語言"
+
+msgid "Display Size"
+msgstr "介面大小"
+
+msgid "Tool Profile"
+msgstr "工具設定檔"
+
+msgid "Collaborative Editing"
+msgstr "協同編輯"
+
+msgid "Progressive Tool Catalog"
+msgstr "漸進式工具目錄"
+
+msgid "Model Manager"
+msgstr "模型管理器"
+
+msgid "Model Manager Upload"
+msgstr "模型管理器上傳"
+
+msgid "Working Files Folder"
+msgstr "工作檔案目錄"
+
+msgid "Resumable Jobs Folder"
+msgstr "可恢復作業目錄"
+
+msgid "Model Read Folders"
+msgstr "模型讀取目錄"
+
+msgid "Results Output Folder"
+msgstr "結果輸出目錄"
+
+msgid "COMSOL Installation Folder"
+msgstr "COMSOL 安裝目錄"
+
+msgid "Java Runtime Folder"
+msgstr "Java 執行時目錄"
+
+msgid "JDK Folder"
+msgstr "JDK 目錄"
+
+msgid "Outcome Contract Validation"
+msgstr "結果契約驗證"
+
+msgid "Artifact Chain Verification"
+msgstr "工件鏈驗證"
+
+msgid "Summary Claim Verification"
+msgstr "摘要聲明驗證"
+
+msgid "Producer Driver Compatibility"
+msgstr "生產者驅動相容性"
+
+msgid "Keyword Manual Search"
+msgstr "關鍵詞手冊搜尋"
+
+msgid "Manuals Folder"
+msgstr "手冊目錄"
+
+msgid "Search Index File"
+msgstr "搜尋索引檔案"
+
+msgid "Semantic Manual Search"
+msgstr "語義手冊搜尋"
+
+msgid "Semantic Index Folder"
+msgstr "語義索引目錄"
+
+msgid "Semantic Model Folder"
+msgstr "語義模型目錄"
+
+msgid "Solver Owner Name"
+msgstr "模擬器所有者名稱"
 
 msgid "Language used by this Settings window."
 msgstr "此設定視窗使用的語言。"

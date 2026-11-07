@@ -71,14 +71,14 @@ def _platform_help_text(text: str, *, platform: str | None = None) -> str:
 
 
 TAB_TITLES = {
-    "general": "General",
-    "profile": "Profile",
-    "runtime": "Runtime",
+    "general": "Interface and Language",
+    "profile": "Feature Settings",
+    "runtime": "Read/Write Directories",
     "transport": "MCP Connection",
     "comsol_java": "COMSOL/Java",
-    "evidence": "Evidence",
-    "docs": "Docs",
-    "ownership": "Owner",
+    "evidence": "Verification and Safety",
+    "docs": "Manual Auto-Retrieval",
+    "ownership": "Solver Ownership",
     "about": "About",
 }
 FIXED_LINKS = (
@@ -439,7 +439,11 @@ class SettingsApplication:
             self.notebook.add(tab, text=_(TAB_TITLES[tab_id]))
         docs_keys = {key for _title, keys in DOC_SECTIONS for key in keys}
         for field in FIELDS:
-            if field.key not in docs_keys and field.key not in CUSTOM_TAB_KEYS:
+            if (
+                field.key not in docs_keys
+                and field.key not in CUSTOM_TAB_KEYS
+                and field.tab != "about"
+            ):
                 self._add_field(self.tabs[field.tab].content, field)
         docs_parent = self.tabs["docs"].content
         for title, keys in DOC_SECTIONS:
@@ -488,12 +492,19 @@ class SettingsApplication:
         )
 
     def _add_field(self, parent: ttk.Frame, field: FieldDescriptor) -> None:
+        from .model import FIELD_TITLES
+
+        _ = self.controller.text
         row = parent.grid_size()[1]
         frame = ttk.Frame(parent, padding=(0, 0, 0, 14))
         frame.grid(row=row, column=0, sticky="ew")
         parent.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
-        ttk.Label(frame, text=field.key, wraplength=330, justify="left").grid(
+        # Batch I*: use the human-readable title, not the key. The key
+        # appears in grey at the start of the help text (tooltip).
+        title = FIELD_TITLES.get(field.key)
+        label_text = _(title) if title else field.key
+        ttk.Label(frame, text=label_text, wraplength=330, justify="left").grid(
             row=0,
             column=0,
             sticky="nw",
@@ -607,9 +618,12 @@ class SettingsApplication:
                 command=self._start_manual_index_build,
             ).pack(anchor="w")
             content_row = 2
+        # Batch I*: prefix the help text with the settings key in grey,
+        # so users can see the raw key without it being the title.
+        raw_help = _platform_help_text(self.controller.text(help_id))
         help_label = ttk.Label(
             frame,
-            text=_platform_help_text(self.controller.text(help_id)),
+            text=f"({field.key})  {raw_help}",
             style="Help.TLabel",
             wraplength=620,
             justify="left",
@@ -714,12 +728,12 @@ class SettingsApplication:
         ).pack(anchor="w")
 
         shim_frame = ttk.LabelFrame(
-            parent, text=_("Shim binary (required for Rust shim mode)"), padding=8
+            parent, text=_("Standalone program (required for Rust shim mode)"), padding=8
         )
         shim_frame.pack(fill="x", pady=(0, 8))
         path_row = ttk.Frame(shim_frame)
         path_row.pack(fill="x", pady=(0, 4))
-        ttk.Label(path_row, text=_("Binary path")).pack(side="left")
+        ttk.Label(path_row, text=_("Standalone program path")).pack(side="left")
         self._shim_path_var = tk.StringVar(
             value=str(get_value(self.controller.model.document, "shim_binary.path") or "")
         )
@@ -743,7 +757,7 @@ class SettingsApplication:
             digest = self._shim_sha256_var.get().strip()
             if not path:
                 self._shim_check_label.config(
-                    text=_("Enter the shim binary path first."), foreground="#b00"
+                    text=_("Enter the standalone program path first."), foreground="#b00"
                 )
                 return
             import hashlib
@@ -776,7 +790,7 @@ class SettingsApplication:
                 foreground="#070",
             )
 
-        ttk.Button(shim_frame, text=_("Check binary"), command=_check_binary).pack(
+        ttk.Button(shim_frame, text=_("Check program"), command=_check_binary).pack(
             anchor="w", pady=(4, 0)
         )
 
@@ -826,7 +840,7 @@ class SettingsApplication:
                 digest = self._shim_sha256_var.get().strip()
                 if not path or not digest:
                     self._switch_status.config(
-                        text=_("Rust shim mode requires a binary path and SHA-256."),
+                        text=_("Rust shim mode requires a standalone program path and SHA-256."),
                         foreground="#b00",
                     )
                     return
@@ -863,6 +877,11 @@ class SettingsApplication:
         ttk.Label(parent, text=_("COMSOL MCP Settings"), font="TkHeadingFont").pack(anchor="w")
         ttk.Label(parent, text=f"{_('GUI release')}: {GUI_RELEASE}").pack(anchor="w", pady=(12, 0))
         ttk.Label(parent, text=f"{_('Installed package version')}: {__version__}").pack(anchor="w")
+        # Batch I*: schema identity moved here from the General tab.
+        from comsol_mcp.settings import SETTINGS_SCHEMA, SETTINGS_VERSION
+
+        ttk.Label(parent, text=f"{_('Settings schema')}: {SETTINGS_SCHEMA}").pack(anchor="w")
+        ttk.Label(parent, text=f"{_('Settings schema version')}: {SETTINGS_VERSION}").pack(anchor="w")
         ttk.Label(parent, text=_("Desktop shortcut"), font="TkHeadingFont").pack(
             anchor="w",
             pady=(18, 6),

@@ -5,17 +5,29 @@ msgstr "Project-Id-Version: comsol-mcp alpha8.1\nMIME-Version: 1.0\nContent-Type
 msgid "COMSOL MCP Settings"
 msgstr "COMSOL MCP Settings"
 
-msgid "General"
-msgstr "General"
+msgid "Interface and Language"
+msgstr "Interface and Language"
 
-msgid "Profile"
-msgstr "Profile"
+msgid "Feature Settings"
+msgstr "Feature Settings"
 
-msgid "Runtime"
-msgstr "Runtime"
+msgid "Read/Write Directories"
+msgstr "Read/Write Directories"
 
 msgid "MCP Connection"
 msgstr "MCP Connection"
+
+msgid "Verification and Safety"
+msgstr "Verification and Safety"
+
+msgid "Manual Auto-Retrieval"
+msgstr "Manual Auto-Retrieval"
+
+msgid "Solver Ownership"
+msgstr "Solver Ownership"
+
+msgid "About"
+msgstr "About"
 
 msgid "Transport mode"
 msgstr "Transport mode"
@@ -26,20 +38,26 @@ msgstr "Python direct (default, fully compatible)"
 msgid "Rust shim (lower memory, experimental)"
 msgstr "Rust shim (lower memory, experimental)"
 
-msgid "Shim binary (required for Rust shim mode)"
-msgstr "Shim binary (required for Rust shim mode)"
+msgid "Standalone program (required for Rust shim mode)"
+msgstr "Standalone program (required for Rust shim mode)"
 
-msgid "Binary path"
-msgstr "Binary path"
+msgid "Standalone program path"
+msgstr "Standalone program path"
+
+msgid "Settings schema identity."
+msgstr "Settings schema identity."
+
+msgid "Settings schema version."
+msgstr "Settings schema version."
 
 msgid "SHA-256"
 msgstr "SHA-256"
 
-msgid "Check binary"
-msgstr "Check binary"
+msgid "Check program"
+msgstr "Check program"
 
-msgid "Enter the shim binary path first."
-msgstr "Enter the shim binary path first."
+msgid "Enter the standalone program path first."
+msgstr "Enter the standalone program path first."
 
 msgid "File not found."
 msgstr "File not found."
@@ -59,8 +77,8 @@ msgstr "Before switching, close every agent session that uses this server (inclu
 msgid "Refused: server processes are still running. Close them and try again."
 msgstr "Refused: server processes are still running. Close them and try again."
 
-msgid "Rust shim mode requires a binary path and SHA-256."
-msgstr "Rust shim mode requires a binary path and SHA-256."
+msgid "Rust shim mode requires a standalone program path and SHA-256."
+msgstr "Rust shim mode requires a standalone program path and SHA-256."
 
 msgid "Confirm transport switch"
 msgstr "Confirm transport switch"
@@ -73,18 +91,6 @@ msgstr "Choose how agent clients connect to the COMSOL MCP server. Switching req
 
 msgid "COMSOL/Java"
 msgstr "COMSOL/Java"
-
-msgid "Evidence"
-msgstr "Evidence"
-
-msgid "Docs"
-msgstr "Docs"
-
-msgid "Owner"
-msgstr "Owner"
-
-msgid "About"
-msgstr "About"
 
 msgid "Changes take effect only after restarting Codex or the owning MCP client."
 msgstr "Changes take effect only after restarting Codex or the owning MCP client."
@@ -194,11 +200,86 @@ msgstr "简体中文"
 msgid "繁體中文"
 msgstr "繁體中文"
 
-msgid "Internal settings format name. You do not need to change it."
-msgstr "Internal settings format name. You do not need to change it."
+msgid "Settings schema"
+msgstr "Settings schema"
 
-msgid "Settings format version used when this file is saved."
-msgstr "Settings format version used when this file is saved."
+msgid "Settings schema version"
+msgstr "Settings schema version"
+
+msgid "Language"
+msgstr "Language"
+
+msgid "Display Size"
+msgstr "Display Size"
+
+msgid "Tool Profile"
+msgstr "Tool Profile"
+
+msgid "Collaborative Editing"
+msgstr "Collaborative Editing"
+
+msgid "Progressive Tool Catalog"
+msgstr "Progressive Tool Catalog"
+
+msgid "Model Manager"
+msgstr "Model Manager"
+
+msgid "Model Manager Upload"
+msgstr "Model Manager Upload"
+
+msgid "Working Files Folder"
+msgstr "Working Files Folder"
+
+msgid "Resumable Jobs Folder"
+msgstr "Resumable Jobs Folder"
+
+msgid "Model Read Folders"
+msgstr "Model Read Folders"
+
+msgid "Results Output Folder"
+msgstr "Results Output Folder"
+
+msgid "COMSOL Installation Folder"
+msgstr "COMSOL Installation Folder"
+
+msgid "Java Runtime Folder"
+msgstr "Java Runtime Folder"
+
+msgid "JDK Folder"
+msgstr "JDK Folder"
+
+msgid "Outcome Contract Validation"
+msgstr "Outcome Contract Validation"
+
+msgid "Artifact Chain Verification"
+msgstr "Artifact Chain Verification"
+
+msgid "Summary Claim Verification"
+msgstr "Summary Claim Verification"
+
+msgid "Producer Driver Compatibility"
+msgstr "Producer Driver Compatibility"
+
+msgid "Keyword Manual Search"
+msgstr "Keyword Manual Search"
+
+msgid "Manuals Folder"
+msgstr "Manuals Folder"
+
+msgid "Search Index File"
+msgstr "Search Index File"
+
+msgid "Semantic Manual Search"
+msgstr "Semantic Manual Search"
+
+msgid "Semantic Index Folder"
+msgstr "Semantic Index Folder"
+
+msgid "Semantic Model Folder"
+msgstr "Semantic Model Folder"
+
+msgid "Solver Owner Name"
+msgstr "Solver Owner Name"
 
 msgid "Language used by this Settings window."
 msgstr "Language used by this Settings window."

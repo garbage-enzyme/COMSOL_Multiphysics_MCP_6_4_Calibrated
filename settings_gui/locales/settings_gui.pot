@@ -5,16 +5,28 @@ msgstr "Project-Id-Version: comsol-mcp alpha8.1\nMIME-Version: 1.0\nContent-Type
 msgid "COMSOL MCP Settings"
 msgstr ""
 
-msgid "General"
+msgid "Interface and Language"
 msgstr ""
 
-msgid "Profile"
+msgid "Feature Settings"
 msgstr ""
 
-msgid "Runtime"
+msgid "Read/Write Directories"
 msgstr ""
 
 msgid "MCP Connection"
+msgstr ""
+
+msgid "Verification and Safety"
+msgstr ""
+
+msgid "Manual Auto-Retrieval"
+msgstr ""
+
+msgid "Solver Ownership"
+msgstr ""
+
+msgid "About"
 msgstr ""
 
 msgid "Transport mode"
@@ -26,19 +38,25 @@ msgstr ""
 msgid "Rust shim (lower memory, experimental)"
 msgstr ""
 
-msgid "Shim binary (required for Rust shim mode)"
+msgid "Standalone program (required for Rust shim mode)"
 msgstr ""
 
-msgid "Binary path"
+msgid "Standalone program path"
+msgstr ""
+
+msgid "Settings schema identity."
+msgstr ""
+
+msgid "Settings schema version."
 msgstr ""
 
 msgid "SHA-256"
 msgstr ""
 
-msgid "Check binary"
+msgid "Check program"
 msgstr ""
 
-msgid "Enter the shim binary path first."
+msgid "Enter the standalone program path first."
 msgstr ""
 
 msgid "File not found."
@@ -59,7 +77,7 @@ msgstr ""
 msgid "Refused: server processes are still running. Close them and try again."
 msgstr ""
 
-msgid "Rust shim mode requires a binary path and SHA-256."
+msgid "Rust shim mode requires a standalone program path and SHA-256."
 msgstr ""
 
 msgid "Confirm transport switch"
@@ -72,18 +90,6 @@ msgid "Choose how agent clients connect to the COMSOL MCP server. Switching requ
 msgstr ""
 
 msgid "COMSOL/Java"
-msgstr ""
-
-msgid "Evidence"
-msgstr ""
-
-msgid "Docs"
-msgstr ""
-
-msgid "Owner"
-msgstr ""
-
-msgid "About"
 msgstr ""
 
 msgid "Changes take effect only after restarting Codex or the owning MCP client."
@@ -194,10 +200,85 @@ msgstr ""
 msgid "繁體中文"
 msgstr ""
 
-msgid "Internal settings format name. You do not need to change it."
+msgid "Settings schema"
 msgstr ""
 
-msgid "Settings format version used when this file is saved."
+msgid "Settings schema version"
+msgstr ""
+
+msgid "Language"
+msgstr ""
+
+msgid "Display Size"
+msgstr ""
+
+msgid "Tool Profile"
+msgstr ""
+
+msgid "Collaborative Editing"
+msgstr ""
+
+msgid "Progressive Tool Catalog"
+msgstr ""
+
+msgid "Model Manager"
+msgstr ""
+
+msgid "Model Manager Upload"
+msgstr ""
+
+msgid "Working Files Folder"
+msgstr ""
+
+msgid "Resumable Jobs Folder"
+msgstr ""
+
+msgid "Model Read Folders"
+msgstr ""
+
+msgid "Results Output Folder"
+msgstr ""
+
+msgid "COMSOL Installation Folder"
+msgstr ""
+
+msgid "Java Runtime Folder"
+msgstr ""
+
+msgid "JDK Folder"
+msgstr ""
+
+msgid "Outcome Contract Validation"
+msgstr ""
+
+msgid "Artifact Chain Verification"
+msgstr ""
+
+msgid "Summary Claim Verification"
+msgstr ""
+
+msgid "Producer Driver Compatibility"
+msgstr ""
+
+msgid "Keyword Manual Search"
+msgstr ""
+
+msgid "Manuals Folder"
+msgstr ""
+
+msgid "Search Index File"
+msgstr ""
+
+msgid "Semantic Manual Search"
+msgstr ""
+
+msgid "Semantic Index Folder"
+msgstr ""
+
+msgid "Semantic Model Folder"
+msgstr ""
+
+msgid "Solver Owner Name"
 msgstr ""
 
 msgid "Language used by this Settings window."
