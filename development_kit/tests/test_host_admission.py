@@ -128,6 +128,11 @@ def test_release_preserves_a_replacement_record(runtime):
     assert claim.path.read_bytes() == replacement_bytes
 
 
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="only the Windows opened-identity delete can distinguish a same-content "
+    "replacement; the POSIX quarantine path restores it without loss",
+)
 def test_release_preserves_identical_bytes_with_a_new_file_identity(runtime):
     claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
     claim.path.unlink()
