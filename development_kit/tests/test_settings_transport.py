@@ -125,7 +125,15 @@ def test_transport_shim_rejects_malformed_identity(_isolated_settings, field, va
 
 @pytest.mark.parametrize(
     "directory",
-    ["%PROGRAMDATA%/comsol_mcp/runtime", "~/runtime", " D:/runtime", "relative/runtime"],
+    [
+        pytest.param(
+            "%PROGRAMDATA%/comsol_mcp/runtime",
+            marks=pytest.mark.skipif(os.name != "nt", reason="Windows environment reference"),
+        ),
+        "~/runtime",
+        " D:/runtime" if os.name == "nt" else " /srv/runtime",
+        "relative/runtime",
+    ],
 )
 def test_transport_shim_requires_a_literal_runtime_directory(_isolated_settings, directory):
     _write(_shim_document(_isolated_settings, runtime_directory=directory), _isolated_settings)
