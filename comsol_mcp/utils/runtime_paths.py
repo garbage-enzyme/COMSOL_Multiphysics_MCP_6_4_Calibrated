@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
+from typing import Any, Mapping
 
 from comsol_mcp.settings import settings_environment
 
@@ -13,11 +14,16 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
-def default_runtime_dir(environ: dict[str, str] | None = None) -> Path:
+def default_runtime_dir(
+    environ: dict[str, str] | None = None,
+    *,
+    settings: Mapping[str, Any] | None = None,
+) -> Path:
     """Return the common root for leases and durable jobs.
 
     ``COMSOL_MCP_RUNTIME_DIR`` is authoritative.  For backward compatibility,
     setting only ``COMSOL_MCP_JOBS_DIR`` makes its parent the common root.
+    ``settings`` resolves from one already-validated settings snapshot.
     """
     source = os.environ if environ is None else environ
     configured = source.get("COMSOL_MCP_RUNTIME_DIR")
@@ -28,7 +34,11 @@ def default_runtime_dir(environ: dict[str, str] | None = None) -> Path:
     if configured_jobs:
         return Path(configured_jobs).parent
 
-    environment = settings_environment(environ)
+    environment = (
+        settings_environment(environ)
+        if settings is None
+        else settings_environment(environ, settings=settings)
+    )
     configured = environment.get("COMSOL_MCP_RUNTIME_DIR")
     if configured:
         return Path(configured)

@@ -3,6 +3,7 @@
 import logging
 import multiprocessing as mp
 import os
+from typing import Any
 from weakref import WeakKeyDictionary, WeakSet
 
 from mcp.server.mcpserver import MCPServer
@@ -191,6 +192,114 @@ def _preload_native_runtime() -> dict[str, str]:
     return preload_mcp_native_runtime()
 
 
+def _startup_transport_gate() -> "tuple[Any, Any] | None":
+    """0.8.2 §10 startup gate: one settings snapshot through admission.
+
+    Returns ``(claim, snapshot)`` for a direct Python host, or ``None`` for
+    a verified shim-contained worker. Exits with code 2 on any refusal.
+    Every decision quotes the same settings snapshot: its identity is bound
+    into the admission record, so a settings change during startup is
+    detectable instead of being mixed across reads.
+    """
+    import sys as _sys
+
+    from comsol_mcp.host_admission import (
+        HostAdmissionError,
+        acquire,
+        release,
+        transport_setting_errors,
+        validate_transport_mode,
+        verify_worker_binding,
+    )
+    from comsol_mcp.settings import load_settings_snapshot, read_settings_digest
+    from comsol_mcp.utils.runtime_paths import default_runtime_dir
+
+    def _refuse(exc: HostAdmissionError) -> None:
+        logger.error("Host admission refused: %s (%s)", exc, exc.reason_code)
+        _sys.stderr.write(f"comsol-mcp: refusing to start: [{exc.reason_code}] {exc}\n")
+        _sys.exit(2)
+
+    try:
+        snapshot = load_settings_snapshot()
+    except Exception as exc:  # noqa: BLE001 - a single refusal path for every unread
+        logger.error("Settings snapshot failed: %s", exc)
+        _sys.stderr.write(
+            f"comsol-mcp: refusing to start: [settings_unreadable] settings cannot be read: {exc}\n"
+        )
+        _sys.exit(2)
+
+    runtime_dir = default_runtime_dir(settings=snapshot.settings)
+
+    if os.environ.get("COMSOL_MCP_SHIM_WORKER") == "1":
+        try:
+            binding = verify_worker_binding(
+                settings=snapshot.settings,
+                settings_identity=snapshot.identity(),
+                runtime_dir=runtime_dir,
+            )
+        except HostAdmissionError as exc:
+            _refuse(exc)
+        logger.info(
+            "Shim worker binding verified: host PID %s, binary %s",
+            binding["host_pid"],
+            binding["executable"],
+        )
+        # The launch secret is not needed again; children never inherit it.
+        os.environ.pop("COMSOL_MCP_SHIM_WORKER_TOKEN", None)
+        os.environ.pop("COMSOL_MCP_SHIM_HOST_PID", None)
+        # Independent owners (durable jobs, settings window) must outlive the
+        # shim's kill-on-close job, as they outlive a direct Python host.
+        from comsol_mcp.process_launch import enable_job_breakaway
+
+        enable_job_breakaway()
+        return None
+
+    # A missing settings file means defaults, whose transport is Python;
+    # that is not ambiguous for this host. Unreadable or invalid transport
+    # configuration is ambiguous and refuses before admission.
+    if errors := transport_setting_errors(snapshot.report):
+        summary = "; ".join(f"{error.get('path')}: {error.get('message')}" for error in errors)
+        _sys.stderr.write(
+            "comsol-mcp: refusing to start: [transport_setting_invalid] the configured "
+            f"transport is ambiguous ({summary}). Fix settings.json and retry.\n"
+        )
+        _sys.exit(2)
+    try:
+        validate_transport_mode(
+            snapshot.settings,
+            actual_mode="python",
+            settings_source=str(snapshot.location.path),
+        )
+        claim = acquire(
+            runtime_dir,
+            transport_mode="python",
+            settings=snapshot.identity(),
+        )
+        if read_settings_digest(snapshot.location.path) != snapshot.sha256:
+            release(claim)
+            raise HostAdmissionError(
+                "settings_changed_during_admission",
+                "settings.json changed between validation and admission; the "
+                "host released admission. Retry after the change is complete.",
+                {"settings_path": str(snapshot.location.path)},
+            )
+    except HostAdmissionError as exc:
+        _refuse(exc)
+    except OSError as exc:
+        _refuse(
+            HostAdmissionError(
+                "settings_unreadable",
+                f"settings.json could not be re-read after admission: {exc}",
+            )
+        )
+    logger.info(
+        "Host admission: PID %s, transport python, settings %s",
+        claim.document["pid"],
+        claim.document["settings"]["sha256"],
+    )
+    return claim, snapshot
+
+
 def main() -> None:
     """Run the MCP server.
 
@@ -200,73 +309,13 @@ def main() -> None:
 
     0.8.2 §10: validate transport mode and acquire host admission before
     serving. The Python direct host refuses to start when settings select
-    the shim, and refuses when another host already holds admission.
+    the shim, and refuses when another host already holds admission. A
+    shim-contained worker runs only after its launch binding verifies.
     """
     logging.basicConfig(level=logging.INFO)
 
-    # Transport gate: refuse mode mismatch or domain contention before any
-    # heavy import or preload. A shim-contained worker is exempt: its parent
-    # is the shim, which already holds admission.
-    from comsol_mcp.settings import load_settings, resolve_settings_location
-    from comsol_mcp.utils.runtime_paths import default_runtime_dir
-
-    _worker = os.environ.get("COMSOL_MCP_SHIM_WORKER") == "1"
-    if _worker:
-        # §10 worker launch binding: verify an ancestor's executable is the
-        # shim binary. Walk up the ancestor chain to handle venv redirectors.
-        # Check the executable path, not the command line: a probe script
-        # that merely mentions the shim path in its arguments must not pass.
-        try:
-            import psutil as _psutil
-
-            _current = _psutil.Process()
-            _found_shim_parent = False
-            for _ in range(5):  # Bounded ancestor walk.
-                try:
-                    _parent = _current.parent()
-                except (_psutil.NoSuchProcess, _psutil.AccessDenied):
-                    break
-                if _parent is None:
-                    break
-                try:
-                    _exe = (_parent.exe() or "").lower()
-                except (_psutil.NoSuchProcess, _psutil.AccessDenied):
-                    _exe = ""
-                _name = (_parent.name() or "").lower()
-                if "comsol-mcp-shim" in _exe or "comsol-mcp-shim" in _name:
-                    _found_shim_parent = True
-                    break
-                _current = _parent
-            if not _found_shim_parent:
-                import sys as _sys
-
-                _sys.stderr.write(
-                    "comsol-mcp: refusing to start: COMSOL_MCP_SHIM_WORKER is set "
-                    "but no ancestor executable is the shim binary.\n"
-                )
-                _sys.exit(2)
-        except ImportError:
-            pass  # psutil unavailable in a stripped environment; trust the flag.
-    if not _worker:
-        settings = load_settings()
-        location = resolve_settings_location()
-        from comsol_mcp.host_admission import HostAdmissionError, acquire, validate_transport_mode
-
-        try:
-            validate_transport_mode(
-                settings, actual_mode="python", settings_source=str(location.path)
-            )
-            admission = acquire(
-                default_runtime_dir(),
-                transport_mode="python",
-            )
-            logger.info("Host admission: PID %s, transport python", admission["pid"])
-        except HostAdmissionError as exc:
-            logger.error("Host admission refused: %s (%s)", exc, exc.reason_code)
-            import sys as _sys
-
-            _sys.stderr.write(f"comsol-mcp: refusing to start: {exc}\n")
-            _sys.exit(2)
+    gate = _startup_transport_gate()
+    claim = gate[0] if gate is not None else None
 
     # Profile selection must precede heavy imports/preload.
     selection = resolve_profile()
@@ -288,20 +337,23 @@ def main() -> None:
 
     # Use the same factory as embedded and installed callers.  The legacy
     # module-global server does not carry the Tasks extension or its engine.
-    # Release the host-admission lock on clean exit (crash leaves a stale
-    # lock that the next acquirer reclaims by process identity).
+    # Release host admission on clean exit by removing exactly the record
+    # this host published; a crash leaves a stale record that the next
+    # acquirer recovers only after verified cleanup.
     _admission_released = False
 
     def _release_admission() -> None:
         nonlocal _admission_released
-        if _admission_released:
+        if _admission_released or claim is None:
             return
         _admission_released = True
         try:
             from comsol_mcp.host_admission import release as _release
-            _release(default_runtime_dir())
-        except Exception:
-            pass
+
+            if not _release(claim):
+                logger.warning("Host admission record changed; it was left in place")
+        except Exception as exc:  # noqa: BLE001 - shutdown must not mask the exit path
+            logger.warning("Host admission release failed: %s", exc)
 
     import atexit as _atexit
 

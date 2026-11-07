@@ -54,6 +54,7 @@ from comsol_mcp.contracts.shape_support import (
 )
 from comsol_mcp.discovery_manifest import MANIFEST_SCHEMA_NAME, MANIFEST_SCHEMA_VERSION
 from comsol_mcp.durable import canonical_sha256_v1
+from comsol_mcp.host_admission import HOST_ADMISSION_SCHEMA, HOST_ADMISSION_VERSION
 from comsol_mcp.settings_gui_handshake import HANDSHAKE_SCHEMA, HANDSHAKE_VERSION
 
 OPERATION_LOCK_SCHEMA, OPERATION_LOCK_VERSION = "comsol_mcp.operation_lock", "1.0.0"
@@ -796,6 +797,12 @@ def _entries() -> list[dict[str, Any]]:
             OPERATION_LOCK_SCHEMA,
             OPERATION_LOCK_VERSION,
             "comsol_mcp.operation_arbiter",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            HOST_ADMISSION_SCHEMA,
+            HOST_ADMISSION_VERSION,
+            "comsol_mcp.host_admission",
             artifact_kind="durable_artifact",
         ),
         _entry(

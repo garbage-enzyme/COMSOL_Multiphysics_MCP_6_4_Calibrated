@@ -57,7 +57,9 @@
   "transport": "python",
   "shim_binary": {
     "path": null,
-    "sha256": null
+    "sha256": null,
+    "version": null,
+    "platform": null
   },
   "gui": {
     "language": "zh-cn",

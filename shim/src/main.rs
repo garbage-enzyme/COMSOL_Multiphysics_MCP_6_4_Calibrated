@@ -14,8 +14,11 @@
 //!
 //! The shim never acquires solver leases and never fabricates live state.
 
+mod admission;
 #[cfg(windows)]
 mod winjob;
+
+mod procinfo;
 
 use std::collections::HashMap;
 use std::io::{BufRead, Read, Write};
@@ -135,6 +138,8 @@ struct Manifest {
     latest_handshake: String,
     handshake_versions: Vec<String>,
     terminator: String,
+    /// SHA-256 of the settings bytes the manifest was generated under.
+    settings_sha256: Option<String>,
 }
 
 impl Manifest {
@@ -237,11 +242,16 @@ impl Manifest {
             }
             responses.insert((era_static, version, method, cursor), payload.to_owned());
         }
+        let settings_sha256 = value
+            .pointer("/binding/settings/sha256")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         Ok(Manifest {
             responses,
             latest_handshake,
             handshake_versions,
             terminator,
+            settings_sha256,
         })
     }
 
@@ -327,7 +337,12 @@ fn shim_client_info() -> Value {
     json!({"name": "comsol-mcp-shim", "version": env!("CARGO_PKG_VERSION")})
 }
 
-fn spawn_worker(out: &OutSink, terminator: &str, era: &ClientEra) -> Result<Worker, String> {
+fn spawn_worker(
+    out: &OutSink,
+    terminator: &str,
+    era: &ClientEra,
+    worker_token: &str,
+) -> Result<Worker, String> {
     let spec = std::env::var(ENV_CHILD).unwrap_or_else(|_| "[]".to_owned());
     let argv: Vec<String> = serde_json::from_str(&spec).map_err(|e| format!("{ENV_CHILD}: {e}"))?;
     let (program, args) = argv
@@ -337,6 +352,14 @@ fn spawn_worker(out: &OutSink, terminator: &str, era: &ClientEra) -> Result<Work
     command
         .args(args)
         .env("COMSOL_MCP_SHIM_WORKER", "1")
+        // Launch binding: the worker verifies this PID against the admission
+        // record (birth time, executable identity) and this token against the
+        // recorded token hash before it skips host admission.
+        .env(
+            admission::ENV_WORKER_HOST_PID,
+            std::process::id().to_string(),
+        )
+        .env(admission::ENV_WORKER_TOKEN, worker_token)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
@@ -465,167 +488,6 @@ fn request_meta_protocol(params: Option<&Value>) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Read the settings file and verify transport mode is "shim". Return an
-/// error message on mismatch; return None when the mode is correct or the
-/// HI-01 fix: fail closed on unreadable, unparsable, or missing settings.
-/// Every error path returns Some(error), never None (which meant "OK").
-fn validate_transport_setting() -> Option<String> {
-    let settings_path = match std::env::var("COMSOL_MCP_SETTINGS_PATH") {
-        Ok(path) => path,
-        Err(_) => {
-            return Some(
-                "COMSOL_MCP_SETTINGS_PATH is not set. The shim requires \
-                 explicit settings to verify transport mode."
-                    .to_owned(),
-            );
-        }
-    };
-    let contents = match std::fs::read_to_string(&settings_path) {
-        Ok(text) => text,
-        Err(e) => {
-            return Some(format!(
-                "cannot read settings file {settings_path}: {e}. \
-                 The shim refuses to start without verified settings."
-            ));
-        }
-    };
-    let settings: Value = match serde_json::from_str(&contents) {
-        Ok(value) => value,
-        Err(e) => {
-            return Some(format!(
-                "settings file {settings_path} is not valid JSON: {e}. \
-                 The shim refuses to start with malformed settings."
-            ));
-        }
-    };
-    let mode = settings
-        .get("transport")
-        .and_then(Value::as_str)
-        .unwrap_or("python");
-    if mode != "shim" {
-        return Some(format!(
-            "settings select transport '{mode}' but this is the shim. \
-             Change the transport setting to 'shim' or launch the Python \
-             entry point directly. Settings: {settings_path}"
-        ));
-    }
-    None
-}
-
-/// HI-02 fix: validate the configured shim binary identity before admission.
-/// Checks path existence and SHA-256 match. Returns None on success.
-fn validate_shim_binary() -> Option<String> {
-    let settings_path = std::env::var("COMSOL_MCP_SETTINGS_PATH").ok()?;
-    let contents = std::fs::read_to_string(&settings_path).ok()?;
-    let settings: Value = serde_json::from_str(&contents).ok()?;
-
-    let shim = settings.get("shim_binary")?;
-    let path = shim.get("path").and_then(Value::as_str)?;
-    let expected_hash = shim.get("sha256").and_then(Value::as_str)?;
-
-    if path.is_empty() || expected_hash.len() != 64 {
-        return Some(
-            "shim_binary.path or sha256 is missing or invalid. Fill both fields \
-             in the MCP Connection tab."
-                .to_owned(),
-        );
-    }
-
-    let binary = std::path::Path::new(path);
-    if !binary.is_file() {
-        return Some(format!(
-            "shim binary not found at '{path}'. Check the path in the MCP Connection tab."
-        ));
-    }
-
-    let bytes = match std::fs::read(binary) {
-        Ok(bytes) => bytes,
-        Err(e) => return Some(format!("cannot read shim binary '{path}': {e}")),
-    };
-    let actual_hash = sha256_hex(&bytes);
-    if actual_hash != expected_hash.to_lowercase() {
-        return Some(format!(
-            "shim binary SHA-256 mismatch. Expected '{expected_hash}', got '{actual_hash}'. \
-             Update the hash in the MCP Connection tab to match the actual binary."
-        ));
-    }
-
-    None
-}
-fn resolve_runtime_dir() -> Option<std::path::PathBuf> {
-    if let Ok(dir) = std::env::var("COMSOL_MCP_RUNTIME_DIR") {
-        return Some(std::path::PathBuf::from(dir));
-    }
-    let settings_path = std::env::var("COMSOL_MCP_SETTINGS_PATH").ok()?;
-    let contents = std::fs::read_to_string(&settings_path).ok()?;
-    let settings: Value = serde_json::from_str(&contents).ok()?;
-    settings
-        .pointer("/runtime/directory")
-        .and_then(Value::as_str)
-        .map(std::path::PathBuf::from)
-}
-
-/// Acquire the shared host-admission lock. The lock file uses the same
-/// schema as the Python side (`comsol_mcp.host_admission` 1.0.0). Returns
-/// the lock file path for later release.
-fn acquire_host_admission() -> Result<std::path::PathBuf, String> {
-    let runtime_dir = resolve_runtime_dir()
-        .ok_or_else(|| "cannot resolve the runtime directory for host admission".to_owned())?;
-    let lock_path = runtime_dir.join("host_admission.lock");
-    if !runtime_dir.exists() {
-        std::fs::create_dir_all(&runtime_dir)
-            .map_err(|e| format!("cannot create runtime directory: {e}"))?;
-    }
-
-    // Check for an existing lock. Refuse when another PID holds it; this
-    // conservative approach never reclaims a live-looking lock.
-    if let Ok(contents) = std::fs::read_to_string(&lock_path)
-        && let Ok(existing) = serde_json::from_str::<Value>(&contents)
-        && let Some(pid) = existing.get("pid").and_then(Value::as_i64)
-        && pid != std::process::id() as i64
-    {
-        let mode = existing
-            .get("transport_mode")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        return Err(format!(
-            "another host (PID {pid}, transport '{mode}') holds \
-             the admission lock for this domain. Close it and retry."
-        ));
-    }
-
-    // Write our lock (exclusive create).
-    let identity = json!({
-        "schema_name": "comsol_mcp.host_admission",
-        "schema_version": "1.0.0",
-        "transport_mode": "shim",
-        "pid": std::process::id(),
-        "acquired_at_epoch": std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(0.0),
-    });
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock_path)
-    {
-        Ok(mut file) => {
-            use std::io::Write;
-            let payload = serde_json::to_string_pretty(&identity).unwrap_or_default();
-            if let Err(e) = writeln!(file, "{payload}") {
-                let _ = std::fs::remove_file(&lock_path);
-                return Err(format!("cannot write admission lock: {e}"));
-            }
-            Ok(lock_path)
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            Err("another process acquired host admission concurrently".to_owned())
-        }
-        Err(e) => Err(format!("cannot create admission lock: {e}")),
-    }
-}
-
 fn error_reply(id: Option<&Value>, message: &str, terminator: &str, out: &OutSink) {
     let id = id.cloned().unwrap_or(Value::Null);
     let body = json!({
@@ -647,7 +509,24 @@ fn run() -> i32 {
     // and the recorded artifact hash before enabling shim transport.
     let arguments: Vec<String> = std::env::args().collect();
     if arguments.len() == 2 && (arguments[1] == "--version" || arguments[1] == "-V") {
-        println!("comsol-mcp-shim {}", env!("CARGO_PKG_VERSION"));
+        println!(
+            "comsol-mcp-shim {} ({})",
+            admission::SHIM_VERSION,
+            admission::SHIM_PLATFORM
+        );
+        return 0;
+    }
+
+    // 0.8.2 §10 interactive launch: when stdin is a terminal (no protocol
+    // client), explain the stdio launch method and exit before reading
+    // settings, acquiring admission, or creating any child process. The
+    // explicit version-report command above stays available.
+    use std::io::IsTerminal;
+    if std::io::stdin().is_terminal() {
+        eprintln!("comsol-mcp-shim: this is an MCP stdio server, not an interactive program.");
+        eprintln!("To use it, configure an MCP client (ZCode, Codex, Claude) to launch this");
+        eprintln!("binary as its MCP server command. The client communicates over stdin/stdout.");
+        eprintln!("For the version, run: comsol-mcp-shim --version");
         return 0;
     }
     let (out, writer_thread) = OutSink::spawn();
@@ -671,41 +550,67 @@ fn run() -> i32 {
         .map(|m| m.latest_handshake.clone())
         .unwrap_or_else(|| "2025-11-25".to_owned());
 
-    // 0.8.2 §10 startup gate: validate the configured transport mode. The
-    // shim refuses to start when settings select Python direct. Read the
-    // settings file (minimal JSON parse, no Python needed).
-    if let Some(problem) = validate_transport_setting() {
-        eprintln!("comsol-mcp-shim: refusing to start: {problem}");
-        return 2;
-    }
-
-    // HI-02: validate the configured binary identity (path + SHA-256).
-    if let Some(problem) = validate_shim_binary() {
-        eprintln!("comsol-mcp-shim: refusing to start: {problem}");
-        return 2;
-    }
-
-    // 0.8.2 §10 interactive launch: when stdin is a terminal (no protocol
-    // client), explain the stdio launch method and exit without starting
-    // Python or COMSOL. Preserve the explicit version-report command.
-    use std::io::IsTerminal;
-    if std::io::stdin().is_terminal() {
-        eprintln!("comsol-mcp-shim: this is an MCP stdio server, not an interactive program.");
-        eprintln!("To use it, configure an MCP client (ZCode, Codex, Claude) to launch this");
-        eprintln!("binary as its MCP server command. The client communicates over stdin/stdout.");
-        eprintln!("For the version, run: comsol-mcp-shim --version");
-        return 0;
-    }
-
-    // 0.8.2 §10 host admission: acquire the shared admission lock for the
-    // canonical ownership domain before serving any request.
-    let admission = match acquire_host_admission() {
-        Ok(lock) => Some(lock),
+    // 0.8.2 §10 startup gate, fail closed: one settings snapshot is read,
+    // hashed and validated; the configured binary identity is bound to this
+    // running image (path, SHA-256, version, platform). Every failure path
+    // refuses before any worker can be created.
+    let startup = match admission::startup() {
+        Ok(startup) => startup,
         Err(problem) => {
             eprintln!("comsol-mcp-shim: refusing to start: {problem}");
             return 2;
         }
     };
+    // The discovery manifest is bound to the exact settings bytes it was
+    // generated under; changed settings invalidate it (no stale discovery).
+    if let Some(loaded) = manifest.as_ref()
+        && loaded.settings_sha256.as_deref() != Some(startup.settings_sha256.as_str())
+    {
+        eprintln!(
+            "comsol-mcp-shim: refusing to start: [manifest_stale] the discovery manifest was \
+             generated under different settings (manifest {:?}, current {}). Regenerate it \
+             with: python -m comsol_mcp.discovery_manifest generate --output <path>",
+            loaded.settings_sha256, startup.settings_sha256
+        );
+        return 2;
+    }
+
+    // 0.8.2 §10 host admission: acquire the shared admission lock for the
+    // canonical ownership domain before serving any request. A stale record
+    // is recovered only after verified cleanup; a replacement record is
+    // never erased. The settings snapshot is re-checked afterwards so a
+    // change during admission refuses startup.
+    let worker_token = admission::worker_token();
+    let worker_token_sha256 = sha256_hex(worker_token.as_bytes());
+    let mut admission = match admission::acquire(&startup, &worker_token_sha256) {
+        Ok(claim) => Some(claim),
+        Err(problem) => {
+            eprintln!("comsol-mcp-shim: refusing to start: {problem}");
+            return 2;
+        }
+    };
+    match admission::settings_unchanged(&startup) {
+        Ok(true) => {}
+        Ok(false) => {
+            if let Some(claim) = admission.as_ref() {
+                claim.release();
+            }
+            eprintln!(
+                "comsol-mcp-shim: refusing to start: [settings_changed_during_admission] \
+                 settings {} changed between validation and admission. Retry after the \
+                 change is complete.",
+                startup.settings_path.display()
+            );
+            return 2;
+        }
+        Err(problem) => {
+            if let Some(claim) = admission.as_ref() {
+                claim.release();
+            }
+            eprintln!("comsol-mcp-shim: refusing to start: {problem}");
+            return 2;
+        }
+    }
 
     let mut worker: Option<Worker> = None;
     let mut era: Option<ClientEra> = None;
@@ -830,8 +735,19 @@ fn run() -> i32 {
                     let bring_up_era = era
                         .clone()
                         .unwrap_or(ClientEra::Handshake(latest_handshake.clone()));
-                    match spawn_worker(&out, &terminator, &bring_up_era) {
-                        Ok(spawned) => worker = Some(spawned),
+                    match spawn_worker(&out, &terminator, &bring_up_era, &worker_token) {
+                        Ok(spawned) => {
+                            if let Some(claim) = admission.as_mut()
+                                && let Err(problem) = claim.record_worker(spawned.child.id())
+                            {
+                                // Stale recovery still finds the worker through
+                                // its parent link; the record is extra evidence.
+                                eprintln!(
+                                    "comsol-mcp-shim: worker identity not recorded: {problem}"
+                                );
+                            }
+                            worker = Some(spawned);
+                        }
                         Err(problem) => {
                             eprintln!("comsol-mcp-shim: {problem}");
                             error_reply(
@@ -869,6 +785,10 @@ fn run() -> i32 {
             }
         }
     }
+    // The admission record is released only after the worker's exit is
+    // observed. An unverified exit keeps the record, so the next host must
+    // verify cleanup (the recorded worker is absent) before recovery.
+    let mut worker_exit_verified = true;
     if let Some(mut live) = worker.take() {
         live.client_gone.store(true, Ordering::SeqCst);
         let _ = live.stdin.flush();
@@ -882,7 +802,7 @@ fn run() -> i32 {
                 }
                 _ => {
                     let _ = live.child.kill();
-                    let _ = live.child.wait();
+                    worker_exit_verified = live.child.wait().is_ok();
                     eprintln!("comsol-mcp-shim: worker did not exit within the grace period");
                     break;
                 }
@@ -892,9 +812,15 @@ fn run() -> i32 {
     drop(out); // Close the bounded queue; the writer drains and exits.
     let _ = writer_thread.join();
 
-    // Release the host-admission lock on clean exit.
-    if let Some(path) = &admission {
-        let _ = std::fs::remove_file(path);
+    if let Some(claim) = admission.as_ref() {
+        if !worker_exit_verified {
+            eprintln!(
+                "comsol-mcp-shim: worker exit is unverified; the admission record is kept \
+                 for verified recovery"
+            );
+        } else if !claim.release() {
+            eprintln!("comsol-mcp-shim: the admission record changed; it was left in place");
+        }
     }
 
     0
