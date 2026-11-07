@@ -14,6 +14,63 @@ msgstr "工具設定檔"
 msgid "Runtime"
 msgstr "執行路徑"
 
+msgid "MCP Connection"
+msgstr "MCP 連線方式"
+
+msgid "Transport mode"
+msgstr "傳輸模式"
+
+msgid "Python direct (default, fully compatible)"
+msgstr "Python 直連（預設，完全相容）"
+
+msgid "Rust shim (lower memory, experimental)"
+msgstr "Rust shim（低記憶體，實驗性）"
+
+msgid "Shim binary (required for Rust shim mode)"
+msgstr "Shim 二進位（Rust shim 模式必需）"
+
+msgid "Binary path"
+msgstr "二進位路徑"
+
+msgid "SHA-256"
+msgstr "SHA-256 校驗"
+
+msgid "Check binary"
+msgstr "校驗二進位"
+
+msgid "Enter the shim binary path first."
+msgstr "請先輸入 shim 二進位路徑。"
+
+msgid "File not found."
+msgstr "檔案不存在。"
+
+msgid "SHA-256 mismatch. Check the published hash."
+msgstr "SHA-256 不匹配。請核對已發布的雜湊值。"
+
+msgid "Verified. SHA-256 matches. Version: {version}"
+msgstr "校驗通過。SHA-256 匹配。版本：{version}"
+
+msgid "Switch transport"
+msgstr "切換傳輸方式"
+
+msgid "Before switching, close every agent session that uses this server (including the one that opened this window). The button refuses while any server process is running."
+msgstr "切換前，請關閉所有使用本伺服器的 agent 連線（包括幫你開啟本視窗的那個）。有伺服器程序執行時按鈕會拒絕切換。"
+
+msgid "Refused: server processes are still running. Close them and try again."
+msgstr "已拒絕：仍有伺服器程序在執行。請關閉後重試。"
+
+msgid "Rust shim mode requires a binary path and SHA-256."
+msgstr "Rust shim 模式需要二進位路徑和 SHA-256。"
+
+msgid "Confirm transport switch"
+msgstr "確認切換傳輸方式"
+
+msgid "Transport set to {mode}. It takes effect on next start."
+msgstr "傳輸方式已設為 {mode}。下次啟動時生效。"
+
+msgid "Choose how agent clients connect to the COMSOL MCP server. Switching requires a dedicated confirmation and only takes effect after every agent session closes and restarts."
+msgstr "選擇 agent 用戶端連線 COMSOL MCP 伺服器的方式。切換需要單獨確認，且僅在所有 agent 連線關閉並重新啟動後生效。"
+
 msgid "COMSOL/Java"
 msgstr "COMSOL/Java"
 
@@ -247,6 +304,15 @@ msgstr "存放本機語意搜尋模型的可選資料夾。\n範例：%LOCALAPPD
 
 msgid "Optional name that identifies who owns the COMSOL session."
 msgstr "用於說明誰在使用 COMSOL 工作階段的可選名稱。"
+
+msgid "One transport value. 'python' keeps the direct Python entry point. 'shim' opts into the Rust launcher."
+msgstr "傳輸方式單值。'python' 保持 Python 直連入口；'shim' 選用 Rust 啟動器。"
+
+msgid "Absolute path to the shim binary. Required when transport is 'shim'."
+msgstr "shim 二進位的絕對路徑。transport 為 'shim' 時必需。"
+
+msgid "Expected SHA-256 of the shim binary. Required when transport is 'shim'."
+msgstr "shim 二進位的預期 SHA-256。transport 為 'shim' 時必需。"
 
 msgid "Enter a valid absolute path or clear this setting."
 msgstr "請輸入有效的絕對路徑，或清除此項。"

@@ -1,6 +1,6 @@
 {
   "schema_name": "comsol_mcp.settings",
-  "schema_version": "1.3.0",
+  "schema_version": "1.4.0",
   "profile": {
     "name": "core"
   },
@@ -53,6 +53,11 @@
   },
   "comsol": {
     "installation_root": null
+  },
+  "transport": "python",
+  "shim_binary": {
+    "path": null,
+    "sha256": null
   },
   "gui": {
     "language": "zh-cn",

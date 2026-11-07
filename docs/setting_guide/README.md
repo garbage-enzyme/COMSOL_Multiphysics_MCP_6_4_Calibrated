@@ -180,7 +180,10 @@ the GUI before save and by backend validation when JSON is edited directly.
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
 | `schema_name` | `"comsol_mcp.settings"` | Read-only schema identity. Must match exactly. |
-| `schema_version` | `"1.3.0"` | New writes use `1.3.0`. `1.0.0`, `1.1.0`, and `1.2.0` are read and migrated in memory. |
+| `schema_version` | `"1.4.0"` | New writes use `1.4.0`. `1.0.0`, `1.1.0`, `1.2.0`, and `1.3.0` are read and migrated in memory. |
+| `transport` | `"python"` | `"python"` or `"shim"`. One value, never two enabled booleans. `"shim"` requires both `shim_binary.path` and `shim_binary.sha256` to be set. |
+| `shim_binary.path` | `null` | Absolute path to the shim binary. Required when `transport` is `"shim"`. |
+| `shim_binary.sha256` | `null` | Expected SHA-256 of the shim binary. Required when `transport` is `"shim"`. |
 | `gui.language` | `"zh-cn"` | `"en"`, `"zh-cn"`, or `"zh-tw"`. |
 | `gui.scale` | `"system"` | `"system"`, `"100"`, `"125"`, `"150"`, or `"200"`. The GUI displays the numeric choices as percentages. |
 

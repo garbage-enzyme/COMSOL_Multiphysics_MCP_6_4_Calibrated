@@ -308,12 +308,43 @@ FIELDS = (
         True,
         help_id="Optional name that identifies who owns the COMSOL session.",
     ),
+    # Transport selector: tracked for validation and save, but the tab
+    # builds custom widgets (radio pair, identity fields, confirm button).
+    # The auto-field loop in app.py skips this tab.
+    FieldDescriptor(
+        "transport",
+        "transport",
+        "choice",
+        False,
+        choices=("python", "shim"),
+        help_id=(
+            "One transport value. 'python' keeps the direct Python entry "
+            "point. 'shim' opts into the Rust launcher."
+        ),
+    ),
+    FieldDescriptor(
+        "shim_binary.path",
+        "transport",
+        "text",
+        True,
+        help_id="Absolute path to the shim binary. Required when transport is 'shim'.",
+    ),
+    FieldDescriptor(
+        "shim_binary.sha256",
+        "transport",
+        "text",
+        True,
+        help_id="Expected SHA-256 of the shim binary. Required when transport is 'shim'.",
+    ),
 )
 FIELD_BY_KEY = {field.key: field for field in FIELDS}
+# Keys whose widgets the transport tab builds by hand.
+CUSTOM_TAB_KEYS = {"transport", "shim_binary.path", "shim_binary.sha256"}
 TAB_IDS = (
     "general",
     "profile",
     "runtime",
+    "transport",
     "comsol_java",
     "evidence",
     "docs",

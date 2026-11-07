@@ -375,6 +375,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/tests/test_semantic_worker_protocol.py` — The tests cover isolated semantic worker protocol and containment.
 - `development_kit/tests/test_server.py` — The tests cover server construction and capabilities without starting a transport.
 - `development_kit/tests/test_settings.py` — The tests cover grouped settings defaults, validation, and fallback errors.
+- `development_kit/tests/test_settings_transport.py` — The tests cover the settings transport field: defaults, shim identity requirements, degradation behavior, and version readability.
 - `development_kit/tests/test_alpha6_settings_gui_contract.py` — The module locks the alpha6 settings schema, location, launcher, and packaging contracts.
 - `development_kit/tests/test_settings_gui_launcher.py` — The tests cover detached Settings GUI launch, handshake, profile discovery, and Tk import isolation.
 - `development_kit/tests/test_settings_gui_direct_entry.py` — The tests cover the installed Settings GUI exact-path, validate-only, and explicit shortcut command contract.

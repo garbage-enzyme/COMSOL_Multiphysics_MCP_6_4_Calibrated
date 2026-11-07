@@ -24,6 +24,36 @@ ZH_CN = {
     "General": "常规",
     "Profile": "工具配置",
     "Runtime": "运行路径",
+    "MCP Connection": "MCP 连接方式",
+    "Transport mode": "传输模式",
+    "Python direct (default, fully compatible)": "Python 直连（默认，完全兼容）",
+    "Rust shim (lower memory, experimental)": "Rust shim（低内存，实验性）",
+    "Shim binary (required for Rust shim mode)": "Shim 二进制（Rust shim 模式必需）",
+    "Binary path": "二进制路径",
+    "SHA-256": "SHA-256 校验",
+    "Check binary": "校验二进制",
+    "Enter the shim binary path first.": "请先输入 shim 二进制路径。",
+    "File not found.": "文件不存在。",
+    "SHA-256 mismatch. Check the published hash.": "SHA-256 不匹配。请核对已发布的哈希值。",
+    "Verified. SHA-256 matches. Version: {version}": "校验通过。SHA-256 匹配。版本：{version}",
+    "Switch transport": "切换传输方式",
+    "Before switching, close every agent session that uses this "
+    "server (including the one that opened this window). The "
+    "button refuses while any server process is running.": (
+        "切换前，请关闭所有使用本服务器的 agent 会话"
+        "（包括帮你打开本窗口的那个）。有服务器进程运行时按钮会拒绝切换。"
+    ),
+    "Refused: server processes are still running. "
+    "Close them and try again.": "已拒绝：仍有服务器进程在运行。请关闭后重试。",
+    "Rust shim mode requires a binary path and SHA-256.": "Rust shim 模式需要二进制路径和 SHA-256。",
+    "Confirm transport switch": "确认切换传输方式",
+    "Transport set to {mode}. It takes effect on next start.": "传输方式已设为 {mode}。下次启动时生效。",
+    "Choose how agent clients connect to the COMSOL MCP server. "
+    "Switching requires a dedicated confirmation and only takes "
+    "effect after every agent session closes and restarts.": (
+        "选择 agent 客户端连接 COMSOL MCP 服务器的方式。"
+        "切换需要单独确认，且仅在所有 agent 会话关闭并重启后生效。"
+    ),
     "COMSOL/Java": "COMSOL/Java",
     "Evidence": "证据",
     "Docs": "文档",
@@ -102,6 +132,12 @@ ZH_CN = {
     "Optional folder containing the prepared semantic vector index. It is independent from the SQLite lexical index.": "存放已准备语义向量索引的可选文件夹。它与 SQLite 词法索引相互独立。",
     "Optional folder containing the local semantic-search model. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\models": "存放本地语义搜索模型的可选文件夹。\n示例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\models",
     "Optional name that identifies who owns the COMSOL session.": "用于说明谁在使用 COMSOL 会话的可选名称。",
+    (
+        "One transport value. 'python' keeps the direct Python entry "
+        "point. 'shim' opts into the Rust launcher."
+    ): "传输方式单值。'python' 保持 Python 直连入口；'shim' 选用 Rust 启动器。",
+    "Absolute path to the shim binary. Required when transport is 'shim'.": "shim 二进制的绝对路径。transport 为 'shim' 时必需。",
+    "Expected SHA-256 of the shim binary. Required when transport is 'shim'.": "shim 二进制的预期 SHA-256。transport 为 'shim' 时必需。",
     "Enter a valid absolute path or clear this setting.": "请输入有效的绝对路径，或清空此项。",
     "Enter an ASCII-only full path, or leave this setting empty.": "请输入仅含 ASCII 字符的完整路径，或将此项留空。",
     "Enter a valid absolute path.": "请输入有效的绝对路径。",
@@ -155,6 +191,36 @@ ZH_TW = {
     "General": "一般",
     "Profile": "工具設定檔",
     "Runtime": "執行路徑",
+    "MCP Connection": "MCP 連線方式",
+    "Transport mode": "傳輸模式",
+    "Python direct (default, fully compatible)": "Python 直連（預設，完全相容）",
+    "Rust shim (lower memory, experimental)": "Rust shim（低記憶體，實驗性）",
+    "Shim binary (required for Rust shim mode)": "Shim 二進位（Rust shim 模式必需）",
+    "Binary path": "二進位路徑",
+    "SHA-256": "SHA-256 校驗",
+    "Check binary": "校驗二進位",
+    "Enter the shim binary path first.": "請先輸入 shim 二進位路徑。",
+    "File not found.": "檔案不存在。",
+    "SHA-256 mismatch. Check the published hash.": "SHA-256 不匹配。請核對已發布的雜湊值。",
+    "Verified. SHA-256 matches. Version: {version}": "校驗通過。SHA-256 匹配。版本：{version}",
+    "Switch transport": "切換傳輸方式",
+    "Before switching, close every agent session that uses this "
+    "server (including the one that opened this window). The "
+    "button refuses while any server process is running.": (
+        "切換前，請關閉所有使用本伺服器的 agent 連線"
+        "（包括幫你開啟本視窗的那個）。有伺服器程序執行時按鈕會拒絕切換。"
+    ),
+    "Refused: server processes are still running. "
+    "Close them and try again.": "已拒絕：仍有伺服器程序在執行。請關閉後重試。",
+    "Rust shim mode requires a binary path and SHA-256.": "Rust shim 模式需要二進位路徑和 SHA-256。",
+    "Confirm transport switch": "確認切換傳輸方式",
+    "Transport set to {mode}. It takes effect on next start.": "傳輸方式已設為 {mode}。下次啟動時生效。",
+    "Choose how agent clients connect to the COMSOL MCP server. "
+    "Switching requires a dedicated confirmation and only takes "
+    "effect after every agent session closes and restarts.": (
+        "選擇 agent 用戶端連線 COMSOL MCP 伺服器的方式。"
+        "切換需要單獨確認，且僅在所有 agent 連線關閉並重新啟動後生效。"
+    ),
     "COMSOL/Java": "COMSOL/Java",
     "Evidence": "證據",
     "Docs": "文件",
@@ -233,6 +299,12 @@ ZH_TW = {
     "Optional folder containing the prepared semantic vector index. It is independent from the SQLite lexical index.": "存放已準備語意向量索引的可選資料夾。它與 SQLite 詞彙索引相互獨立。",
     "Optional folder containing the local semantic-search model. \nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\models": "存放本機語意搜尋模型的可選資料夾。\n範例：%LOCALAPPDATA%\\comsol_mcp\\semantic\\models",
     "Optional name that identifies who owns the COMSOL session.": "用於說明誰在使用 COMSOL 工作階段的可選名稱。",
+    (
+        "One transport value. 'python' keeps the direct Python entry "
+        "point. 'shim' opts into the Rust launcher."
+    ): "傳輸方式單值。'python' 保持 Python 直連入口；'shim' 選用 Rust 啟動器。",
+    "Absolute path to the shim binary. Required when transport is 'shim'.": "shim 二進位的絕對路徑。transport 為 'shim' 時必需。",
+    "Expected SHA-256 of the shim binary. Required when transport is 'shim'.": "shim 二進位的預期 SHA-256。transport 為 'shim' 時必需。",
     "Enter a valid absolute path or clear this setting.": "請輸入有效的絕對路徑，或清除此項。",
     "Enter an ASCII-only full path, or leave this setting empty.": "請輸入僅含 ASCII 字元的完整路徑，或將此項留空。",
     "Enter a valid absolute path.": "請輸入有效的絕對路徑。",

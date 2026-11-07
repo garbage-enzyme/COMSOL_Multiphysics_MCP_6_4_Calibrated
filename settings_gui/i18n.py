@@ -24,6 +24,29 @@ MESSAGE_IDS = (
     "General",
     "Profile",
     "Runtime",
+    "MCP Connection",
+    "Transport mode",
+    "Python direct (default, fully compatible)",
+    "Rust shim (lower memory, experimental)",
+    "Shim binary (required for Rust shim mode)",
+    "Binary path",
+    "SHA-256",
+    "Check binary",
+    "Enter the shim binary path first.",
+    "File not found.",
+    "SHA-256 mismatch. Check the published hash.",
+    "Verified. SHA-256 matches. Version: {version}",
+    "Switch transport",
+    "Before switching, close every agent session that uses this "
+    "server (including the one that opened this window). The "
+    "button refuses while any server process is running.",
+    "Refused: server processes are still running. Close them and try again.",
+    "Rust shim mode requires a binary path and SHA-256.",
+    "Confirm transport switch",
+    "Transport set to {mode}. It takes effect on next start.",
+    "Choose how agent clients connect to the COMSOL MCP server. "
+    "Switching requires a dedicated confirmation and only takes "
+    "effect after every agent session closes and restarts.",
     "COMSOL/Java",
     "Evidence",
     "Docs",
@@ -148,6 +171,12 @@ MESSAGE_IDS = (
         "\nExample: %LOCALAPPDATA%\\comsol_mcp\\semantic\\models"
     ),
     "Optional name that identifies who owns the COMSOL session.",
+    (
+        "One transport value. 'python' keeps the direct Python entry "
+        "point. 'shim' opts into the Rust launcher."
+    ),
+    "Absolute path to the shim binary. Required when transport is 'shim'.",
+    "Expected SHA-256 of the shim binary. Required when transport is 'shim'.",
     "Enter a valid absolute path or clear this setting.",
     "Enter an ASCII-only full path, or leave this setting empty.",
     "Enter a valid absolute path.",

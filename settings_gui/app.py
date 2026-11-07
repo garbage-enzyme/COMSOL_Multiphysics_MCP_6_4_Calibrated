@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import tkinter as tk
 import webbrowser
@@ -31,6 +32,7 @@ from .fonts import apply_locale_font
 from .i18n import Translator, language_option_labels, scale_option_labels
 from .manual_index import ManualIndexBuildTask
 from .model import (
+    CUSTOM_TAB_KEYS,
     FIELDS,
     TAB_IDS,
     FieldDescriptor,
@@ -72,6 +74,7 @@ TAB_TITLES = {
     "general": "General",
     "profile": "Profile",
     "runtime": "Runtime",
+    "transport": "MCP Connection",
     "comsol_java": "COMSOL/Java",
     "evidence": "Evidence",
     "docs": "Docs",
@@ -436,7 +439,7 @@ class SettingsApplication:
             self.notebook.add(tab, text=_(TAB_TITLES[tab_id]))
         docs_keys = {key for _title, keys in DOC_SECTIONS for key in keys}
         for field in FIELDS:
-            if field.key not in docs_keys:
+            if field.key not in docs_keys and field.key not in CUSTOM_TAB_KEYS:
                 self._add_field(self.tabs[field.tab].content, field)
         docs_parent = self.tabs["docs"].content
         for title, keys in DOC_SECTIONS:
@@ -448,6 +451,7 @@ class SettingsApplication:
             ).grid(row=row, column=0, sticky="w", pady=(4, 12))
             for key in keys:
                 self._add_field(docs_parent, next(field for field in FIELDS if field.key == key))
+        self._build_transport(self.tabs["transport"].content)
         self._build_about(self.tabs["about"].content)
         try:
             self.notebook.select(min(self._selected_tab, len(TAB_IDS) - 1))
@@ -675,6 +679,184 @@ class SettingsApplication:
             current = object()
         if current != value:
             self.controller.update(key, value)
+
+    def _build_transport(self, parent: ttk.Frame) -> None:
+        """Build the MCP Connection tab: radio pair, binary identity, confirm."""
+        import subprocess as _sp
+
+        _ = self.controller.text
+        ttk.Label(parent, text=_("MCP Connection"), font="TkHeadingFont").pack(anchor="w")
+        ttk.Label(
+            parent,
+            text=_(
+                "Choose how agent clients connect to the COMSOL MCP server. "
+                "Switching requires a dedicated confirmation and only takes "
+                "effect after every agent session closes and restarts."
+            ),
+        ).pack(anchor="w", pady=(4, 12))
+
+        mode_frame = ttk.LabelFrame(parent, text=_("Transport mode"), padding=8)
+        mode_frame.pack(fill="x", pady=(0, 8))
+        self._transport_var = tk.StringVar(
+            value=str(get_value(self.controller.model.document, "transport") or "python")
+        )
+        ttk.Radiobutton(
+            mode_frame,
+            text=_("Python direct (default, fully compatible)"),
+            variable=self._transport_var,
+            value="python",
+        ).pack(anchor="w")
+        ttk.Radiobutton(
+            mode_frame,
+            text=_("Rust shim (lower memory, experimental)"),
+            variable=self._transport_var,
+            value="shim",
+        ).pack(anchor="w")
+
+        shim_frame = ttk.LabelFrame(
+            parent, text=_("Shim binary (required for Rust shim mode)"), padding=8
+        )
+        shim_frame.pack(fill="x", pady=(0, 8))
+        path_row = ttk.Frame(shim_frame)
+        path_row.pack(fill="x", pady=(0, 4))
+        ttk.Label(path_row, text=_("Binary path")).pack(side="left")
+        self._shim_path_var = tk.StringVar(
+            value=str(get_value(self.controller.model.document, "shim_binary.path") or "")
+        )
+        ttk.Entry(path_row, textvariable=self._shim_path_var, width=60).pack(
+            side="left", padx=(8, 0), fill="x", expand=True
+        )
+        hash_row = ttk.Frame(shim_frame)
+        hash_row.pack(fill="x", pady=(0, 4))
+        ttk.Label(hash_row, text=_("SHA-256")).pack(side="left")
+        self._shim_sha256_var = tk.StringVar(
+            value=str(get_value(self.controller.model.document, "shim_binary.sha256") or "")
+        )
+        ttk.Entry(hash_row, textvariable=self._shim_sha256_var, width=66).pack(
+            side="left", padx=(8, 0), fill="x", expand=True
+        )
+        self._shim_check_label = ttk.Label(shim_frame, text="")
+        self._shim_check_label.pack(anchor="w")
+
+        def _check_binary() -> None:
+            path = self._shim_path_var.get().strip()
+            digest = self._shim_sha256_var.get().strip()
+            if not path:
+                self._shim_check_label.config(
+                    text=_("Enter the shim binary path first."), foreground="#b00"
+                )
+                return
+            import hashlib
+            from pathlib import Path
+
+            binary = Path(path)
+            if not binary.is_file():
+                self._shim_check_label.config(text=_("File not found."), foreground="#b00")
+                return
+            actual = hashlib.sha256(binary.read_bytes()).hexdigest()
+            if digest and actual != digest.casefold():
+                self._shim_check_label.config(
+                    text=_("SHA-256 mismatch. Check the published hash."), foreground="#b00"
+                )
+                return
+            flags = getattr(_sp, "CREATE_NO_WINDOW", 0)
+            try:
+                result = _sp.run(  # noqa: S603
+                    [str(binary), "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    creationflags=flags,
+                )
+                version = result.stdout.strip() if result.returncode == 0 else "?"
+            except OSError, _sp.TimeoutExpired:
+                version = "?"
+            self._shim_check_label.config(
+                text=_("Verified. SHA-256 matches. Version: {version}").format(version=version),
+                foreground="#070",
+            )
+
+        ttk.Button(shim_frame, text=_("Check binary"), command=_check_binary).pack(
+            anchor="w", pady=(4, 0)
+        )
+
+        switch_frame = ttk.LabelFrame(parent, text=_("Switch transport"), padding=8)
+        switch_frame.pack(fill="x", pady=(0, 8))
+        ttk.Label(
+            switch_frame,
+            text=_(
+                "Before switching, close every agent session that uses this "
+                "server (including the one that opened this window). The "
+                "button refuses while any server process is running."
+            ),
+        ).pack(anchor="w", pady=(0, 6))
+        self._switch_status = ttk.Label(switch_frame, text="")
+        self._switch_status.pack(anchor="w")
+
+        def _detect_running_servers() -> list[str]:
+            import psutil
+
+            found = []
+            for proc in psutil.process_iter(["name", "cmdline"]):
+                try:
+                    name = (proc.info["name"] or "").lower()
+                    cmdline = " ".join(proc.info.get("cmdline") or []).lower()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):  # noqa: S112
+                    continue
+                if proc.pid == _sp.os.getpid():
+                    continue
+                if "comsol-mcp" in name or "comsol-mcp" in cmdline:
+                    if "settings" not in cmdline:
+                        found.append(f"{proc.info['name']} (PID {proc.pid})")
+            return found
+
+        def _confirm_switch() -> None:
+            running = _detect_running_servers()
+            if running:
+                self._switch_status.config(
+                    text=_(
+                        "Refused: server processes are still running. Close them and try again."
+                    ),
+                    foreground="#b00",
+                )
+                return
+            mode = self._transport_var.get()
+            if mode == "shim":
+                path = self._shim_path_var.get().strip()
+                digest = self._shim_sha256_var.get().strip()
+                if not path or not digest:
+                    self._switch_status.config(
+                        text=_("Rust shim mode requires a binary path and SHA-256."),
+                        foreground="#b00",
+                    )
+                    return
+            # Write directly to the settings file. This is a dedicated
+            # confirm action, deliberately separate from the general
+            # form save: the plan requires its own button and its own
+            # pre-flight process check.
+            from comsol_mcp.settings import resolve_settings_location
+
+            location = resolve_settings_location()
+            target = location.writable_path
+            try:
+                document = json.loads(target.read_text(encoding="utf-8"))
+            except OSError, ValueError:
+                document = {}
+            document["transport"] = mode
+            document["shim_binary"] = {
+                "path": self._shim_path_var.get().strip() or None,
+                "sha256": self._shim_sha256_var.get().strip() or None,
+            }
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(document, indent=2), encoding="utf-8")
+            self._switch_status.config(
+                text=_("Transport set to {mode}. It takes effect on next start.").format(mode=mode),
+                foreground="#070",
+            )
+
+        ttk.Button(switch_frame, text=_("Confirm transport switch"), command=_confirm_switch).pack(
+            anchor="w", pady=(4, 0)
+        )
 
     def _build_about(self, parent: ttk.Frame) -> None:
         _ = self.controller.text

@@ -13,8 +13,8 @@ from comsol_mcp.durable import canonical_sha256_v1, read_file_bytes_bounded
 
 SETTINGS_PATH_ENV = "COMSOL_MCP_SETTINGS_PATH"
 SETTINGS_SCHEMA = "comsol_mcp.settings"
-SETTINGS_VERSION = "1.3.0"
-SETTINGS_READABLE_VERSIONS = ("1.0.0", "1.1.0", "1.2.0", SETTINGS_VERSION)
+SETTINGS_VERSION = "1.4.0"
+SETTINGS_READABLE_VERSIONS = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", SETTINGS_VERSION)
 MAX_SETTINGS_BYTES = 64 * 1024
 LOCALAPPDATA_ENV = "LOCALAPPDATA"
 PROGRAMDATA_ENV = "PROGRAMDATA"
@@ -98,6 +98,11 @@ _DEFAULT_SETTINGS: dict[str, Any] = {
     "ownership": {"owner": None},
     "java": {"java_home": None, "jdk_home": None},
     "comsol": {"installation_root": None},
+    # One transport value, never two enabled booleans. "python" keeps the
+    # direct Python entry point; "shim" opts into the Rust launcher and
+    # requires a validated binary identity in the shim_binary section.
+    "transport": "python",
+    "shim_binary": {"path": None, "sha256": None},
     "gui": {"language": "zh-cn", "scale": "system"},
 }
 
@@ -293,6 +298,50 @@ def _parse_gui_scale(value: Any) -> str:
             reason_code="settings_value_invalid",
         )
     return normalized
+
+
+TRANSPORT_MODES = ("python", "shim")
+
+
+def _parse_transport(value: Any) -> str:
+    normalized = value.strip().casefold() if isinstance(value, str) else None
+    if normalized not in TRANSPORT_MODES:
+        raise SettingsError(
+            f"settings.transport must be one of {list(TRANSPORT_MODES)}",
+            reason_code="settings_value_invalid",
+        )
+    return normalized
+
+
+def _parse_shim_path(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise SettingsError(
+            "settings.shim_binary.path must be a non-empty absolute path",
+            reason_code="settings_value_invalid",
+        )
+    from pathlib import Path
+
+    if not Path(value).is_absolute():
+        raise SettingsError(
+            "settings.shim_binary.path must be an absolute path",
+            reason_code="settings_value_invalid",
+        )
+    return value
+
+
+def _parse_shim_sha256(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) != 64 or not all(
+        character in "0123456789abcdef" for character in value.casefold()
+    ):
+        raise SettingsError(
+            "settings.shim_binary.sha256 must be 64 lowercase hex characters",
+            reason_code="settings_value_invalid",
+        )
+    return value.casefold()
 
 
 def _migrate_legacy_document(document: Any) -> Any:
@@ -793,6 +842,40 @@ def _normalize(
         errors=errors,
     )
 
+    shim_binary = _object(
+        top["shim_binary"],
+        location="settings.shim_binary",
+        defaults=defaults["shim_binary"],
+        errors=errors,
+    )
+    shim_path = _read_value(
+        shim_binary["path"],
+        location="settings.shim_binary.path",
+        default=defaults["shim_binary"]["path"],
+        parser=_parse_shim_path,
+        errors=errors,
+    )
+    shim_sha256 = _read_value(
+        shim_binary["sha256"],
+        location="settings.shim_binary.sha256",
+        default=defaults["shim_binary"]["sha256"],
+        parser=_parse_shim_sha256,
+        errors=errors,
+    )
+    transport = _read_value(
+        top["transport"],
+        location="settings.transport",
+        default=defaults["transport"],
+        parser=_parse_transport,
+        errors=errors,
+    )
+    if transport == "shim" and (shim_path is None or shim_sha256 is None):
+        raise SettingsError(
+            "settings.transport 'shim' requires settings.shim_binary.path and "
+            "settings.shim_binary.sha256 to be set",
+            reason_code="settings_value_invalid",
+        )
+
     return {
         "schema_name": schema_name,
         "schema_version": schema_version,
@@ -822,6 +905,8 @@ def _normalize(
         "ownership": {"owner": owner},
         "java": {"java_home": java_home, "jdk_home": jdk_home},
         "comsol": {"installation_root": installation_root},
+        "transport": transport,
+        "shim_binary": {"path": shim_path, "sha256": shim_sha256},
         "gui": {"language": language, "scale": scale},
     }
 
