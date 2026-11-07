@@ -844,7 +844,9 @@ class SettingsApplication:
                     continue
                 if proc.pid == _sp.os.getpid():
                     continue
-                if "comsol-mcp" in name or "comsol-mcp" in cmdline:
+                # HI-04: match both hyphen (comsol-mcp.exe) and underscore
+                # (python -m comsol_mcp.server) entry points.
+                if "comsol-mcp" in name or "comsol-mcp" in cmdline or "comsol_mcp.server" in cmdline:
                     if "settings" not in cmdline:
                         found.append(f"{proc.info['name']} (PID {proc.pid})")
             return found

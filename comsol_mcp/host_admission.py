@@ -139,11 +139,27 @@ def acquire(
                 "resolve it before starting a new host",
                 {"owner_pid": lock.get("pid")},
             )
-        # Stale: safe to reclaim.
-        try:
-            path.unlink()
-        except OSError:
-            pass
+        # HI-03 fix: stale reclaim must be atomic against concurrent
+        # replacement. Use unlink_if_content (opened-file compare-and-delete)
+        # so a new owner that replaced the file between our read and delete
+        # is preserved, not erased. If the bytes changed, another process
+        # won the race; retry once.
+        from comsol_mcp.durable.io import unlink_if_content
+
+        if not unlink_if_content(path, raw or b""):
+            # Another process replaced the lock between our read and delete.
+            # Re-read and classify the new owner.
+            new_lock, _new_raw, _new_err = _read_lock(path)
+            if new_lock is not None:
+                new_state = _owner_state(new_lock)
+                if new_state == "active":
+                    raise HostAdmissionError(
+                        "admission_domain_busy",
+                        "another host acquired admission concurrently",
+                        {"owner_pid": new_lock.get("pid")},
+                    )
+            # If still stale or absent, proceed to create our lock below.
+            # The exclusive create below handles the final race.
 
     document = {
         "schema_name": HOST_ADMISSION_SCHEMA,

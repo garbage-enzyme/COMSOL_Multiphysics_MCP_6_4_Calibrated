@@ -467,11 +467,37 @@ fn request_meta_protocol(params: Option<&Value>) -> Option<String> {
 
 /// Read the settings file and verify transport mode is "shim". Return an
 /// error message on mismatch; return None when the mode is correct or the
-/// settings file is unreadable (the Python server performs the full check).
+/// HI-01 fix: fail closed on unreadable, unparsable, or missing settings.
+/// Every error path returns Some(error), never None (which meant "OK").
 fn validate_transport_setting() -> Option<String> {
-    let settings_path = std::env::var("COMSOL_MCP_SETTINGS_PATH").ok()?;
-    let contents = std::fs::read_to_string(&settings_path).ok()?;
-    let settings: Value = serde_json::from_str(&contents).ok()?;
+    let settings_path = match std::env::var("COMSOL_MCP_SETTINGS_PATH") {
+        Ok(path) => path,
+        Err(_) => {
+            return Some(
+                "COMSOL_MCP_SETTINGS_PATH is not set. The shim requires \
+                 explicit settings to verify transport mode."
+                    .to_owned(),
+            );
+        }
+    };
+    let contents = match std::fs::read_to_string(&settings_path) {
+        Ok(text) => text,
+        Err(e) => {
+            return Some(format!(
+                "cannot read settings file {settings_path}: {e}. \
+                 The shim refuses to start without verified settings."
+            ));
+        }
+    };
+    let settings: Value = match serde_json::from_str(&contents) {
+        Ok(value) => value,
+        Err(e) => {
+            return Some(format!(
+                "settings file {settings_path} is not valid JSON: {e}. \
+                 The shim refuses to start with malformed settings."
+            ));
+        }
+    };
     let mode = settings
         .get("transport")
         .and_then(Value::as_str)
@@ -486,7 +512,46 @@ fn validate_transport_setting() -> Option<String> {
     None
 }
 
-/// Resolve the runtime directory from the environment or the settings file.
+/// HI-02 fix: validate the configured shim binary identity before admission.
+/// Checks path existence and SHA-256 match. Returns None on success.
+fn validate_shim_binary() -> Option<String> {
+    let settings_path = std::env::var("COMSOL_MCP_SETTINGS_PATH").ok()?;
+    let contents = std::fs::read_to_string(&settings_path).ok()?;
+    let settings: Value = serde_json::from_str(&contents).ok()?;
+
+    let shim = settings.get("shim_binary")?;
+    let path = shim.get("path").and_then(Value::as_str)?;
+    let expected_hash = shim.get("sha256").and_then(Value::as_str)?;
+
+    if path.is_empty() || expected_hash.len() != 64 {
+        return Some(
+            "shim_binary.path or sha256 is missing or invalid. Fill both fields \
+             in the MCP Connection tab."
+                .to_owned(),
+        );
+    }
+
+    let binary = std::path::Path::new(path);
+    if !binary.is_file() {
+        return Some(format!(
+            "shim binary not found at '{path}'. Check the path in the MCP Connection tab."
+        ));
+    }
+
+    let bytes = match std::fs::read(binary) {
+        Ok(bytes) => bytes,
+        Err(e) => return Some(format!("cannot read shim binary '{path}': {e}")),
+    };
+    let actual_hash = sha256_hex(&bytes);
+    if actual_hash != expected_hash.to_lowercase() {
+        return Some(format!(
+            "shim binary SHA-256 mismatch. Expected '{expected_hash}', got '{actual_hash}'. \
+             Update the hash in the MCP Connection tab to match the actual binary."
+        ));
+    }
+
+    None
+}
 fn resolve_runtime_dir() -> Option<std::path::PathBuf> {
     if let Ok(dir) = std::env::var("COMSOL_MCP_RUNTIME_DIR") {
         return Some(std::path::PathBuf::from(dir));
@@ -610,6 +675,12 @@ fn run() -> i32 {
     // shim refuses to start when settings select Python direct. Read the
     // settings file (minimal JSON parse, no Python needed).
     if let Some(problem) = validate_transport_setting() {
+        eprintln!("comsol-mcp-shim: refusing to start: {problem}");
+        return 2;
+    }
+
+    // HI-02: validate the configured binary identity (path + SHA-256).
+    if let Some(problem) = validate_shim_binary() {
         eprintln!("comsol-mcp-shim: refusing to start: {problem}");
         return 2;
     }
