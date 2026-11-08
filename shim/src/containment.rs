@@ -205,10 +205,6 @@ mod imp {
             }
             Ok(RegistryJob)
         }
-
-        pub fn raw(&self) -> *mut std::ffi::c_void {
-            std::ptr::null_mut()
-        }
     }
 
     /// Live member PIDs of one session.
@@ -338,7 +334,7 @@ mod tests {
         let job = adopt(&identity).expect("adopt");
         let found = members(&identity).expect("members");
         assert!(found.contains(&std::process::id()));
-        drop(job);
+        let _ = job;
     }
 
     #[test]
