@@ -31,7 +31,13 @@ if WINDOWS:
 
     c_void_p = ctypes.c_void_p
 
-    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    def _load_kernel32() -> Any:
+        # ``WinDLL`` exists only on Windows typeshed; resolve it by name so
+        # strict mypy accepts the module on every platform.
+        factory = getattr(ctypes, "WinDLL")
+        return factory("kernel32", use_last_error=True)
+
+    _kernel32 = _load_kernel32()
     _kernel32.CreateJobObjectW.restype = wt.HANDLE
     _kernel32.CreateJobObjectW.argtypes = [c_void_p, wt.LPCWSTR]
     _kernel32.OpenJobObjectW.restype = wt.HANDLE
