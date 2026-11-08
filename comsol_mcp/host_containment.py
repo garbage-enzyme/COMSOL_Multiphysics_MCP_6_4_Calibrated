@@ -57,6 +57,12 @@ if WINDOWS:
     _ERROR_INSUFFICIENT_BUFFER = 122
 
 
+def _last_error() -> int:
+    """The thread's ctypes last error; 0 where the platform lacks the call."""
+    getter = getattr(ctypes, "get_last_error", None)
+    return int(getter()) if getter is not None else 0
+
+
 class UnknownContainment(RuntimeError):
     """The containment evidence could not be read; the state is UNKNOWN."""
 
@@ -79,9 +85,9 @@ def adopt_host_containment(identity: dict[str, Any]) -> Any:
             raise ValueError("a windows containment identity requires a job name")
         handle = _kernel32.CreateJobObjectW(None, name)
         if not handle:
-            raise OSError(ctypes.get_last_error(), "CreateJobObjectW failed")
+            raise OSError(_last_error(), "CreateJobObjectW failed")
         if not _kernel32.AssignProcessToJobObject(handle, _kernel32.GetCurrentProcess()):
-            error = ctypes.get_last_error()
+            error = _last_error()
             _kernel32.CloseHandle(handle)
             raise OSError(error, "AssignProcessToJobObject failed")
         return handle
@@ -110,7 +116,7 @@ def containment_members(identity: dict[str, Any]) -> set[int]:
             raise UnknownContainment("the recorded job name is missing")
         handle = _kernel32.OpenJobObjectW(_JOB_OBJECT_QUERY, False, name)
         if not handle:
-            error = ctypes.get_last_error()
+            error = _last_error()
             if error == _ERROR_FILE_NOT_FOUND:
                 return set()  # The object died with its last member.
             raise UnknownContainment(f"the host job cannot be opened: winerror {error}")
@@ -133,7 +139,7 @@ def containment_members(identity: dict[str, Any]) -> set[int]:
                     ctypes.byref(needed),
                 ):
                     break
-                error = ctypes.get_last_error()
+                error = _last_error()
                 if error == _ERROR_INSUFFICIENT_BUFFER and needed.value > capacity:
                     capacity = needed.value
                     continue
