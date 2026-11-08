@@ -103,8 +103,8 @@ def _is_elevated() -> bool:
     try:
         import ctypes.wintypes as wt
 
-        kernel32 = ctypes.WinDLL("kernel32")
-        advapi32 = ctypes.WinDLL("advapi32")
+        kernel32 = getattr(ctypes, "WinDLL")("kernel32")
+        advapi32 = getattr(ctypes, "WinDLL")("advapi32")
         kernel32.GetCurrentProcess.restype = wt.HANDLE
         kernel32.GetCurrentProcess.argtypes = []
         advapi32.OpenProcessToken.restype = wt.BOOL
@@ -302,7 +302,8 @@ def save_copy_into_volume(
                 raise ValueError("adopted server model is no longer uniquely available")
             matches[0].java.save(str(volume.save_path), True)
         except OSError as exc:
-            if getattr(exc, "winerror", None) == 112 or exc.errno in (28,):
+            windows_error = getattr(exc, "winerror", None)
+            if windows_error == 112 or exc.errno in (28,):
                 raise SaveCopyWriteCapExceeded(f"{cap}", enforcement_point="os_volume") from exc
             raise
         except Exception as exc:  # noqa: BLE001 - the server wraps OS errors
