@@ -40,7 +40,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from comsol_mcp.durable.io import atomic_write_bytes_exclusive, unlink_if_content
 
@@ -81,12 +81,30 @@ class HostAdmissionError(RuntimeError):
 
 @dataclass(frozen=True)
 class AdmissionClaim:
-    """The exact record this process published, needed for a safe release."""
+    """The exact record this process published, needed for a safe release.
+
+    ``containment_handle`` keeps the host's named job object alive for the
+    host lifetime (Windows). It is not equated: identity is the record.
+    """
 
     path: Path
     document: dict[str, Any]
     payload: bytes
     file_identity: tuple[int, int]
+    containment_handle: Any = None
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, AdmissionClaim):
+            return NotImplemented
+        return (
+            self.path,
+            self.payload,
+            self.file_identity,
+            self.document,
+        ) == (other.path, other.payload, other.file_identity, other.document)
+
+    def __hash__(self) -> int:
+        return hash((str(self.path), self.payload, self.file_identity))
 
 
 def expected_shim_platforms() -> tuple[str, ...]:
@@ -614,44 +632,93 @@ def verify_stale_cleanup(
             }
         )
 
-    inventory = _process_inventory()
-    current_birth = {pid: created for pid, _ppid, created, _name in inventory}
-    children: dict[int, list[tuple[int, float | None]]] = {}
-    for pid, ppid, created, _name in inventory:
-        if isinstance(ppid, int):
-            children.setdefault(ppid, []).append((pid, created))
+    from comsol_mcp.host_containment import UnknownContainment, containment_members
+
     owners = independent_owner_identities(runtime)
     descendants: list[dict[str, Any]] = []
     independent: list[dict[str, Any]] = []
-    for pid, ppid, created, name in inventory:
-        if pid in ignore_pids:
-            continue
-        for root in roots:
-            if ppid != root["pid"]:
+    containment = lock.get("containment")
+    scope = "direct children of the host and of every recorded owned process"
+    if isinstance(containment, dict) and containment.get("kind"):
+        # Kernel-authoritative membership: every descendant the host kept, at
+        # any depth, regardless of ppid readability or reparenting.
+        scope = "kernel membership of the recorded host containment"
+        try:
+            members = containment_members(containment)
+        except UnknownContainment as exc:
+            raise HostAdmissionError(
+                "admission_state_uncertain",
+                f"the previous host's containment cannot be read: {exc}",
+            ) from exc
+        inventory_by_pid = {
+            pid: (created, name) for pid, _ppid, created, name in _process_inventory()
+        }
+        for pid in sorted(members):
+            if pid in ignore_pids:
                 continue
+            created, name = inventory_by_pid.get(pid, (None, f"pid-{pid}"))
             if created is None:
-                raise HostAdmissionError(
-                    "admission_state_uncertain",
-                    f"process {pid} ({name}) has an unreadable creation time; it cannot "
-                    "be ordered against the previous host",
-                    {"pid": pid},
-                )
-            if created + CREATE_TIME_TOLERANCE_SECONDS < root["process_create_time"]:
-                continue  # Born before the recorded process: not its child.
-            holder = current_birth.get(root["pid"])
-            if (
-                holder is not None
-                and abs(holder - root["process_create_time"]) > CREATE_TIME_TOLERANCE_SECONDS
-                and created + CREATE_TIME_TOLERANCE_SECONDS >= holder
-            ):
-                continue  # A child of the process that now reuses the PID.
-            role = _independent_role(pid, float(created), name, owners, children)
+                # A member the inventory cannot see is still in the
+                # containment: alive and unnamed, so it is cleanup debt.
+                descendants.append({"pid": pid, "name": name, "role": "member"})
+                continue
+            role = _independent_role(pid, float(created), name, owners, {})
             if role is not None:
                 independent.append({"pid": pid, "name": name, "role": role})
                 continue
-            descendants.append(
-                {"pid": pid, "name": name, "parent_pid": root["pid"], "parent_role": root["role"]}
+            descendants.append({"pid": pid, "name": name, "role": "member"})
+    else:
+        # Legacy record without containment: fall back to parent links, and
+        # any live process whose parent is unreadable is UNKNOWN, not absent.
+        inventory = _process_inventory()
+        for pid, ppid, _created, name in inventory:
+            if isinstance(ppid, int) or pid in ignore_pids:
+                continue
+            raise HostAdmissionError(
+                "admission_state_uncertain",
+                f"process {pid} ({name}) has an unreadable parent; ancestry cannot "
+                "be established for a record without containment evidence",
+                {"pid": pid},
             )
+        current_birth = {pid: created for pid, _ppid, created, _name in inventory}
+        children: dict[int, list[tuple[int, float | None]]] = {}
+        for pid, ppid, created, _name in inventory:
+            if isinstance(ppid, int):
+                children.setdefault(ppid, []).append((pid, created))
+        for pid, ppid, created, name in inventory:
+            if pid in ignore_pids:
+                continue
+            for root in roots:
+                if ppid != root["pid"]:
+                    continue
+                if created is None:
+                    raise HostAdmissionError(
+                        "admission_state_uncertain",
+                        f"process {pid} ({name}) has an unreadable creation time; it "
+                        "cannot be ordered against the previous host",
+                        {"pid": pid},
+                    )
+                if created + CREATE_TIME_TOLERANCE_SECONDS < root["process_create_time"]:
+                    continue  # Born before the recorded process: not its child.
+                holder = current_birth.get(root["pid"])
+                if (
+                    holder is not None
+                    and abs(holder - root["process_create_time"]) > CREATE_TIME_TOLERANCE_SECONDS
+                    and created + CREATE_TIME_TOLERANCE_SECONDS >= holder
+                ):
+                    continue  # A child of the process that now reuses the PID.
+                role = _independent_role(pid, float(created), name, owners, children)
+                if role is not None:
+                    independent.append({"pid": pid, "name": name, "role": role})
+                    continue
+                descendants.append(
+                    {
+                        "pid": pid,
+                        "name": name,
+                        "parent_pid": root["pid"],
+                        "parent_role": root["role"],
+                    }
+                )
     if descendants:
         listed = ", ".join(f"PID {item['pid']} ({item['name']})" for item in descendants)
         raise HostAdmissionError(
@@ -666,7 +733,7 @@ def verify_stale_cleanup(
         "descendants": {
             "live": [],
             "independent_owners": independent,
-            "scope": "direct children of the host and of every recorded owned process",
+            "scope": scope,
         },
         "solver_lease": lease,
         "listeners": {
@@ -682,12 +749,17 @@ def acquire(
     transport_mode: str,
     settings: Mapping[str, Any],
     pid: int | None = None,
+    containment_handle_factory: Callable[[dict[str, Any]], Any] | None = None,
 ) -> AdmissionClaim:
     """Acquire host admission for one ownership domain.
 
     ``settings`` is the identity (``path`` and ``sha256``) of the one
     settings snapshot the caller validated. Raises HostAdmissionError on
-    refusal; never terminates or takes over another host.
+    refusal; never terminates or takes over another host. The host adopts a
+    containment identity (a named job object on Windows, a session on POSIX)
+    and records it, so a later recovery enumerates every descendant from the
+    kernel instead of trusting parent links. ``containment_handle_factory``
+    (tests) replaces the adoption step; the claim keeps the handle alive.
     """
     if transport_mode not in TRANSPORT_MODES:
         raise ValueError(f"unknown transport mode {transport_mode!r}")
@@ -732,6 +804,25 @@ def acquire(
     else:
         solver_lease_evidence(runtime)
 
+    from comsol_mcp import host_containment
+
+    factory = containment_handle_factory or host_containment.adopt_host_containment
+    try:
+        containment = host_containment.host_containment_id(pid=me["pid"])
+        handle = factory(containment)
+    except OSError as exc:
+        raise HostAdmissionError(
+            "admission_state_uncertain",
+            f"this host cannot adopt its containment identity: {exc}",
+        ) from exc
+    try:
+        # Prove the registry answers before the record names it.
+        host_containment.containment_members(containment)
+    except host_containment.UnknownContainment as exc:
+        raise HostAdmissionError(
+            "admission_state_uncertain",
+            f"this host's containment identity cannot be read back: {exc}",
+        ) from exc
     document: dict[str, Any] = {
         "schema_name": HOST_ADMISSION_SCHEMA,
         "schema_version": HOST_ADMISSION_VERSION,
@@ -744,6 +835,7 @@ def acquire(
         "client": _client_identity(me["pid"]),
         "settings": {"path": settings.get("path"), "sha256": settings.get("sha256")},
         "domain": str(runtime.absolute()),
+        "containment": containment,
         "shim": None,
         "owned_processes": [],
         "recovered_from": recovered,
@@ -757,7 +849,13 @@ def acquire(
             "admission_domain_busy",
             "another host acquired admission for this domain concurrently",
         ) from None
-    return AdmissionClaim(path=path, document=document, payload=payload, file_identity=identity)
+    return AdmissionClaim(
+        path=path,
+        document=document,
+        payload=payload,
+        file_identity=identity,
+        containment_handle=handle,
+    )
 
 
 def release(claim: AdmissionClaim) -> bool:

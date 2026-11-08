@@ -15,6 +15,7 @@
 //! The shim never acquires solver leases and never fabricates live state.
 
 mod admission;
+mod containment;
 #[cfg(windows)]
 mod winjob;
 

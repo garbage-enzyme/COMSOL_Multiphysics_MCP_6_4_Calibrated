@@ -871,6 +871,17 @@ fn independent_owner_identities(
 /// virtual-environment launcher qualifies when its single child is a recorded
 /// owner. The Python reader additionally compares the two command lines;
 /// this reader has no command-line source, so it accepts the same launchers.
+fn independent_role_by_probe(
+    row: &procinfo::Entry,
+    owners: &std::collections::HashMap<u32, (f64, &'static str)>,
+    rows: &[procinfo::Entry],
+) -> Option<String> {
+    let Probe::Alive(created) = procinfo::probe(row.pid) else {
+        return None;
+    };
+    independent_role(row, created, owners, rows)
+}
+
 fn independent_role(
     row: &procinfo::Entry,
     created: f64,
@@ -1011,6 +1022,14 @@ fn solver_lease_evidence(runtime: &Path) -> Result<Value, Refusal> {
 
 /// Prove that a stale host left nothing running.
 fn verify_stale_cleanup(lock: &Value, runtime: &Path) -> Result<Value, Refusal> {
+    verify_stale_cleanup_inner(lock, runtime, &[])
+}
+
+fn verify_stale_cleanup_inner(
+    lock: &Value,
+    runtime: &Path,
+    ignore_pids: &[u32],
+) -> Result<Value, Refusal> {
     let Some((owner_pid, owner_created)) = identity_fields(lock) else {
         return refusal(
             "admission_state_uncertain",
@@ -1069,41 +1088,120 @@ fn verify_stale_cleanup(lock: &Value, runtime: &Path) -> Result<Value, Refusal> 
     let owners = independent_owner_identities(runtime)?;
     let mut descendants = Vec::new();
     let mut independent = Vec::new();
-    for row in &rows {
-        for (root_pid, root_created, root_role) in &roots {
-            if row.ppid != *root_pid || row.pid == *root_pid {
+    let containment = lock.get("containment");
+    let containment_kind = containment
+        .and_then(Value::as_object)
+        .and_then(|map| map.get("kind"))
+        .and_then(Value::as_str);
+    let mut scope = "direct children of the host and of every recorded owned process";
+    if containment_kind.is_some() {
+        // Kernel-authoritative membership: every descendant the host kept,
+        // at any depth, regardless of parent links.
+        scope = "kernel membership of the recorded host containment";
+        let members = crate::containment::members(containment.expect("the kind was present"))
+            .map_err(|problem| Refusal {
+                code: "admission_state_uncertain",
+                message: format!("the previous host's containment cannot be read: {problem}"),
+            })?;
+        for pid in members {
+            if ignore_pids.contains(&pid) {
                 continue;
             }
-            let created = match procinfo::probe(row.pid) {
-                Probe::Alive(created) => created,
-                Probe::Absent => continue, // Exited since the snapshot.
-                Probe::Unknown => {
-                    return refusal(
-                        "admission_state_uncertain",
-                        format!(
-                            "process {} ({}) has an unreadable creation time; it cannot \
-                             be ordered against the previous host",
-                            row.pid, row.name
-                        ),
-                    );
-                }
+            let Some(row) = rows.iter().find(|row| row.pid == pid) else {
+                // A member the inventory cannot see is still alive.
+                descendants.push((pid, format!("pid-{pid}"), 0, "member".to_owned()));
+                continue;
             };
-            if created + CREATE_TIME_TOLERANCE_SECONDS < *root_created {
-                continue; // Born before the recorded process: not its child.
-            }
-            if let Probe::Alive(holder) = procinfo::probe(*root_pid)
-                && (holder - root_created).abs() > CREATE_TIME_TOLERANCE_SECONDS
-                && created + CREATE_TIME_TOLERANCE_SECONDS >= holder
-            {
-                continue; // A child of the process that now reuses the PID.
-            }
-            if let Some(role) = independent_role(row, created, &owners, &rows) {
-                independent.push(json!({"pid": row.pid, "name": row.name, "role": role}));
+            let Some(role) = independent_role_by_probe(row, &owners, &rows) else {
+                descendants.push((row.pid, row.name.clone(), 0, "member".to_owned()));
+                continue;
+            };
+            independent.push(json!({"pid": row.pid, "name": row.name, "role": role}));
+        }
+        finish_stale_verification(
+            owner_pid,
+            owner_created,
+            owned_evidence,
+            independent,
+            descendants,
+            runtime,
+            scope,
+        )
+    } else {
+        // Legacy record: parent links, and an unreadable parent is refused.
+        for row in &rows {
+            // The Windows snapshot always lists the kernel idle (0) and
+            // system (4) processes; they are nobody's children.
+            if row.pid <= 4 {
                 continue;
             }
-            descendants.push((row.pid, row.name.clone(), *root_pid, root_role.clone()));
+            if row.ppid == 0 && !ignore_pids.contains(&row.pid) {
+                return refusal(
+                    "admission_state_uncertain",
+                    format!(
+                        "process {} ({}) has an unreadable parent; ancestry cannot be \
+                         established for a record without containment evidence",
+                        row.pid, row.name
+                    ),
+                );
+            }
         }
+        for row in &rows {
+            for (root_pid, root_created, root_role) in &roots {
+                if row.ppid != *root_pid || row.pid == *root_pid {
+                    continue;
+                }
+                let created = match procinfo::probe(row.pid) {
+                    Probe::Alive(created) => created,
+                    Probe::Absent => continue, // Exited since the snapshot.
+                    Probe::Unknown => {
+                        return refusal(
+                            "admission_state_uncertain",
+                            format!(
+                                "process {} ({}) has an unreadable creation time; it cannot \
+                             be ordered against the previous host",
+                                row.pid, row.name
+                            ),
+                        );
+                    }
+                };
+                if created + CREATE_TIME_TOLERANCE_SECONDS < *root_created {
+                    continue; // Born before the recorded process: not its child.
+                }
+                if let Probe::Alive(holder) = procinfo::probe(*root_pid)
+                    && (holder - root_created).abs() > CREATE_TIME_TOLERANCE_SECONDS
+                    && created + CREATE_TIME_TOLERANCE_SECONDS >= holder
+                {
+                    continue; // A child of the process that now reuses the PID.
+                }
+                if let Some(role) = independent_role(row, created, &owners, &rows) {
+                    independent.push(json!({"pid": row.pid, "name": row.name, "role": role}));
+                    continue;
+                }
+                descendants.push((row.pid, row.name.clone(), *root_pid, root_role.clone()));
+            }
+        }
+        finish_stale_verification(
+            owner_pid,
+            owner_created,
+            owned_evidence,
+            independent,
+            descendants,
+            runtime,
+            scope,
+        )
     }
+}
+
+fn finish_stale_verification(
+    owner_pid: u32,
+    owner_created: f64,
+    owned_evidence: Vec<Value>,
+    independent: Vec<Value>,
+    descendants: Vec<(u32, String, u32, String)>,
+    runtime: &Path,
+    scope: &str,
+) -> Result<Value, Refusal> {
     if !descendants.is_empty() {
         let listed = descendants
             .iter()
@@ -1122,7 +1220,7 @@ fn verify_stale_cleanup(lock: &Value, runtime: &Path) -> Result<Value, Refusal> 
         "descendants": {
             "live": [],
             "independent_owners": independent,
-            "scope": "direct children of the host and of every recorded owned process",
+            "scope": scope,
         },
         "solver_lease": lease,
         "listeners": {
@@ -1141,6 +1239,8 @@ pub struct Claim {
     pub path: PathBuf,
     payload: Vec<u8>,
     document: Value,
+    /// Keeps the named registry job referenced for the host lifetime.
+    _containment: Option<crate::containment::RegistryHandle>,
 }
 
 fn owner_text(lock: &Value) -> String {
@@ -1249,12 +1349,24 @@ pub fn acquire(startup: &Startup, worker_token_sha256: &str) -> Result<Claim, Re
             "this shim's own creation time is unavailable",
         );
     };
+    // Containment registry: the kernel, not parent links, decides which
+    // descendants a later recovery must see.
+    let containment = crate::containment::identity_for(std::process::id());
+    let registry = crate::containment::adopt(&containment).map_err(|problem| Refusal {
+        code: "admission_state_uncertain",
+        message: format!("this host cannot adopt its containment identity: {problem}"),
+    })?;
+    crate::containment::members(&containment).map_err(|problem| Refusal {
+        code: "admission_state_uncertain",
+        message: format!("this host's containment identity cannot be read back: {problem}"),
+    })?;
     let document = json!({
         "schema_name": SCHEMA_NAME,
         "schema_version": SCHEMA_VERSION,
         "state": "active",
         "transport_mode": "shim",
         "pid": std::process::id(),
+        "containment": containment,
         "process_create_time": own_created,
         "command_signature": own_command_signature(),
         "executable": display_path(&startup.executable),
@@ -1280,6 +1392,7 @@ pub fn acquire(startup: &Startup, worker_token_sha256: &str) -> Result<Claim, Re
         path,
         payload,
         document,
+        _containment: Some(registry),
     })
 }
 
@@ -1420,6 +1533,7 @@ mod tests {
             path: path.clone(),
             payload: payload.clone(),
             document,
+            _containment: None,
         };
         let replacement = document_bytes(&record(9, 2.0));
         fs::write(&path, &replacement).unwrap();
@@ -1455,6 +1569,7 @@ mod tests {
             path: path.clone(),
             payload,
             document,
+            _containment: None,
         };
         claim.record_worker(std::process::id()).unwrap();
         let stored: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();

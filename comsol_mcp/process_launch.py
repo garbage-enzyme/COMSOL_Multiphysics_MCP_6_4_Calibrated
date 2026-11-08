@@ -10,29 +10,45 @@ and the settings window together with the worker.
 The shim's job therefore permits breakaway, and a worker whose shim launch
 binding verified (see ``comsol_mcp.server``) asks for
 ``CREATE_BREAKAWAY_FROM_JOB`` for exactly these independent owners. Every other
-child stays contained. When an enclosing job (for example one an MCP client
-created) forbids breakaway, Windows refuses with ``ERROR_ACCESS_DENIED``; the
-launch is retried inside the job, which is the behavior without the shim.
-The direct Python host never requests breakaway, so its launches are
-unchanged.
+child stays contained. The direct Python host never requests breakaway, so
+its launches are unchanged.
+
+A launch that must outlive its host either leaves the job or does not start:
+when the enclosing job denies breakaway, this module raises
+:class:`JobBreakawayDenied` instead of starting a process that would die with
+the host. A dependent "independent owner" would silently lose the contract's
+lifetime guarantee, so the refusal must happen before any dependent work.
 """
 
 from __future__ import annotations
 
-import logging
 import os
 from typing import Any, Callable
-
-logger = logging.getLogger(__name__)
 
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 ERROR_ACCESS_DENIED = 5
 
 BREAKAWAY_REQUESTED = "requested"
-BREAKAWAY_REFUSED = "refused_by_enclosing_job"
 BREAKAWAY_NOT_REQUESTED = "not_requested"
 
 _breakaway_enabled = False
+
+
+class JobBreakawayDenied(OSError):
+    """The enclosing job forbids breakaway, so the launch was refused.
+
+    No process was started; nothing dependent on an independent lifetime may
+    proceed from this failure.
+    """
+
+    def __init__(self, command: list[str]):
+        self.command = list(command)
+        super().__init__(
+            ERROR_ACCESS_DENIED,
+            "the enclosing job object forbids breakaway, so this independent "
+            f"owner was not started: {command[0] if command else 'the process'}",
+        )
+        self.winerror = ERROR_ACCESS_DENIED
 
 
 def enable_job_breakaway() -> None:
@@ -52,7 +68,11 @@ def popen_independent_owner(
     creationflags: int,
     **kwargs: Any,
 ) -> tuple[Any, str]:
-    """Start one process that must outlive its host; return it and the outcome."""
+    """Start one process that must outlive its host; return it and the outcome.
+
+    Raises :class:`JobBreakawayDenied` when breakaway is required but the
+    enclosing job denies it — before any process is started.
+    """
     if not _breakaway_enabled:
         return factory(command, creationflags=creationflags, **kwargs), BREAKAWAY_NOT_REQUESTED
     try:
@@ -61,21 +81,16 @@ def popen_independent_owner(
         )
         return process, BREAKAWAY_REQUESTED
     except OSError as exc:
-        if getattr(exc, "winerror", None) != ERROR_ACCESS_DENIED:
-            raise
-    logger.warning(
-        "An enclosing job object forbids breakaway; %s stays inside the host's job "
-        "and ends when that job is closed",
-        command[0] if command else "the process",
-    )
-    return factory(command, creationflags=creationflags, **kwargs), BREAKAWAY_REFUSED
+        if getattr(exc, "winerror", None) == ERROR_ACCESS_DENIED:
+            raise JobBreakawayDenied(command) from exc
+        raise
 
 
 __all__ = [
     "BREAKAWAY_NOT_REQUESTED",
-    "BREAKAWAY_REFUSED",
     "BREAKAWAY_REQUESTED",
     "CREATE_BREAKAWAY_FROM_JOB",
+    "JobBreakawayDenied",
     "enable_job_breakaway",
     "job_breakaway_enabled",
     "popen_independent_owner",

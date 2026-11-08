@@ -599,3 +599,151 @@ def test_observer_and_its_ancestors_are_not_cleanup_debt(runtime, cleanup_proces
     assert evidence["descendants"]["live"] == []
     with pytest.raises(ha.HostAdmissionError):
         ha.verify_stale_cleanup(json.loads(ha.lock_path_for(runtime).read_bytes()), runtime)
+
+
+def _orphan_chain_with_listener(scripts: Path, mark: Path) -> tuple[dict, int]:
+    """A dead host, a dead middle, and a live listening grandchild.
+
+    The three stages run from script files (no nested quoting); the
+    grandchild picks its own port and records it in ``mark`` so nothing in
+    this process holds the listener. The chain runs inside THIS process's
+    containment, so a record carrying that identity must find the grandchild
+    through the kernel even though its recorded ancestors are gone.
+    """
+    scripts.mkdir(parents=True, exist_ok=True)
+    grand = scripts / "grand.py"
+    middle = scripts / "middle.py"
+    host = scripts / "host.py"
+    grand.write_text(
+        "import socket, time\n"
+        "listener = socket.socket()\n"
+        "listener.bind(('127.0.0.1', 0))\n"
+        "listener.listen(1)\n"
+        f"open(r'{mark}', 'w').write(str(listener.getsockname()[1]))\n"
+        "time.sleep(120)\n",
+        encoding="utf-8",
+    )
+    middle.write_text(
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, r'%s'], creationflags=0x08000000)\n"
+        "time.sleep(0.8)\n" % str(grand),
+        encoding="utf-8",
+    )
+    host.write_text(
+        "import json, psutil, subprocess, sys\n"
+        "me = psutil.Process()\n"
+        "middle = subprocess.Popen([sys.executable, r'%s'], creationflags=0x08000000)\n"
+        "middle.wait()\n"
+        "print(json.dumps({'host': me.pid, 'create': me.create_time()}), flush=True)\n"
+        % str(middle),
+        encoding="utf-8",
+    )
+    parent = subprocess.Popen(
+        [sys.executable, str(host)],
+        stdout=subprocess.PIPE,
+        text=True,
+        creationflags=0x08000000,
+    )
+    report = json.loads(parent.stdout.readline())
+    parent.wait(timeout=30)
+    deadline = time.time() + 10
+    while time.time() < deadline and not mark.exists():
+        time.sleep(0.05)
+    if not mark.exists():
+        return report, 0
+    port = int(mark.read_text(encoding="ascii"))
+    import psutil as _ps
+
+    grand_pid = 0
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        for connection in _ps.net_connections(kind="inet"):
+            if (
+                connection.laddr
+                and connection.laddr.port == port
+                and connection.status == "LISTEN"
+                and connection.pid != os.getpid()
+            ):
+                grand_pid = connection.pid
+        if grand_pid:
+            break
+        time.sleep(0.1)
+    return report, grand_pid
+
+
+@windows_parent_links
+def test_kernel_containment_finds_a_listening_grandchild_behind_dead_ancestors(
+    runtime, cleanup_processes
+):
+    from comsol_mcp import host_containment
+
+    identity = host_containment.host_containment_id(pid=os.getpid())
+    handle = host_containment.adopt_host_containment(identity)
+    mark = runtime / "grandchild-port.txt"
+    report, grand = _orphan_chain_with_listener(runtime / "chain", mark)
+    assert grand is not None, "the listening grandchild must exist"
+    cleanup_processes.append(grand)
+    try:
+        record = _record(
+            {
+                "pid": report["host"],
+                "process_create_time": report["create"],
+                "command_signature": "0" * 64,
+            },
+            containment=identity,
+        )
+        with pytest.raises(ha.HostAdmissionError) as error:
+            ha.verify_stale_cleanup(record, runtime, ignore_pids=ha.observer_lineage())
+        assert error.value.reason_code == "admission_cleanup_unverified"
+        assert grand in [item["pid"] for item in error.value.details["descendants"]]
+    finally:
+        import ctypes
+
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+
+
+@windows_parent_links
+def test_kernel_containment_passes_when_no_member_remains(runtime):
+    from comsol_mcp import host_containment
+
+    identity = host_containment.host_containment_id(pid=os.getpid())
+    handle = host_containment.adopt_host_containment(identity)
+    try:
+        dead = _dead_identity()
+        record = _record(dead, containment=identity)
+        # The only members are this process (the observer) and its console.
+        evidence = ha.verify_stale_cleanup(record, runtime, ignore_pids=ha.observer_lineage())
+        assert evidence["descendants"]["live"] == []
+        assert evidence["descendants"]["scope"].startswith("kernel membership")
+    finally:
+        import ctypes
+
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+
+
+def test_legacy_record_with_an_unreadable_parent_is_unknown(runtime, monkeypatch):
+    dead = _dead_identity()
+    _write(ha.lock_path_for(runtime), _record(dead))
+
+    def broken_inventory(*_args, **_kwargs):
+        return [(424242, None, 1000.0, "python.exe")]
+
+    monkeypatch.setattr(ha, "_process_inventory", broken_inventory)
+    with pytest.raises(ha.HostAdmissionError) as error:
+        ha.verify_stale_cleanup(_record(dead), runtime)
+    assert error.value.reason_code == "admission_state_uncertain"
+    assert "unreadable parent" in str(error.value)
+
+
+@windows_parent_links
+def test_acquire_records_and_the_record_carries_containment(runtime):
+    claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+    try:
+        recorded = claim.document["containment"]
+        assert recorded["kind"] in {"windows_job", "posix_session"}
+        if recorded["kind"] == "windows_job":
+            assert recorded["name"].startswith(r"Local\comsol_mcp_host_")
+    finally:
+        assert ha.release(claim) is True

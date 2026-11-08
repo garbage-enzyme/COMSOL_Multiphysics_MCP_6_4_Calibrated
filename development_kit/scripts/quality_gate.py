@@ -51,6 +51,7 @@ LINT_TARGETS = (
     "comsol_mcp/discovery_manifest.py",
     # 0.8.2 §10: host admission, transport selection and their probes.
     "comsol_mcp/host_admission.py",
+    "comsol_mcp/host_containment.py",
     "comsol_mcp/process_launch.py",
     "settings_gui/transport.py",
     "settings_gui/tests/test_transport.py",
@@ -201,6 +202,7 @@ MYPY_GROUPS = (
         "--follow-imports=skip",
         # 0.8.2 §10: host admission and the transport selector logic.
         "comsol_mcp/host_admission.py",
+        "comsol_mcp/host_containment.py",
         "comsol_mcp/process_launch.py",
         "settings_gui/transport.py",
     ),
