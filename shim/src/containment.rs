@@ -184,12 +184,19 @@ mod imp {
 
     pub struct RegistryJob;
 
+    // EPERM: this process is already the session leader.
+    const EPERM: i32 = 1;
+
+    unsafe extern "C" {
+        fn setsid() -> i32;
+    }
+
     impl RegistryJob {
         pub fn adopt(_name: &str) -> Result<RegistryJob, ContainmentError> {
             unsafe {
-                if libc::setsid() < 0 {
-                    let already_leader = std::io::Error::last_os_error().raw_os_error();
-                    if already_leader != Some(libc::EPERM) {
+                if setsid() < 0 {
+                    let error = std::io::Error::last_os_error().raw_os_error();
+                    if error != Some(EPERM) {
                         return Err(ContainmentError::Unknown(
                             "the host cannot become a session leader".to_owned(),
                         ));
