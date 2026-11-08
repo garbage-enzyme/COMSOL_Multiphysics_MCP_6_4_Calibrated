@@ -353,6 +353,7 @@ class SharedSessionManager:
         snapshot_target_factory: Callable[[str], Path] = _default_snapshot_target_factory,
         save_copy_writer: Callable[[Any, str, Path], None] = _default_save_copy_writer,
         save_copy_writer_is_bounded: bool = False,
+        bounded_save_copy_provider: Callable[[int], Mapping[str, Any]] | None = None,
         manifest_writer: Callable[[Path, dict[str, Any]], None] = _default_manifest_writer,
         clock: Callable[[], float] = time.time,
         attached_receipt_root: Path | None = None,
@@ -367,6 +368,7 @@ class SharedSessionManager:
         self._snapshot_target_factory = snapshot_target_factory
         self._save_copy_writer = save_copy_writer
         self._save_copy_writer_is_bounded = bool(save_copy_writer_is_bounded)
+        self._bounded_save_copy_provider = bounded_save_copy_provider
         self._manifest_writer = manifest_writer
         self._clock = clock
         self._lock = threading.RLock()
@@ -931,7 +933,21 @@ class SharedSessionManager:
                 or max_snapshot_bytes > MAX_SNAPSHOT_BYTES
             ):
                 return {"success": False, "state": "snapshot_size_limit_invalid"}
-            if not self._save_copy_writer_is_bounded:
+            from comsol_mcp.shared_session.bounded_save import SaveCopyWriteCapExceeded
+
+            bounded = None
+            if self._bounded_save_copy_provider is not None:
+                bounded = self._bounded_save_copy_provider(max_snapshot_bytes)
+                if not bounded.get("available"):
+                    return {
+                        "success": False,
+                        "state": "snapshot_write_bound_unavailable",
+                        "write_attempted": False,
+                        "reason_code": bounded.get("reason_code"),
+                        "detail": bounded.get("detail"),
+                        "required_capability": "os_volume_free_space",
+                    }
+            elif not self._save_copy_writer_is_bounded:
                 return {
                     "success": False,
                     "state": "snapshot_write_bound_unavailable",
@@ -943,6 +959,8 @@ class SharedSessionManager:
                 expected_revision_sha256=expected_revision_sha256,
             )
             if not verified_before.get("success"):
+                if bounded is not None:
+                    bounded["bounded"].discard()
                 return {
                     "success": False,
                     "state": "snapshot_precondition_failed",
@@ -960,7 +978,10 @@ class SharedSessionManager:
                 if manifest_path.exists():
                     raise FileExistsError("shared snapshot manifest already exists")
                 target_owned = True
-                self._save_copy_writer(self._client, self._selected_model.tag, target)
+                if bounded is not None:
+                    bounded["bounded"].run(self._client, self._selected_model.tag, target)
+                else:
+                    self._save_copy_writer(self._client, self._selected_model.tag, target)
                 if not target.is_file():
                     raise RuntimeError("Save Copy did not create a snapshot file")
                 snapshot_size = target.stat().st_size
@@ -1007,6 +1028,17 @@ class SharedSessionManager:
                     "manifest_sha256": manifest_sha256,
                     "model_lock_verification": verified_after,
                     "identity_preserved": True,
+                }
+            except SaveCopyWriteCapExceeded as exc:
+                return {
+                    "success": False,
+                    "state": "snapshot_byte_cap_enforced",
+                    "write_attempted": True,
+                    "cap_bytes": max_snapshot_bytes,
+                    "enforcement": "os_volume_free_space",
+                    "enforcement_point": exc.enforcement_point,
+                    "bytes_at_final_target": 0,
+                    "error": f"{type(exc).__name__}: {exc}",
                 }
             except Exception as exc:
                 cleanup_errors = []

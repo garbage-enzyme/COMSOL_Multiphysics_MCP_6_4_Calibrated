@@ -218,6 +218,7 @@ def _manager(
     bounded_snapshot_writer=True,
     manifest_writer=None,
     ownership=None,
+    bounded_provider=None,
 ):
     snapshots = snapshots or [_snapshot() for _ in range(10)]
     snapshots = [
@@ -273,6 +274,7 @@ def _manager(
         save_copy_writer=snapshot_writer
         or (lambda value, tag, target: target.write_bytes(b"snapshot fixture")),
         save_copy_writer_is_bounded=bounded_snapshot_writer,
+        bounded_save_copy_provider=bounded_provider,
         manifest_writer=manifest_writer
         or (lambda path, value: path.write_text(json.dumps(value), encoding="utf-8")),
         clock=lambda: 1100.0,
