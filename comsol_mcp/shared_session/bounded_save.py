@@ -251,7 +251,8 @@ class FakeVolume:
         with self._lock:
             if self._used + len(data) > self.cap:
                 error = OSError(28, "No space left on device")
-                error.winerror = 112  # ERROR_DISK_FULL
+                # ERROR_DISK_FULL on Windows; POSIX readers match on errno.
+                setattr(error, "winerror", 112)
                 raise error
             with self.save_path.open("ab") as handle:
                 handle.write(data)
