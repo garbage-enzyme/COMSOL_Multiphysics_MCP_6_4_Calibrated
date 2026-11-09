@@ -243,6 +243,12 @@ so it equals the cap when the cap is a multiple of 512. The result reports
 
 The temporary volume, its mount folder and its work folder are removed on
 every path; `volume_cleanup` reports anything that could not be removed.
+The call completes only when that removal is verified. If anything remains,
+or the removal cannot be verified, a finished copy returns
+`snapshot_cleanup_pending` instead of `snapshot_complete`: the copy and its
+manifest are valid and kept, `cleanup_state` says what is known
+(`residue_reported` or `unverified`), and `cleanup_recovery` names the
+temporary volume for a later verified cleanup.
 
 ### Assistant solve turn
 

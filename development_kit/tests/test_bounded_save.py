@@ -215,6 +215,133 @@ def test_exact_cap_copy_is_accepted_with_manifest_hash(tmp_path):
     assert volumes[-1].teardown_called is True
     assert _residue_free(result["volume_cleanup"])
     assert result["write_time_bound_bytes"] == CAP
+    assert result["cleanup_state"] == "complete"
+    assert "cleanup_recovery" not in result
+
+
+# --- the operation completes only when its volume cleanup passes ------------
+
+
+def _aligned_copy_manager(tmp_path, volumes):
+    model = WritingMphModel("Model_1", bytes(CAP))
+    provider = BoundedProvider(tmp_path / "volumes", volumes, model=model)
+    manager, _ownership, _client = _manager(
+        tmp_path, client=ModelsClient([model]), bounded_provider=provider
+    )
+    return manager, _attach_and_lock(manager)
+
+
+def _assert_artifacts_kept_and_valid(result):
+    snapshot = Path(result["snapshot_path"])
+    manifest_path = Path(result["manifest_path"])
+    assert snapshot.read_bytes() == bytes(CAP)
+    assert hashlib.sha256(snapshot.read_bytes()).hexdigest() == result["snapshot_sha256"]
+    assert hashlib.sha256(manifest_path.read_bytes()).hexdigest() == result["manifest_sha256"]
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["snapshot"]["sha256"] == result["snapshot_sha256"]
+    assert manifest["complete"] is True
+
+
+def test_reported_cleanup_residue_is_not_a_completed_snapshot(tmp_path, monkeypatch):
+    original = FakeVolume.teardown
+
+    def teardown_with_residue(self):
+        original(self)
+        return {
+            "residue_free": False,
+            "image_exists": True,
+            "errors": ["injected detached-state UNKNOWN"],
+        }
+
+    monkeypatch.setattr(FakeVolume, "teardown", teardown_with_residue)
+    volumes: list[FakeVolume] = []
+    manager, lock = _aligned_copy_manager(tmp_path, volumes)
+
+    result = _snapshot(manager, lock, CAP)
+
+    assert result["success"] is False
+    assert result["state"] == "snapshot_cleanup_pending"
+    assert result["artifact_complete"] is True
+    assert result["cleanup_state"] == "residue_reported"
+    assert "injected detached-state UNKNOWN" in result["volume_cleanup"]["errors"]
+    assert result["cleanup_recovery"]["work_dir"] == str(volumes[-1].work_dir)
+    _assert_artifacts_kept_and_valid(result)
+
+
+def test_a_raising_teardown_is_unverified_and_not_a_completed_snapshot(tmp_path, monkeypatch):
+    original = FakeVolume.teardown
+
+    def raising_teardown(self):
+        original(self)
+        raise OSError("injected detach verification failure")
+
+    monkeypatch.setattr(FakeVolume, "teardown", raising_teardown)
+    volumes: list[FakeVolume] = []
+    manager, lock = _aligned_copy_manager(tmp_path, volumes)
+
+    result = _snapshot(manager, lock, CAP)
+
+    assert result["success"] is False
+    assert result["state"] == "snapshot_cleanup_pending"
+    assert result["cleanup_state"] == "unverified"
+    cleanup = result["volume_cleanup"]
+    assert cleanup["teardown_raised"] is True
+    assert any("injected detach verification failure" in error for error in cleanup["errors"])
+    assert result["cleanup_recovery"]["work_dir"] == str(volumes[-1].work_dir)
+    _assert_artifacts_kept_and_valid(result)
+
+
+def test_pending_cleanup_is_recorded_durably_for_a_later_verified_cleanup(tmp_path, monkeypatch):
+    def teardown_leaving_the_volume(self):
+        return {"residue_free": False, "image_exists": True, "errors": ["detach refused"]}
+
+    monkeypatch.setattr(FakeVolume, "teardown", teardown_leaving_the_volume)
+    volumes: list[FakeVolume] = []
+    manager, lock = _aligned_copy_manager(tmp_path, volumes)
+
+    result = _snapshot(manager, lock, CAP)
+
+    assert result["state"] == "snapshot_cleanup_pending"
+    record_path = Path(result["volume_cleanup"]["cleanup_record_path"])
+    assert record_path.parent == volumes[-1].work_dir
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["schema"] == bounded_save.PENDING_CLEANUP_SCHEMA
+    assert record["cleanup_state"] == "residue_reported"
+    assert record["recovery_identity"] == result["cleanup_recovery"]
+    assert record["report"]["errors"] == ["detach refused"]
+
+
+def test_a_refusal_with_cleanup_residue_reports_its_cleanup_state(tmp_path, monkeypatch):
+    def teardown_with_residue(self):
+        return {"residue_free": False, "image_exists": True, "errors": ["detach refused"]}
+
+    monkeypatch.setattr(FakeVolume, "teardown", teardown_with_residue)
+    volumes: list[FakeVolume] = []
+    model = WritingMphModel("Model_1", bytes(CAP + 1))
+    provider = BoundedProvider(tmp_path / "volumes", volumes, model=model)
+    manager, _ownership, _client = _manager(
+        tmp_path, client=ModelsClient([model]), bounded_provider=provider
+    )
+    lock = _attach_and_lock(manager)
+
+    result = _snapshot(manager, lock, CAP)
+
+    assert result["success"] is False
+    assert result["state"] == "snapshot_byte_cap_enforced"
+    assert result["cleanup_state"] == "residue_reported"
+    assert result["cleanup_recovery"]["work_dir"] == str(volumes[-1].work_dir)
+    assert result["bytes_at_final_target"] == 0
+
+
+def test_only_an_explicit_residue_free_report_counts_as_complete():
+    assert bounded_save.cleanup_state_of({"residue_free": True}) == "complete"
+    assert bounded_save.cleanup_state_of({"residue_free": False}) == "residue_reported"
+    assert bounded_save.cleanup_state_of({}) == "unverified"
+    assert bounded_save.cleanup_state_of({"residue_free": "yes"}) == "unverified"
+    assert (
+        bounded_save.cleanup_state_of({"residue_free": True, "teardown_raised": True})
+        == "unverified"
+    )
 
 
 def test_one_byte_overflow_is_refused_at_write_time_with_zero_bytes(tmp_path):

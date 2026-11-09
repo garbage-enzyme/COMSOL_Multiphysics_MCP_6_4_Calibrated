@@ -312,6 +312,30 @@ def _hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _apply_cleanup_gate(result: dict[str, Any], cleanup: Mapping[str, Any]) -> None:
+    """Make the snapshot operation's success depend on its volume cleanup.
+
+    A valid copy and its manifest stay in place with their identities, but the
+    operation completes only once its capped volume is verifiably gone.
+    Reported residue, or a teardown that could not be verified, turns a
+    completed snapshot into ``snapshot_cleanup_pending`` carrying the cleanup
+    report and the recovery identity a later verified cleanup needs.
+    """
+    from comsol_mcp.shared_session.bounded_save import cleanup_state_of
+
+    report = dict(cleanup)
+    state = str(report.get("cleanup_state") or cleanup_state_of(report))
+    result["volume_cleanup"] = report
+    result["cleanup_state"] = state
+    if state == "complete":
+        return
+    result["cleanup_recovery"] = report.get("recovery_identity")
+    if result.get("state") == "snapshot_complete":
+        result["success"] = False
+        result["state"] = "snapshot_cleanup_pending"
+        result["artifact_complete"] = True
+
+
 def _default_snapshot_target_factory(model_tag: str) -> Path:
     from comsol_mcp.path_policy import PathPolicy
 
@@ -966,7 +990,7 @@ class SharedSessionManager:
                         **bound_facts,
                     }
                     if "cleanup" in bounded:
-                        refusal["volume_cleanup"] = bounded["cleanup"]
+                        _apply_cleanup_gate(refusal, bounded["cleanup"])
                     return refusal
                 bounded_writer = bounded["bounded"]
             elif not self._save_copy_writer_is_bounded:
@@ -991,9 +1015,9 @@ class SharedSessionManager:
                     bounded_writer.discard()
                 raise
             if bounded_writer is not None:
-                result["volume_cleanup"] = bounded_writer.discard()
                 for key, value in bound_facts.items():
                     result.setdefault(key, value)
+                _apply_cleanup_gate(result, bounded_writer.discard())
             return result
 
     def _snapshot_locked(

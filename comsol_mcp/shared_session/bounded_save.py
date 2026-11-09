@@ -33,9 +33,11 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
+import json
 import os
 import shutil
 import subprocess
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
@@ -48,6 +50,8 @@ NO_WINDOW = 0x08000000
 PWSH = ["pwsh.exe", "-NoProfile", "-NoLogo", "-NonInteractive", "-Command"]
 DISK_FULL_WINERRORS = (112, 39)  # ERROR_DISK_FULL, ERROR_HANDLE_DISK_FULL
 DISK_FULL_ERRNO = 28  # ENOSPC
+PENDING_CLEANUP_RECORD = "cleanup-pending.json"
+PENDING_CLEANUP_SCHEMA = "comsol_mcp.bounded_save_pending_cleanup/1"
 
 
 class BoundedSaveUnavailable(RuntimeError):
@@ -103,6 +107,22 @@ class VolumeProtocol(Protocol):
     save_path: Path
 
     def teardown(self) -> Mapping[str, Any]: ...
+
+
+def cleanup_state_of(report: Mapping[str, Any]) -> str:
+    """Classify one cleanup report: complete, residue_reported or unverified.
+
+    Only an explicit ``residue_free: True`` counts as complete. A report that
+    says nothing, or one from a teardown that raised, is unverified.
+    """
+    if report.get("teardown_raised"):
+        return "unverified"
+    residue_free = report.get("residue_free")
+    if residue_free is True:
+        return "complete"
+    if residue_free is False:
+        return "residue_reported"
+    return "unverified"
 
 
 def write_time_bound(cap: int) -> int:
@@ -317,6 +337,14 @@ class DiskpartVolume:
                 return
         raise RuntimeError(f"capped volume free {observed} != bound {wanted} after adjustments")
 
+    def recovery_identity(self) -> dict[str, str]:
+        """Where a later verified cleanup finds this volume."""
+        return {
+            "work_dir": str(self.work_dir),
+            "image_path": str(self.vhd),
+            "mount_point": str(self.mount),
+        }
+
     def residue(self) -> dict[str, bool]:
         """What of this volume still exists on the host."""
         return {
@@ -368,10 +396,11 @@ class DiskpartVolume:
         if self.vhd.exists():
             return
         _remove_dir_if_empty(self.mount, errors, label="mount point")
-        try:
-            (self.work_dir / "dp.txt").unlink(missing_ok=True)
-        except OSError as exc:
-            errors.append(f"diskpart script: {type(exc).__name__}: {exc}")
+        for name in ("dp.txt", PENDING_CLEANUP_RECORD):
+            try:
+                (self.work_dir / name).unlink(missing_ok=True)
+            except OSError as exc:
+                errors.append(f"{name}: {type(exc).__name__}: {exc}")
         _remove_dir_if_empty(self.work_dir, errors, label="work directory")
 
     def teardown(self) -> dict[str, Any]:
@@ -396,12 +425,16 @@ class DiskpartVolume:
             # again under the same safety rule.
             self._sweep(errors, detached=self._detach(errors))
         residue = self.residue()
-        return {
+        report: dict[str, Any] = {
             **residue,
             "teardown": teardown_report,
             "errors": errors,
             "residue_free": not any(residue.values()),
         }
+        report["cleanup_state"] = cleanup_state_of(report)
+        if report["cleanup_state"] != "complete":
+            report["recovery_identity"] = self.recovery_identity()
+        return report
 
 
 class FakeVolume:
@@ -435,6 +468,9 @@ class FakeVolume:
                 handle.write(data)
             self._used += len(data)
             return self._used
+
+    def recovery_identity(self) -> dict[str, str]:
+        return {"work_dir": str(self.work_dir), "volume_directory": str(self.directory)}
 
     @property
     def bytes_written(self) -> int:
@@ -584,14 +620,70 @@ class BoundedWriter:
 
     def _teardown(self) -> dict[str, Any]:
         if self.cleanup_report is None:
+            identity = _recovery_identity(self._volume)
             try:
-                self.cleanup_report = dict(self._volume.teardown())
+                report = dict(self._volume.teardown())
             except Exception as exc:  # noqa: BLE001 - a failed teardown is evidence
-                self.cleanup_report = {
+                report = {
                     "residue_free": False,
+                    "teardown_raised": True,
                     "errors": [f"teardown: {type(exc).__name__}: {exc}"],
                 }
+            report["cleanup_state"] = cleanup_state_of(report)
+            if report["cleanup_state"] != "complete":
+                # Keep what a later verified cleanup needs, durably while the
+                # work directory still exists.
+                report["recovery_identity"] = identity
+                report.update(_record_pending_cleanup(identity, report))
+            self.cleanup_report = report
         return self.cleanup_report
+
+
+def _recovery_identity(volume: Any) -> dict[str, str]:
+    describe = getattr(volume, "recovery_identity", None)
+    if callable(describe):
+        try:
+            return {str(key): str(value) for key, value in dict(describe()).items()}
+        except Exception as exc:  # noqa: BLE001 - identity is evidence, never fatal
+            return {"identity_error": f"{type(exc).__name__}: {exc}"}
+    return {"work_dir": str(getattr(volume, "work_dir", ""))}
+
+
+def _record_pending_cleanup(
+    identity: Mapping[str, str], report: Mapping[str, Any]
+) -> dict[str, str]:
+    """Persist one pending-cleanup record inside the volume's work directory."""
+    location = identity.get("work_dir") or ""
+    work_dir = Path(location)
+    if not location or not work_dir.is_dir():
+        return {"cleanup_record_error": "the work directory is not present"}
+    record = work_dir / PENDING_CLEANUP_RECORD
+    body = {
+        "schema": PENDING_CLEANUP_SCHEMA,
+        "recorded_at_epoch": time.time(),
+        "recovery_identity": dict(identity),
+        "cleanup_state": report.get("cleanup_state"),
+        "report": {key: value for key, value in report.items() if key != "recovery_identity"},
+    }
+    try:
+        record.write_text(json.dumps(body, indent=2, default=str), encoding="utf-8")
+    except OSError as exc:
+        return {"cleanup_record_error": f"{type(exc).__name__}: {exc}"}
+    return {"cleanup_record_path": str(record)}
+
+
+def _refusal_cleanup(work: Path, errors: list[str]) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "image_exists": False,
+        "mount_point_exists": False,
+        "work_dir_exists": os.path.lexists(work),
+        "errors": errors,
+        "residue_free": not errors and not os.path.lexists(work),
+    }
+    report["cleanup_state"] = cleanup_state_of(report)
+    if report["cleanup_state"] != "complete":
+        report["recovery_identity"] = {"work_dir": str(work)}
+    return report
 
 
 def prepare_bounded_writer(
@@ -648,13 +740,7 @@ def prepare_bounded_writer(
             "available": False,
             "reason_code": exc.reason_code,
             "detail": str(exc),
-            "cleanup": {
-                "image_exists": False,
-                "mount_point_exists": False,
-                "work_dir_exists": os.path.lexists(work),
-                "errors": errors,
-                "residue_free": not errors and not os.path.lexists(work),
-            },
+            "cleanup": _refusal_cleanup(work, errors),
             **facts,
         }
     except VolumePreparationFailed as exc:
@@ -672,13 +758,7 @@ def prepare_bounded_writer(
             "available": False,
             "reason_code": "volume_preparation_failed",
             "detail": f"{type(exc).__name__}: {exc}",
-            "cleanup": {
-                "image_exists": False,
-                "mount_point_exists": False,
-                "work_dir_exists": os.path.lexists(work),
-                "errors": errors,
-                "residue_free": not errors and not os.path.lexists(work),
-            },
+            "cleanup": _refusal_cleanup(work, errors),
             **facts,
         }
     return {
@@ -699,6 +779,7 @@ __all__ = [
     "SaveCopyWriteCapExceeded",
     "VolumePreparationFailed",
     "WriteTimeBoundViolated",
+    "cleanup_state_of",
     "prepare_bounded_writer",
     "save_copy_into_volume",
     "windows_bounded_volume_factory",

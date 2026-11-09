@@ -217,7 +217,11 @@ COMSOL 6.4 的 Save Copy 只能按路径写文件，本身没有字节上限。�
   不写入任何内容。
 
 临时卷、挂载目录和工作目录在每条路径上都会删除；无法删除的部分记录在
-`volume_cleanup` 中。
+`volume_cleanup` 中。只有确认删除完成后，调用才算完成。若仍有残留，或者无法
+确认删除结果，已写完的副本返回 `snapshot_cleanup_pending` 而不是
+`snapshot_complete`：副本和清单有效并保留，`cleanup_state` 说明已知情况
+（`residue_reported` 或 `unverified`），`cleanup_recovery` 给出临时卷的位置，
+供之后经确认的清理使用。
 
 ### 智能助手求解时
 
