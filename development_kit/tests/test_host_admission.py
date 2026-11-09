@@ -178,8 +178,13 @@ def test_matching_birth_with_a_different_signature_is_uncertain(runtime, cleanup
 
 
 def test_stale_owner_with_verified_cleanup_is_recovered_with_evidence(runtime):
-    stale = _dead_identity()
-    _write(ha.lock_path_for(runtime), _record(stale))
+    if os.name != "nt":
+        previous = _contained_dead_host()
+        _write(ha.lock_path_for(runtime), _contained_record(previous))
+        stale = previous
+    else:
+        stale = _dead_identity()
+        _write(ha.lock_path_for(runtime), _record(stale))
     claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
     recovered = claim.document["recovered_from"]
     assert recovered["pid"] == stale["pid"]
@@ -193,7 +198,13 @@ def test_reused_pid_is_stale_and_its_new_children_are_not_counted(runtime, clean
     holder = _spawn(SLEEPER)
     cleanup_processes.append(holder)
     reused = {**_identity(holder.pid), "process_create_time": 1_000_000.0}
-    _write(ha.lock_path_for(runtime), _record(reused))
+    if os.name != "nt":
+        record = _contained_record(_contained_dead_host())
+        record["pid"] = reused["pid"]
+        record["process_create_time"] = reused["process_create_time"]
+        _write(ha.lock_path_for(runtime), record)
+    else:
+        _write(ha.lock_path_for(runtime), _record(reused))
     claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
     assert (
         claim.document["recovered_from"]["reason"] == "the PID now belongs to a different process"
@@ -314,7 +325,10 @@ def test_terminal_job_state_does_not_excuse_a_live_child(runtime, cleanup_proces
 
 def test_stale_reclaim_preserves_a_replacement_and_refuses(runtime):
     lock = ha.lock_path_for(runtime)
-    _write(lock, _record(_dead_identity()))
+    if os.name != "nt":
+        _write(lock, _contained_record(_contained_dead_host()))
+    else:
+        _write(lock, _record(_dead_identity()))
     replacement = ha.document_bytes(_record(_identity(os.getpid())))
     original = ha.verify_stale_cleanup
 
