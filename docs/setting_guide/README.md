@@ -189,6 +189,16 @@ the GUI before save and by backend validation when JSON is edited directly.
 | `gui.language` | `"zh-cn"` | `"en"`, `"zh-cn"`, or `"zh-tw"`. |
 | `gui.scale` | `"system"` | `"system"`, `"100"`, `"125"`, `"150"`, or `"200"`. The GUI displays the numeric choices as percentages. |
 
+One host serves one runtime directory. When the previous host is gone but
+left a record it cannot prove clean — on Linux and macOS, a record without a
+containment identity — a new host refuses to start with
+`admission_state_uncertain`, keeps the record and stops nothing. The
+diagnostic names the operator flow: `python -m comsol_mcp.host_admission
+--show <runtime-dir>` prints the record's identity and the exact `--recover`
+command. Run it only after confirming independently that nothing from the
+previous host is still running. It archives the record before removing it
+and refuses if anything from the previous host is still visible.
+
 ### Tool Profile
 
 | Key | Default | Meaning and accepted values |

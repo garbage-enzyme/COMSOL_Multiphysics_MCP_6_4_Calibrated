@@ -7,6 +7,7 @@ exact window that a concurrent writer could use.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -841,3 +842,269 @@ def test_session_containment_finds_a_reparented_orphan(runtime):
         assert str(report["orphan"]) in str(refusal.value)
     finally:
         orphan.kill()
+
+
+# --- POSIX: a containment-less stale record is UNKNOWN, never clean ----------
+
+_HOST_THAT_RECORDS_ITSELF = f"""
+import json, sys
+sys.path.insert(0, {str(REPO_ROOT)!r})
+from comsol_mcp import host_containment
+identity = host_containment.host_containment_id(pid=__import__("os").getpid())
+host_containment.adopt_host_containment(identity)
+host_containment.containment_members(identity)
+import psutil
+print(json.dumps({{
+    "pid": __import__("os").getpid(),
+    "process_create_time": psutil.Process().create_time(),
+    "cmdline": psutil.Process().cmdline(),
+    "containment": identity,
+}}), flush=True)
+"""
+
+
+def _contained_dead_host() -> dict:
+    """A previous host that adopted containment, recorded it, and exited."""
+    completed = subprocess.run(  # noqa: S603 - fixed interpreter argv
+        [sys.executable, "-c", _HOST_THAT_RECORDS_ITSELF],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(REPO_ROOT),
+    )
+    assert completed.returncode == 0, completed.stderr
+    report = json.loads(completed.stdout)
+    deadline = time.monotonic() + 10
+    while psutil.pid_exists(report["pid"]) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return report
+
+
+def _contained_record(report: dict) -> dict:
+    return _record(
+        {
+            "pid": report["pid"],
+            "process_create_time": report["process_create_time"],
+            "command_signature": ha.command_signature(report["cmdline"]),
+        },
+        containment=report["containment"],
+    )
+
+
+_SESSION_ORPHAN_SCRIPT = f"""
+import json, os, subprocess, sys
+sys.path.insert(0, {str(REPO_ROOT)!r})
+from comsol_mcp import host_containment
+identity = host_containment.host_containment_id(pid=os.getpid())
+host_containment.adopt_host_containment(identity)
+orphan = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(120)"],
+    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+)
+import psutil
+print(json.dumps({{
+    "pid": os.getpid(),
+    "process_create_time": psutil.Process().create_time(),
+    "cmdline": psutil.Process().cmdline(),
+    "containment": identity,
+    "orphan": orphan.pid,
+}}), flush=True)
+"""
+
+
+def _host_with_session_orphan() -> dict:
+    """A previous host whose orphaned child stays in its containment."""
+    parent = subprocess.Popen(  # noqa: S603 - fixed interpreter argv
+        [sys.executable, "-c", _SESSION_ORPHAN_SCRIPT],
+        stdout=subprocess.PIPE,
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+    report = json.loads(parent.stdout.readline())
+    parent.wait(timeout=30)
+    deadline = time.monotonic() + 10
+    while psutil.pid_exists(report["pid"]) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return report
+
+
+@posix_sessions
+def test_a_containment_less_stale_record_is_unknown_and_is_kept(runtime):
+    dead = _dead_identity()
+    payload = _write(ha.lock_path_for(runtime), _record(dead))
+    with pytest.raises(ha.HostAdmissionError) as error:
+        ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+    assert error.value.reason_code == "admission_state_uncertain"
+    assert "no containment identity" in str(error.value)
+    assert "the record was kept" in str(error.value)
+    details = error.value.details
+    assert details["path"] == str(ha.lock_path_for(runtime))
+    assert details["recovery"].startswith("independent confirmation")
+    assert ha.lock_path_for(runtime).read_bytes() == payload
+
+
+@posix_sessions
+def test_a_contained_dead_host_is_recovered_with_evidence(runtime):
+    previous = _contained_dead_host()
+    _write(ha.lock_path_for(runtime), _contained_record(previous))
+    claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+    recovered = claim.document["recovered_from"]
+    assert recovered["pid"] == previous["pid"]
+    assert recovered["cleanup"]["descendants"]["live"] == []
+    assert recovered["cleanup"]["solver_lease"] == {"state": "absent"}
+    assert ha.release(claim) is True
+
+
+@posix_sessions
+def test_a_contained_host_with_a_live_session_orphan_blocks_recovery(runtime):
+    report = _host_with_session_orphan()
+    try:
+        payload = _write(ha.lock_path_for(runtime), _contained_record(report))
+        with pytest.raises(ha.HostAdmissionError) as error:
+            ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+        assert error.value.reason_code == "admission_cleanup_unverified"
+        assert str(report["orphan"]) in str(error.value)
+        assert ha.lock_path_for(runtime).read_bytes() == payload
+    finally:
+        try:
+            psutil.Process(report["orphan"]).kill()
+        except psutil.Error:
+            pass
+
+
+# --- the explicit operator recovery flow -------------------------------------
+
+
+def test_recovery_needs_a_named_confirmation(runtime):
+    dead = _dead_identity()
+    _write(ha.lock_path_for(runtime), _record(dead))
+    with pytest.raises(ha.HostAdmissionError) as error:
+        ha.recover_after_independent_confirmation(
+            runtime, record_sha256="0" * 64, confirmed_by="  "
+        )
+    assert error.value.reason_code == "admission_recovery_unconfirmed"
+
+
+def test_recovery_refuses_when_the_record_changed(runtime):
+    dead = _dead_identity()
+    payload = _write(ha.lock_path_for(runtime), _record(dead))
+    with pytest.raises(ha.HostAdmissionError) as error:
+        ha.recover_after_independent_confirmation(
+            runtime, record_sha256="0" * 64, confirmed_by="operator"
+        )
+    assert error.value.reason_code == "admission_recovery_record_mismatch"
+    assert ha.lock_path_for(runtime).read_bytes() == payload
+
+
+def test_recovery_refuses_a_live_recorded_host(runtime, cleanup_processes):
+    live = _spawn(SLEEPER)
+    cleanup_processes.append(live)
+    payload = _write(ha.lock_path_for(runtime), _record(_identity(live.pid)))
+    with pytest.raises(ha.HostAdmissionError) as error:
+        ha.recover_after_independent_confirmation(
+            runtime,
+            record_sha256=hashlib.sha256(payload).hexdigest(),
+            confirmed_by="operator",
+        )
+    assert error.value.reason_code == "admission_domain_busy"
+    assert ha.lock_path_for(runtime).read_bytes() == payload
+
+
+def test_recovery_is_not_lifted_over_positive_evidence(runtime, cleanup_processes):
+    worker = _spawn(SLEEPER)
+    cleanup_processes.append(worker)
+    payload = _write(
+        ha.lock_path_for(runtime),
+        _record(_dead_identity(), owned_processes=[_identity(worker.pid)]),
+    )
+    with pytest.raises(ha.HostAdmissionError) as error:
+        ha.recover_after_independent_confirmation(
+            runtime,
+            record_sha256=hashlib.sha256(payload).hexdigest(),
+            confirmed_by="operator",
+        )
+    assert error.value.reason_code == "admission_cleanup_unverified"
+    assert ha.lock_path_for(runtime).read_bytes() == payload
+
+
+def test_recovery_of_an_absent_record_reports_absence(runtime):
+    result = ha.recover_after_independent_confirmation(
+        runtime, record_sha256="0" * 64, confirmed_by="operator"
+    )
+    assert result == {
+        "schema_name": ha.HOST_ADMISSION_RECOVERY_SCHEMA,
+        "schema_version": ha.HOST_ADMISSION_RECOVERY_VERSION,
+        "outcome": "absent",
+        "path": str(ha.lock_path_for(runtime)),
+        "terminated_processes": [],
+    }
+
+
+def test_recovery_archives_and_removes_a_confirmed_stale_record(runtime):
+    dead = _dead_identity()
+    payload = _write(ha.lock_path_for(runtime), _record(dead))
+    digest = hashlib.sha256(payload).hexdigest()
+
+    preview = ha.recovery_preview(runtime)
+    assert preview["record_sha256"] == digest
+    assert "--recover" in preview["recovery_command"]
+
+    receipt = ha.recover_after_independent_confirmation(
+        runtime, record_sha256=digest, confirmed_by="operator"
+    )
+    assert receipt["outcome"] == "recovered"
+    assert receipt["record"]["sha256"] == digest
+    assert receipt["terminated_processes"] == []
+    assert not ha.lock_path_for(runtime).exists()
+    archive_dir = runtime / "admission_recovered"
+    archived = archive_dir / receipt["record"]["archived_as"]
+    assert archived.read_bytes() == payload
+    receipt_path = archive_dir / receipt["record"]["archived_as"].replace(".lock", ".recovery.json")
+    body = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert body["schema_name"] == ha.HOST_ADMISSION_RECOVERY_SCHEMA
+    assert body["schema_version"] == ha.HOST_ADMISSION_RECOVERY_VERSION
+    assert body["confirmed_by"] == "operator"
+    expected = "unknown" if os.name != "nt" else "verified"
+    assert receipt["automatic_verification"]["state"] == expected
+
+    # A host may start again once the record was explicitly recovered.
+    claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+    assert ha.release(claim) is True
+
+
+@posix_sessions
+def test_recovery_of_a_contained_record_verifies_automatically(runtime):
+    previous = _contained_dead_host()
+    payload = _write(ha.lock_path_for(runtime), _contained_record(previous))
+    receipt = ha.recover_after_independent_confirmation(
+        runtime,
+        record_sha256=hashlib.sha256(payload).hexdigest(),
+        confirmed_by="operator",
+    )
+    assert receipt["outcome"] == "recovered"
+    assert receipt["automatic_verification"]["state"] == "verified"
+    assert not ha.lock_path_for(runtime).exists()
+
+
+# POSIX only: on Windows a dead host's job name no longer opens, so its
+# members cannot be enumerated after the host exits (open finding, see the
+# 2026-11-10 handback); the session form of this control is sound.
+@posix_sessions
+def test_recovery_is_not_lifted_over_a_live_session_member(runtime):
+    report = _host_with_session_orphan()
+    try:
+        payload = _write(ha.lock_path_for(runtime), _contained_record(report))
+        with pytest.raises(ha.HostAdmissionError) as error:
+            ha.recover_after_independent_confirmation(
+                runtime,
+                record_sha256=hashlib.sha256(payload).hexdigest(),
+                confirmed_by="operator",
+            )
+        assert error.value.reason_code == "admission_cleanup_unverified"
+        assert str(report["orphan"]) in str(error.value)
+        assert ha.lock_path_for(runtime).read_bytes() == payload
+    finally:
+        try:
+            psutil.Process(report["orphan"]).kill()
+        except psutil.Error:
+            pass

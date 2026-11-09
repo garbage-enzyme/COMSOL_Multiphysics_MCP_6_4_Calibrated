@@ -68,6 +68,18 @@ impl std::fmt::Display for Refusal {
     }
 }
 
+// Shared with comsol_mcp.host_admission: the reason code and this text are
+// the operator-facing contract for a stale record without containment.
+#[cfg(any(test, not(windows)))]
+fn legacy_record_unknown_message() -> String {
+    "the stale admission record has no containment identity; a reparented \
+descendant of the previous host cannot be ruled out on this platform, so \
+the record was kept; confirm independently that nothing from the previous \
+host remains, then run 'python -m comsol_mcp.host_admission --show \
+<runtime-dir>' for the exact recovery command"
+        .to_owned()
+}
+
 fn refusal<T>(code: &'static str, message: impl Into<String>) -> Result<T, Refusal> {
     Err(Refusal {
         code,
@@ -1128,6 +1140,15 @@ fn verify_stale_cleanup_inner(
             scope,
         )
     } else {
+        #[cfg(not(windows))]
+        {
+            // Caller decision 2026-11-10: missing containment evidence is
+            // never clean where orphans are reparented. Positive-evidence
+            // checks have already run above; nothing is removed.
+            let _ = &rows;
+            return refusal("admission_state_uncertain", legacy_record_unknown_message());
+        }
+        #[cfg(windows)]
         // Legacy record: parent links, and an unreadable parent is refused.
         for row in &rows {
             // The Windows snapshot always lists the kernel idle (0) and
@@ -1578,6 +1599,26 @@ mod tests {
         fs::write(&path, b"foreign\n").unwrap();
         assert!(claim.record_worker(std::process::id()).is_err());
         assert_eq!(fs::read(&path).unwrap(), b"foreign\n");
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn legacy_record_message_matches_the_python_contract() {
+        let message = legacy_record_unknown_message();
+        assert!(message.contains("no containment identity"));
+        assert!(message.contains("the record was kept"));
+        assert!(message.contains("python -m comsol_mcp.host_admission --show"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_containment_less_stale_record_is_unknown_on_posix() {
+        let directory = scratch("legacy-unknown");
+        let lock = record(4242, 1.0);
+        let error = verify_stale_cleanup(&lock, &directory).unwrap_err();
+        assert_eq!(error.code, "admission_state_uncertain");
+        assert!(error.message.contains("no containment identity"));
+        assert!(error.message.contains("the record was kept"));
         let _ = fs::remove_dir_all(&directory);
     }
 

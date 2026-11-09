@@ -24,6 +24,11 @@ Rules (shared with ``shim/src/admission.rs``):
   verified durable job worker, and the solver lease shows no live
   non-job owner and no live recorded COMSOL server. Missing evidence is
   ``uncertain`` and refuses admission; it is never treated as absence.
+* A stale record without a containment identity cannot prove its descendants
+  are gone where orphans are reparented (POSIX). There it is always
+  ``admission_state_uncertain``: recovery, takeover and dependent startup are
+  refused, the record is kept, nothing is stopped, and the diagnostic names
+  the explicit operator recovery flow (``--show`` / ``--recover``).
 * A fresh admission also checks the solver lease, so a live retained-version
   host that holds the lease blocks a new host in the same domain.
 """
@@ -46,6 +51,18 @@ from comsol_mcp.durable.io import atomic_write_bytes_exclusive, unlink_if_conten
 
 HOST_ADMISSION_SCHEMA = "comsol_mcp.host_admission"
 HOST_ADMISSION_VERSION = "1.1.0"
+HOST_ADMISSION_RECOVERY_SCHEMA = "comsol_mcp.host_admission_recovery"
+HOST_ADMISSION_RECOVERY_VERSION = "1.0.0"
+# Shared with shim/src/admission.rs: the reason code and this text are the
+# operator-facing contract; the details carry the exact values.
+LEGACY_RECORD_UNKNOWN_MESSAGE = (
+    "the stale admission record has no containment identity; a reparented "
+    "descendant of the previous host cannot be ruled out on this platform, so "
+    "the record was kept; confirm independently that nothing from the previous "
+    "host remains, then run "
+    "'python -m comsol_mcp.host_admission --show <runtime-dir>' for the exact "
+    "recovery command"
+)
 READABLE_VERSIONS = ("1.0.0", HOST_ADMISSION_VERSION)
 HOST_ADMISSION_FILE = "host_admission.lock"
 SOLVER_LEASE_FILE = "solver_owner.json"
@@ -573,15 +590,20 @@ def verify_stale_cleanup(
     runtime_dir: str | Path,
     *,
     ignore_pids: frozenset[int] = frozenset(),
+    for_explicit_recovery: bool = False,
 ) -> dict[str, Any]:
     """Prove that a stale host left nothing running. Raises on any gap.
 
-    Windows keeps a dead parent's PID in its children's records, so every
-    live direct child of the stale host or of a recorded owned process is
-    found. POSIX reparents orphans, so there the check covers the recorded
-    owned processes and children that still name a recorded parent; the
-    POSIX lane owns no licensed solver (runtime contract decision D3).
-    ``ignore_pids`` exempts the observing process and its ancestors.
+    A record with a containment identity is judged by kernel membership.
+    Without one, Windows keeps a dead parent's PID in its children's
+    records, so every live direct child of the stale host or of a recorded
+    owned process is found. POSIX reparents orphans, so a containment-less
+    record there cannot rule out a surviving descendant: it is always
+    ``admission_state_uncertain`` (caller decision 2026-11-10). Only the
+    explicit operator recovery (``for_explicit_recovery``, after independent
+    confirmation) proceeds past that missing evidence; every positive
+    finding still refuses. ``ignore_pids`` exempts the observing process
+    and its ancestors.
     """
     runtime = Path(runtime_dir)
     owner = _identity_fields(lock)
@@ -634,12 +656,26 @@ def verify_stale_cleanup(
 
     from comsol_mcp.host_containment import UnknownContainment, containment_members
 
+    containment = lock.get("containment")
+    has_containment = isinstance(containment, dict) and bool(containment.get("kind"))
+    if os.name != "nt" and not has_containment and not for_explicit_recovery:
+        # Missing evidence, not a finding: the owned-process checks above have
+        # already refused any positive evidence.
+        raise HostAdmissionError(
+            "admission_state_uncertain",
+            LEGACY_RECORD_UNKNOWN_MESSAGE,
+            {
+                "path": str(runtime / HOST_ADMISSION_FILE),
+                "containment": None,
+                "recovery": "independent confirmation, then --show and --recover",
+            },
+        )
+
     owners = independent_owner_identities(runtime)
     descendants: list[dict[str, Any]] = []
     independent: list[dict[str, Any]] = []
-    containment = lock.get("containment")
     scope = "direct children of the host and of every recorded owned process"
-    if isinstance(containment, dict) and containment.get("kind"):
+    if isinstance(containment, dict) and has_containment:
         # Kernel-authoritative membership: every descendant the host kept, at
         # any depth, regardless of ppid readability or reparenting.
         scope = "kernel membership of the recorded host containment"
@@ -1142,3 +1178,165 @@ def verify_worker_binding(
         "settings": dict(settings_identity),
         "token_verified": True,
     }
+
+
+# ---------------------------------------------------------------------------
+# Explicit operator recovery (caller decision 2026-11-10)
+# ---------------------------------------------------------------------------
+
+RECOVERY_ARCHIVE_DIRECTORY = "admission_recovered"
+
+
+def recovery_preview(runtime_dir: str | Path) -> dict[str, Any]:
+    """Read-only: the record's exact identity and its explicit recovery command."""
+    runtime = Path(runtime_dir)
+    path = lock_path_for(runtime)
+    raw = _read_bytes(path, reason="admission_lock_unreadable")
+    if raw is None:
+        return {"state": "absent", "path": str(path)}
+    digest = hashlib.sha256(raw).hexdigest()
+    view = status(runtime, assess_cleanup=True)
+    return {
+        "state": view.get("state"),
+        "reason": view.get("reason"),
+        "path": str(path),
+        "record_sha256": digest,
+        "previous_host": {key: view.get(key) for key in ("pid", "transport_mode")},
+        "cleanup": view.get("cleanup"),
+        "recovery_command": (
+            f'python -m comsol_mcp.host_admission --recover "{runtime}" {digest} '
+            '--confirmed-by "<who confirmed that nothing from the previous host remains>"'
+        ),
+    }
+
+
+def recover_after_independent_confirmation(
+    runtime_dir: str | Path,
+    *,
+    record_sha256: str,
+    confirmed_by: str,
+) -> dict[str, Any]:
+    """Archive and remove one stale record after independent confirmation.
+
+    The confirmation lifts only the missing containment evidence. Every
+    positive finding still refuses: a live or unverifiable recorded host, a
+    live owned process, a live descendant reachable through containment or
+    parent links, a live solver-lease owner or recorded server. The record
+    must still hold the exact bytes the operator inspected. It is archived
+    before it is removed, nothing is terminated, and a receipt is written.
+    """
+    if not isinstance(confirmed_by, str) or not confirmed_by.strip():
+        raise HostAdmissionError(
+            "admission_recovery_unconfirmed",
+            "explicit recovery needs --confirmed-by naming who confirmed that nothing "
+            "from the previous host remains",
+        )
+    runtime = Path(runtime_dir)
+    path = lock_path_for(runtime)
+    raw = _read_bytes(path, reason="admission_lock_unreadable")
+    if raw is None:
+        return {
+            "schema_name": HOST_ADMISSION_RECOVERY_SCHEMA,
+            "schema_version": HOST_ADMISSION_RECOVERY_VERSION,
+            "outcome": "absent",
+            "path": str(path),
+            "terminated_processes": [],
+        }
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest != str(record_sha256).strip().lower():
+        raise HostAdmissionError(
+            "admission_recovery_record_mismatch",
+            "the admission record is absent or no longer holds the inspected bytes; "
+            "run --show again and inspect the current record",
+            {"path": str(path), "record_sha256": digest},
+        )
+    lock = parse_lock(raw, path=path)
+    state, reason = classify_process(lock, signature_mismatch="uncertain")
+    if state == "active":
+        raise HostAdmissionError(
+            "admission_domain_busy",
+            f"the recorded host (PID {lock.get('pid')}) is running; close its client normally",
+            owner_summary(lock),
+        )
+    if state == "uncertain":
+        raise HostAdmissionError(
+            "admission_state_uncertain",
+            f"the recorded host (PID {lock.get('pid')}) cannot be verified: {reason}",
+            owner_summary(lock),
+        )
+    automatic: dict[str, Any]
+    try:
+        verify_stale_cleanup(lock, runtime, ignore_pids=observer_lineage())
+        automatic = {"state": "verified"}
+    except HostAdmissionError as exc:
+        if exc.reason_code != "admission_state_uncertain":
+            raise  # positive evidence is never lifted by a confirmation
+        automatic = {"state": "unknown", "reason_code": exc.reason_code, "reason": str(exc)}
+    evidence = verify_stale_cleanup(
+        lock, runtime, ignore_pids=observer_lineage(), for_explicit_recovery=True
+    )
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    archive_dir = runtime / RECOVERY_ARCHIVE_DIRECTORY
+    stem = f"host_admission-{stamp}-{digest[:16]}"
+    archive = archive_dir / f"{stem}.lock"
+    atomic_write_bytes_exclusive(archive, raw)
+    if archive.read_bytes() != raw:
+        raise HostAdmissionError(
+            "admission_state_uncertain",
+            "the archived copy does not match the record; nothing was removed",
+            {"archive": archive.name},
+        )
+    removed = bool(unlink_if_content(path, raw))
+    receipt = {
+        "schema_name": HOST_ADMISSION_RECOVERY_SCHEMA,
+        "schema_version": HOST_ADMISSION_RECOVERY_VERSION,
+        "recorded_at_epoch": time.time(),
+        "outcome": "recovered" if removed else "refused_record_changed",
+        "record": {"sha256": digest, "archived_as": archive.name},
+        "previous_host": owner_summary(lock),
+        "owner_state": {"state": state, "reason": reason},
+        "automatic_verification": automatic,
+        "explicit_verification": evidence,
+        "confirmed_by": confirmed_by.strip(),
+        "terminated_processes": [],
+    }
+    atomic_write_bytes_exclusive(archive_dir / f"{stem}.recovery.json", document_bytes(receipt))
+    if not removed:
+        raise HostAdmissionError(
+            "admission_domain_busy",
+            "the admission record changed during recovery; nothing was removed",
+            {"archive": archive.name},
+        )
+    return receipt
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``--show <runtime-dir>`` or ``--recover <runtime-dir> <sha256> --confirmed-by <text>``."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="python -m comsol_mcp.host_admission",
+        description="Inspect or explicitly recover a host admission record.",
+    )
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--show", metavar="RUNTIME_DIR")
+    action.add_argument("--recover", nargs=2, metavar=("RUNTIME_DIR", "RECORD_SHA256"))
+    parser.add_argument("--confirmed-by", default="")
+    arguments = parser.parse_args(argv)
+    try:
+        if arguments.show:
+            result = recovery_preview(arguments.show)
+        else:
+            runtime, digest = arguments.recover
+            result = recover_after_independent_confirmation(
+                runtime, record_sha256=digest, confirmed_by=arguments.confirmed_by
+            )
+    except HostAdmissionError as exc:
+        print(f"refused: [{exc.reason_code}] {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=2, sort_keys=True, default=str))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

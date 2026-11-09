@@ -54,7 +54,12 @@ from comsol_mcp.contracts.shape_support import (
 )
 from comsol_mcp.discovery_manifest import MANIFEST_SCHEMA_NAME, MANIFEST_SCHEMA_VERSION
 from comsol_mcp.durable import canonical_sha256_v1
-from comsol_mcp.host_admission import HOST_ADMISSION_SCHEMA, HOST_ADMISSION_VERSION
+from comsol_mcp.host_admission import (
+    HOST_ADMISSION_RECOVERY_SCHEMA,
+    HOST_ADMISSION_RECOVERY_VERSION,
+    HOST_ADMISSION_SCHEMA,
+    HOST_ADMISSION_VERSION,
+)
 from comsol_mcp.settings_gui_handshake import HANDSHAKE_SCHEMA, HANDSHAKE_VERSION
 from comsol_mcp.shared_session.bounded_save import (
     PENDING_CLEANUP_SCHEMA,
@@ -806,6 +811,12 @@ def _entries() -> list[dict[str, Any]]:
         _entry(
             HOST_ADMISSION_SCHEMA,
             HOST_ADMISSION_VERSION,
+            "comsol_mcp.host_admission",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            HOST_ADMISSION_RECOVERY_SCHEMA,
+            HOST_ADMISSION_RECOVERY_VERSION,
             "comsol_mcp.host_admission",
             artifact_kind="durable_artifact",
         ),

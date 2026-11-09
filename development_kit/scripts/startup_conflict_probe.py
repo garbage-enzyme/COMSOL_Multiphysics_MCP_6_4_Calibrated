@@ -580,6 +580,49 @@ class Probe:
             for release in fixture.get("release", []):
                 release()
 
+    def _contained_dead_host(self) -> dict[str, Any]:
+        """A previous host that adopted containment, recorded it, and exited."""
+        import psutil
+
+        script = (
+            "import json, os, psutil, sys\n"
+            f"sys.path.insert(0, {str(sp.ROOT)!r})\n"
+            "from comsol_mcp import host_containment\n"
+            "identity = host_containment.host_containment_id(pid=os.getpid())\n"
+            "host_containment.adopt_host_containment(identity)\n"
+            "host_containment.containment_members(identity)\n"
+            "me = psutil.Process()\n"
+            "print(json.dumps({'pid': me.pid, 'process_create_time': me.create_time(),"
+            " 'cmdline': me.cmdline(), 'containment': identity}), flush=True)\n"
+        )
+        parent = subprocess.Popen(  # noqa: S603 - fixed interpreter argv
+            [str(self.python), "-c", script],
+            stdout=subprocess.PIPE,
+            text=True,
+            cwd=str(sp.ROOT),
+            creationflags=sp.NO_WINDOW,
+        )
+        report = json.loads(parent.stdout.readline())
+        parent.wait(timeout=30)
+        deadline = time.time() + 10
+        while psutil.pid_exists(report["pid"]) and time.time() < deadline:
+            time.sleep(0.05)
+        return report
+
+    def _record_of(self, report: dict[str, Any]) -> dict[str, Any]:
+        import hashlib as _hashlib
+
+        return sp.admission_record(
+            {
+                "pid": report["pid"],
+                "process_create_time": report["process_create_time"],
+                "command_signature": _hashlib.sha256(
+                    "\0".join(report["cmdline"]).encode()
+                ).hexdigest(),
+            },
+            containment=report.get("containment"),
+        )
+
     def case07_ownership_evidence(self) -> None:
         import psutil
 
@@ -618,6 +661,12 @@ class Probe:
             )
 
         def stale(runtime: Path) -> dict[str, Any]:
+            # POSIX: a containment-less record is UNKNOWN now; the contained
+            # variant below proves valid identities still recover.
+            if os.name != "nt":
+                report = self._contained_dead_host()
+                sp.write_record(runtime, self._record_of(report))
+                return {"expect_admission": True, "dead_pid": report["pid"]}
             dead = sp.dead_identity(self.python)
             sp.write_record(runtime, sp.admission_record(dead))
             return {"expect_admission": True, "dead_pid": dead["pid"]}
@@ -638,7 +687,14 @@ class Probe:
             helper = sp.sleeper(self.python)
             identity = sp.birth_identity(helper.pid)
             identity["process_create_time"] -= 1000.0
-            sp.write_record(runtime, sp.admission_record(identity))
+            if os.name != "nt":
+                report = self._contained_dead_host()
+                record = self._record_of(report)
+                record["pid"] = identity["pid"]
+                record["process_create_time"] = identity["process_create_time"]
+                sp.write_record(runtime, record)
+            else:
+                sp.write_record(runtime, sp.admission_record(identity))
             return {"expect_admission": True, "reused_pid": helper.pid, "release": [helper.kill]}
 
         self._both_entry_points(
@@ -717,16 +773,34 @@ class Probe:
                 "release": [release],
             }
 
-        self._both_entry_points(
-            "live_descendant_of_stale_owner_is_unverified_cleanup",
-            orphan,
-            lambda observed, fixture: (
-                observed["exit_code"] == 2
-                and observed["reason_code"] == "admission_cleanup_unverified"
-                and str(fixture["orphan_pid"]) in observed["stderr_tail"]
-                and observed["lock_bytes_unchanged"]
-            ),
-        )
+        if os.name == "nt":
+            # A containment-less record keeps its parent-link walk on Windows.
+            self._both_entry_points(
+                "live_descendant_of_stale_owner_is_unverified_cleanup",
+                orphan,
+                lambda observed, fixture: (
+                    observed["exit_code"] == 2
+                    and observed["reason_code"] == "admission_cleanup_unverified"
+                    and str(fixture["orphan_pid"]) in observed["stderr_tail"]
+                    and observed["lock_bytes_unchanged"]
+                ),
+            )
+        else:
+            # Caller decision 2026-11-10: on POSIX such a record is UNKNOWN —
+            # refused, kept, with the explicit-recovery diagnostic.
+            self._both_entry_points(
+                "legacy_record_with_live_descendant_is_unknown_and_kept",
+                orphan,
+                lambda observed, fixture: (
+                    observed["exit_code"] == 2
+                    and observed["reason_code"] == "admission_state_uncertain"
+                    and psutil.pid_exists(fixture["orphan_pid"])
+                    and "no containment identity" in observed["stderr_tail"]
+                    and "the record was kept" in observed["stderr_tail"]
+                    and "comsol_mcp.host_admission --show" in observed["stderr_tail"]
+                    and observed["lock_bytes_unchanged"]
+                ),
+            )
 
         def live_lease(runtime: Path) -> dict[str, Any]:
             helper = sp.sleeper(self.python)
@@ -817,6 +891,204 @@ class Probe:
                 and not observed["forbidden_worker_started"],
                 observed,
             )
+
+        self.case07_posix_decision()
+
+    def _cli(self, *arguments: str) -> dict[str, Any]:
+        """Run the operator CLI (python -m comsol_mcp.host_admission)."""
+        completed = subprocess.run(  # noqa: S603 - fixed interpreter argv
+            [str(self.python), "-m", "comsol_mcp.host_admission", *arguments],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=str(sp.ROOT),
+            creationflags=sp.NO_WINDOW,
+        )
+        try:
+            body = json.loads(completed.stdout) if completed.stdout.strip() else None
+        except ValueError:
+            body = None
+        return {
+            "exit_code": completed.returncode,
+            "json": body,
+            "stderr_tail": completed.stderr[-600:],
+        }
+
+    def case07_posix_decision(self) -> None:
+        """POSIX rows for the caller decision of 2026-11-10.
+
+        A record that cannot prove containment is UNKNOWN: recovery, takeover
+        and dependent startup are refused, the record is kept and nothing is
+        stopped; the explicit operator flow recovers it after independent
+        confirmation and never lifts positive evidence. Valid identities keep
+        recovering automatically.
+        """
+        import psutil
+
+        def legacy_clean(runtime: Path) -> dict[str, Any]:
+            return {
+                "lock_bytes": sp.write_record(
+                    runtime, sp.admission_record(sp.dead_identity(self.python))
+                )
+            }
+
+        self._both_entry_points(
+            "legacy_record_without_descendants_is_unknown_and_kept",
+            legacy_clean,
+            lambda observed, _f: (
+                observed["exit_code"] == 2
+                and observed["reason_code"] == "admission_state_uncertain"
+                and "no containment identity" in observed["stderr_tail"]
+                and observed["lock_bytes_unchanged"]
+                and not observed["forbidden_worker_started"]
+            ),
+        )
+
+        def contained_orphan(runtime: Path) -> dict[str, Any]:
+            script = (
+                "import json, os, psutil, subprocess, sys\n"
+                f"sys.path.insert(0, {str(sp.ROOT)!r})\n"
+                "from comsol_mcp import host_containment\n"
+                "identity = host_containment.host_containment_id(pid=os.getpid())\n"
+                "host_containment.adopt_host_containment(identity)\n"
+                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'],"
+                " stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,"
+                " stderr=subprocess.DEVNULL)\n"
+                "me = psutil.Process()\n"
+                "print(json.dumps({'pid': me.pid, 'process_create_time': me.create_time(),"
+                " 'cmdline': me.cmdline(), 'containment': identity, 'child': child.pid}),"
+                " flush=True)\n"
+            )
+            parent = subprocess.Popen(  # noqa: S603 - fixed interpreter argv
+                [str(self.python), "-c", script],
+                stdout=subprocess.PIPE,
+                text=True,
+                cwd=str(sp.ROOT),
+                creationflags=sp.NO_WINDOW,
+            )
+            report = json.loads(parent.stdout.readline())
+            parent.wait(timeout=30)
+            deadline = time.time() + 10
+            while psutil.pid_exists(report["pid"]) and time.time() < deadline:
+                time.sleep(0.05)
+
+            def release() -> None:
+                try:
+                    psutil.Process(report["child"]).kill()
+                except psutil.Error:
+                    pass
+
+            return {
+                "lock_bytes": sp.write_record(runtime, self._record_of(report)),
+                "orphan_pid": report["child"],
+                "release": [release],
+            }
+
+        self._both_entry_points(
+            "contained_record_with_live_orphan_is_unverified_cleanup",
+            contained_orphan,
+            lambda observed, fixture: (
+                observed["exit_code"] == 2
+                and observed["reason_code"] == "admission_cleanup_unverified"
+                and str(fixture["orphan_pid"]) in observed["stderr_tail"]
+                and observed["lock_bytes_unchanged"]
+                and psutil.pid_exists(fixture["orphan_pid"])
+            ),
+        )
+
+        # The explicit operator flow, end to end, per entry point.
+        for transport in ("python", "shim"):
+            directory = self.directory(f"case07-explicit-recovery-{transport}")
+            runtime = directory / "runtime"
+            runtime.mkdir()
+            payload = sp.write_record(runtime, sp.admission_record(sp.dead_identity(self.python)))
+            settings = self.settings(directory / "settings.json", transport, runtime)
+            child, marker = self.sentinel(directory)
+            if transport == "python":
+                host = self.python_host(self.env(settings), directory / "host.log")
+            else:
+                host = self.shim_host(self.env(settings, child=child), directory / "host.log")
+            refused = self.refused(host, runtime, marker)
+            refused["lock_bytes_unchanged"] = sp.read_lock(runtime)[1] == payload
+            show = self._cli("--show", str(runtime))
+            digest = (show["json"] or {}).get("record_sha256")
+            wrong = self._cli("--recover", str(runtime), "0" * 64, "--confirmed-by", "probe")
+            still_kept = sp.read_lock(runtime)[1] == payload
+            recover = self._cli(
+                "--recover", str(runtime), str(digest), "--confirmed-by", "startup probe"
+            )
+            receipt = recover["json"] or {}
+            archived = (
+                runtime
+                / "admission_recovered"
+                / str((receipt.get("record") or {}).get("archived_as"))
+            )
+            archive_matches = archived.is_file() and archived.read_bytes() == payload
+            lock_gone = not (runtime / sp.LOCK_NAME).exists()
+            if transport == "python":
+                again = self.python_host(self.env(settings), directory / "host-again.log")
+            else:
+                again = self.shim_host(
+                    self.env(settings, child=child), directory / "host-again.log"
+                )
+            lock = sp.wait_for_owner(runtime, again, timeout=TIMEOUT_EXIT)
+            admitted = sp.lock_owned_by(lock, again)
+            closed = again.close()
+            observed = {
+                "refused": refused,
+                "show": show,
+                "wrong_digest": wrong,
+                "record_kept_after_wrong_digest": still_kept,
+                "recover": recover,
+                "archive_matches_record": archive_matches,
+                "lock_removed": lock_gone,
+                "admitted_after_recovery": admitted,
+                "exit_after_recovery": closed,
+            }
+            self.check(
+                f"case07.explicit_recovery_after_independent_confirmation_{transport}",
+                refused["exit_code"] == 2
+                and refused["reason_code"] == "admission_state_uncertain"
+                and refused["lock_bytes_unchanged"]
+                and show["exit_code"] == 0
+                and bool(digest)
+                and wrong["exit_code"] == 2
+                and "admission_recovery_record_mismatch" in wrong["stderr_tail"]
+                and still_kept
+                and recover["exit_code"] == 0
+                and receipt.get("outcome") == "recovered"
+                and receipt.get("terminated_processes") == []
+                and archive_matches
+                and lock_gone
+                and admitted
+                and closed == 0,
+                observed,
+            )
+
+        # The flow never lifts positive evidence.
+        directory = self.directory("case07-explicit-recovery-live-member")
+        runtime = directory / "runtime"
+        runtime.mkdir()
+        fixture = contained_orphan(runtime)
+        try:
+            digest = hashlib.sha256(fixture["lock_bytes"]).hexdigest()
+            refused = self._cli(
+                "--recover", str(runtime), digest, "--confirmed-by", "startup probe"
+            )
+            kept = sp.read_lock(runtime)[1] == fixture["lock_bytes"]
+            alive = psutil.pid_exists(fixture["orphan_pid"])
+            self.check(
+                "case07.explicit_recovery_refuses_a_live_session_member",
+                refused["exit_code"] == 2
+                and "admission_cleanup_unverified" in refused["stderr_tail"]
+                and str(fixture["orphan_pid"]) in refused["stderr_tail"]
+                and kept
+                and alive,
+                {"refused": refused, "record_kept": kept, "orphan_alive": alive},
+            )
+        finally:
+            for release in fixture["release"]:
+                release()
 
     # -- case 8 ------------------------------------------------------------
 
