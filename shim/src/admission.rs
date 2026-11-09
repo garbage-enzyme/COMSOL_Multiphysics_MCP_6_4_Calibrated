@@ -70,7 +70,6 @@ impl std::fmt::Display for Refusal {
 
 // Shared with comsol_mcp.host_admission: the reason code and this text are
 // the operator-facing contract for a stale record without containment.
-#[cfg(any(test, not(windows)))]
 fn legacy_record_unknown_message() -> String {
     "the stale admission record has no containment identity; a reparented \
 descendant of the previous host cannot be ruled out on this platform, so \
@@ -1105,11 +1104,14 @@ fn verify_stale_cleanup_inner(
         .and_then(Value::as_object)
         .and_then(|map| map.get("kind"))
         .and_then(Value::as_str);
-    let mut scope = "direct children of the host and of every recorded owned process";
+    let scope = if containment_kind.is_some() {
+        "kernel membership of the recorded host containment"
+    } else {
+        "direct children of the host and of every recorded owned process"
+    };
     if containment_kind.is_some() {
         // Kernel-authoritative membership: every descendant the host kept,
         // at any depth, regardless of parent links.
-        scope = "kernel membership of the recorded host containment";
         let members = crate::containment::members(containment.expect("the kind was present"))
             .map_err(|problem| Refusal {
                 code: "admission_state_uncertain",
@@ -1130,25 +1132,7 @@ fn verify_stale_cleanup_inner(
             };
             independent.push(json!({"pid": row.pid, "name": row.name, "role": role}));
         }
-        finish_stale_verification(
-            owner_pid,
-            owner_created,
-            owned_evidence,
-            independent,
-            descendants,
-            runtime,
-            scope,
-        )
-    } else {
-        #[cfg(not(windows))]
-        {
-            // Caller decision 2026-11-10: missing containment evidence is
-            // never clean where orphans are reparented. Positive-evidence
-            // checks have already run above; nothing is removed.
-            let _ = &rows;
-            return refusal("admission_state_uncertain", legacy_record_unknown_message());
-        }
-        #[cfg(windows)]
+    } else if cfg!(windows) {
         // Legacy record: parent links, and an unreadable parent is refused.
         for row in &rows {
             // The Windows snapshot always lists the kernel idle (0) and
@@ -1161,7 +1145,7 @@ fn verify_stale_cleanup_inner(
                     "admission_state_uncertain",
                     format!(
                         "process {} ({}) has an unreadable parent; ancestry cannot be \
-                         established for a record without containment evidence",
+                     established for a record without containment evidence",
                         row.pid, row.name
                     ),
                 );
@@ -1180,7 +1164,7 @@ fn verify_stale_cleanup_inner(
                             "admission_state_uncertain",
                             format!(
                                 "process {} ({}) has an unreadable creation time; it cannot \
-                             be ordered against the previous host",
+                         be ordered against the previous host",
                                 row.pid, row.name
                             ),
                         );
@@ -1202,16 +1186,22 @@ fn verify_stale_cleanup_inner(
                 descendants.push((row.pid, row.name.clone(), *root_pid, root_role.clone()));
             }
         }
-        finish_stale_verification(
-            owner_pid,
-            owner_created,
-            owned_evidence,
-            independent,
-            descendants,
-            runtime,
-            scope,
-        )
+    } else {
+        // Caller decision 2026-11-10: missing containment evidence is never
+        // clean where orphans are reparented. Positive-evidence checks have
+        // already run above; nothing is removed.
+        let _ = (&rows, &roots);
+        return refusal("admission_state_uncertain", legacy_record_unknown_message());
     }
+    finish_stale_verification(
+        owner_pid,
+        owner_created,
+        owned_evidence,
+        independent,
+        descendants,
+        runtime,
+        scope,
+    )
 }
 
 fn finish_stale_verification(
