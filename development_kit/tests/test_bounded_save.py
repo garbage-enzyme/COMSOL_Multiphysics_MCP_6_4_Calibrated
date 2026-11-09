@@ -305,7 +305,8 @@ def test_pending_cleanup_is_recorded_durably_for_a_later_verified_cleanup(tmp_pa
     record_path = Path(result["volume_cleanup"]["cleanup_record_path"])
     assert record_path.parent == volumes[-1].work_dir
     record = json.loads(record_path.read_text(encoding="utf-8"))
-    assert record["schema"] == bounded_save.PENDING_CLEANUP_SCHEMA
+    assert record["schema_name"] == bounded_save.PENDING_CLEANUP_SCHEMA
+    assert record["schema_version"] == bounded_save.PENDING_CLEANUP_VERSION
     assert record["cleanup_state"] == "residue_reported"
     assert record["recovery_identity"] == result["cleanup_recovery"]
     assert record["report"]["errors"] == ["detach refused"]

@@ -51,7 +51,8 @@ PWSH = ["pwsh.exe", "-NoProfile", "-NoLogo", "-NonInteractive", "-Command"]
 DISK_FULL_WINERRORS = (112, 39)  # ERROR_DISK_FULL, ERROR_HANDLE_DISK_FULL
 DISK_FULL_ERRNO = 28  # ENOSPC
 PENDING_CLEANUP_RECORD = "cleanup-pending.json"
-PENDING_CLEANUP_SCHEMA = "comsol_mcp.bounded_save_pending_cleanup/1"
+PENDING_CLEANUP_SCHEMA = "comsol_mcp.bounded_save_pending_cleanup"
+PENDING_CLEANUP_VERSION = "1.0.0"
 
 
 class BoundedSaveUnavailable(RuntimeError):
@@ -659,7 +660,8 @@ def _record_pending_cleanup(
         return {"cleanup_record_error": "the work directory is not present"}
     record = work_dir / PENDING_CLEANUP_RECORD
     body = {
-        "schema": PENDING_CLEANUP_SCHEMA,
+        "schema_name": PENDING_CLEANUP_SCHEMA,
+        "schema_version": PENDING_CLEANUP_VERSION,
         "recorded_at_epoch": time.time(),
         "recovery_identity": dict(identity),
         "cleanup_state": report.get("cleanup_state"),
