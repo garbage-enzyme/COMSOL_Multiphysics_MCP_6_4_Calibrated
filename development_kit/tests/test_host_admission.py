@@ -724,6 +724,7 @@ def test_kernel_containment_passes_when_no_member_remains(runtime):
             ctypes.windll.kernel32.CloseHandle(handle)
 
 
+@windows_parent_links
 def test_legacy_record_with_an_unreadable_parent_is_unknown(runtime, monkeypatch):
     dead = _dead_identity()
     _write(ha.lock_path_for(runtime), _record(dead))
