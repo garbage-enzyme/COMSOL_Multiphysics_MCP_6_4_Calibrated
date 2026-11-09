@@ -408,7 +408,14 @@ def test_preparation_refusal_reports_the_rollback(tmp_path, monkeypatch):
     assert list((tmp_path / "root").iterdir()) != []
 
 
-def test_non_ascii_volume_root_is_refused_without_diskpart(tmp_path):
+def test_the_production_factory_refuses_before_any_diskpart_call(tmp_path, monkeypatch):
+    import os
+    import shutil
+
+    def forbidden_run(command, *, what):
+        pytest.fail(f"no volume command may run: {what}")
+
+    monkeypatch.setattr(bounded_save, "_run", forbidden_run)
     result = prepare_bounded_writer(
         CAP,
         volume_factory=bounded_save.windows_bounded_volume_factory,
@@ -416,7 +423,14 @@ def test_non_ascii_volume_root_is_refused_without_diskpart(tmp_path):
     )
 
     assert result["available"] is False
-    assert result["reason_code"] == "volume_root_not_ascii"
+    if os.name != "nt":
+        expected = "unsupported_platform"
+    elif shutil.which("diskpart.exe") is None or shutil.which("pwsh.exe") is None:
+        expected = "tooling_missing"
+    else:
+        expected = "volume_root_not_ascii"
+    assert result["reason_code"] == expected
+    assert result["cleanup"]["residue_free"] is True
 
 
 # --- copy-out and teardown helpers ------------------------------------------
