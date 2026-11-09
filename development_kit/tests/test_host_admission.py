@@ -400,7 +400,13 @@ def test_stale_lease_with_a_live_recorded_server_blocks_recovery(runtime, cleanu
         json.dumps(_lease(_dead_identity(), comsol_server_processes=[_identity(server.pid)])),
         encoding="utf-8",
     )
-    _write(ha.lock_path_for(runtime), _record(_dead_identity()))
+    if os.name != "nt":
+        # The lease evidence is positive: reach it through a record that can
+        # be judged (a containment-less record is UNKNOWN first on POSIX).
+        previous = _contained_dead_host()
+        _write(ha.lock_path_for(runtime), _contained_record(previous))
+    else:
+        _write(ha.lock_path_for(runtime), _record(_dead_identity()))
     with pytest.raises(ha.HostAdmissionError) as error:
         ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
     assert error.value.reason_code == "admission_cleanup_unverified"
