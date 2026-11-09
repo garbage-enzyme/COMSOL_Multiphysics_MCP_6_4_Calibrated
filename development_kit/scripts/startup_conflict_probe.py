@@ -783,6 +783,41 @@ class Probe:
             observed,
         )
 
+        # POSIX: a host started as a process-group leader (a shell job)
+        # cannot become a session leader. It must refuse rather than record
+        # a session it does not lead, which would hide its descendants
+        # from every later recovery.
+        if os.name == "nt":
+            return
+        for transport in ("python", "shim"):
+            directory = self.directory(f"case07-group-leader-{transport}")
+            runtime = directory / "runtime"
+            runtime.mkdir()
+            settings = self.settings(directory / "settings.json", transport, runtime)
+            child, marker = self.sentinel(directory)
+            if transport == "python":
+                host = sp.python_host(
+                    self.python, self.env(settings), directory / "host.log", process_group=0
+                )
+            else:
+                host = sp.shim_host(
+                    self.shim,
+                    self.env(settings, child=child),
+                    directory / "host.log",
+                    process_group=0,
+                )
+            self.cleanup.append(host.kill_tree)
+            observed = self.refused(host, runtime, marker)
+            self.check(
+                f"case07.group_leader_host_refuses_a_session_it_cannot_lead_{transport}",
+                observed["exit_code"] == 2
+                and observed["reason_code"] == "admission_state_uncertain"
+                and "leads no session it can record" in observed["stderr_tail"]
+                and not observed["lock_present"]
+                and not observed["forbidden_worker_started"],
+                observed,
+            )
+
     # -- case 8 ------------------------------------------------------------
 
     def case08_settings_change(self) -> None:

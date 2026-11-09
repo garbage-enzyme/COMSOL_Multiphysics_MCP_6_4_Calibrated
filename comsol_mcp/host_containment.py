@@ -83,7 +83,9 @@ def host_containment_id(*, pid: int) -> dict[str, Any]:
 def adopt_host_containment(identity: dict[str, Any]) -> Any:
     """Adopt the containment identity; returns an owned handle (Windows).
 
-    POSIX: becomes a session leader (idempotent) and returns None.
+    POSIX: becomes a session leader (idempotent) and returns None. Raises
+    ``OSError`` when the host does not end up leading the recorded session,
+    as when it already led a process group and ``setsid()`` was refused.
     """
     if WINDOWS:
         name = identity.get("name") if isinstance(identity, dict) else None
@@ -98,11 +100,26 @@ def adopt_host_containment(identity: dict[str, Any]) -> Any:
             raise OSError(error, "AssignProcessToJobObject failed")
         return handle
     setsid = getattr(os, "setsid", None)
-    if setsid is not None:
-        try:
-            setsid()
-        except OSError:
-            pass  # Already a session leader; membership is what matters.
+    getsid = getattr(os, "getsid", None)
+    if setsid is None or getsid is None:
+        raise OSError(38, "this platform cannot establish a host session")  # ENOSYS
+    try:
+        setsid()
+    except OSError:
+        # EPERM: this process already leads a process group. That is not the
+        # same as leading a session; the readback below decides.
+        pass
+    recorded = identity.get("id") if isinstance(identity, dict) else None
+    effective = getsid(0)
+    if effective != recorded:
+        # The record would name a session this host does not lead, and a later
+        # recovery would see none of its descendants. Refuse instead.
+        raise OSError(
+            1,  # EPERM
+            f"this host leads no session it can record (its session is {effective}, "
+            f"the record would name {recorded}); start it as a normal child process, "
+            "not as a shell job",
+        )
     return None
 
 

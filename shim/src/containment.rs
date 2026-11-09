@@ -184,15 +184,29 @@ mod imp {
 
     pub struct RegistryJob;
 
-    // EPERM: this process is already the session leader.
+    // EPERM: this process already leads a process group (or a session).
     const EPERM: i32 = 1;
 
     unsafe extern "C" {
         fn setsid() -> i32;
+        fn getsid(pid: i32) -> i32;
+    }
+
+    /// A record may name only the session this host actually leads.
+    pub fn session_matches(effective: i32, recorded: u32) -> Result<(), ContainmentError> {
+        if u32::try_from(effective).ok() == Some(recorded) {
+            Ok(())
+        } else {
+            Err(ContainmentError::Unknown(format!(
+                "this host leads no session it can record (its session is {effective}, \
+                 the record would name {recorded}); start it as a normal child process, \
+                 not as a shell job"
+            )))
+        }
     }
 
     impl RegistryJob {
-        pub fn adopt(_name: &str) -> Result<RegistryJob, ContainmentError> {
+        pub fn adopt_session(recorded: u32) -> Result<RegistryJob, ContainmentError> {
             unsafe {
                 if setsid() < 0 {
                     let error = std::io::Error::last_os_error().raw_os_error();
@@ -203,6 +217,10 @@ mod imp {
                     }
                 }
             }
+            // EPERM alone proves nothing: a process-group leader is refused
+            // setsid() without leading any session. Read the session back.
+            let effective = unsafe { getsid(0) };
+            session_matches(effective, recorded)?;
             Ok(RegistryJob)
         }
     }
@@ -303,7 +321,19 @@ pub fn adopt(identity: &serde_json::Value) -> Result<imp::RegistryJob, Containme
             unreachable!()
         }
     } else {
-        imp::RegistryJob::adopt("")
+        #[cfg(not(windows))]
+        {
+            let recorded = identity
+                .get("id")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok())
+                .ok_or_else(|| ContainmentError::Unknown("session id missing".to_owned()))?;
+            imp::RegistryJob::adopt_session(recorded)
+        }
+        #[cfg(windows)]
+        {
+            unreachable!()
+        }
     }
 }
 
@@ -335,6 +365,20 @@ mod tests {
         let found = members(&identity).expect("members");
         assert!(found.contains(&std::process::id()));
         let _ = job;
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_session_this_host_does_not_lead_is_refused() {
+        assert!(imp::session_matches(26, 26).is_ok());
+        // A process-group leader keeps its inherited session after EPERM.
+        let refused = imp::session_matches(11, 26).expect_err("foreign session");
+        assert!(
+            refused
+                .to_string()
+                .contains("leads no session it can record")
+        );
+        assert!(imp::session_matches(-1, 26).is_err());
     }
 
     #[test]

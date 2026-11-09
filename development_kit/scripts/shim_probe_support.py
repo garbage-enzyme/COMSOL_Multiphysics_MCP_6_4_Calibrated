@@ -89,9 +89,20 @@ def base_environment() -> dict[str, str]:
 class Host:
     """One launched host process with its own stderr log."""
 
-    def __init__(self, argv: list[str], env: dict[str, str], log: Path, *, cwd: Path = ROOT):
+    def __init__(
+        self,
+        argv: list[str],
+        env: dict[str, str],
+        log: Path,
+        *,
+        cwd: Path = ROOT,
+        process_group: int | None = None,
+    ):
         self.log = log
         self._log_handle = log.open("wb")
+        # process_group (POSIX) starts the host as a process-group leader,
+        # the launch shape of a shell job.
+        extra: dict[str, Any] = {} if process_group is None else {"process_group": process_group}
         self.process = subprocess.Popen(  # noqa: S603 - fixed probe argv
             argv,
             cwd=str(cwd),
@@ -100,6 +111,7 @@ class Host:
             stdout=subprocess.PIPE,
             stderr=self._log_handle,
             creationflags=NO_WINDOW,
+            **extra,
         )
         self.started = time.time()
 
@@ -229,12 +241,16 @@ class Host:
             pass
 
 
-def python_host(python: Path, env: dict[str, str], log: Path) -> Host:
-    return Host([str(python), "-m", "comsol_mcp.server"], env, log)
+def python_host(
+    python: Path, env: dict[str, str], log: Path, *, process_group: int | None = None
+) -> Host:
+    return Host([str(python), "-m", "comsol_mcp.server"], env, log, process_group=process_group)
 
 
-def shim_host(shim: Path, env: dict[str, str], log: Path) -> Host:
-    return Host([str(shim)], env, log)
+def shim_host(
+    shim: Path, env: dict[str, str], log: Path, *, process_group: int | None = None
+) -> Host:
+    return Host([str(shim)], env, log, process_group=process_group)
 
 
 def read_lock(runtime: Path) -> tuple[dict[str, Any] | None, bytes | None]:

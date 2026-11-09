@@ -747,3 +747,90 @@ def test_acquire_records_and_the_record_carries_containment(runtime):
             assert recorded["name"].startswith(r"Local\comsol_mcp_host_")
     finally:
         assert ha.release(claim) is True
+
+
+# --- POSIX session containment (runs on the POSIX lane only) ----------------
+
+posix_sessions = pytest.mark.skipif(os.name == "nt", reason="POSIX session containment")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+_ADOPT_AND_REPORT = """
+import json, os, subprocess, sys
+if sys.argv[1] == "group_leader":
+    os.setpgid(0, 0)
+from comsol_mcp import host_containment
+identity = host_containment.host_containment_id(pid=os.getpid())
+try:
+    host_containment.adopt_host_containment(identity)
+    adopted, error = True, None
+except OSError as exc:
+    adopted, error = False, str(exc)
+orphan = None
+if adopted and sys.argv[2] == "orphan":
+    orphan = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"]).pid
+import psutil
+print(json.dumps({
+    "pid": os.getpid(),
+    "process_create_time": psutil.Process().create_time(),
+    "session": os.getsid(0),
+    "identity": identity,
+    "adopted": adopted,
+    "error": error,
+    "orphan": orphan,
+}), flush=True)
+"""
+
+
+def _adopt_in_child(mode: str, orphan: str) -> dict:
+    environment = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
+    completed = subprocess.run(  # noqa: S603 - fixed interpreter argv
+        [sys.executable, "-c", _ADOPT_AND_REPORT, mode, orphan],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=environment,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout)
+
+
+@posix_sessions
+def test_a_normal_child_leads_the_session_it_records():
+    report = _adopt_in_child("normal", "none")
+
+    assert report["adopted"] is True, report
+    assert report["identity"] == {"kind": "posix_session", "id": report["pid"]}
+    assert report["session"] == report["pid"]
+
+
+@posix_sessions
+def test_a_process_group_leader_cannot_record_a_session_it_does_not_lead():
+    # setsid() is refused to a process-group leader, which keeps the session
+    # it inherited; adoption must refuse instead of recording its own PID.
+    report = _adopt_in_child("group_leader", "none")
+
+    assert report["adopted"] is False, report
+    assert "leads no session it can record" in report["error"]
+    assert report["session"] != report["pid"]
+
+
+@posix_sessions
+def test_session_containment_finds_a_reparented_orphan(runtime):
+    report = _adopt_in_child("normal", "orphan")
+    orphan = psutil.Process(report["orphan"])
+    try:
+        deadline = time.time() + 10
+        while psutil.pid_exists(report["pid"]) and time.time() < deadline:
+            time.sleep(0.05)
+        assert orphan.ppid() != report["pid"]  # reparented: parent links lost
+        record = {
+            "pid": report["pid"],
+            "process_create_time": report["process_create_time"],
+            "containment": report["identity"],
+        }
+        with pytest.raises(ha.HostAdmissionError) as refusal:
+            ha.verify_stale_cleanup(record, runtime)
+        assert refusal.value.reason_code == "admission_cleanup_unverified"
+        assert str(report["orphan"]) in str(refusal.value)
+    finally:
+        orphan.kill()
