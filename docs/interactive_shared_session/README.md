@@ -224,10 +224,25 @@ lock, that lock is invalid.
 5. Verify again, then call `shared_model_unlock`.
 6. Tell the user clearly that their turn may resume.
 
-COMSOL 6.4 Save Copy writes by pathname and cannot enforce a byte ceiling while
-writing. When the bound cannot be guaranteed, this release returns
-`snapshot_write_bound_unavailable`. It does not write a complete oversized file
-and then pretend the write was bounded.
+COMSOL 6.4 Save Copy writes by pathname and has no byte ceiling of its own.
+This release bounds it through the operating system: the copy is written into
+a temporary virtual-disk volume whose free space equals the write-time bound,
+and only a complete, hash-verified copy reaches the snapshot folder. The bound
+is the largest multiple of 512 bytes that does not exceed `max_snapshot_bytes`,
+so it equals the cap when the cap is a multiple of 512. The result reports
+`cap_bytes` and `write_time_bound_bytes`.
+
+- A copy within the bound returns `snapshot_complete` with its manifest.
+- A copy that needs more space than the bound is stopped during the write and
+  returns `snapshot_byte_cap_enforced`; nothing reaches the snapshot folder.
+  This includes a copy that would have fit in the last partial 512-byte block
+  of a cap that is not a multiple of 512.
+- When the volume cannot be built (the server is not elevated, `diskpart` or
+  PowerShell 7 is missing, or the platform is not Windows), the call returns
+  `snapshot_write_bound_unavailable` with a `reason_code` and writes nothing.
+
+The temporary volume, its mount folder and its work folder are removed on
+every path; `volume_cleanup` reports anything that could not be removed.
 
 ### Assistant solve turn
 

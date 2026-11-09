@@ -933,20 +933,42 @@ class SharedSessionManager:
                 or max_snapshot_bytes > MAX_SNAPSHOT_BYTES
             ):
                 return {"success": False, "state": "snapshot_size_limit_invalid"}
-            from comsol_mcp.shared_session.bounded_save import SaveCopyWriteCapExceeded
-
-            bounded = None
+            bounded_writer = None
+            bound_facts: dict[str, Any] = {}
             if self._bounded_save_copy_provider is not None:
-                bounded = self._bounded_save_copy_provider(max_snapshot_bytes)
-                if not bounded.get("available"):
+                try:
+                    bounded = dict(self._bounded_save_copy_provider(max_snapshot_bytes))
+                except Exception as exc:
                     return {
+                        "success": False,
+                        "state": "snapshot_write_bound_unavailable",
+                        "write_attempted": False,
+                        "reason_code": "provider_failed",
+                        "detail": f"{type(exc).__name__}: {exc}",
+                        "required_capability": "os_volume_free_space",
+                    }
+                bound_facts = {
+                    "cap_bytes": max_snapshot_bytes,
+                    **{
+                        key: bounded[key]
+                        for key in ("write_time_bound_bytes", "granularity_bytes", "bound_rule")
+                        if key in bounded
+                    },
+                }
+                if not bounded.get("available"):
+                    refusal = {
                         "success": False,
                         "state": "snapshot_write_bound_unavailable",
                         "write_attempted": False,
                         "reason_code": bounded.get("reason_code"),
                         "detail": bounded.get("detail"),
                         "required_capability": "os_volume_free_space",
+                        **bound_facts,
                     }
+                    if "cleanup" in bounded:
+                        refusal["volume_cleanup"] = bounded["cleanup"]
+                    return refusal
+                bounded_writer = bounded["bounded"]
             elif not self._save_copy_writer_is_bounded:
                 return {
                     "success": False,
@@ -954,126 +976,182 @@ class SharedSessionManager:
                     "write_attempted": False,
                     "required_capability": "incremental_native_write_byte_limit",
                 }
-            verified_before = self.verify_model_lock(
+            # Every path where the prepared writer never ran (a refused
+            # precondition, a target or manifest collision, a failed target
+            # factory, an unexpected error) tears its volume down too.
+            try:
+                result = self._snapshot_locked(
+                    bounded_writer,
+                    expected_lock_sha256=expected_lock_sha256,
+                    expected_revision_sha256=expected_revision_sha256,
+                    max_snapshot_bytes=max_snapshot_bytes,
+                )
+            except BaseException:
+                if bounded_writer is not None:
+                    bounded_writer.discard()
+                raise
+            if bounded_writer is not None:
+                result["volume_cleanup"] = bounded_writer.discard()
+                for key, value in bound_facts.items():
+                    result.setdefault(key, value)
+            return result
+
+    def _snapshot_locked(
+        self,
+        bounded_writer: Any,
+        *,
+        expected_lock_sha256: str,
+        expected_revision_sha256: str,
+        max_snapshot_bytes: int,
+    ) -> dict[str, Any]:
+        from comsol_mcp.shared_session.bounded_save import (
+            SaveCopyWriteCapExceeded,
+            WriteTimeBoundViolated,
+        )
+
+        verified_before = self.verify_model_lock(
+            expected_lock_sha256=expected_lock_sha256,
+            expected_revision_sha256=expected_revision_sha256,
+        )
+        if not verified_before.get("success"):
+            return {
+                "success": False,
+                "state": "snapshot_precondition_failed",
+                "model_lock_verification": verified_before,
+            }
+        target: Path | None = None
+        manifest_path: Path | None = None
+        target_owned = False
+        manifest_owned = False
+
+        def remove_owned_artifacts() -> list[str]:
+            errors: list[str] = []
+            for artifact, owned in (
+                (manifest_path, manifest_owned),
+                (target, target_owned),
+            ):
+                if artifact is None or not owned:
+                    continue
+                try:
+                    artifact.unlink(missing_ok=True)
+                except Exception as cleanup_exc:
+                    errors.append(f"{artifact.name}: {type(cleanup_exc).__name__}: {cleanup_exc}")
+            return errors
+
+        def bytes_at_target() -> int:
+            if target is None or not target_owned or not target.is_file():
+                return 0
+            return target.stat().st_size
+
+        try:
+            target = self._snapshot_target_factory(self._selected_model.tag)
+            if target.exists():
+                raise FileExistsError("shared snapshot target already exists")
+            manifest_path = target.with_suffix(".manifest.json")
+            if manifest_path.exists():
+                raise FileExistsError("shared snapshot manifest already exists")
+            target_owned = True
+            if bounded_writer is not None:
+                bounded_writer.run(self._client, self._selected_model.tag, target)
+            else:
+                self._save_copy_writer(self._client, self._selected_model.tag, target)
+            if not target.is_file():
+                raise RuntimeError("Save Copy did not create a snapshot file")
+            snapshot_size = target.stat().st_size
+            if snapshot_size <= 0:
+                raise RuntimeError("Save Copy created an empty snapshot file")
+            if snapshot_size > max_snapshot_bytes:
+                raise ValueError("Save Copy exceeds the caller-declared byte limit")
+            verified_after = self.verify_model_lock(
                 expected_lock_sha256=expected_lock_sha256,
                 expected_revision_sha256=expected_revision_sha256,
             )
-            if not verified_before.get("success"):
-                if bounded is not None:
-                    bounded["bounded"].discard()
-                return {
-                    "success": False,
-                    "state": "snapshot_precondition_failed",
-                    "model_lock_verification": verified_before,
-                }
-            target = None
-            manifest_path = None
-            target_owned = False
-            manifest_owned = False
-            try:
-                target = self._snapshot_target_factory(self._selected_model.tag)
-                if target.exists():
-                    raise FileExistsError("shared snapshot target already exists")
-                manifest_path = target.with_suffix(".manifest.json")
-                if manifest_path.exists():
-                    raise FileExistsError("shared snapshot manifest already exists")
-                target_owned = True
-                if bounded is not None:
-                    bounded["bounded"].run(self._client, self._selected_model.tag, target)
-                else:
-                    self._save_copy_writer(self._client, self._selected_model.tag, target)
-                if not target.is_file():
-                    raise RuntimeError("Save Copy did not create a snapshot file")
-                snapshot_size = target.stat().st_size
-                if snapshot_size <= 0:
-                    raise RuntimeError("Save Copy created an empty snapshot file")
-                if snapshot_size > max_snapshot_bytes:
-                    raise ValueError("Save Copy exceeds the caller-declared byte limit")
-                verified_after = self.verify_model_lock(
-                    expected_lock_sha256=expected_lock_sha256,
-                    expected_revision_sha256=expected_revision_sha256,
-                )
-                if not verified_after.get("success"):
-                    raise RuntimeError("model identity or revision changed during Save Copy")
-                source = _verify_immutable_source(self._model_lock.immutable_source)
-                snapshot_sha256 = _hash_file(target)
-                body = {
-                    "schema_name": SHARED_MODEL_SNAPSHOT_SCHEMA,
-                    "schema_version": SHARED_MODEL_SNAPSHOT_VERSION,
-                    "snapshot_id": target.stem,
-                    "created_at_epoch": self._clock(),
-                    "save_copy_api": "Model.java.save(path, True)",
-                    "model": dict(self._model_lock.model),
-                    "lock_sha256": self._model_lock.lock_sha256,
-                    "revision_sha256": self._model_lock.revision["revision_sha256"],
-                    "immutable_source": source,
-                    "snapshot": {
-                        "file_name": target.name,
-                        "sha256": snapshot_sha256,
-                        "size_bytes": snapshot_size,
-                    },
-                    "identity_preserved": True,
-                    "complete": True,
-                }
-                manifest_owned = True
-                self._manifest_writer(manifest_path, body)
-                manifest_sha256 = _hash_file(manifest_path)
-                return {
-                    "success": True,
-                    "state": "snapshot_complete",
-                    "snapshot_path": str(target),
-                    "snapshot_sha256": snapshot_sha256,
-                    "snapshot_size_bytes": snapshot_size,
-                    "manifest_path": str(manifest_path),
-                    "manifest_sha256": manifest_sha256,
-                    "model_lock_verification": verified_after,
-                    "identity_preserved": True,
-                }
-            except SaveCopyWriteCapExceeded as exc:
-                return {
-                    "success": False,
-                    "state": "snapshot_byte_cap_enforced",
-                    "write_attempted": True,
-                    "cap_bytes": max_snapshot_bytes,
-                    "enforcement": "os_volume_free_space",
-                    "enforcement_point": exc.enforcement_point,
-                    "bytes_at_final_target": 0,
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
-            except Exception as exc:
-                cleanup_errors = []
-                for artifact, owned in (
-                    (manifest_path, manifest_owned),
-                    (target, target_owned),
-                ):
-                    if artifact is None or not owned:
-                        continue
-                    try:
-                        artifact.unlink(missing_ok=True)
-                    except Exception as cleanup_exc:
-                        cleanup_errors.append(
-                            f"{artifact.name}: {type(cleanup_exc).__name__}: {cleanup_exc}"
-                        )
-                return {
-                    "success": False,
-                    "state": "snapshot_incomplete",
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "snapshot_path": None if target is None else str(target),
-                    "partial_snapshot_exists": bool(
-                        target_owned and target is not None and target.is_file()
-                    ),
-                    "complete_manifest_exists": bool(
-                        manifest_owned and manifest_path is not None and manifest_path.is_file()
-                    ),
-                    "artifacts_removed": (
-                        not cleanup_errors
-                        and not bool(target_owned and target is not None and target.exists())
-                        and not bool(
-                            manifest_owned and manifest_path is not None and manifest_path.exists()
-                        )
-                    ),
-                    "cleanup_errors": cleanup_errors,
-                }
+            if not verified_after.get("success"):
+                raise RuntimeError("model identity or revision changed during Save Copy")
+            source = _verify_immutable_source(self._model_lock.immutable_source)
+            snapshot_sha256 = _hash_file(target)
+            body = {
+                "schema_name": SHARED_MODEL_SNAPSHOT_SCHEMA,
+                "schema_version": SHARED_MODEL_SNAPSHOT_VERSION,
+                "snapshot_id": target.stem,
+                "created_at_epoch": self._clock(),
+                "save_copy_api": "Model.java.save(path, True)",
+                "model": dict(self._model_lock.model),
+                "lock_sha256": self._model_lock.lock_sha256,
+                "revision_sha256": self._model_lock.revision["revision_sha256"],
+                "immutable_source": source,
+                "snapshot": {
+                    "file_name": target.name,
+                    "sha256": snapshot_sha256,
+                    "size_bytes": snapshot_size,
+                },
+                "identity_preserved": True,
+                "complete": True,
+            }
+            manifest_owned = True
+            self._manifest_writer(manifest_path, body)
+            manifest_sha256 = _hash_file(manifest_path)
+            return {
+                "success": True,
+                "state": "snapshot_complete",
+                "snapshot_path": str(target),
+                "snapshot_sha256": snapshot_sha256,
+                "snapshot_size_bytes": snapshot_size,
+                "manifest_path": str(manifest_path),
+                "manifest_sha256": manifest_sha256,
+                "model_lock_verification": verified_after,
+                "identity_preserved": True,
+            }
+        except SaveCopyWriteCapExceeded as exc:
+            cleanup_errors = remove_owned_artifacts()
+            return {
+                "success": False,
+                "state": "snapshot_byte_cap_enforced",
+                "write_attempted": True,
+                "cap_bytes": max_snapshot_bytes,
+                "write_time_bound_bytes": exc.write_time_bound_bytes,
+                "partial_bytes_observed": exc.partial_bytes_observed,
+                "enforcement": "os_volume_free_space",
+                "enforcement_point": exc.enforcement_point,
+                "bytes_at_final_target": bytes_at_target(),
+                "cleanup_errors": cleanup_errors,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        except WriteTimeBoundViolated as exc:
+            cleanup_errors = remove_owned_artifacts()
+            return {
+                "success": False,
+                "state": "snapshot_write_bound_violated",
+                "write_attempted": True,
+                "cap_bytes": max_snapshot_bytes,
+                "write_time_bound_bytes": exc.write_time_bound_bytes,
+                "observed_bytes": exc.observed_bytes,
+                "bytes_at_final_target": bytes_at_target(),
+                "cleanup_errors": cleanup_errors,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        except Exception as exc:
+            cleanup_errors = remove_owned_artifacts()
+            return {
+                "success": False,
+                "state": "snapshot_incomplete",
+                "error": f"{type(exc).__name__}: {exc}",
+                "snapshot_path": None if target is None else str(target),
+                "partial_snapshot_exists": bool(
+                    target_owned and target is not None and target.is_file()
+                ),
+                "complete_manifest_exists": bool(
+                    manifest_owned and manifest_path is not None and manifest_path.is_file()
+                ),
+                "artifacts_removed": (
+                    not cleanup_errors
+                    and not bool(target_owned and target is not None and target.exists())
+                    and not bool(
+                        manifest_owned and manifest_path is not None and manifest_path.exists()
+                    )
+                ),
+                "cleanup_errors": cleanup_errors,
+            }
 
     def prepare_attached_job_handoff(
         self,

@@ -202,9 +202,22 @@ MCP 不会根据“第一个模型”或“当前窗口”猜测目标。请始�
 5. 再次核对模型，然后调用 `shared_model_unlock`。
 6. 明确告诉用户现在可以继续操作。
 
-COMSOL 6.4 的 Save Copy 只能按路径写文件，无法在写入过程中强制最大字节数。因此当前
-版本在无法保证写入上限时会返回 `snapshot_write_bound_unavailable`，不会先写完整文件再
-假装满足上限。
+COMSOL 6.4 的 Save Copy 只能按路径写文件，本身没有字节上限。本版本借助操作系统
+限制写入：副本先写入一个临时虚拟磁盘卷，该卷的剩余空间等于写入上限；只有完整且
+散列校验通过的副本才会进入快照目录。写入上限是不超过 `max_snapshot_bytes` 的
+最大 512 字节整数倍，因此上限本身是 512 的整数倍时两者相等。结果会给出
+`cap_bytes` 和 `write_time_bound_bytes`。
+
+- 副本不超过写入上限时，返回 `snapshot_complete` 和清单。
+- 副本需要的空间超过写入上限时，写入过程中即被阻止，返回
+  `snapshot_byte_cap_enforced`，快照目录不会出现任何字节。上限不是 512 的整数倍
+  时，本可放进最后不足 512 字节部分的副本同样会被阻止。
+- 无法建立临时卷时（服务未以管理员权限运行、缺少 `diskpart` 或 PowerShell 7，
+  或者不是 Windows），返回 `snapshot_write_bound_unavailable` 和 `reason_code`，
+  不写入任何内容。
+
+临时卷、挂载目录和工作目录在每条路径上都会删除；无法删除的部分记录在
+`volume_cleanup` 中。
 
 ### 智能助手求解时
 

@@ -7,24 +7,26 @@ incremental write limit through the API, and pointing the save at a named
 pipe crashes the server-side JVM.
 
 This module enforces the caller-declared cap at write time through the
-operating system: the copy is written into a throwaway VHDX volume whose
-free space is set to the cap (cluster-aligned) by a filler file. A copy
-that needs more clusters than the cap allows fails inside the volume with
-the OS disk-full error; nothing ever reaches the final target. A copy that
-fits is streamed out to the caller's target and hash-verified; the volume —
-with any partial content — is then detached and deleted.
+operating system: the copy is written into a throwaway virtual-disk volume
+whose free space a filler file sets to the write-time bound. The OS refuses
+any write that needs more space than the bound, so the copy can never grow
+past it, and nothing reaches the final target until the copy-out hash
+verifies. The image, its mount point and its work directory are removed on
+every exit path; every cleanup failure is reported, never hidden.
 
-Boundary semantics (proven natively under ``D:/mcp_tests/p10pipe/native``):
+Bound semantics. Free space is granular to the file-system cluster, so the
+bound is the largest cluster multiple that does not exceed the cap:
 
-* free space is cluster-granular, so the OS bound is ``ceil(cap / cluster)``;
-* a copy larger than the cap but within one cluster can reach the volume;
-  the immediate post-write byte check refuses it before a byte leaves, and
-  the transient overshoot stays under one cluster inside the deleted volume;
-* the final target only ever receives bytes of an accepted copy.
-
-The volume is only a bound: it sets no other limit, and it is destroyed on
-every exit path — that destruction is also the partial-file cleanup. The
-writer touches the attached server only through the save call itself.
+* the volume uses 512-byte NTFS clusters, the smallest NTFS cluster. A VHD
+  image has 512-byte physical sectors; a VHDX image reports 4 KiB sectors
+  and refuses 512-byte clusters. The bound is therefore at most 511 bytes
+  below the cap, and equals the cap whenever the cap is a multiple of 512;
+* native output never exceeds the bound, hence never exceeds the cap;
+* a copy larger than the bound is refused at write time. That includes a
+  copy that would have fit in the last partial cluster under an unaligned
+  cap; the typed refusal reports both the cap and the bound;
+* a completed save larger than the bound means the volume failed to
+  enforce. It is refused as a bound violation and never copied out.
 """
 
 from __future__ import annotations
@@ -36,12 +38,16 @@ import shutil
 import subprocess
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
-CLUSTER_BYTES = 4096
+CLUSTER_BYTES = 512
+IMAGE_NAME = "capvol.vhd"
+BOUND_RULE = "largest_cluster_multiple_not_above_cap"
 VOLUME_SLACK_BYTES = 64 * 1024 * 1024
 NO_WINDOW = 0x08000000
-PWSH = ["pwsh.exe", "-NoProfile", "-NoLogo", "-Command"]
+PWSH = ["pwsh.exe", "-NoProfile", "-NoLogo", "-NonInteractive", "-Command"]
+DISK_FULL_WINERRORS = (112, 39)  # ERROR_DISK_FULL, ERROR_HANDLE_DISK_FULL
+DISK_FULL_ERRNO = 28  # ENOSPC
 
 
 class BoundedSaveUnavailable(RuntimeError):
@@ -53,18 +59,42 @@ class BoundedSaveUnavailable(RuntimeError):
         super().__init__(detail or reason_code)
 
 
-class SaveCopyWriteCapExceeded(RuntimeError):
-    """The copy needed more bytes than the cap allowed, at write time.
+class VolumePreparationFailed(RuntimeError):
+    """Building the capped volume failed; ``cleanup`` is the rollback report."""
 
-    ``enforcement_point`` says which bound refused it: ``os_volume`` (the
-    volume ran out of clusters mid-write) or ``post_write_byte_check`` (the
-    copy fit the cluster bound but exceeded the byte cap by less than one
-    cluster).
+    def __init__(self, detail: str, *, cleanup: Mapping[str, Any]):
+        self.cleanup = cleanup
+        super().__init__(detail)
+
+
+class SaveCopyWriteCapExceeded(RuntimeError):
+    """The OS refused the copy at the write-time bound, during the write.
+
+    ``partial_bytes_observed`` is the size the copy reached inside the volume
+    when the OS refused it; it never exceeds the bound.
     """
 
-    def __init__(self, detail: str, *, enforcement_point: str = "os_volume"):
-        self.enforcement_point = enforcement_point
+    enforcement_point = "os_volume"
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        write_time_bound_bytes: int,
+        partial_bytes_observed: int | None,
+    ):
+        self.write_time_bound_bytes = write_time_bound_bytes
+        self.partial_bytes_observed = partial_bytes_observed
         super().__init__(detail)
+
+
+class WriteTimeBoundViolated(RuntimeError):
+    """A completed save exceeded the bound: the volume did not enforce it."""
+
+    def __init__(self, *, observed_bytes: int, write_time_bound_bytes: int):
+        self.observed_bytes = observed_bytes
+        self.write_time_bound_bytes = write_time_bound_bytes
+        super().__init__(f"{observed_bytes} > {write_time_bound_bytes}")
 
 
 class VolumeProtocol(Protocol):
@@ -72,12 +102,12 @@ class VolumeProtocol(Protocol):
 
     save_path: Path
 
-    def teardown(self) -> None: ...
+    def teardown(self) -> Mapping[str, Any]: ...
 
 
-def aligned_cap(cap: int) -> int:
-    """The cluster-aligned free-space bound for one byte cap."""
-    return (cap + CLUSTER_BYTES - 1) // CLUSTER_BYTES * CLUSTER_BYTES
+def write_time_bound(cap: int) -> int:
+    """The largest cluster multiple not above ``cap``: the enforced bound."""
+    return cap // CLUSTER_BYTES * CLUSTER_BYTES
 
 
 def _run(command: list[str], *, what: str) -> str:
@@ -94,6 +124,16 @@ def _run(command: list[str], *, what: str) -> str:
             f"{(completed.stdout or '')[-400:]} {(completed.stderr or '')[-400:]}".strip()
         )
     return completed.stdout or ""
+
+
+def _pwsh(script: str, *, what: str) -> str:
+    """Run one PowerShell script; any error, terminating or not, fails it."""
+    return _run([*PWSH, "$ErrorActionPreference = 'Stop'; " + script], what=what)
+
+
+def _last_line(output: str) -> str:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    return lines[-1] if lines else ""
 
 
 def _is_elevated() -> bool:
@@ -144,44 +184,91 @@ def _is_elevated() -> bool:
         return False
 
 
-class DiskpartVolume:
-    """One attached, capped, folder-mounted VHDX volume.
+def _disk_full_markers() -> tuple[str, ...]:
+    """Disk-full texts, including this host's own localized messages."""
+    markers = [
+        "not enough space on the disk",
+        "disk is full",
+        "no space left on device",
+        "磁盘空间不足",
+        "磁盘已满",
+    ]
+    format_error = getattr(ctypes, "FormatError", None)
+    if format_error is not None:
+        for code in DISK_FULL_WINERRORS:
+            text = str(format_error(code)).strip().rstrip("。.").strip()
+            if text:
+                markers.append(text)
+    return tuple(marker.lower() for marker in markers)
 
-    ``teardown`` detaches and deletes the VHDX; everything written inside
-    disappears with it.
+
+def _is_disk_full(exc: BaseException) -> bool:
+    """Whether a save failure is the volume refusing more space.
+
+    The server reports the OS error inside its own exception text, so the
+    text is matched as well as the structured codes.
+    """
+    if isinstance(exc, OSError) and (
+        getattr(exc, "winerror", None) in DISK_FULL_WINERRORS or exc.errno == DISK_FULL_ERRNO
+    ):
+        return True
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(marker in text for marker in _disk_full_markers())
+
+
+def _remove_dir_if_empty(path: Path, errors: list[str], *, label: str) -> None:
+    if not os.path.lexists(path):
+        return
+    try:
+        os.rmdir(path)
+    except OSError as exc:
+        errors.append(f"{label}: {type(exc).__name__}: {exc}")
+
+
+class DiskpartVolume:
+    """One attached, capped, folder-mounted VHD volume with 512-byte clusters.
+
+    Construction is failure-atomic: a failure after any step rolls the volume
+    back and raises ``VolumePreparationFailed`` with the rollback report.
+    ``teardown`` is idempotent, never raises, and reports what remains.
     """
 
     def __init__(self, cap: int, work_dir: Path):
         self.cap = cap
+        self.bound = write_time_bound(cap)
         self.work_dir = work_dir
-        self.vhd = work_dir / "capvol.vhdx"
+        self.vhd = work_dir / IMAGE_NAME
         self.mount = work_dir / "mount"
-        self.mount.mkdir(parents=True)
         self.save_path = self.mount / "copy.mph"
-        size_mb = (VOLUME_SLACK_BYTES + aligned_cap(cap)) // (1024 * 1024) + 8
-        script = (
-            f"create vdisk file={self.vhd} maximum={size_mb} type=expandable\n"
-            f"select vdisk file={self.vhd}\nattach vdisk\n"
-        )
+        self.size_bytes = ((VOLUME_SLACK_BYTES + self.bound) // (1024 * 1024) + 8) * 1024 * 1024
+        self._report: dict[str, Any] | None = None
         script_file = work_dir / "dp.txt"
-        script_file.write_text(script, encoding="ascii")
         try:
-            _run(["diskpart.exe", "/s", str(script_file)], what="create+attach vdisk")
-            self._format_and_mount()
-            self._fill_to_cap()
-        finally:
-            script_file.unlink(missing_ok=True)
+            try:
+                self.mount.mkdir(parents=True)
+                script_file.write_text(
+                    f"create vdisk file={self.vhd} maximum={self.size_bytes // (1024 * 1024)}"
+                    " type=expandable\n"
+                    f"select vdisk file={self.vhd}\nattach vdisk\n",
+                    encoding="ascii",
+                )
+                _run(["diskpart.exe", "/s", str(script_file)], what="create+attach vdisk")
+                self._format_and_mount()
+                self._fill_to_bound()
+            finally:
+                script_file.unlink(missing_ok=True)
+        except BaseException as exc:
+            cleanup = self._rollback()
+            if not isinstance(exc, Exception):
+                raise
+            raise VolumePreparationFailed(f"{type(exc).__name__}: {exc}", cleanup=cleanup) from exc
 
     def _disk_number(self) -> int:
-        # Get-Disk's Path is a SCSI device id; Location carries the VHDX path
+        # Get-Disk's Path is a SCSI device id; Location carries the image path
         # exactly as passed to diskpart (native separators).
-        vhd_arg = str(self.vhd)
-        output = _run(
-            [
-                *PWSH,
-                f"(Get-Disk | Where-Object {{$_.Location -eq '{vhd_arg}'}}"
-                " | Select-Object -First 1).DiskNumber",
-            ],
+        output = _pwsh(
+            f"(Get-Disk | Where-Object {{$_.Location -eq '{self.vhd}'}}"
+            " | Select-Object -First 1).DiskNumber",
             what="identify the capped volume's disk",
         )
         text = output.strip()
@@ -192,25 +279,35 @@ class DiskpartVolume:
     def _format_and_mount(self) -> None:
         number = self._disk_number()
         mount_arg = str(self.mount).replace("\\", "/") + "/"
-        _run(
-            [
-                *PWSH,
-                f"$d = Initialize-Disk -Number {number} -PartitionStyle MBR;"
+        unit = _last_line(
+            _pwsh(
+                f"$null = Initialize-Disk -Number {number} -PartitionStyle MBR;"
                 f"$p = New-Partition -DiskNumber {number} -UseMaximumSize;"
-                f"$null = Format-Volume -Partition $p -FileSystem NTFS"
-                f" -NewFileSystemLabel P10CAP -Confirm:$false;"
+                "$v = Format-Volume -Partition $p -FileSystem NTFS"
+                f" -AllocationUnitSize {CLUSTER_BYTES} -NewFileSystemLabel BOUNDCAP"
+                " -Confirm:$false;"
                 f"Add-PartitionAccessPath -DiskNumber {number}"
-                f" -PartitionNumber $p.PartitionNumber -AccessPath '{mount_arg}'",
-            ],
-            what="format+mount the capped volume",
+                f" -PartitionNumber $p.PartitionNumber -AccessPath '{mount_arg}';"
+                "$v.AllocationUnitSize",
+                what="format+mount the capped volume",
+            )
         )
+        if unit != str(CLUSTER_BYTES):
+            raise RuntimeError(f"capped volume cluster is {unit!r}, not {CLUSTER_BYTES}")
+        # Every later size decision reads this folder's free space; it must be
+        # the new volume, never the host drive underneath.
+        if not os.path.ismount(self.mount):
+            raise RuntimeError("the capped volume is not mounted at its folder")
 
-    def _fill_to_cap(self) -> None:
-        wanted = aligned_cap(self.cap)
+    def _fill_to_bound(self) -> None:
+        wanted = self.bound
+        total = shutil.disk_usage(self.mount).total
+        if total > self.size_bytes:
+            raise RuntimeError(f"free-space probe reads {total} bytes, not the capped volume")
         filler = self.mount / "filler.bin"
         filler_size = 0
         observed = 0
-        for _ in range(8):
+        for _ in range(12):
             free = shutil.disk_usage(self.mount).free
             filler_size = max(filler_size + free - wanted, 0)
             with filler.open("wb") as handle:
@@ -218,39 +315,119 @@ class DiskpartVolume:
             observed = shutil.disk_usage(self.mount).free
             if observed == wanted:
                 return
-        raise RuntimeError(f"capped volume free {observed} != cap bound {wanted} after adjustments")
+        raise RuntimeError(f"capped volume free {observed} != bound {wanted} after adjustments")
 
-    def teardown(self) -> None:
+    def residue(self) -> dict[str, bool]:
+        """What of this volume still exists on the host."""
+        return {
+            "image_exists": self.vhd.exists(),
+            "mount_point_exists": os.path.lexists(self.mount),
+            "work_dir_exists": os.path.lexists(self.work_dir),
+        }
+
+    def _detach(self, errors: list[str]) -> bool:
+        """Detach the image and read the attachment back; True once detached."""
+        if not self.vhd.exists():
+            return True
         try:
-            _run(
-                [
-                    *PWSH,
-                    f"Dismount-DiskImage -ImagePath '{self.vhd}' -ErrorAction SilentlyContinue",
-                ],
-                what="dismount the capped volume",
+            state = _last_line(
+                _pwsh(
+                    f"$i = Get-DiskImage -ImagePath '{self.vhd}' -ErrorAction SilentlyContinue;"
+                    f"if ($i -and $i.Attached) {{ Dismount-DiskImage -ImagePath '{self.vhd}'"
+                    " | Out-Null };"
+                    f"$a = Get-DiskImage -ImagePath '{self.vhd}' -ErrorAction SilentlyContinue;"
+                    "if ($a -and $a.Attached) { 'attached' } else { 'detached' }",
+                    what="detach the capped volume",
+                )
             )
-        finally:
-            self.vhd.unlink(missing_ok=True)
+        except Exception as exc:  # noqa: BLE001 - every cleanup failure is evidence
+            errors.append(f"detach: {type(exc).__name__}: {exc}")
+            return False
+        if state != "detached":
+            errors.append(f"detach: the image still reads {state!r}")
+            return False
+        return True
+
+    def _sweep(self, errors: list[str], *, detached: bool) -> None:
+        """Remove the image, then its mount point and work directory.
+
+        The image is deleted only after a verified detach; when the detach
+        cannot be verified, the image is retained and the reason recorded.
+        The mount point and work directory are removed only once the image
+        is gone: the mount point is then a dangling junction (or an empty
+        folder), and removing it never touches a live volume.
+        """
+        if self.vhd.exists():
+            if not detached:
+                errors.append("image retained: its detach was not verified")
+            else:
+                try:
+                    self.vhd.unlink()
+                except OSError as exc:
+                    errors.append(f"image: {type(exc).__name__}: {exc}")
+        if self.vhd.exists():
+            return
+        _remove_dir_if_empty(self.mount, errors, label="mount point")
+        try:
+            (self.work_dir / "dp.txt").unlink(missing_ok=True)
+        except OSError as exc:
+            errors.append(f"diskpart script: {type(exc).__name__}: {exc}")
+        _remove_dir_if_empty(self.work_dir, errors, label="work directory")
+
+    def teardown(self) -> dict[str, Any]:
+        """Detach and delete the image, then remove its mount point and work dir."""
+        if self._report is None:
+            errors: list[str] = []
+            self._sweep(errors, detached=self._detach(errors))
+            residue = self.residue()
+            self._report = {
+                **residue,
+                "errors": errors,
+                "residue_free": not any(residue.values()),
+            }
+        return self._report
+
+    def _rollback(self) -> dict[str, Any]:
+        """Undo a partial construction and read the residue back independently."""
+        teardown_report = self.teardown()
+        errors: list[str] = []
+        if any(self.residue().values()):
+            # Do not trust a teardown that left residue or never ran: sweep
+            # again under the same safety rule.
+            self._sweep(errors, detached=self._detach(errors))
+        residue = self.residue()
+        return {
+            **residue,
+            "teardown": teardown_report,
+            "errors": errors,
+            "residue_free": not any(residue.values()),
+        }
 
 
 class FakeVolume:
-    """Test seam: one directory with a Python-enforced byte budget."""
+    """Test seam: one directory with a Python-enforced budget at the bound.
+
+    Like the OS, a write that needs more room than remains fails whole.
+    """
 
     def __init__(self, cap: int, work_dir: Path):
         from threading import Lock
 
-        self.cap = aligned_cap(cap)
+        self.cap = cap
+        self.bound = write_time_bound(cap)
+        self.work_dir = work_dir
         self.directory = work_dir / "volume"
         self.directory.mkdir(parents=True)
         self.save_path = self.directory / "copy.mph"
         self._used = 0
         self._lock = Lock()
         self.teardown_called = False
+        self._report: dict[str, Any] | None = None
 
     def write(self, data: bytes) -> int:
         with self._lock:
-            if self._used + len(data) > self.cap:
-                error = OSError(28, "No space left on device")
+            if self._used + len(data) > self.bound:
+                error = OSError(DISK_FULL_ERRNO, "No space left on device")
                 # ERROR_DISK_FULL on Windows; POSIX readers match on errno.
                 setattr(error, "winerror", 112)
                 raise error
@@ -259,9 +436,33 @@ class FakeVolume:
             self._used += len(data)
             return self._used
 
-    def teardown(self) -> None:
-        self.teardown_called = True
-        shutil.rmtree(self.directory, ignore_errors=True)
+    @property
+    def bytes_written(self) -> int:
+        """Every byte the writer has ever placed in this volume."""
+        return self._used
+
+    def teardown(self) -> dict[str, Any]:
+        if self._report is None:
+            self.teardown_called = True
+            errors: list[str] = []
+            try:
+                shutil.rmtree(self.directory)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                errors.append(f"volume: {type(exc).__name__}: {exc}")
+            _remove_dir_if_empty(self.work_dir, errors, label="work directory")
+            residue = {
+                "image_exists": self.directory.exists(),
+                "mount_point_exists": False,
+                "work_dir_exists": os.path.lexists(self.work_dir),
+            }
+            self._report = {
+                **residue,
+                "errors": errors,
+                "residue_free": not any(residue.values()),
+            }
+        return self._report
 
 
 def _stream_copy(source: Path, target: Path) -> None:
@@ -281,6 +482,13 @@ def _stream_copy(source: Path, target: Path) -> None:
         raise RuntimeError("copy-out hash mismatch; the target bytes were refused")
 
 
+def _size_or_none(path: Path) -> int | None:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
+
+
 def save_copy_into_volume(
     client: Any,
     model_tag: str,
@@ -291,45 +499,35 @@ def save_copy_into_volume(
 ) -> int:
     """Write one Save Copy through a prepared capped volume; return its size.
 
-    The volume is always torn down. The final target only ever holds a
-    complete copy whose size is within the cap.
+    The final target only ever holds a complete copy within the bound. The
+    caller owns the volume's teardown.
     """
+    bound = write_time_bound(cap)
+    matches = [model for model in list(client.models()) if str(model.java.tag()) == model_tag]
+    if len(matches) != 1:
+        raise ValueError("adopted server model is no longer uniquely available")
     try:
-        try:
-            matches = [
-                model for model in list(client.models()) if str(model.java.tag()) == model_tag
-            ]
-            if len(matches) != 1:
-                raise ValueError("adopted server model is no longer uniquely available")
-            matches[0].java.save(str(volume.save_path), True)
-        except OSError as exc:
-            windows_error = getattr(exc, "winerror", None)
-            if windows_error == 112 or exc.errno in (28,):
-                raise SaveCopyWriteCapExceeded(f"{cap}", enforcement_point="os_volume") from exc
-            raise
-        except Exception as exc:  # noqa: BLE001 - the server wraps OS errors
-            text = f"{type(exc).__name__}: {exc}"
-            if "磁盘空间不足" in text or "not enough space" in text.lower():
-                raise SaveCopyWriteCapExceeded(f"{cap}", enforcement_point="os_volume") from exc
-            raise
-        if not volume.save_path.is_file():
-            raise RuntimeError("Save Copy did not create a file inside the volume")
-        size = volume.save_path.stat().st_size
-        if size <= 0:
-            raise RuntimeError("Save Copy created an empty file inside the volume")
-        if size > cap:
-            # The OS bound is cluster-granular; at most one cluster over the
-            # cap can land inside the volume. Refuse it before any byte leaves.
+        matches[0].java.save(str(volume.save_path), True)
+    except Exception as exc:  # noqa: BLE001 - the server wraps OS errors
+        if _is_disk_full(exc):
             raise SaveCopyWriteCapExceeded(
-                f"{size} > {cap}", enforcement_point="post_write_byte_check"
-            )
-        if target.exists():
-            raise FileExistsError("shared snapshot target already exists")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _stream_copy(volume.save_path, target)
-        return size
-    finally:
-        volume.teardown()
+                f"the copy needs more than the {bound}-byte write-time bound",
+                write_time_bound_bytes=bound,
+                partial_bytes_observed=_size_or_none(volume.save_path),
+            ) from exc
+        raise
+    if not volume.save_path.is_file():
+        raise RuntimeError("Save Copy did not create a file inside the volume")
+    size = volume.save_path.stat().st_size
+    if size <= 0:
+        raise RuntimeError("Save Copy created an empty file inside the volume")
+    if size > bound:
+        raise WriteTimeBoundViolated(observed_bytes=size, write_time_bound_bytes=bound)
+    if target.exists():
+        raise FileExistsError("shared snapshot target already exists")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _stream_copy(volume.save_path, target)
+    return size
 
 
 def windows_bounded_volume_factory(cap: int, work_dir: Path) -> VolumeProtocol:
@@ -340,6 +538,10 @@ def windows_bounded_volume_factory(cap: int, work_dir: Path) -> VolumeProtocol:
         raise BoundedSaveUnavailable(
             "tooling_missing", "diskpart and pwsh are required to build the capped volume"
         )
+    if not str(work_dir).isascii():
+        raise BoundedSaveUnavailable(
+            "volume_root_not_ascii", "the capped volume's work directory must be ASCII"
+        )
     if not _is_elevated():
         raise BoundedSaveUnavailable(
             "elevation_required", "attaching the capped volume needs an elevated host"
@@ -348,23 +550,48 @@ def windows_bounded_volume_factory(cap: int, work_dir: Path) -> VolumeProtocol:
 
 
 class BoundedWriter:
-    """One call's prepared writer: the volume exists until run or discarded."""
+    """One call's prepared writer; it owns the volume until teardown.
 
-    def __init__(self, writer: Callable[[Any, str, Path], None], volume: VolumeProtocol):
-        self._writer = writer
+    ``run`` performs the save and always tears the volume down; ``discard``
+    tears it down when the save never runs. Either may be called on any exit
+    path, in any order: the volume is torn down exactly once, and
+    ``cleanup_report`` keeps the result.
+    """
+
+    def __init__(self, volume: VolumeProtocol, *, cap: int, bound: int):
         self._volume = volume
+        self.cap = cap
+        self.write_time_bound_bytes = bound
         self._consumed = False
+        self.cleanup_report: dict[str, Any] | None = None
 
-    def run(self, client: Any, model_tag: str, target: Path) -> None:
-        """Run the save; the writer owns the volume's teardown from here on."""
+    def run(self, client: Any, model_tag: str, target: Path) -> int:
+        """Run the save once; the volume is torn down before this returns."""
+        if self._consumed:
+            raise RuntimeError("a prepared bounded writer runs at most once")
         self._consumed = True
-        self._writer(client, model_tag, target)
+        try:
+            return save_copy_into_volume(
+                client, model_tag, target, cap=self.cap, volume=self._volume
+            )
+        finally:
+            self._teardown()
 
-    def discard(self) -> None:
-        """Tear the prepared volume down when the save never runs."""
-        if not self._consumed:
-            self._consumed = True
-            self._volume.teardown()
+    def discard(self) -> dict[str, Any]:
+        """Tear the volume down if the save never ran; return the report."""
+        self._consumed = True
+        return self._teardown()
+
+    def _teardown(self) -> dict[str, Any]:
+        if self.cleanup_report is None:
+            try:
+                self.cleanup_report = dict(self._volume.teardown())
+            except Exception as exc:  # noqa: BLE001 - a failed teardown is evidence
+                self.cleanup_report = {
+                    "residue_free": False,
+                    "errors": [f"teardown: {type(exc).__name__}: {exc}"],
+                }
+        return self.cleanup_report
 
 
 def prepare_bounded_writer(
@@ -375,51 +602,105 @@ def prepare_bounded_writer(
 ) -> dict[str, Any]:
     """Prepare one bounded writer for a snapshot call, or refuse.
 
-    Returns ``{"available": True, "bounded": BoundedWriter, "mechanism":
-    "os_volume_free_space", "write_time_bound_bytes": ...}`` or
-    ``{"available": False, "reason_code": ..., "detail": ...}``. The caller
-    must ``discard()`` the bounded writer when it does not run the save, and
-    the writer itself tears the volume down after the save.
+    Returns ``{"available": True, "bounded": BoundedWriter, ...}`` with the
+    write-time bound, or ``{"available": False, "reason_code": ...,
+    "detail": ...}``; a refusal after a volume was started carries the
+    rollback report under ``cleanup``. The caller must ``discard()`` the
+    bounded writer on every path where it does not run the save.
     """
+    bound = write_time_bound(max_snapshot_bytes)
+    facts = {
+        "write_time_bound_bytes": bound,
+        "granularity_bytes": CLUSTER_BYTES,
+        "bound_rule": BOUND_RULE,
+    }
+    if bound <= 0:
+        return {
+            "available": False,
+            "reason_code": "cap_below_write_granularity",
+            "detail": f"no {CLUSTER_BYTES}-byte multiple fits a {max_snapshot_bytes}-byte cap",
+            **facts,
+        }
     factory = volume_factory or windows_bounded_volume_factory
-
-    def resolve_root() -> Path:
+    try:
         if volume_root is not None:
-            return volume_root
-        from comsol_mcp.path_policy import PathPolicy
+            root = volume_root
+        else:
+            from comsol_mcp.path_policy import PathPolicy
 
-        policy = PathPolicy.from_environment()
-        resolved = Path(policy.shared_snapshot_root) / ".bounded-volume"
-        resolved.mkdir(parents=True, exist_ok=True)
-        return resolved
-
-    work = resolve_root() / f"run-{uuid.uuid4().hex}"
-    work.mkdir(parents=True)
+            root = Path(PathPolicy.from_environment().shared_snapshot_root) / ".bounded-volume"
+        root.mkdir(parents=True, exist_ok=True)
+        work = root / f"run-{uuid.uuid4().hex}"
+        work.mkdir()
+    except Exception as exc:  # noqa: BLE001 - refuse with the reason
+        return {
+            "available": False,
+            "reason_code": "volume_root_unavailable",
+            "detail": f"{type(exc).__name__}: {exc}",
+            **facts,
+        }
     try:
         volume = factory(max_snapshot_bytes, work)
     except BoundedSaveUnavailable as exc:
-        shutil.rmtree(work, ignore_errors=True)
-        return {"available": False, "reason_code": exc.reason_code, "detail": str(exc)}
-
-    def writer(client: Any, model_tag: str, target: Path) -> None:
-        save_copy_into_volume(client, model_tag, target, cap=max_snapshot_bytes, volume=volume)
-
+        errors: list[str] = []
+        _remove_dir_if_empty(work, errors, label="work directory")
+        return {
+            "available": False,
+            "reason_code": exc.reason_code,
+            "detail": str(exc),
+            "cleanup": {
+                "image_exists": False,
+                "mount_point_exists": False,
+                "work_dir_exists": os.path.lexists(work),
+                "errors": errors,
+                "residue_free": not errors and not os.path.lexists(work),
+            },
+            **facts,
+        }
+    except VolumePreparationFailed as exc:
+        return {
+            "available": False,
+            "reason_code": "volume_preparation_failed",
+            "detail": str(exc),
+            "cleanup": exc.cleanup,
+            **facts,
+        }
+    except Exception as exc:  # noqa: BLE001 - a non-atomic factory still refuses
+        errors = []
+        _remove_dir_if_empty(work, errors, label="work directory")
+        return {
+            "available": False,
+            "reason_code": "volume_preparation_failed",
+            "detail": f"{type(exc).__name__}: {exc}",
+            "cleanup": {
+                "image_exists": False,
+                "mount_point_exists": False,
+                "work_dir_exists": os.path.lexists(work),
+                "errors": errors,
+                "residue_free": not errors and not os.path.lexists(work),
+            },
+            **facts,
+        }
     return {
         "available": True,
-        "bounded": BoundedWriter(writer, volume),
+        "bounded": BoundedWriter(volume, cap=max_snapshot_bytes, bound=bound),
         "mechanism": "os_volume_free_space",
-        "write_time_bound_bytes": aligned_cap(max_snapshot_bytes),
+        **facts,
     }
 
 
 __all__ = [
+    "BOUND_RULE",
+    "CLUSTER_BYTES",
     "BoundedSaveUnavailable",
     "BoundedWriter",
     "DiskpartVolume",
     "FakeVolume",
     "SaveCopyWriteCapExceeded",
-    "aligned_cap",
+    "VolumePreparationFailed",
+    "WriteTimeBoundViolated",
     "prepare_bounded_writer",
     "save_copy_into_volume",
     "windows_bounded_volume_factory",
+    "write_time_bound",
 ]
