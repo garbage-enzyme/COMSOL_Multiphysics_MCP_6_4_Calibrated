@@ -767,7 +767,14 @@ except OSError as exc:
     adopted, error = False, str(exc)
 orphan = None
 if adopted and sys.argv[2] == "orphan":
-    orphan = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"]).pid
+    # The orphan must not hold this child's pipes open, or the caller's
+    # read would wait for it.
+    orphan = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).pid
 import psutil
 print(json.dumps({
     "pid": os.getpid(),
