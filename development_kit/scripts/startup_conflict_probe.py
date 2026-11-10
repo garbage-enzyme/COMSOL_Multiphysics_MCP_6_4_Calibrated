@@ -142,7 +142,7 @@ class Probe:
         runtime = directory / "runtime"
         settings = self.settings(directory / "settings.json", "python", runtime)
         old = self.python_host(self.env(settings), directory / "old-python.log")
-        lock = sp.wait_for_lock(runtime)
+        lock = sp.wait_for_owner(runtime, old)
         served_before = old.initialize()
         _lock, before = sp.read_lock(runtime)
         # A hand edit (or a client command that bypasses the GUI) now selects
@@ -1635,7 +1635,16 @@ class Probe:
         )
         self.settings(settings, "python", runtime)
         host = self.python_host(self.env(settings), directory / "python.log")
-        sp.wait_for_lock(runtime)
+        # A bare wait_for_lock can return a record this host is about to
+        # remove: a settings rewrite between validation and admission is
+        # refused with settings_changed_during_admission and the record is
+        # released (observed once in the 2026-11-10 independent full run).
+        # Wait for a record this host owns; retry once after the rewrite.
+        lock = sp.wait_for_owner(runtime, host)
+        if not sp.lock_owned_by(lock, host):
+            self.settings(settings, "python", runtime)
+            host = self.python_host(self.env(settings), directory / "python-2.log")
+            lock = sp.wait_for_owner(runtime, host)
         self.settings(settings, "shim", runtime)
         pending = gui_transport.describe_modes(
             "shim", gui_transport.observe_hosts(runtime, process_iter=no_processes)
