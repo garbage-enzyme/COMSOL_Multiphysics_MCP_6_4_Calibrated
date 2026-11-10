@@ -5,6 +5,8 @@
 // reconnect with exponential backoff.
 
 import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 export const MCP_PROTOCOL_VERSION = "2025-03-26";
 
@@ -53,6 +55,7 @@ export function createComsolConnection(opts) {
 		logger = console,
 		toolCallTimeoutMs = 600000,
 		initTimeoutMs = 60000,
+		shutdownTimeoutMs = 15000,
 		reconnect = { enabled: true, initialDelayMs: 500, maxDelayMs: 30000, maxAttempts: 10 },
 		onTools = async () => {},
 	} = opts;
@@ -65,6 +68,7 @@ export function createComsolConnection(opts) {
 	const pending = new Map();
 	let queue = Promise.resolve();
 	let disposed = false;
+	let disposePromise = null;
 	let reconnectAttempts = 0;
 	let reconnectTimer = null;
 	let budgetExhausted = false;
@@ -258,10 +262,12 @@ export function createComsolConnection(opts) {
 			child = c;
 			alive = true;
 			c.stdout.setEncoding("utf8");
-			c.stdout.on("data", onStdoutData);
+			c.stdout.on("data", (chunk) => { if (c === child) onStdoutData(chunk); });
 			// An unhandled stdin 'error' (EPIPE when the server dies mid-write)
 			// would crash the whole DSH host; treat it as process loss instead.
-			c.stdin.on("error", () => { onChildLost(); });
+			// Every handler is guarded by child identity: a terminated child's
+			// late exit or error event must not tear down its replacement.
+			c.stdin.on("error", () => { if (c === child) onChildLost(); });
 			c.stderr.setEncoding("utf8");
 			let stderrBuf = "";
 			c.stderr.on("data", (chunk) => {
@@ -269,11 +275,11 @@ export function createComsolConnection(opts) {
 				if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-4096);
 			});
 			c.on("error", (e) => {
-				alive = false;
-				if (!settled) { settled = true; reject(e); } else onChildLost();
+				if (c === child) alive = false;
+				if (!settled) { settled = true; reject(e); } else if (c === child) onChildLost();
 			});
 			c.on("exit", () => {
-				if (!settled) { settled = true; alive = false; reject(new Error("server exited during startup")); } else onChildLost();
+				if (!settled) { settled = true; alive = false; reject(new Error("server exited during startup")); } else if (c === child) onChildLost();
 			});
 			rpc("initialize", {
 				protocolVersion: MCP_PROTOCOL_VERSION,
@@ -334,6 +340,12 @@ export function createComsolConnection(opts) {
 	}
 
 	async function connectOnce() {
+		if (disposePromise) {
+			// A previous disposal may still be awaiting the host's normal
+			// shutdown; a restart begun earlier would meet a live owner.
+			await disposePromise.catch(() => {});
+			disposePromise = null;
+		}
 		try {
 			await startChild();
 			connectedAt = Date.now();
@@ -350,8 +362,18 @@ export function createComsolConnection(opts) {
 			// our transport-loss boundary, so release those queue entries here.
 			rejectAllPending("comsol server startup failed");
 			if (child) {
-				try { child.kill(); } catch { /* already gone */ }
+				const dying = child;
 				child = null;
+				// A child that already exited never emits "exit" again.
+				if (dying.exitCode === null && dying.signalCode === null) {
+					try { dying.kill(); } catch { /* already gone */ }
+					// Bounded termination: a replacement starting before this
+					// process is gone met a live owner's runtime state.
+					await new Promise((resolve) => {
+						const timer = setTimeout(resolve, shutdownTimeoutMs);
+						dying.once("exit", () => { clearTimeout(timer); resolve(); });
+					});
+				}
 			}
 			throw e;
 		}
@@ -379,13 +401,95 @@ export function createComsolConnection(opts) {
 	}
 
 	function dispose() {
-		if (disposed) return;
+		if (disposePromise) return disposePromise;
 		disposed = true;
 		if (reconnectTimer) clearTimeout(reconnectTimer);
+		reconnectTimer = null;
 		rejectAllPending("comsol-bridge disposed");
-		child?.kill();
+		disposePromise = shutdownGracefully();
+		return disposePromise;
+	}
+
+	// BRIDGE-CLOSE-01: disposal closes the server's stdin and awaits its
+	// bounded, verified normal shutdown. Killing here instead would leave the
+	// host's admission record behind with a lost Windows job name, and the
+	// next connection in the same runtime would correctly refuse with
+	// admission_state_uncertain until an operator recovers it.
+	async function shutdownGracefully() {
+		const c = child;
 		child = null;
 		alive = false;
+		ready = false;
+		if (!c) return;
+		// A child that already exited never emits "exit" again.
+		if (c.exitCode !== null || c.signalCode !== null) {
+			if (c.signalCode === null && c.exitCode === 0) {
+				await waitForAdmissionRelease();
+			} else {
+				log(
+					"warn",
+					`server had already exited (code ${String(c.exitCode)}, signal ${String(c.signalCode)}); its admission record, if any, remains`,
+				);
+			}
+			return;
+		}
+		let exitCode = null;
+		const exited = await new Promise((resolve) => {
+			const timer = setTimeout(() => resolve(false), shutdownTimeoutMs);
+			c.once("exit", (code) => {
+				exitCode = code;
+				clearTimeout(timer);
+				resolve(true);
+			});
+			// EPIPE when the server died first: the exit event settles us.
+			c.stdin.on("error", () => {});
+			try {
+				c.stdin.end();
+			} catch { /* already closed */ }
+		});
+		if (!exited) {
+			log(
+				"warn",
+				`server did not exit within ${shutdownTimeoutMs}ms of stdin EOF; terminating it; its admission record, if any, remains and may need the operator recovery flow`,
+			);
+			try { c.kill(); } catch { /* already gone */ }
+			return;
+		}
+		if (exitCode !== 0) {
+			log(
+				"warn",
+				`server exited with code ${exitCode} during shutdown; its admission record, if any, remains`,
+			);
+			return;
+		}
+		await waitForAdmissionRelease();
+	}
+
+	// Verified cleanup, best effort: the host's normal shutdown removes its
+	// admission record. When the settings passed to the child name a runtime
+	// directory, wait bounded for that record to disappear. The record is
+	// never removed or rewritten here: one that remains must surface as
+	// UNKNOWN to the next start, not vanish.
+	async function waitForAdmissionRelease() {
+		const settingsPath = env.COMSOL_MCP_SETTINGS_PATH;
+		if (!settingsPath || typeof settingsPath !== "string") return;
+		let lockPath;
+		try {
+			const parsed = JSON.parse(readFileSync(settingsPath, "utf-8"));
+			const dir = parsed?.runtime?.directory;
+			if (typeof dir !== "string" || dir.length === 0) return;
+			lockPath = join(dir, "host_admission.lock");
+		} catch {
+			return; // Settings unreadable: the host's exit 0 is our verification.
+		}
+		const deadline = Date.now() + shutdownTimeoutMs;
+		while (existsSync(lockPath)) {
+			if (Date.now() >= deadline) {
+				log("warn", `admission record still present after shutdown: ${lockPath}`);
+				return;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
 	}
 
 	return {

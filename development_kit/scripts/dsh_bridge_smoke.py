@@ -122,6 +122,113 @@ process.exit(0);
     }
 
 
+def _run_bridge_lifecycle(
+    settings_path: Path,
+    runtime: Path,
+    command: list[str],
+    env: dict,
+    workdir: Path,
+) -> dict:
+    """BRIDGE-CLOSE-01 regression: the real bridge core, end to end.
+
+    Connect, forwarded call, an awaited graceful dispose, and a second
+    connection in the same runtime. The driver reports whether the host's
+    admission record was released by the normal shutdown; every process the
+    driver spawned must be gone when it returns.
+    """
+    import time
+
+    import psutil
+
+    driver = (
+        "import { readFileSync, writeFileSync, existsSync } from 'node:fs';\n"
+        "import { createComsolConnection } from "
+        f"'file:///{(BRIDGE_DIR / 'lib' / 'mcp-client-core.mjs').as_posix()}';\n"
+        "const cfg = JSON.parse(readFileSync(process.argv[2], 'utf-8'));\n"
+        "const quiet = { debug(){}, info(){}, warn(){}, error(){} };\n"
+        "const opts = { ...cfg.spawn, reconnect: { enabled: false },"
+        " initTimeoutMs: 30000, toolCallTimeoutMs: 30000, logger: quiet };\n"
+        "const rows = {};\n"
+        "const con = createComsolConnection(opts);\n"
+        "rows.connected = await con.connect();\n"
+        "if (!rows.connected) { writeFileSync(cfg.out, JSON.stringify(rows)); process.exit(0); }\n"
+        "rows.tools = (await con.listTools()).length;\n"
+        "rows.call_ok = 'deployment_identity' in"
+        " JSON.parse((await con.callTool('capabilities', {})).text);\n"
+        "await con.dispose();\n"
+        "rows.lock_released_after_dispose = !existsSync(cfg.lock);\n"
+        "const second = createComsolConnection(opts);\n"
+        "rows.reconnected = await second.connect();\n"
+        "if (rows.reconnected) {\n"
+        "  rows.second_call_ok = 'deployment_identity' in"
+        " JSON.parse((await second.callTool('capabilities', {})).text);\n"
+        "  await second.dispose();\n"
+        "  rows.lock_released_after_second = !existsSync(cfg.lock);\n"
+        "}\n"
+        "writeFileSync(cfg.out, JSON.stringify(rows));\n"
+        "process.exit(0);\n"
+    )
+    script_path = workdir / "bridge_lifecycle.mjs"
+    script_path.write_text(driver, encoding="utf-8")
+    config_path = workdir / "lifecycle-config.json"
+    result_path = workdir / "lifecycle-result.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "spawn": {"command": command[0], "args": command[1:], "cwd": str(ROOT), "env": env},
+                "lock": str(runtime / "host_admission.lock"),
+                "out": str(result_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    result_path.unlink(missing_ok=True)
+
+    started = time.time()
+    owned: dict[tuple[int, float], str] = {}
+    with (workdir / "lifecycle.log").open("wb") as log:
+        node = subprocess.Popen(  # noqa: S603 - fixed probe argv
+            ["node", str(script_path), str(config_path)],
+            cwd=str(BRIDGE_DIR),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        while node.poll() is None and time.time() - started < 180:
+            try:
+                for process in psutil.Process(node.pid).children(recursive=True):
+                    try:
+                        owned[(process.pid, process.create_time())] = process.name()
+                    except psutil.NoSuchProcess:
+                        pass
+            except psutil.NoSuchProcess:
+                pass
+            time.sleep(0.1)
+        if node.poll() is None:
+            node.terminate()
+        node.wait(timeout=10)
+    time.sleep(1.0)
+    survivors = []
+    for (pid, born), name in owned.items():
+        try:
+            process = psutil.Process(pid)
+            if process.create_time() == born:
+                survivors.append({"pid": pid, "name": name})
+        except psutil.NoSuchProcess:
+            pass
+    rows = {}
+    if result_path.exists():
+        rows = json.loads(result_path.read_text(encoding="utf-8"))
+    rows["node_exit_code"] = node.returncode
+    if node.returncode != 0:
+        rows["log_tail"] = (workdir / "lifecycle.log").read_text(
+            encoding="utf-8", errors="replace"
+        )[-400:]
+    rows["seconds"] = round(time.time() - started, 1)
+    rows["surviving_processes"] = survivors
+    return rows
+
+
 def _drive_mcp_session(command: list[str], env: dict, workdir: str) -> dict:
     """Drive a minimal MCP session through the given command list."""
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
@@ -273,6 +380,52 @@ def main() -> int:
         )
         results["bridge_shim_mode"] = bridge_shim
 
+        # === Test 4: bridge disposal and same-domain reconnect ===
+        # BRIDGE-CLOSE-01: the real core must close the host normally (stdin
+        # EOF, bounded exit, verified admission release) so a reconnect in the
+        # same runtime succeeds, on both transports.
+        lifecycle: dict = {}
+        for transport in ("python", "shim"):
+            room = workdir / f"lifecycle-{transport}"
+            room.mkdir()
+            bridge_runtime = room / "runtime"
+            bridge_runtime.mkdir()
+            bridge_settings = room / "settings.json"
+            bridge_env = sp.base_environment()
+            bridge_env["COMSOL_MCP_SETTINGS_PATH"] = str(bridge_settings)
+            bridge_env["COMSOL_MCP_PROFILE"] = "core"
+            if transport == "python":
+                bridge_settings.write_text(
+                    json.dumps(
+                        {
+                            "schema_name": "comsol_mcp.settings",
+                            "schema_version": "1.4.0",
+                            "profile": {"name": "core"},
+                            "runtime": {"directory": str(bridge_runtime)},
+                            "transport": "python",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                command = [str(args.python), "-m", "comsol_mcp.server"]
+            else:
+                sp.write_settings(
+                    bridge_settings,
+                    sp.settings_document(transport="shim", runtime=bridge_runtime, shim=args.shim),
+                )
+                bridge_manifest = room / "manifest.json"
+                generated = sp.generate_manifest(args.python, bridge_settings, bridge_manifest)
+                lifecycle["manifest_generated"] = generated.returncode == 0
+                command = [str(args.shim)]
+                bridge_env["COMSOL_MCP_DISCOVERY_MANIFEST"] = str(bridge_manifest)
+                bridge_env["COMSOL_MCP_SHIM_CHILD"] = json.dumps(
+                    [str(args.python), "-m", "comsol_mcp.server"]
+                )
+            lifecycle[transport] = _run_bridge_lifecycle(
+                bridge_settings, bridge_runtime, command, bridge_env, room
+            )
+        results["bridge_lifecycle"] = lifecycle
+
     # Evaluate checks.
     py_ok = py_result.get("server_name") == "COMSOL MCP" and py_result.get("tool_count", 0) > 0
     shim_ok = (
@@ -282,6 +435,20 @@ def main() -> int:
     bridge_py_ok = bridge_py.get("exit_code") == 0
     bridge_shim_ok = bridge_shim.get("exit_code") == 0
 
+    def lifecycle_ok(transport: str) -> bool:
+        rows = (results.get("bridge_lifecycle") or {}).get(transport) or {}
+        return (
+            rows.get("node_exit_code") == 0
+            and rows.get("connected") is True
+            and rows.get("tools", 0) > 0
+            and rows.get("call_ok") is True
+            and rows.get("lock_released_after_dispose") is True
+            and rows.get("reconnected") is True
+            and rows.get("second_call_ok") is True
+            and rows.get("lock_released_after_second") is True
+            and rows.get("surviving_processes") == []
+        )
+
     checks = {
         "manifest_bound_to_shim_settings": results.get("manifest_generated") is True,
         "python_direct_works": py_ok,
@@ -289,6 +456,8 @@ def main() -> int:
         "same_tool_surface": same_surface,
         "bridge_resolves_python": bridge_py_ok,
         "bridge_resolves_shim": bridge_shim_ok,
+        "bridge_dispose_then_reconnect_python": lifecycle_ok("python"),
+        "bridge_dispose_then_reconnect_shim": lifecycle_ok("shim"),
     }
     results["checks"] = checks
     results["passed"] = all(checks.values())

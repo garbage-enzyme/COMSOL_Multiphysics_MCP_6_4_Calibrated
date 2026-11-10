@@ -16,11 +16,11 @@ The job is only a membership registry: it sets no kill-on-close limit, so a
 normal host exit never ends contained children by itself.
 
 The named job object dies with its last *handle*, not with its last member
-(measured 2026-11-10, D:/mcp_tests/p0082/posix-unknown/job-name-exp2). When
-the host exits it usually held the only handle, so the name no longer opens
-while members may still be alive. A name that no longer opens is therefore
-UNKNOWN evidence, never proof that no member remains; only a reader holding
-a handle (a live host) gets a complete member list.
+(measured 2026-11-10). When the host exits it usually held the only handle,
+so the name no longer opens while members may still be alive. A name that
+no longer opens is therefore UNKNOWN evidence, never proof that no member
+remains; only a reader holding a handle (a live host) gets a complete
+member list.
 """
 
 from __future__ import annotations
