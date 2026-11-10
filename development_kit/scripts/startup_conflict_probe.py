@@ -142,7 +142,7 @@ class Probe:
         runtime = directory / "runtime"
         settings = self.settings(directory / "settings.json", "python", runtime)
         old = self.python_host(self.env(settings), directory / "old-python.log")
-        lock = sp.wait_for_owner(runtime, old)
+        lock = sp.wait_for_lock(runtime)
         served_before = old.initialize()
         _lock, before = sp.read_lock(runtime)
         # A hand edit (or a client command that bypasses the GUI) now selects
@@ -1635,16 +1635,16 @@ class Probe:
         )
         self.settings(settings, "python", runtime)
         host = self.python_host(self.env(settings), directory / "python.log")
-        # A bare wait_for_lock can return a record this host is about to
-        # remove: a settings rewrite between validation and admission is
-        # refused with settings_changed_during_admission and the record is
-        # released (observed once in the 2026-11-10 independent full run).
-        # Wait for a record this host owns; retry once after the rewrite.
+        # The host re-reads the settings digest after it publishes its record
+        # and refuses a rewrite inside that window with
+        # settings_changed_during_admission (the designed contract; case08
+        # tests it). The record appearing is the start of that window, not
+        # its end, so it is no signal that the settings may change. One
+        # initialize round trip is: the server answers only after the
+        # admission gate returned.
         lock = sp.wait_for_owner(runtime, host)
-        if not sp.lock_owned_by(lock, host):
-            self.settings(settings, "python", runtime)
-            host = self.python_host(self.env(settings), directory / "python-2.log")
-            lock = sp.wait_for_owner(runtime, host)
+        owned = sp.lock_owned_by(lock, host)  # live query: capture before close
+        served = host.initialize()
         self.settings(settings, "shim", runtime)
         pending = gui_transport.describe_modes(
             "shim", gui_transport.observe_hosts(runtime, process_iter=no_processes)
@@ -1652,8 +1652,11 @@ class Probe:
         host.close()
         self.check(
             "case09.running_python_host_shown_with_pending_restart",
-            pending["active_transport"] == "python" and pending["pending_restart"] is True,
-            pending,
+            served
+            and owned
+            and pending["active_transport"] == "python"
+            and pending["pending_restart"] is True,
+            {**pending, "host_served_before_the_settings_change": served},
         )
         test = subprocess.run(  # noqa: S603 - fixed pytest argv
             [
