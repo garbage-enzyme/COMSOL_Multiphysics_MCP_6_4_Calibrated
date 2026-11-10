@@ -675,14 +675,12 @@ def test_observer_and_its_ancestors_are_not_cleanup_debt(runtime, cleanup_proces
     # its own console host, kept alive only by the exempted orphan's
     # attachment. It serves the exempted process, so it is exempted with it;
     # locally the host shares the observer's console and has none.
-    lineage |= (
-        frozenset(
-            kid.pid
-            for kid in psutil.Process(record["pid"]).children()
-            if (kid.name() or "").lower() in {"conhost.exe", "openconsole.exe"}
-        )
-        if psutil.pid_exists(record["pid"])
-        else frozenset()
+    # The dead host can no longer be enumerated; the table keeps its PPID.
+    lineage |= frozenset(
+        process.pid
+        for process in psutil.process_iter(["ppid", "name"])
+        if process.info["ppid"] == record["pid"]
+        and (process.info["name"] or "").lower() in {"conhost.exe", "openconsole.exe"}
     )
     evidence = ha.verify_stale_cleanup(
         record, runtime, ignore_pids=lineage, for_explicit_recovery=True
