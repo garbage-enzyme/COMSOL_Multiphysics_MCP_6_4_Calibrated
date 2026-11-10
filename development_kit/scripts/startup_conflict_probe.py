@@ -862,6 +862,7 @@ class Probe:
         # a session it does not lead, which would hide its descendants
         # from every later recovery.
         if os.name == "nt":
+            self.case07_windows_decision()
             return
         for transport in ("python", "shim"):
             directory = self.directory(f"case07-group-leader-{transport}")
@@ -913,6 +914,163 @@ class Probe:
             "json": body,
             "stderr_tail": completed.stderr[-600:],
         }
+
+    def _dead_host_behind_a_lost_job(self) -> dict[str, Any]:
+        import psutil
+
+        """A Windows host that exits holding the only job handle, orphan alive.
+
+        The fixture runs under the base interpreter: the venv launcher
+        terminates its own descendants when it exits, which would take the
+        orphan with it and fake the cleanup the rows must disprove.
+        """
+        interpreter = getattr(sys, "_base_executable", sys.executable)
+        script = (
+            "import json, os, psutil, subprocess, sys\n"
+            f"sys.path.insert(0, {str(sp.ROOT)!r})\n"
+            "from comsol_mcp import host_containment\n"
+            "identity = host_containment.host_containment_id(pid=os.getpid())\n"
+            "handle = host_containment.adopt_host_containment(identity)\n"
+            "assert host_containment.containment_members(identity)\n"
+            "orphan = subprocess.Popen(\n"
+            '    [sys.executable, "-c", "import time; time.sleep(600)"],\n'
+            "    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,"
+            " stderr=subprocess.DEVNULL)\n"
+            "del handle  # the job object dies with this last handle\n"
+            "me = psutil.Process()\n"
+            "print(json.dumps({'pid': me.pid, 'process_create_time':"
+            " me.create_time(), 'cmdline': me.cmdline(), 'containment': identity,"
+            " 'orphan': orphan.pid}), flush=True)\n"
+        )
+        parent = subprocess.Popen(  # noqa: S603 - fixed interpreter argv
+            [interpreter, "-c", script],
+            stdout=subprocess.PIPE,
+            text=True,
+            cwd=str(sp.ROOT),
+            creationflags=sp.NO_WINDOW,
+        )
+        report = json.loads(parent.stdout.readline())
+        parent.wait(timeout=30)
+        deadline = time.time() + 10
+        while psutil.pid_exists(report["pid"]) and time.time() < deadline:
+            time.sleep(0.05)
+        return report
+
+    def case07_windows_decision(self) -> None:
+        """WIN-CONTAIN-01 rows: a lost job name never proves cleanup.
+
+        The job object dies with its last handle, not its last member, so
+        after a host exits its recorded containment can no longer be read.
+        Automatic recovery refuses as UNKNOWN with the record kept; the
+        explicit operator flow recovers it and never lifts positive
+        evidence.
+        """
+        import psutil
+
+        def lost_job_with_orphan(runtime: Path) -> dict[str, Any]:
+            report = self._dead_host_behind_a_lost_job()
+
+            def release() -> None:
+                try:
+                    psutil.Process(report["orphan"]).kill()
+                except psutil.Error:
+                    pass
+
+            return {
+                "lock_bytes": sp.write_record(runtime, self._record_of(report)),
+                "orphan_pid": report["orphan"],
+                "release": [release],
+            }
+
+        self._both_entry_points(
+            "job_name_lost_with_live_orphan_is_unknown_and_kept",
+            lost_job_with_orphan,
+            lambda observed, fixture: (
+                observed["exit_code"] == 2
+                and observed["reason_code"] == "admission_state_uncertain"
+                and "containment cannot be read" in observed["stderr_tail"]
+                and "no longer opens" in observed["stderr_tail"]
+                and observed["lock_bytes_unchanged"]
+                and not observed["forbidden_worker_started"]
+                and psutil.pid_exists(fixture["orphan_pid"])
+            ),
+        )
+
+        for transport in ("python", "shim"):
+            directory = self.directory(f"case07-windows-recovery-{transport}")
+            runtime = directory / "runtime"
+            runtime.mkdir()
+            fixture = lost_job_with_orphan(runtime)
+            settings = self.settings(directory / "settings.json", transport, runtime)
+            child, marker = self.sentinel(directory)
+            if transport == "python":
+                host = self.python_host(self.env(settings), directory / "host.log")
+            else:
+                host = self.shim_host(self.env(settings, child=child), directory / "host.log")
+            refused = self.refused(host, runtime, marker)
+            refused["lock_bytes_unchanged"] = sp.read_lock(runtime)[1] == fixture["lock_bytes"]
+            show = self._cli("--show", str(runtime))
+            digest = (show["json"] or {}).get("record_sha256")
+            wrong = self._cli("--recover", str(runtime), "0" * 64, "--confirmed-by", "probe")
+            still_kept = sp.read_lock(runtime)[1] == fixture["lock_bytes"]
+            recover = self._cli(
+                "--recover", str(runtime), str(digest), "--confirmed-by", "startup probe"
+            )
+            receipt = recover["json"] or {}
+            archived = (
+                runtime
+                / "admission_recovered"
+                / str((receipt.get("record") or {}).get("archived_as"))
+            )
+            lock_gone = not (runtime / sp.LOCK_NAME).exists()
+            if transport == "python":
+                again = self.python_host(self.env(settings), directory / "host-again.log")
+            else:
+                again = self.shim_host(
+                    self.env(settings, child=child), directory / "host-again.log"
+                )
+            lock = sp.wait_for_owner(runtime, again, timeout=TIMEOUT_EXIT)
+            admitted = sp.lock_owned_by(lock, again)
+            closed = again.close()
+            orphan_alive = psutil.pid_exists(fixture["orphan_pid"])
+            observed = {
+                "refused": refused,
+                "show": show,
+                "wrong_digest": wrong,
+                "record_kept_after_wrong_digest": still_kept,
+                "recover": recover,
+                "archive_matches_record": archived.is_file()
+                and archived.read_bytes() == fixture["lock_bytes"],
+                "lock_removed": lock_gone,
+                "admitted_after_recovery": admitted,
+                "exit_after_recovery": closed,
+                "orphan_alive_after_recovery": orphan_alive,
+                "automatic_verification": (receipt.get("automatic_verification") or {}).get(
+                    "state"
+                ),
+            }
+            self.check(
+                f"case07.explicit_recovery_of_a_lost_job_record_{transport}",
+                refused["exit_code"] == 2
+                and refused["reason_code"] == "admission_state_uncertain"
+                and refused["lock_bytes_unchanged"]
+                and show["exit_code"] == 0
+                and bool(digest)
+                and wrong["exit_code"] == 2
+                and still_kept
+                and recover["exit_code"] == 0
+                and receipt.get("outcome") == "recovered"
+                and observed["automatic_verification"] == "unknown"
+                and receipt.get("terminated_processes") == []
+                and observed["archive_matches_record"]
+                and lock_gone
+                and admitted
+                and closed == 0
+                and observed["orphan_alive_after_recovery"],
+                observed,
+            )
+            for release in fixture["release"]:
+                release()
 
     def case07_posix_decision(self) -> None:
         """POSIX rows for the caller decision of 2026-11-10.
@@ -1334,24 +1492,40 @@ class Probe:
         crashed.wait_exit(30)
         stale_kept = (runtime / sp.LOCK_NAME).exists()
         restarted = self.python_host(self.env(settings), directory / "restarted.log")
-        relock = sp.wait_for_owner(runtime, restarted)
-        restarted_owned = sp.lock_owned_by(relock, restarted)
-        recovered = (relock or {}).get("recovered_from") or {}
-        code3 = restarted.close()
-        self.check(
-            "case10.python_crash_then_verified_recovery",
-            stale_kept
-            and restarted_owned
-            and recovered.get("pid") == crashed_pid
-            and "cleanup" in recovered
-            and code3 == 0,
-            {
-                "stale_kept": stale_kept,
-                "restarted_owned": restarted_owned,
-                "recovered_from": recovered,
-                "restart_exit": code3,
-            },
-        )
+        if os.name == "nt":
+            # WIN-CONTAIN-01: the crashed host held the only job handle, so
+            # its containment can no longer be read; automatic recovery must
+            # refuse as UNKNOWN and keep the record.
+            refused = self.refused(restarted, runtime, None)
+            refused["lock_bytes_unchanged"] = (runtime / sp.LOCK_NAME).exists()
+            self.check(
+                "case10.python_crash_then_verified_recovery",
+                stale_kept
+                and refused["exit_code"] == 2
+                and refused["reason_code"] == "admission_state_uncertain"
+                and "containment cannot be read" in refused["stderr_tail"]
+                and refused["lock_bytes_unchanged"],
+                {"stale_kept": stale_kept, "refused": refused},
+            )
+        else:
+            relock = sp.wait_for_owner(runtime, restarted)
+            restarted_owned = sp.lock_owned_by(relock, restarted)
+            recovered = (relock or {}).get("recovered_from") or {}
+            code3 = restarted.close()
+            self.check(
+                "case10.python_crash_then_verified_recovery",
+                stale_kept
+                and restarted_owned
+                and recovered.get("pid") == crashed_pid
+                and "cleanup" in recovered
+                and code3 == 0,
+                {
+                    "stale_kept": stale_kept,
+                    "restarted_owned": restarted_owned,
+                    "recovered_from": recovered,
+                    "restart_exit": code3,
+                },
+            )
 
         directory = self.directory("case10-shim")
         runtime = directory / "runtime"
@@ -1374,6 +1548,22 @@ class Probe:
         restarted = self.shim_host(
             self.env(settings, child=self.real_worker()), directory / "restarted.log"
         )
+        if os.name == "nt":
+            # WIN-CONTAIN-01: same as the python row above.
+            refused = self.refused(restarted, runtime, None)
+            refused["lock_bytes_unchanged"] = (runtime / sp.LOCK_NAME).exists()
+            self.check(
+                "case10.shim_crash_kills_contained_worker_then_verified_recovery",
+                served
+                and worker_gone
+                and stale_kept
+                and refused["exit_code"] == 2
+                and refused["reason_code"] == "admission_state_uncertain"
+                and "containment cannot be read" in refused["stderr_tail"]
+                and refused["lock_bytes_unchanged"],
+                {"served": served, "worker_gone": worker_gone, "refused": refused},
+            )
+            return
         deadline = time.time() + TIMEOUT_EXIT
         relock = None
         while time.time() < deadline:

@@ -1129,3 +1129,133 @@ def test_recovery_is_not_lifted_over_a_live_session_member(runtime):
             psutil.Process(report["orphan"]).kill()
         except psutil.Error:
             pass
+
+
+# --- WIN-CONTAIN-01: a lost job name is UNKNOWN, never clean ------------------
+
+_JOB_ORPHAN_SCRIPT = f"""
+import json, os, psutil, subprocess, sys
+sys.path.insert(0, {str(REPO_ROOT)!r})
+from comsol_mcp import host_containment
+identity = host_containment.host_containment_id(pid=os.getpid())
+handle = host_containment.adopt_host_containment(identity)
+assert host_containment.containment_members(identity)  # the handle keeps it readable
+# The venv launcher does not outlive its host here; the base interpreter does.
+orphan = subprocess.Popen(
+    [getattr(sys, "_base_executable", sys.executable), "-c", "import time; time.sleep(120)"],
+    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+)
+del handle  # the last handle: the job object dies with it, not with the orphan
+me = psutil.Process()
+print(json.dumps({{
+    "pid": me.pid,
+    "process_create_time": me.create_time(),
+    "cmdline": me.cmdline(),
+    "containment": identity,
+    "orphan": orphan.pid,
+    "orphan_in_a_job": True,
+}}), flush=True)
+"""
+
+
+def _dead_host_behind_a_lost_job() -> dict:
+    """A Windows host that exits holding the only job handle, orphan alive."""
+    # The venv launcher terminates its own descendants when it exits, which
+    # would take the orphan with it; the base interpreter leaves it alone.
+    parent = subprocess.Popen(  # noqa: S603 - fixed interpreter argv
+        [getattr(sys, "_base_executable", sys.executable), "-c", _JOB_ORPHAN_SCRIPT],
+        stdout=subprocess.PIPE,
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+    report = json.loads(parent.stdout.readline())
+    parent.wait(timeout=30)
+    deadline = time.monotonic() + 10
+    while psutil.pid_exists(report["pid"]) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return report
+
+
+@windows_parent_links
+def test_a_job_name_that_no_longer_opens_is_unknown(runtime):
+    import ctypes
+
+    from comsol_mcp import host_containment
+    from comsol_mcp.host_containment import UnknownContainment
+
+    identity = host_containment.host_containment_id(pid=os.getpid())
+    handle = host_containment.adopt_host_containment(identity)
+    assert os.getpid() in host_containment.containment_members(identity)
+    ctypes.windll.kernel32.CloseHandle(handle)  # the only handle
+    with pytest.raises(UnknownContainment) as unknown:
+        host_containment.containment_members(identity)
+    assert "no longer opens" in str(unknown.value)
+    assert "cannot be ruled out" in str(unknown.value)
+
+
+@windows_parent_links
+def test_a_dead_windows_host_with_an_orphan_is_unknown_and_kept(runtime):
+    report = _dead_host_behind_a_lost_job()
+    orphan = psutil.Process(report["orphan"])
+    try:
+        payload = _write(ha.lock_path_for(runtime), _contained_record(report))
+        with pytest.raises(ha.HostAdmissionError) as error:
+            ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+        assert error.value.reason_code == "admission_state_uncertain"
+        assert "containment cannot be read" in str(error.value)
+        assert orphan.is_running()
+        assert ha.lock_path_for(runtime).read_bytes() == payload
+    finally:
+        orphan.kill()
+
+
+@windows_parent_links
+def test_explicit_recovery_of_a_lost_job_record_needs_the_operator(runtime):
+    report = _dead_host_behind_a_lost_job()
+    orphan = psutil.Process(report["orphan"])
+    try:
+        payload = _write(ha.lock_path_for(runtime), _contained_record(report))
+        digest = hashlib.sha256(payload).hexdigest()
+        receipt = ha.recover_after_independent_confirmation(
+            runtime, record_sha256=digest, confirmed_by="operator"
+        )
+        assert receipt["outcome"] == "recovered"
+        assert receipt["automatic_verification"]["state"] == "unknown"
+        unavailable = receipt["explicit_verification"]["descendants"]["unavailable"]
+        assert "no longer opens" in unavailable
+        assert not ha.lock_path_for(runtime).exists()
+        archived = runtime / "admission_recovered" / receipt["record"]["archived_as"]
+        assert archived.read_bytes() == payload
+        assert orphan.is_running()  # nothing was terminated
+        claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+        assert ha.release(claim) is True
+    finally:
+        orphan.kill()
+
+
+@windows_parent_links
+def test_explicit_recovery_still_refuses_positive_evidence_after_job_loss(runtime):
+    worker = _spawn(SLEEPER)
+    cleanup_processes_fixture = [worker]
+    try:
+        report = _dead_host_behind_a_lost_job()
+        orphan = psutil.Process(report["orphan"])
+        cleanup_processes_fixture.append(orphan)
+        record = _contained_record(report)
+        record["owned_processes"] = [_identity(worker.pid)]
+        payload = _write(ha.lock_path_for(runtime), record)
+        with pytest.raises(ha.HostAdmissionError) as error:
+            ha.recover_after_independent_confirmation(
+                runtime,
+                record_sha256=hashlib.sha256(payload).hexdigest(),
+                confirmed_by="operator",
+            )
+        assert error.value.reason_code == "admission_cleanup_unverified"
+        assert str(worker.pid) in str(error.value)
+        assert ha.lock_path_for(runtime).read_bytes() == payload
+    finally:
+        for process in cleanup_processes_fixture:
+            try:
+                process.kill()
+            except psutil.Error:
+                pass

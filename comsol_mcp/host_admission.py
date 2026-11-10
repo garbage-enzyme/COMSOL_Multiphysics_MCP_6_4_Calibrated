@@ -24,11 +24,13 @@ Rules (shared with ``shim/src/admission.rs``):
   verified durable job worker, and the solver lease shows no live
   non-job owner and no live recorded COMSOL server. Missing evidence is
   ``uncertain`` and refuses admission; it is never treated as absence.
-* A stale record without a containment identity cannot prove its descendants
-  are gone where orphans are reparented (POSIX). There it is always
-  ``admission_state_uncertain``: recovery, takeover and dependent startup are
-  refused, the record is kept, nothing is stopped, and the diagnostic names
-  the explicit operator recovery flow (``--show`` / ``--recover``).
+* A stale record whose containment cannot be read cannot prove its
+  descendants are gone: a POSIX record without a containment identity, or a
+  Windows record whose job name no longer opens (the object dies with its
+  last handle, not its last member). Automatic recovery, takeover and
+  dependent startup are refused with ``admission_state_uncertain``; the
+  record is kept, nothing is stopped, and the diagnostic names the explicit
+  operator recovery flow (``--show`` / ``--recover``).
 * A fresh admission also checks the solver lease, so a live retained-version
   host that holds the lease blocks a new host in the same domain.
 """
@@ -675,6 +677,7 @@ def verify_stale_cleanup(
     descendants: list[dict[str, Any]] = []
     independent: list[dict[str, Any]] = []
     scope = "direct children of the host and of every recorded owned process"
+    containment_unavailable: str | None = None
     if isinstance(containment, dict) and has_containment:
         # Kernel-authoritative membership: every descendant the host kept, at
         # any depth, regardless of ppid readability or reparenting.
@@ -682,10 +685,16 @@ def verify_stale_cleanup(
         try:
             members = containment_members(containment)
         except UnknownContainment as exc:
-            raise HostAdmissionError(
-                "admission_state_uncertain",
-                f"the previous host's containment cannot be read: {exc}",
-            ) from exc
+            if not for_explicit_recovery:
+                raise HostAdmissionError(
+                    "admission_state_uncertain",
+                    f"the previous host's containment cannot be read: {exc}",
+                ) from exc
+            # The operator confirmed cleanup independently; the remaining
+            # checks (owned processes above, solver lease below) still refuse
+            # on any positive evidence.
+            containment_unavailable = str(exc)
+            members = set()
         inventory_by_pid = {
             pid: (created, name) for pid, _ppid, created, name in _process_inventory()
         }
@@ -763,6 +772,22 @@ def verify_stale_cleanup(
             {"descendants": descendants},
         )
     lease = solver_lease_evidence(runtime)
+    if containment_unavailable is not None:
+        return {
+            "owner": {"pid": owner[0], "process_create_time": owner[1]},
+            "owned_processes": owned_evidence,
+            "descendants": {
+                "live": [],
+                "independent_owners": independent,
+                "scope": scope,
+                "unavailable": containment_unavailable,
+            },
+            "solver_lease": lease,
+            "listeners": {
+                "method": "owned_process_absence",
+                "note": "no recorded or descendant process is alive, so none can hold a listener",
+            },
+        }
     return {
         "owner": {"pid": owner[0], "process_create_time": owner[1]},
         "owned_processes": owned_evidence,

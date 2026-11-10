@@ -15,6 +15,13 @@ Unreadable evidence is UNKNOWN, never absence.
 
 The job is only a membership registry: it sets no kill-on-close limit, so a
 normal host exit never ends contained children by itself.
+
+The named job object dies with its last *handle*, not with its last member
+(measured 2026-11-10, D:/mcp_tests/p0082/posix-unknown/job-name-exp2). When
+the host exits it usually held the only handle, so the name no longer opens
+while members may still be alive. A name that no longer opens is therefore
+UNKNOWN evidence, never proof that no member remains; only a reader holding
+a handle (a live host) gets a complete member list.
 """
 
 from __future__ import annotations
@@ -126,9 +133,9 @@ def adopt_host_containment(identity: dict[str, Any]) -> Any:
 def containment_members(identity: dict[str, Any]) -> set[int]:
     """Live member PIDs of one recorded containment identity.
 
-    Raises :class:`UnknownContainment` when the evidence is unreadable. An
-    absent Windows job name means no member is alive (the object dies with
-    its last member), so that returns an empty set.
+    Raises :class:`UnknownContainment` when the evidence is unreadable.
+    A Windows job name that no longer opens is UNKNOWN: the object dies
+    with its last handle, so members may still be alive.
     """
     kind = identity.get("kind") if isinstance(identity, dict) else None
     if kind == "windows_job":
@@ -141,7 +148,13 @@ def containment_members(identity: dict[str, Any]) -> set[int]:
         if not handle:
             error = _last_error()
             if error == _ERROR_FILE_NOT_FOUND:
-                return set()  # The object died with its last member.
+                # The object dies with its last HANDLE, not its last member:
+                # a surviving descendant cannot be ruled out (WIN-CONTAIN-01).
+                raise UnknownContainment(
+                    "the named job no longer opens; the object dies with its last "
+                    "handle, not its last member, so a surviving descendant cannot "
+                    "be ruled out"
+                )
             raise UnknownContainment(f"the host job cannot be opened: winerror {error}")
         try:
 

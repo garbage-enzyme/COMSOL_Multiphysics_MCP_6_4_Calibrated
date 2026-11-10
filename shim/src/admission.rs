@@ -1600,6 +1600,32 @@ mod tests {
         assert!(message.contains("python -m comsol_mcp.host_admission --show"));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn a_lost_windows_job_name_is_unknown_not_clean() {
+        // WIN-CONTAIN-01: the job dies with its last handle, so a name that
+        // no longer opens cannot prove its members are gone.
+        let directory = scratch("job-name-lost");
+        let mut lock = record(4242, 1.0);
+        lock["containment"] = json!({
+            "kind": "windows_job",
+            "name": r"Local\comsol_mcp_host_4242_never_created",
+        });
+        let error = verify_stale_cleanup(&lock, &directory).unwrap_err();
+        assert_eq!(error.code, "admission_state_uncertain");
+        assert!(
+            error.message.contains("containment cannot be read"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("no longer opens"),
+            "{}",
+            error.message
+        );
+        let _ = fs::remove_dir_all(&directory);
+    }
+
     #[cfg(not(windows))]
     #[test]
     fn a_containment_less_stale_record_is_unknown_on_posix() {

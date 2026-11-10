@@ -5,9 +5,10 @@
 //! records the name in the admission lock. Descendants inherit the job
 //! unless they explicitly break away (independent owners do). A recovery
 //! reader opens the job by name and asks the kernel for its member list:
-//! complete at any depth, regardless of parent links. The job object dies
-//! with its last member, so a name that no longer opens proves no member is
-//! alive.
+//! complete at any depth, regardless of parent links. The object dies with
+//! its last HANDLE, not its last member (measured 2026-11-10), so a name
+//! that no longer opens is UNKNOWN evidence, never proof that no member is
+//! alive; only a reader holding a handle gets a complete list.
 //!
 //! POSIX: the host becomes a session leader and records the session id; the
 //! recovery reader lists every process with that session. Unreadable
@@ -117,7 +118,14 @@ mod imp {
                     .raw_os_error()
                     .unwrap_or_default() as u32;
                 if error == ERROR_FILE_NOT_FOUND {
-                    return Ok(Vec::new()); // Died with its last member.
+                    // WIN-CONTAIN-01: the object dies with its last HANDLE,
+                    // not its last member; members may still be alive.
+                    return Err(ContainmentError::Unknown(
+                        "the named job no longer opens; the object dies with its \
+                         last handle, not its last member, so a surviving \
+                         descendant cannot be ruled out"
+                            .to_owned(),
+                    ));
                 }
                 let _ = error;
                 return Err(ContainmentError::Unknown(format!(
@@ -401,5 +409,23 @@ mod tests {
     fn unknown_records_refuse_rather_than_claim_absence() {
         let empty = serde_json::json!({});
         assert!(members(&empty).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_lost_job_name_is_unknown_never_empty() {
+        // WIN-CONTAIN-01: the object dies with its last HANDLE, not its last
+        // member, so a name that no longer opens proves nothing about members.
+        let identity = identity_for(std::process::id());
+        {
+            let job = adopt(&identity).expect("adopt");
+            let found = members(&identity).expect("members while the handle lives");
+            assert!(found.contains(&std::process::id()));
+            drop(job); // the only handle
+        }
+        let refused = members(&identity).expect_err("the lost name is UNKNOWN");
+        let message = refused.to_string();
+        assert!(message.contains("no longer opens"), "{message}");
+        assert!(message.contains("cannot be ruled out"), "{message}");
     }
 }
