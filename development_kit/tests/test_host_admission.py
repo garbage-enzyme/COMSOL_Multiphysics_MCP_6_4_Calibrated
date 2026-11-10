@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -1069,6 +1070,7 @@ def test_recovery_archives_and_removes_a_confirmed_stale_record(runtime):
     preview = ha.recovery_preview(runtime)
     assert preview["record_sha256"] == digest
     assert "--recover" in preview["recovery_command"]
+    assert preview["explicit_recovery"]["state"] == "ready"
 
     receipt = ha.recover_after_independent_confirmation(
         runtime, record_sha256=digest, confirmed_by="operator"
@@ -1083,10 +1085,22 @@ def test_recovery_archives_and_removes_a_confirmed_stale_record(runtime):
     receipt_path = archive_dir / receipt["record"]["archived_as"].replace(".lock", ".recovery.json")
     body = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert body["schema_name"] == ha.HOST_ADMISSION_RECOVERY_SCHEMA
-    assert body["schema_version"] == ha.HOST_ADMISSION_RECOVERY_VERSION
-    assert body["confirmed_by"] == "operator"
-    expected = "unknown" if os.name != "nt" else "verified"
-    assert receipt["automatic_verification"]["state"] == expected
+    assert body["schema_version"] == ha.HOST_ADMISSION_RECOVERY_VERSION == "1.1.0"
+    assert body["operator_confirmation"]["confirmed_by"] == "operator"
+    machine = receipt["machine_verification"]
+    if os.name == "nt":
+        # Parent links verify a Windows legacy record by machine: the
+        # confirmation stands in for nothing.
+        assert receipt["automatic_verification"]["state"] == "verified"
+        assert receipt["operator_confirmation"]["covers"] == []
+        assert machine["listeners"]["method"] == "owned_process_absence"
+    else:
+        assert receipt["automatic_verification"]["state"] == "unknown"
+        covered = [item["evidence"] for item in receipt["operator_confirmation"]["covers"]]
+        assert covered == ["descendants", "listeners"]
+        assert machine["descendants"]["unavailable"] == "the record has no containment identity"
+        assert "own session" in machine["descendants"]["scope"]
+        assert machine["listeners"]["method"] == "not_machine_verified"
 
     # A host may start again once the record was explicitly recovered.
     claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
@@ -1203,8 +1217,38 @@ def test_a_dead_windows_host_with_an_orphan_is_unknown_and_kept(runtime):
             ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
         assert error.value.reason_code == "admission_state_uncertain"
         assert "containment cannot be read" in str(error.value)
+        assert str(error.value).endswith(ha.OPERATOR_RECOVERY_HINT)
         assert orphan.is_running()
         assert ha.lock_path_for(runtime).read_bytes() == payload
+    finally:
+        orphan.kill()
+
+
+@windows_parent_links
+def test_explicit_recovery_refuses_a_live_direct_child_after_job_loss(runtime):
+    # WIN-RECOVER-02: a confirmation may cover what the machine cannot see,
+    # never a child the process inventory still attributes to the host.
+    report = _dead_host_behind_a_lost_job()
+    orphan = psutil.Process(report["orphan"])
+    born = orphan.create_time()
+    try:
+        assert orphan.ppid() == report["pid"]
+        payload = _write(ha.lock_path_for(runtime), _contained_record(report))
+        digest = hashlib.sha256(payload).hexdigest()
+        preview = ha.recovery_preview(runtime)
+        assert preview["explicit_recovery"]["state"] == "refused"
+        assert preview["explicit_recovery"]["reason_code"] == "admission_cleanup_unverified"
+        with pytest.raises(ha.HostAdmissionError) as error:
+            ha.recover_after_independent_confirmation(
+                runtime, record_sha256=digest, confirmed_by="operator"
+            )
+        assert error.value.reason_code == "admission_cleanup_unverified"
+        assert str(report["orphan"]) in str(error.value)
+        [found] = error.value.details["descendants"]
+        assert (found["pid"], found["parent_pid"]) == (report["orphan"], report["pid"])
+        assert ha.lock_path_for(runtime).read_bytes() == payload
+        assert not (runtime / "admission_recovered").exists()
+        assert orphan.is_running() and orphan.create_time() == born  # left alone
     finally:
         orphan.kill()
 
@@ -1216,21 +1260,303 @@ def test_explicit_recovery_of_a_lost_job_record_needs_the_operator(runtime):
     try:
         payload = _write(ha.lock_path_for(runtime), _contained_record(report))
         digest = hashlib.sha256(payload).hexdigest()
+        # The operator's own cleanup, before any confirmation.
+        orphan.kill()
+        orphan.wait(timeout=10)
         receipt = ha.recover_after_independent_confirmation(
             runtime, record_sha256=digest, confirmed_by="operator"
         )
         assert receipt["outcome"] == "recovered"
+        assert receipt["terminated_processes"] == []
         assert receipt["automatic_verification"]["state"] == "unknown"
-        unavailable = receipt["explicit_verification"]["descendants"]["unavailable"]
-        assert "no longer opens" in unavailable
+        machine = receipt["machine_verification"]
+        assert "no longer opens" in machine["descendants"]["unavailable"]
+        assert "parent exited" in machine["descendants"]["not_machine_verified"]
+        assert machine["descendants"]["scope"].startswith("direct children of the host")
+        assert machine["listeners"]["method"] == "not_machine_verified"
+        confirmation = receipt["operator_confirmation"]
+        assert confirmation["confirmed_by"] == "operator"
+        assert [item["evidence"] for item in confirmation["covers"]] == [
+            "descendants",
+            "listeners",
+        ]
         assert not ha.lock_path_for(runtime).exists()
         archived = runtime / "admission_recovered" / receipt["record"]["archived_as"]
         assert archived.read_bytes() == payload
-        assert orphan.is_running()  # nothing was terminated
         claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
         assert ha.release(claim) is True
     finally:
-        orphan.kill()
+        try:
+            orphan.kill()
+        except psutil.Error:
+            pass
+
+
+_JOB_GRANDCHILD_SCRIPT = f"""
+import json, os, psutil, subprocess, sys
+sys.path.insert(0, {str(REPO_ROOT)!r})
+from comsol_mcp import host_containment
+base = getattr(sys, "_base_executable", sys.executable)
+identity = host_containment.host_containment_id(pid=os.getpid())
+handle = host_containment.adopt_host_containment(identity)
+intermediate = subprocess.Popen(
+    [base, "-c",
+     "import subprocess, sys; "
+     "child = subprocess.Popen([sys.argv[1], '-c', 'import time; time.sleep(120)'], "
+     "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+     "print(child.pid, flush=True)",
+     base],
+    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+)
+grandchild = int(intermediate.stdout.readline())
+intermediate.wait(timeout=30)
+me = psutil.Process()
+print(json.dumps({{
+    "pid": me.pid,
+    "process_create_time": me.create_time(),
+    "cmdline": me.cmdline(),
+    "containment": identity,
+    "intermediate": intermediate.pid,
+    "grandchild": grandchild,
+}}), flush=True)
+"""
+
+
+@windows_parent_links
+def test_a_confirmation_never_claims_an_unattributable_descendant_is_gone(runtime):
+    # The boundary the confirmation may cover: a grandchild whose own parent
+    # exited first names a dead PID, so nothing attributes it to the host.
+    # The receipt must say that this was not machine-verified.
+    parent = subprocess.Popen(  # noqa: S603 - fixed interpreter argv
+        [getattr(sys, "_base_executable", sys.executable), "-c", _JOB_GRANDCHILD_SCRIPT],
+        stdout=subprocess.PIPE,
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+    report = json.loads(parent.stdout.readline())
+    parent.wait(timeout=30)
+    deadline = time.monotonic() + 10
+    while psutil.pid_exists(report["pid"]) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    grandchild = psutil.Process(report["grandchild"])
+    try:
+        assert grandchild.ppid() == report["intermediate"]
+        assert grandchild.ppid() != report["pid"]
+        payload = _write(ha.lock_path_for(runtime), _contained_record(report))
+        receipt = ha.recover_after_independent_confirmation(
+            runtime,
+            record_sha256=hashlib.sha256(payload).hexdigest(),
+            confirmed_by="operator",
+        )
+        assert receipt["outcome"] == "recovered"
+        machine = receipt["machine_verification"]
+        assert machine["descendants"]["live"] == []
+        assert "unavailable" in machine["descendants"]
+        assert machine["listeners"]["method"] == "not_machine_verified"
+        assert receipt["operator_confirmation"]["covers"]
+        assert receipt["terminated_processes"] == []
+        assert grandchild.is_running()  # nothing was terminated
+    finally:
+        grandchild.kill()
+
+
+def test_a_lost_job_name_names_the_operator_flow_and_only_it_is_confirmable(runtime, monkeypatch):
+    from comsol_mcp import host_containment
+
+    def lost(_identity):
+        raise host_containment.ContainmentNameLost(host_containment.JOB_NAME_LOST_MESSAGE)
+
+    monkeypatch.setattr(host_containment, "containment_members", lost)
+    record = _record(
+        _dead_identity(),
+        containment={"kind": "windows_job", "name": "Local\\comsol_mcp_host_0_lost"},
+    )
+    payload = _write(ha.lock_path_for(runtime), record)
+    with pytest.raises(ha.HostAdmissionError) as automatic:
+        ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+    assert automatic.value.reason_code == "admission_state_uncertain"
+    assert str(automatic.value).endswith(ha.OPERATOR_RECOVERY_HINT)
+    assert automatic.value.details["recovery"].startswith("independent confirmation")
+    assert ha.lock_path_for(runtime).read_bytes() == payload
+
+    preview = ha.recovery_preview(runtime)
+    assert preview["explicit_recovery"]["state"] == "ready"
+    covers = preview["explicit_recovery"]["operator_confirmation_covers"]
+    assert [item["evidence"] for item in covers] == ["descendants", "listeners"]
+    receipt = ha.recover_after_independent_confirmation(
+        runtime, record_sha256=preview["record_sha256"], confirmed_by="operator"
+    )
+    assert receipt["outcome"] == "recovered"
+    assert receipt["automatic_verification"]["state"] == "unknown"
+    machine = receipt["machine_verification"]
+    assert machine["descendants"]["unavailable"].endswith(host_containment.JOB_NAME_LOST_MESSAGE)
+    assert machine["descendants"]["not_machine_verified"]
+    assert machine["listeners"]["method"] == "not_machine_verified"
+    assert receipt["operator_confirmation"] == {"confirmed_by": "operator", "covers": covers}
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        "the host job members cannot be listed: winerror 5",
+        "the host job cannot be opened: winerror 5",
+        "/proc cannot be listed: [Errno 13] denied",
+    ],
+)
+def test_explicit_recovery_keeps_other_unreadable_containment_unknown(
+    runtime, monkeypatch, problem
+):
+    from comsol_mcp import host_containment
+
+    def unreadable(_identity):
+        raise host_containment.UnknownContainment(problem)
+
+    monkeypatch.setattr(host_containment, "containment_members", unreadable)
+    record = _record(
+        _dead_identity(),
+        containment={"kind": "windows_job", "name": "Local\\comsol_mcp_host_0_denied"},
+    )
+    payload = _write(ha.lock_path_for(runtime), record)
+    with pytest.raises(ha.HostAdmissionError) as automatic:
+        ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+    assert automatic.value.reason_code == "admission_state_uncertain"
+    assert "--show" not in str(automatic.value)
+    with pytest.raises(ha.HostAdmissionError) as explicit:
+        ha.recover_after_independent_confirmation(
+            runtime,
+            record_sha256=hashlib.sha256(payload).hexdigest(),
+            confirmed_by="operator",
+        )
+    assert explicit.value.reason_code == "admission_state_uncertain"
+    assert problem in str(explicit.value)
+    assert ha.lock_path_for(runtime).read_bytes() == payload
+    assert not (runtime / "admission_recovered").exists()
+    assert ha.recovery_preview(runtime)["explicit_recovery"]["state"] == "refused"
+
+
+_SESSION_LEADER_SCRIPT = """
+import json, os, subprocess, sys
+os.setsid()  # a leader that records no containment (a legacy record)
+member = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(120)"],
+    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+)
+import psutil
+me = psutil.Process()
+print(json.dumps({
+    "pid": me.pid,
+    "process_create_time": me.create_time(),
+    "cmdline": me.cmdline(),
+    "member": member.pid,
+}), flush=True)
+"""
+
+
+@posix_sessions
+def test_explicit_recovery_refuses_a_live_member_of_the_dead_hosts_own_session(runtime):
+    parent = subprocess.Popen(  # noqa: S603 - fixed interpreter argv
+        [sys.executable, "-c", _SESSION_LEADER_SCRIPT],
+        stdout=subprocess.PIPE,
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+    report = json.loads(parent.stdout.readline())
+    parent.wait(timeout=30)
+    deadline = time.monotonic() + 10
+    while psutil.pid_exists(report["pid"]) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    member = psutil.Process(report["member"])
+    born = member.create_time()
+    try:
+        assert os.getsid(member.pid) == report["pid"]
+        assert member.ppid() != report["pid"]  # reparented: no parent link left
+        record = _record(
+            {
+                "pid": report["pid"],
+                "process_create_time": report["process_create_time"],
+                "command_signature": ha.command_signature(report["cmdline"]),
+            }
+        )
+        payload = _write(ha.lock_path_for(runtime), record)
+        with pytest.raises(ha.HostAdmissionError) as automatic:
+            ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+        assert automatic.value.reason_code == "admission_state_uncertain"
+        with pytest.raises(ha.HostAdmissionError) as error:
+            ha.recover_after_independent_confirmation(
+                runtime,
+                record_sha256=hashlib.sha256(payload).hexdigest(),
+                confirmed_by="operator",
+            )
+        assert error.value.reason_code == "admission_cleanup_unverified"
+        assert str(member.pid) in str(error.value)
+        [found] = error.value.details["descendants"]
+        assert (found["pid"], found["session"]) == (member.pid, report["pid"])
+        assert ha.lock_path_for(runtime).read_bytes() == payload
+        assert not (runtime / "admission_recovered").exists()
+        assert member.is_running() and member.create_time() == born
+        assert ha.recovery_preview(runtime)["explicit_recovery"]["state"] == "refused"
+    finally:
+        member.kill()
+
+
+@posix_sessions
+def test_the_host_session_check_handles_reuse_age_and_unreadable_sessions(monkeypatch):
+    host = {"pid": 990_001, "process_create_time": 1000.0, "role": "host"}
+    rows = [(990_002, 1, 1500.0, "member")]
+    monkeypatch.setattr(ha, "_process_inventory", lambda: list(rows))
+    sessions = {990_002: host["pid"]}
+
+    def getsid(pid):
+        if pid in sessions:
+            return sessions[pid]
+        raise ProcessLookupError(pid)
+
+    monkeypatch.setattr(os, "getsid", getsid)
+
+    def check():
+        return ha._attributable_descendants(
+            [host], ignore_pids=frozenset(), owners={}, context="for a test record"
+        )
+
+    scope, found, _ = check()
+    assert [item["pid"] for item in found] == [990_002]
+    assert "own session" in scope
+    # A live process now holding the host PID owns any session with that id.
+    rows.append((host["pid"], 1, 2000.0, "reuser"))
+    scope, found, _ = check()
+    assert found == [] and "belongs to another process" in scope
+    rows.pop()
+    # Older than the host: not started by it.
+    rows[0] = (990_002, 1, 900.0, "member")
+    assert check()[1] == []
+    # A process that exited since the inventory is gone, not unknown.
+    rows[0] = (990_003, 1, 1500.0, "gone")
+    assert check()[1] == []
+
+    def denied(_pid):
+        raise PermissionError(1, "denied")
+
+    monkeypatch.setattr(os, "getsid", denied)
+    with pytest.raises(ha.HostAdmissionError) as error:
+        check()
+    assert error.value.reason_code == "admission_state_uncertain"
+    assert "session of process 990003" in str(error.value)
+
+
+def _rust_str_const(source: str, name: str) -> str:
+    match = re.search(rf'const {name}: &str = "((?:[^"\\]|\\.)*)";', source, re.DOTALL)
+    assert match, name
+    return re.sub(r"\\\r?\n\s*", "", match.group(1))
+
+
+def test_shared_operator_texts_match_the_shim_sources():
+    from comsol_mcp import host_containment
+
+    shim = REPO_ROOT / "shim" / "src"
+    admission = (shim / "admission.rs").read_text(encoding="utf-8")
+    containment = (shim / "containment.rs").read_text(encoding="utf-8")
+    assert _rust_str_const(admission, "OPERATOR_RECOVERY_HINT") == ha.OPERATOR_RECOVERY_HINT
+    assert _rust_str_const(containment, "JOB_NAME_LOST") == (host_containment.JOB_NAME_LOST_MESSAGE)
 
 
 @windows_parent_links

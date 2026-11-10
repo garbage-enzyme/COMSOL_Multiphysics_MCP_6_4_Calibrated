@@ -31,6 +31,11 @@ Rules (shared with ``shim/src/admission.rs``):
   dependent startup are refused with ``admission_state_uncertain``; the
   record is kept, nothing is stopped, and the diagnostic names the explicit
   operator recovery flow (``--show`` / ``--recover``).
+* The operator's confirmation covers only that gap. Explicit recovery still
+  refuses every descendant the process inventory can attribute to the
+  previous host (parent links; on POSIX also its own session), and any other
+  unreadable evidence stays UNKNOWN. Its receipt records machine-verified
+  evidence apart from what the confirmation covers.
 * A fresh admission also checks the solver lease, so a live retained-version
   host that holds the lease blocks a new host in the same domain.
 """
@@ -54,16 +59,20 @@ from comsol_mcp.durable.io import atomic_write_bytes_exclusive, unlink_if_conten
 HOST_ADMISSION_SCHEMA = "comsol_mcp.host_admission"
 HOST_ADMISSION_VERSION = "1.1.0"
 HOST_ADMISSION_RECOVERY_SCHEMA = "comsol_mcp.host_admission_recovery"
-HOST_ADMISSION_RECOVERY_VERSION = "1.0.0"
-# Shared with shim/src/admission.rs: the reason code and this text are the
+# 1.1.0 keeps machine evidence and the operator confirmation apart.
+HOST_ADMISSION_RECOVERY_VERSION = "1.1.0"
+# Shared with shim/src/admission.rs: the reason code and these texts are the
 # operator-facing contract; the details carry the exact values.
-LEGACY_RECORD_UNKNOWN_MESSAGE = (
-    "the stale admission record has no containment identity; a reparented "
-    "descendant of the previous host cannot be ruled out on this platform, so "
+OPERATOR_RECOVERY_HINT = (
     "the record was kept; confirm independently that nothing from the previous "
     "host remains, then run "
     "'python -m comsol_mcp.host_admission --show <runtime-dir>' for the exact "
     "recovery command"
+)
+LEGACY_RECORD_UNKNOWN_MESSAGE = (
+    "the stale admission record has no containment identity; a reparented "
+    "descendant of the previous host cannot be ruled out on this platform, so "
+    + OPERATOR_RECOVERY_HINT
 )
 READABLE_VERSIONS = ("1.0.0", HOST_ADMISSION_VERSION)
 HOST_ADMISSION_FILE = "host_admission.lock"
@@ -587,6 +596,149 @@ def solver_lease_evidence(runtime_dir: str | Path) -> dict[str, Any]:
     }
 
 
+# What the inventory cannot attribute once the containment is out of reach.
+_UNATTRIBUTABLE_WINDOWS = (
+    "a descendant whose own parent exited before it: its parent link names a "
+    "process that is gone, so the inventory cannot attribute it to the previous host"
+)
+_UNATTRIBUTABLE_POSIX = (
+    "a descendant that left the previous host's session: orphans are reparented "
+    "here, so the inventory cannot attribute it to the previous host"
+)
+
+
+def _attributable_descendants(
+    roots: list[dict[str, Any]],
+    *,
+    ignore_pids: frozenset[int],
+    owners: Mapping[int, tuple[float, str]],
+    context: str,
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Live descendants the process inventory can attribute to a stale host.
+
+    Used when no containment can be read. Windows keeps a dead parent's PID
+    in its children's records, so every live direct child of the host or of
+    a recorded owned process is found. POSIX reparents orphans, so the host's
+    own session is checked too: a session id equal to the host PID can only
+    have been created by the host, and Linux never reuses a PID that is
+    still in use as a session id. A live process whose parent, birth time or
+    session cannot be read is UNKNOWN, never absent.
+
+    Returns ``(scope, descendants, independent_owners)``.
+    """
+    inventory = _process_inventory()
+    for pid, ppid, _created, name in inventory:
+        if isinstance(ppid, int) or pid in ignore_pids:
+            continue
+        raise HostAdmissionError(
+            "admission_state_uncertain",
+            f"process {pid} ({name}) has an unreadable parent; ancestry cannot "
+            f"be established {context}",
+            {"pid": pid},
+        )
+    current_birth = {pid: created for pid, _ppid, created, _name in inventory}
+    children: dict[int, list[tuple[int, float | None]]] = {}
+    for pid, ppid, created, _name in inventory:
+        if isinstance(ppid, int):
+            children.setdefault(ppid, []).append((pid, created))
+    descendants: list[dict[str, Any]] = []
+    independent: list[dict[str, Any]] = []
+    for pid, ppid, created, name in inventory:
+        if pid in ignore_pids:
+            continue
+        for root in roots:
+            if ppid != root["pid"]:
+                continue
+            if created is None:
+                raise HostAdmissionError(
+                    "admission_state_uncertain",
+                    f"process {pid} ({name}) has an unreadable creation time; it "
+                    "cannot be ordered against the previous host",
+                    {"pid": pid},
+                )
+            if created + CREATE_TIME_TOLERANCE_SECONDS < root["process_create_time"]:
+                continue  # Born before the recorded process: not its child.
+            holder = current_birth.get(root["pid"])
+            if (
+                holder is not None
+                and abs(holder - root["process_create_time"]) > CREATE_TIME_TOLERANCE_SECONDS
+                and created + CREATE_TIME_TOLERANCE_SECONDS >= holder
+            ):
+                continue  # A child of the process that now reuses the PID.
+            role = _independent_role(pid, float(created), name, owners, children)
+            if role is not None:
+                independent.append({"pid": pid, "name": name, "role": role})
+                continue
+            descendants.append(
+                {
+                    "pid": pid,
+                    "name": name,
+                    "process_create_time": created,
+                    "parent_pid": root["pid"],
+                    "parent_role": root["role"],
+                }
+            )
+    scope = "direct children of the host and of every recorded owned process"
+    if os.name == "nt":
+        return scope, descendants, independent
+    host = roots[0]
+    if host["pid"] in current_birth:
+        # A live process holds the host PID with another birth (the host is
+        # stale): any session with that id is the reuser's, since the PID
+        # could not have been reused while the host's session had members.
+        return (
+            f"{scope}; the host PID now belongs to another process, so no live "
+            "session is the host's",
+            descendants,
+            independent,
+        )
+    getsid = getattr(os, "getsid", None)
+    if getsid is None:
+        raise HostAdmissionError(
+            "admission_state_uncertain",
+            "this platform cannot read process sessions; descendants of the "
+            "previous host cannot be attributed",
+        )
+    listed = {item["pid"] for item in descendants}
+    for pid, _ppid, created, name in inventory:
+        if pid in ignore_pids or pid in listed:
+            continue
+        try:
+            session = getsid(pid)
+        except ProcessLookupError:
+            continue  # Exited since the inventory.
+        except OSError as exc:
+            raise HostAdmissionError(
+                "admission_state_uncertain",
+                f"the session of process {pid} ({name}) cannot be read: {exc}",
+                {"pid": pid},
+            ) from exc
+        if session != host["pid"]:
+            continue
+        if created is None:
+            raise HostAdmissionError(
+                "admission_state_uncertain",
+                f"process {pid} ({name}) has an unreadable creation time; it "
+                "cannot be ordered against the previous host",
+                {"pid": pid},
+            )
+        if created + CREATE_TIME_TOLERANCE_SECONDS < host["process_create_time"]:
+            continue  # Older than the host: not started by it.
+        role = _independent_role(pid, float(created), name, owners, children)
+        if role is not None:
+            independent.append({"pid": pid, "name": name, "role": role})
+            continue
+        descendants.append(
+            {
+                "pid": pid,
+                "name": name,
+                "process_create_time": created,
+                "session": host["pid"],
+            }
+        )
+    return f"{scope}, and every member of the host's own session", descendants, independent
+
+
 def verify_stale_cleanup(
     lock: Mapping[str, Any],
     runtime_dir: str | Path,
@@ -601,11 +753,15 @@ def verify_stale_cleanup(
     records, so every live direct child of the stale host or of a recorded
     owned process is found. POSIX reparents orphans, so a containment-less
     record there cannot rule out a surviving descendant: it is always
-    ``admission_state_uncertain`` (caller decision 2026-11-10). Only the
-    explicit operator recovery (``for_explicit_recovery``, after independent
-    confirmation) proceeds past that missing evidence; every positive
-    finding still refuses. ``ignore_pids`` exempts the observing process
-    and its ancestors.
+    ``admission_state_uncertain`` (caller decision 2026-11-10), as is a
+    Windows record whose job name no longer opens.
+
+    ``for_explicit_recovery`` (after independent operator confirmation)
+    proceeds past exactly those two gaps, and only after checking every
+    descendant the inventory can still attribute to the host; any such
+    descendant still refuses, and every other unreadable observation stays
+    UNKNOWN. The evidence then names what was not machine-verified.
+    ``ignore_pids`` exempts the observing process and its ancestors.
     """
     runtime = Path(runtime_dir)
     owner = _identity_fields(lock)
@@ -656,7 +812,11 @@ def verify_stale_cleanup(
             }
         )
 
-    from comsol_mcp.host_containment import UnknownContainment, containment_members
+    from comsol_mcp.host_containment import (
+        ContainmentNameLost,
+        UnknownContainment,
+        containment_members,
+    )
 
     containment = lock.get("containment")
     has_containment = isinstance(containment, dict) and bool(containment.get("kind"))
@@ -676,25 +836,41 @@ def verify_stale_cleanup(
     owners = independent_owner_identities(runtime)
     descendants: list[dict[str, Any]] = []
     independent: list[dict[str, Any]] = []
-    scope = "direct children of the host and of every recorded owned process"
-    containment_unavailable: str | None = None
+    members: set[int] | None = None
+    # Why the descendant evidence is incomplete. Only explicit recovery gets
+    # past one of these two gaps, and only after the attributable check below.
+    unavailable: str | None = None
+    unattributable = _UNATTRIBUTABLE_WINDOWS if os.name == "nt" else _UNATTRIBUTABLE_POSIX
     if isinstance(containment, dict) and has_containment:
-        # Kernel-authoritative membership: every descendant the host kept, at
-        # any depth, regardless of ppid readability or reparenting.
-        scope = "kernel membership of the recorded host containment"
         try:
             members = containment_members(containment)
-        except UnknownContainment as exc:
+        except ContainmentNameLost as exc:
+            # The expected state after a crash: the host held the only handle.
             if not for_explicit_recovery:
                 raise HostAdmissionError(
                     "admission_state_uncertain",
-                    f"the previous host's containment cannot be read: {exc}",
+                    f"the previous host's containment cannot be read: {exc}; "
+                    + OPERATOR_RECOVERY_HINT,
+                    {
+                        "path": str(runtime / HOST_ADMISSION_FILE),
+                        "containment": containment,
+                        "recovery": "independent confirmation, then --show and --recover",
+                    },
                 ) from exc
-            # The operator confirmed cleanup independently; the remaining
-            # checks (owned processes above, solver lease below) still refuse
-            # on any positive evidence.
-            containment_unavailable = str(exc)
-            members = set()
+            unavailable = f"the recorded containment cannot be read: {exc}"
+        except UnknownContainment as exc:
+            # Not the gap an operator confirmation covers: UNKNOWN for the
+            # automatic and the explicit path alike.
+            raise HostAdmissionError(
+                "admission_state_uncertain",
+                f"the previous host's containment cannot be read: {exc}",
+            ) from exc
+    elif os.name != "nt":
+        unavailable = "the record has no containment identity"
+    if members is not None:
+        # Kernel-authoritative membership: every descendant the host kept, at
+        # any depth, regardless of ppid readability or reparenting.
+        scope = "kernel membership of the recorded host containment"
         inventory_by_pid = {
             pid: (created, name) for pid, _ppid, created, name in _process_inventory()
         }
@@ -713,57 +889,18 @@ def verify_stale_cleanup(
                 continue
             descendants.append({"pid": pid, "name": name, "role": "member"})
     else:
-        # Legacy record without containment: fall back to parent links, and
-        # any live process whose parent is unreadable is UNKNOWN, not absent.
-        inventory = _process_inventory()
-        for pid, ppid, _created, name in inventory:
-            if isinstance(ppid, int) or pid in ignore_pids:
-                continue
-            raise HostAdmissionError(
-                "admission_state_uncertain",
-                f"process {pid} ({name}) has an unreadable parent; ancestry cannot "
-                "be established for a record without containment evidence",
-                {"pid": pid},
-            )
-        current_birth = {pid: created for pid, _ppid, created, _name in inventory}
-        children: dict[int, list[tuple[int, float | None]]] = {}
-        for pid, ppid, created, _name in inventory:
-            if isinstance(ppid, int):
-                children.setdefault(ppid, []).append((pid, created))
-        for pid, ppid, created, name in inventory:
-            if pid in ignore_pids:
-                continue
-            for root in roots:
-                if ppid != root["pid"]:
-                    continue
-                if created is None:
-                    raise HostAdmissionError(
-                        "admission_state_uncertain",
-                        f"process {pid} ({name}) has an unreadable creation time; it "
-                        "cannot be ordered against the previous host",
-                        {"pid": pid},
-                    )
-                if created + CREATE_TIME_TOLERANCE_SECONDS < root["process_create_time"]:
-                    continue  # Born before the recorded process: not its child.
-                holder = current_birth.get(root["pid"])
-                if (
-                    holder is not None
-                    and abs(holder - root["process_create_time"]) > CREATE_TIME_TOLERANCE_SECONDS
-                    and created + CREATE_TIME_TOLERANCE_SECONDS >= holder
-                ):
-                    continue  # A child of the process that now reuses the PID.
-                role = _independent_role(pid, float(created), name, owners, children)
-                if role is not None:
-                    independent.append({"pid": pid, "name": name, "role": role})
-                    continue
-                descendants.append(
-                    {
-                        "pid": pid,
-                        "name": name,
-                        "parent_pid": root["pid"],
-                        "parent_role": root["role"],
-                    }
-                )
+        # No readable containment: every descendant the inventory can still
+        # attribute to the host is positive evidence, explicit recovery or not.
+        scope, descendants, independent = _attributable_descendants(
+            roots,
+            ignore_pids=ignore_pids,
+            owners=owners,
+            context=(
+                "while the recorded containment cannot be read"
+                if has_containment
+                else "for a record without containment evidence"
+            ),
+        )
     if descendants:
         listed = ", ".join(f"PID {item['pid']} ({item['name']})" for item in descendants)
         raise HostAdmissionError(
@@ -772,23 +909,7 @@ def verify_stale_cleanup(
             {"descendants": descendants},
         )
     lease = solver_lease_evidence(runtime)
-    if containment_unavailable is not None:
-        return {
-            "owner": {"pid": owner[0], "process_create_time": owner[1]},
-            "owned_processes": owned_evidence,
-            "descendants": {
-                "live": [],
-                "independent_owners": independent,
-                "scope": scope,
-                "unavailable": containment_unavailable,
-            },
-            "solver_lease": lease,
-            "listeners": {
-                "method": "owned_process_absence",
-                "note": "no recorded or descendant process is alive, so none can hold a listener",
-            },
-        }
-    return {
+    evidence: dict[str, Any] = {
         "owner": {"pid": owner[0], "process_create_time": owner[1]},
         "owned_processes": owned_evidence,
         "descendants": {
@@ -802,6 +923,19 @@ def verify_stale_cleanup(
             "note": "no recorded or descendant process is alive, so none can hold a listener",
         },
     }
+    if unavailable is not None:
+        # Explicit recovery only: say what the machine did not verify, and
+        # do not infer listener absence from an incomplete descendant list.
+        evidence["descendants"]["unavailable"] = unavailable
+        evidence["descendants"]["not_machine_verified"] = unattributable
+        evidence["listeners"] = {
+            "method": "not_machine_verified",
+            "note": (
+                "the descendant evidence is incomplete, so listener absence is not "
+                "machine-verified; it rests on the operator confirmation"
+            ),
+        }
+    return evidence
 
 
 def acquire(
@@ -1221,7 +1355,7 @@ def recovery_preview(runtime_dir: str | Path) -> dict[str, Any]:
         return {"state": "absent", "path": str(path)}
     digest = hashlib.sha256(raw).hexdigest()
     view = status(runtime, assess_cleanup=True)
-    return {
+    preview: dict[str, Any] = {
         "state": view.get("state"),
         "reason": view.get("reason"),
         "path": str(path),
@@ -1233,6 +1367,53 @@ def recovery_preview(runtime_dir: str | Path) -> dict[str, Any]:
             '--confirmed-by "<who confirmed that nothing from the previous host remains>"'
         ),
     }
+    if view.get("state") == "stale":
+        # What --recover would decide now, so the operator sees any process
+        # still attributable to the previous host before confirming anything.
+        try:
+            evidence = verify_stale_cleanup(
+                parse_lock(raw, path=path),
+                runtime,
+                ignore_pids=observer_lineage(),
+                for_explicit_recovery=True,
+            )
+        except HostAdmissionError as exc:
+            preview["explicit_recovery"] = {
+                "state": "refused",
+                "reason_code": exc.reason_code,
+                "reason": str(exc),
+                "details": exc.details,
+            }
+        else:
+            preview["explicit_recovery"] = {
+                "state": "ready",
+                "operator_confirmation_covers": confirmation_coverage(evidence),
+            }
+    return preview
+
+
+def confirmation_coverage(evidence: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """What an operator confirmation stands in for: the machine's gaps only.
+
+    Empty when the machine verified every check itself.
+    """
+    descendants = evidence.get("descendants")
+    if not isinstance(descendants, Mapping) or "unavailable" not in descendants:
+        return []
+    return [
+        {
+            "evidence": "descendants",
+            "unavailable": descendants["unavailable"],
+            "not_machine_verified": descendants.get("not_machine_verified"),
+            "machine_verified_scope": descendants.get("scope"),
+        },
+        {
+            "evidence": "listeners",
+            "not_machine_verified": (
+                "listener absence follows only from complete descendant evidence"
+            ),
+        },
+    ]
 
 
 def recover_after_independent_confirmation(
@@ -1243,12 +1424,16 @@ def recover_after_independent_confirmation(
 ) -> dict[str, Any]:
     """Archive and remove one stale record after independent confirmation.
 
-    The confirmation lifts only the missing containment evidence. Every
-    positive finding still refuses: a live or unverifiable recorded host, a
-    live owned process, a live descendant reachable through containment or
-    parent links, a live solver-lease owner or recorded server. The record
+    The confirmation covers only the evidence the machine cannot obtain: a
+    Windows job name lost with its host, or a POSIX record without a
+    containment identity. Every observable finding still refuses: a live or
+    unverifiable recorded host, a live owned process, a live descendant that
+    the containment or the process inventory still attributes to the host
+    (parent links; on POSIX its own session), a live solver-lease owner or
+    recorded server. Any other unreadable evidence stays UNKNOWN. The record
     must still hold the exact bytes the operator inspected. It is archived
-    before it is removed, nothing is terminated, and a receipt is written.
+    before it is removed, nothing is terminated, and the receipt keeps the
+    machine-verified evidence apart from what the confirmation covers.
     """
     if not isinstance(confirmed_by, str) or not confirmed_by.strip():
         raise HostAdmissionError(
@@ -1321,8 +1506,11 @@ def recover_after_independent_confirmation(
         "previous_host": owner_summary(lock),
         "owner_state": {"state": state, "reason": reason},
         "automatic_verification": automatic,
-        "explicit_verification": evidence,
-        "confirmed_by": confirmed_by.strip(),
+        "machine_verification": evidence,
+        "operator_confirmation": {
+            "confirmed_by": confirmed_by.strip(),
+            "covers": confirmation_coverage(evidence),
+        },
         "terminated_processes": [],
     }
     atomic_write_bytes_exclusive(archive_dir / f"{stem}.recovery.json", document_bytes(receipt))

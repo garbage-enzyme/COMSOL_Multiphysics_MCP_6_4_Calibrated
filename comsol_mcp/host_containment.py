@@ -3,10 +3,9 @@
 Windows: the host assigns itself to a named job object at startup and records
 the name in the admission lock. Every process the host starts inherits the
 job unless it explicitly breaks away (independent owners do). A recovery
-reader opens the job by name and asks the kernel for its member list: that
-list is authoritative and complete regardless of ppid readability. The job
-object keeps existing while any member process lives, so a name that no
-longer opens proves no descendant remains.
+reader opens the job by name and asks the kernel for its member list: while
+the name opens, that list is authoritative and complete regardless of ppid
+readability. The name does not outlive the last handle (see below).
 
 POSIX: the host becomes a session leader at startup and records the session
 id. Descendants inherit the session unless they start a new one (independent
@@ -80,6 +79,22 @@ class UnknownContainment(RuntimeError):
     """The containment evidence could not be read; the state is UNKNOWN."""
 
 
+# Shared with shim/src/containment.rs (JOB_NAME_LOST).
+JOB_NAME_LOST_MESSAGE = (
+    "the named job no longer opens; the object dies with its last handle, not "
+    "its last member, so a surviving descendant cannot be ruled out"
+)
+
+
+class ContainmentNameLost(UnknownContainment):
+    """The recorded job name no longer opens: still UNKNOWN, never absence.
+
+    This is the expected state after a host crash (the host held the only
+    handle). It is the one containment gap an explicit operator recovery may
+    cover; every other unreadable containment stays UNKNOWN there too.
+    """
+
+
 def host_containment_id(*, pid: int) -> dict[str, Any]:
     """The containment identity this host should adopt and record."""
     if WINDOWS:
@@ -150,11 +165,7 @@ def containment_members(identity: dict[str, Any]) -> set[int]:
             if error == _ERROR_FILE_NOT_FOUND:
                 # The object dies with its last HANDLE, not its last member:
                 # a surviving descendant cannot be ruled out (WIN-CONTAIN-01).
-                raise UnknownContainment(
-                    "the named job no longer opens; the object dies with its last "
-                    "handle, not its last member, so a surviving descendant cannot "
-                    "be ruled out"
-                )
+                raise ContainmentNameLost(JOB_NAME_LOST_MESSAGE)
             raise UnknownContainment(f"the host job cannot be opened: winerror {error}")
         try:
 
@@ -214,6 +225,8 @@ def containment_members(identity: dict[str, Any]) -> set[int]:
 
 
 __all__ = [
+    "JOB_NAME_LOST_MESSAGE",
+    "ContainmentNameLost",
     "UnknownContainment",
     "adopt_host_containment",
     "containment_members",

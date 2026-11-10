@@ -197,8 +197,12 @@ after the host exited — a new host refuses to start with
 diagnostic names the operator flow: `python -m comsol_mcp.host_admission
 --show <runtime-dir>` prints the record's identity and the exact `--recover`
 command. Run it only after confirming independently that nothing from the
-previous host is still running. It archives the record before removing it
-and refuses if anything from the previous host is still visible.
+previous host is still running. `--show` also says whether `--recover` would
+proceed now and lists any process still attributable to the previous host,
+such as a child it started; stop those yourself first, because nothing is
+stopped for you. `--recover` archives the record before removing it, refuses
+while anything from the previous host is still visible, and writes a receipt
+that keeps what the machine verified apart from what your confirmation covers.
 
 ### Tool Profile
 

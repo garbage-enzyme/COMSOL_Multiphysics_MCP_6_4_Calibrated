@@ -957,13 +957,16 @@ class Probe:
         return report
 
     def case07_windows_decision(self) -> None:
-        """WIN-CONTAIN-01 rows: a lost job name never proves cleanup.
+        """WIN-CONTAIN-01 and WIN-RECOVER-02 rows: a lost job name never
+        proves cleanup, and a confirmation never overrides a visible child.
 
         The job object dies with its last handle, not its last member, so
         after a host exits its recorded containment can no longer be read.
-        Automatic recovery refuses as UNKNOWN with the record kept; the
-        explicit operator flow recovers it and never lifts positive
-        evidence.
+        Automatic recovery refuses as UNKNOWN with the record kept and names
+        the operator flow. The explicit flow refuses while the inventory
+        still attributes a live child to the host, and recovers only after
+        that child is gone, with a receipt that keeps the confirmation apart
+        from machine evidence.
         """
         import psutil
 
@@ -972,7 +975,9 @@ class Probe:
 
             def release() -> None:
                 try:
-                    psutil.Process(report["orphan"]).kill()
+                    orphan = psutil.Process(report["orphan"])
+                    orphan.kill()
+                    orphan.wait(timeout=10)
                 except psutil.Error:
                     pass
 
@@ -990,6 +995,7 @@ class Probe:
                 and observed["reason_code"] == "admission_state_uncertain"
                 and "containment cannot be read" in observed["stderr_tail"]
                 and "no longer opens" in observed["stderr_tail"]
+                and "comsol_mcp.host_admission --show" in observed["stderr_tail"]
                 and observed["lock_bytes_unchanged"]
                 and not observed["forbidden_worker_started"]
                 and psutil.pid_exists(fixture["orphan_pid"])
@@ -1009,14 +1015,61 @@ class Probe:
                 host = self.shim_host(self.env(settings, child=child), directory / "host.log")
             refused = self.refused(host, runtime, marker)
             refused["lock_bytes_unchanged"] = sp.read_lock(runtime)[1] == fixture["lock_bytes"]
+            orphan_pid = fixture["orphan_pid"]
             show = self._cli("--show", str(runtime))
             digest = (show["json"] or {}).get("record_sha256")
+            preview = (show["json"] or {}).get("explicit_recovery") or {}
             wrong = self._cli("--recover", str(runtime), "0" * 64, "--confirmed-by", "probe")
             still_kept = sp.read_lock(runtime)[1] == fixture["lock_bytes"]
+            # A confirmation never overrides a child the inventory still
+            # attributes to the host: refused, record and child untouched.
+            with_child = self._cli(
+                "--recover", str(runtime), str(digest), "--confirmed-by", "startup probe"
+            )
+            child_refusal = {
+                "refused": refused,
+                "show": show,
+                "wrong_digest": wrong,
+                "record_kept_after_wrong_digest": still_kept,
+                "recover_with_live_child": with_child,
+                "record_kept_with_live_child": sp.read_lock(runtime)[1] == fixture["lock_bytes"],
+                "nothing_archived": not (runtime / "admission_recovered").exists(),
+                "child_alive": psutil.pid_exists(orphan_pid),
+            }
+            self.check(
+                f"case07.explicit_recovery_refuses_a_live_direct_child_after_job_loss_{transport}",
+                refused["exit_code"] == 2
+                and refused["reason_code"] == "admission_state_uncertain"
+                and "comsol_mcp.host_admission --show" in refused["stderr_tail"]
+                and refused["lock_bytes_unchanged"]
+                and show["exit_code"] == 0
+                and bool(digest)
+                and preview.get("state") == "refused"
+                and preview.get("reason_code") == "admission_cleanup_unverified"
+                and str(orphan_pid) in str(preview.get("reason"))
+                and wrong["exit_code"] == 2
+                and still_kept
+                and with_child["exit_code"] == 2
+                and "admission_cleanup_unverified" in with_child["stderr_tail"]
+                and str(orphan_pid) in with_child["stderr_tail"]
+                and child_refusal["record_kept_with_live_child"]
+                and child_refusal["nothing_archived"]
+                and child_refusal["child_alive"],
+                child_refusal,
+            )
+            # The operator's independent cleanup: this probe stops its own
+            # fixture child. The recovery tool itself terminates nothing.
+            for release in fixture["release"]:
+                release()
+            child_gone = not psutil.pid_exists(orphan_pid)
+            show_again = self._cli("--show", str(runtime))
+            ready = (show_again["json"] or {}).get("explicit_recovery") or {}
             recover = self._cli(
                 "--recover", str(runtime), str(digest), "--confirmed-by", "startup probe"
             )
             receipt = recover["json"] or {}
+            machine = receipt.get("machine_verification") or {}
+            confirmation = receipt.get("operator_confirmation") or {}
             archived = (
                 runtime
                 / "admission_recovered"
@@ -1032,45 +1085,43 @@ class Probe:
             lock = sp.wait_for_owner(runtime, again, timeout=TIMEOUT_EXIT)
             admitted = sp.lock_owned_by(lock, again)
             closed = again.close()
-            orphan_alive = psutil.pid_exists(fixture["orphan_pid"])
             observed = {
-                "refused": refused,
-                "show": show,
-                "wrong_digest": wrong,
-                "record_kept_after_wrong_digest": still_kept,
+                "child_stopped_by_the_operator": child_gone,
+                "show_after_cleanup": show_again,
                 "recover": recover,
                 "archive_matches_record": archived.is_file()
                 and archived.read_bytes() == fixture["lock_bytes"],
                 "lock_removed": lock_gone,
                 "admitted_after_recovery": admitted,
                 "exit_after_recovery": closed,
-                "orphan_alive_after_recovery": orphan_alive,
                 "automatic_verification": (receipt.get("automatic_verification") or {}).get(
                     "state"
                 ),
+                "covered_by_confirmation": [
+                    item.get("evidence") for item in confirmation.get("covers") or []
+                ],
+                "listener_method": (machine.get("listeners") or {}).get("method"),
             }
             self.check(
                 f"case07.explicit_recovery_of_a_lost_job_record_{transport}",
-                refused["exit_code"] == 2
-                and refused["reason_code"] == "admission_state_uncertain"
-                and refused["lock_bytes_unchanged"]
-                and show["exit_code"] == 0
-                and bool(digest)
-                and wrong["exit_code"] == 2
-                and still_kept
+                child_gone
+                and show_again["exit_code"] == 0
+                and (show_again["json"] or {}).get("record_sha256") == digest
+                and ready.get("state") == "ready"
                 and recover["exit_code"] == 0
                 and receipt.get("outcome") == "recovered"
                 and observed["automatic_verification"] == "unknown"
                 and receipt.get("terminated_processes") == []
+                and confirmation.get("confirmed_by") == "startup probe"
+                and observed["covered_by_confirmation"] == ["descendants", "listeners"]
+                and observed["listener_method"] == "not_machine_verified"
+                and "no longer opens" in str((machine.get("descendants") or {}).get("unavailable"))
                 and observed["archive_matches_record"]
                 and lock_gone
                 and admitted
-                and closed == 0
-                and observed["orphan_alive_after_recovery"],
+                and closed == 0,
                 observed,
             )
-            for release in fixture["release"]:
-                release()
 
     def case07_posix_decision(self) -> None:
         """POSIX rows for the caller decision of 2026-11-10.
@@ -1203,6 +1254,13 @@ class Probe:
                 "admitted_after_recovery": admitted,
                 "exit_after_recovery": closed,
             }
+            confirmation = receipt.get("operator_confirmation") or {}
+            observed["covered_by_confirmation"] = [
+                item.get("evidence") for item in confirmation.get("covers") or []
+            ]
+            observed["listener_method"] = (
+                (receipt.get("machine_verification") or {}).get("listeners") or {}
+            ).get("method")
             self.check(
                 f"case07.explicit_recovery_after_independent_confirmation_{transport}",
                 refused["exit_code"] == 2
@@ -1216,6 +1274,9 @@ class Probe:
                 and recover["exit_code"] == 0
                 and receipt.get("outcome") == "recovered"
                 and receipt.get("terminated_processes") == []
+                and confirmation.get("confirmed_by") == "startup probe"
+                and observed["covered_by_confirmation"] == ["descendants", "listeners"]
+                and observed["listener_method"] == "not_machine_verified"
                 and archive_matches
                 and lock_gone
                 and admitted
@@ -1247,6 +1308,56 @@ class Probe:
         finally:
             for release in fixture["release"]:
                 release()
+
+        # A dead session leader that recorded no containment: its session
+        # members are still attributable to it, so the flow refuses them.
+        directory = self.directory("case07-explicit-recovery-session-member")
+        runtime = directory / "runtime"
+        runtime.mkdir()
+        script = (
+            "import json, os, psutil, subprocess, sys\n"
+            "os.setsid()\n"
+            "member = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'],"
+            " stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,"
+            " stderr=subprocess.DEVNULL)\n"
+            "me = psutil.Process()\n"
+            "print(json.dumps({'pid': me.pid, 'process_create_time': me.create_time(),"
+            " 'cmdline': me.cmdline(), 'member': member.pid}), flush=True)\n"
+        )
+        parent = subprocess.Popen(  # noqa: S603 - fixed interpreter argv
+            [str(self.python), "-c", script],
+            stdout=subprocess.PIPE,
+            text=True,
+            cwd=str(sp.ROOT),
+        )
+        report = json.loads(parent.stdout.readline())
+        parent.wait(timeout=30)
+        deadline = time.time() + 10
+        while psutil.pid_exists(report["pid"]) and time.time() < deadline:
+            time.sleep(0.05)
+        try:
+            payload = sp.write_record(runtime, self._record_of(report))
+            digest = hashlib.sha256(payload).hexdigest()
+            refused = self._cli(
+                "--recover", str(runtime), digest, "--confirmed-by", "startup probe"
+            )
+            kept = sp.read_lock(runtime)[1] == payload
+            alive = psutil.pid_exists(report["member"])
+            self.check(
+                "case07.explicit_recovery_refuses_a_live_member_of_the_dead_hosts_session",
+                refused["exit_code"] == 2
+                and "admission_cleanup_unverified" in refused["stderr_tail"]
+                and str(report["member"]) in refused["stderr_tail"]
+                and kept
+                and not (runtime / "admission_recovered").exists()
+                and alive,
+                {"refused": refused, "record_kept": kept, "member_alive": alive},
+            )
+        finally:
+            try:
+                psutil.Process(report["member"]).kill()
+            except psutil.Error:
+                pass
 
     # -- case 8 ------------------------------------------------------------
 

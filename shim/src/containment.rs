@@ -19,6 +19,19 @@ pub enum ContainmentError {
     Unknown(String),
 }
 
+/// Shared with ``host_containment.JOB_NAME_LOST_MESSAGE``: a recorded job
+/// name that no longer opens. Still UNKNOWN; the one containment gap the
+/// explicit operator recovery may cover after a host crash.
+pub const JOB_NAME_LOST: &str = "the named job no longer opens; the object dies with its \
+last handle, not its last member, so a surviving descendant cannot be ruled out";
+
+impl ContainmentError {
+    /// Whether this is the lost-name case rather than other unreadable evidence.
+    pub fn is_name_lost(&self) -> bool {
+        matches!(self, ContainmentError::Unknown(reason) if reason == JOB_NAME_LOST)
+    }
+}
+
 impl std::fmt::Display for ContainmentError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -69,8 +82,8 @@ mod imp {
         text.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    /// An owned handle to the host's registry job. Dropping it releases the
-    /// name reference; the object lives on while any member process does.
+    /// An owned handle to the host's registry job. Once the last handle is
+    /// dropped the name no longer opens, even while members still live.
     pub struct RegistryJob {
         handle: *mut c_void,
     }
@@ -120,12 +133,7 @@ mod imp {
                 if error == ERROR_FILE_NOT_FOUND {
                     // WIN-CONTAIN-01: the object dies with its last HANDLE,
                     // not its last member; members may still be alive.
-                    return Err(ContainmentError::Unknown(
-                        "the named job no longer opens; the object dies with its \
-                         last handle, not its last member, so a surviving \
-                         descendant cannot be ruled out"
-                            .to_owned(),
-                    ));
+                    return Err(ContainmentError::Unknown(super::JOB_NAME_LOST.to_owned()));
                 }
                 let _ = error;
                 return Err(ContainmentError::Unknown(format!(
@@ -411,6 +419,13 @@ mod tests {
         assert!(members(&empty).is_err());
     }
 
+    #[test]
+    fn only_the_lost_job_name_counts_as_name_lost() {
+        assert!(ContainmentError::Unknown(JOB_NAME_LOST.to_owned()).is_name_lost());
+        let other = members(&serde_json::json!({})).expect_err("an empty record is UNKNOWN");
+        assert!(!other.is_name_lost(), "{other}");
+    }
+
     #[cfg(windows)]
     #[test]
     fn a_lost_job_name_is_unknown_never_empty() {
@@ -427,5 +442,6 @@ mod tests {
         let message = refused.to_string();
         assert!(message.contains("no longer opens"), "{message}");
         assert!(message.contains("cannot be ruled out"), "{message}");
+        assert!(refused.is_name_lost(), "{message}");
     }
 }

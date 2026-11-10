@@ -68,15 +68,31 @@ impl std::fmt::Display for Refusal {
     }
 }
 
-// Shared with comsol_mcp.host_admission: the reason code and this text are
-// the operator-facing contract for a stale record without containment.
+// Shared with comsol_mcp.host_admission (OPERATOR_RECOVERY_HINT and
+// LEGACY_RECORD_UNKNOWN_MESSAGE): the reason code and these texts are the
+// operator-facing contract for a stale record that cannot prove cleanup.
+const OPERATOR_RECOVERY_HINT: &str = "the record was kept; confirm independently that \
+nothing from the previous host remains, then run 'python -m comsol_mcp.host_admission \
+--show <runtime-dir>' for the exact recovery command";
+
 fn legacy_record_unknown_message() -> String {
-    "the stale admission record has no containment identity; a reparented \
+    format!(
+        "the stale admission record has no containment identity; a reparented \
 descendant of the previous host cannot be ruled out on this platform, so \
-the record was kept; confirm independently that nothing from the previous \
-host remains, then run 'python -m comsol_mcp.host_admission --show \
-<runtime-dir>' for the exact recovery command"
-        .to_owned()
+{OPERATOR_RECOVERY_HINT}"
+    )
+}
+
+/// The refusal for a recorded containment that cannot be read. A lost job
+/// name (the crash case) also names the explicit operator flow.
+fn containment_unreadable_message(problem: &crate::containment::ContainmentError) -> String {
+    if problem.is_name_lost() {
+        format!(
+            "the previous host's containment cannot be read: {problem}; {OPERATOR_RECOVERY_HINT}"
+        )
+    } else {
+        format!("the previous host's containment cannot be read: {problem}")
+    }
 }
 
 fn refusal<T>(code: &'static str, message: impl Into<String>) -> Result<T, Refusal> {
@@ -1115,7 +1131,7 @@ fn verify_stale_cleanup_inner(
         let members = crate::containment::members(containment.expect("the kind was present"))
             .map_err(|problem| Refusal {
                 code: "admission_state_uncertain",
-                message: format!("the previous host's containment cannot be read: {problem}"),
+                message: containment_unreadable_message(&problem),
             })?;
         for pid in members {
             if ignore_pids.contains(&pid) {
@@ -1600,6 +1616,19 @@ mod tests {
         assert!(message.contains("python -m comsol_mcp.host_admission --show"));
     }
 
+    #[test]
+    fn only_a_lost_job_name_names_the_operator_flow() {
+        use crate::containment::{ContainmentError, JOB_NAME_LOST};
+        let lost =
+            containment_unreadable_message(&ContainmentError::Unknown(JOB_NAME_LOST.to_owned()));
+        assert!(lost.contains("no longer opens"), "{lost}");
+        assert!(lost.ends_with(OPERATOR_RECOVERY_HINT), "{lost}");
+        let other = containment_unreadable_message(&ContainmentError::Unknown(
+            "the host job cannot be opened: access denied".to_owned(),
+        ));
+        assert!(!other.contains("--show"), "{other}");
+    }
+
     #[cfg(windows)]
     #[test]
     fn a_lost_windows_job_name_is_unknown_not_clean() {
@@ -1620,6 +1649,13 @@ mod tests {
         );
         assert!(
             error.message.contains("no longer opens"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error
+                .message
+                .contains("python -m comsol_mcp.host_admission --show"),
             "{}",
             error.message
         );
