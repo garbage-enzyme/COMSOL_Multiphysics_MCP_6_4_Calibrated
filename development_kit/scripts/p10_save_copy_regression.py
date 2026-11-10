@@ -279,6 +279,7 @@ def _run(work, runtime, discovery_dir, snapshots, volume_root, args) -> int:
     attached = None
     last_error = None
     attempt = 0
+    attach_log: list[dict] = RESULTS.setdefault("attach_log", [])
     for attempt in range(6):
         try:
             attached = manager.attach(
@@ -288,9 +289,18 @@ def _run(work, runtime, discovery_dir, snapshots, volume_root, args) -> int:
             )
         except Exception as exc:  # noqa: BLE001 - transient inventory failures retry
             last_error = f"{type(exc).__name__}: {exc}"
+            attach_log.append({"attempt": attempt + 1, "raised": last_error})
             time.sleep(2.0)
             continue
         last_error = None
+        attach_log.append(
+            {
+                "attempt": attempt + 1,
+                "success": bool(attached.get("success")),
+                "state": attached.get("state"),
+                "error": attached.get("error"),
+            }
+        )
         if attached.get("success"):
             break
         # The preflight process/listener inventory can be transiently
@@ -376,6 +386,15 @@ def _run(work, runtime, discovery_dir, snapshots, volume_root, args) -> int:
         )
         row = {key: result.get(key) for key in keys if key in result}
         row["volume_residue_free"] = (result.get("volume_cleanup") or {}).get("residue_free")
+        verification = result.get("model_lock_verification")
+        if isinstance(verification, dict):
+            # The reason behind snapshot_precondition_failed (for example a
+            # preflight inventory that was incomplete for one sweep).
+            row["model_lock_verification"] = {
+                key: verification.get(key)
+                for key in ("state", "error", "changed_fields")
+                if key in verification
+            }
         return row
 
     def transient(result: dict) -> bool:
