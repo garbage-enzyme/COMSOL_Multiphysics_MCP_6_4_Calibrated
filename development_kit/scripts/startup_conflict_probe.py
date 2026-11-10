@@ -863,6 +863,7 @@ class Probe:
         # from every later recovery.
         if os.name == "nt":
             self.case07_windows_decision()
+            self.case07_console_in_use()
             return
         for transport in ("python", "shim"):
             directory = self.directory(f"case07-group-leader-{transport}")
@@ -974,12 +975,22 @@ class Probe:
             report = self._dead_host_behind_a_lost_job()
 
             def release() -> None:
-                try:
-                    orphan = psutil.Process(report["orphan"])
-                    orphan.kill()
-                    orphan.wait(timeout=10)
-                except psutil.Error:
-                    pass
+                # The orphan keeps the host's own console host alive; an
+                # operator's cleanup is complete once both are gone.
+                consoles = [
+                    process
+                    for process in psutil.process_iter(["ppid", "name"])
+                    if process.info["ppid"] == report["pid"]
+                    and (process.info["name"] or "").lower() == "conhost.exe"
+                ]
+                for pid in (report["orphan"], *(item.pid for item in consoles)):
+                    try:
+                        process = psutil.Process(pid)
+                        if pid == report["orphan"]:
+                            process.kill()
+                        process.wait(timeout=10)
+                    except psutil.Error:
+                        pass
 
             return {
                 "lock_bytes": sp.write_record(runtime, self._record_of(report)),
@@ -1122,6 +1133,109 @@ class Probe:
                 and closed == 0,
                 observed,
             )
+
+    def case07_console_in_use(self) -> None:
+        """A dead host's own console still in use refuses explicit recovery.
+
+        The host had its own hidden console; its grandchild (whose parent
+        exited first) cannot be attributed through parent links but keeps
+        that console, and so its console host, alive. The flow refuses, keeps
+        the record and the grandchild, and proceeds once the grandchild is
+        stopped by the operator.
+        """
+        import psutil
+
+        interpreter = getattr(sys, "_base_executable", sys.executable)
+        script = (
+            "import json, os, psutil, subprocess, sys\n"
+            f"sys.path.insert(0, {str(sp.ROOT)!r})\n"
+            "from comsol_mcp import host_containment\n"
+            "identity = host_containment.host_containment_id(pid=os.getpid())\n"
+            "handle = host_containment.adopt_host_containment(identity)\n"
+            "code = ('import subprocess, sys; c = subprocess.Popen([sys.argv[1], \"-c\", '\n"
+            "        '\"import time; time.sleep(600)\"], stdin=subprocess.DEVNULL, '\n"
+            "        'stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); '\n"
+            "        'print(c.pid, flush=True)')\n"
+            "inter = subprocess.Popen([sys.executable, '-c', code, sys.executable],\n"
+            "    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,"
+            " text=True)\n"
+            "grandchild = int(inter.stdout.readline())\n"
+            "inter.wait(timeout=30)\n"
+            "me = psutil.Process()\n"
+            "print(json.dumps({'pid': me.pid, 'process_create_time': me.create_time(),"
+            " 'cmdline': me.cmdline(), 'containment': identity,"
+            " 'grandchild': grandchild}), flush=True)\n"
+        )
+        parent = subprocess.Popen(  # noqa: S603 - fixed interpreter argv
+            [interpreter, "-c", script],
+            stdout=subprocess.PIPE,
+            text=True,
+            cwd=str(sp.ROOT),
+            creationflags=sp.NO_WINDOW,
+        )
+        report = json.loads(parent.stdout.readline())
+        parent.wait(timeout=30)
+        deadline = time.time() + 10
+        while psutil.pid_exists(report["pid"]) and time.time() < deadline:
+            time.sleep(0.05)
+        directory = self.directory("case07-explicit-recovery-console-in-use")
+        runtime = directory / "runtime"
+        runtime.mkdir()
+        grandchild = report["grandchild"]
+        try:
+            consoles = [
+                process.pid
+                for process in psutil.process_iter(["ppid", "name"])
+                if process.info["ppid"] == report["pid"]
+                and (process.info["name"] or "").lower() == "conhost.exe"
+            ]
+            payload = sp.write_record(runtime, self._record_of(report))
+            digest = hashlib.sha256(payload).hexdigest()
+            refused = self._cli(
+                "--recover", str(runtime), digest, "--confirmed-by", "startup probe"
+            )
+            kept = sp.read_lock(runtime)[1] == payload
+            alive = psutil.pid_exists(grandchild)
+            try:
+                stopped = psutil.Process(grandchild)
+                stopped.kill()
+                stopped.wait(timeout=10)
+                for pid in consoles:
+                    psutil.Process(pid).wait(timeout=10)
+            except psutil.Error:
+                pass
+            recover = self._cli(
+                "--recover", str(runtime), digest, "--confirmed-by", "startup probe"
+            )
+            receipt = recover["json"] or {}
+            observed = {
+                "console_hosts_of_the_dead_host": consoles,
+                "refused_while_in_use": refused,
+                "record_kept": kept,
+                "nothing_archived_while_in_use": "admission_recovered"
+                not in str(refused.get("json")),
+                "grandchild_alive_when_refused": alive,
+                "recover_after_cleanup": recover,
+            }
+            self.check(
+                "case07.explicit_recovery_refuses_while_the_dead_hosts_console_is_in_use",
+                len(consoles) == 1
+                and refused["exit_code"] == 2
+                and "admission_cleanup_unverified" in refused["stderr_tail"]
+                and "console is still in use" in refused["stderr_tail"]
+                and str(consoles[0]) in refused["stderr_tail"]
+                and kept
+                and alive
+                and recover["exit_code"] == 0
+                and receipt.get("outcome") == "recovered"
+                and receipt.get("terminated_processes") == [],
+                observed,
+            )
+        finally:
+            try:
+                psutil.Process(grandchild).kill()
+            except psutil.Error:
+                pass
 
     def case07_posix_decision(self) -> None:
         """POSIX rows for the caller decision of 2026-11-10.

@@ -598,8 +598,13 @@ def solver_lease_evidence(runtime_dir: str | Path) -> dict[str, Any]:
 
 # What the inventory cannot attribute once the containment is out of reach.
 _UNATTRIBUTABLE_WINDOWS = (
-    "a descendant whose own parent exited before it: its parent link names a "
-    "process that is gone, so the inventory cannot attribute it to the previous host"
+    "a descendant whose own parent exited before it and that does not keep the "
+    "previous host's own console in use: its parent link names a process that is "
+    "gone, so the inventory cannot attribute it to the previous host"
+)
+_CONSOLE_IN_USE = (
+    "a console host lives only while a process is attached to its console, so the "
+    "previous host's console is still in use by a live process"
 )
 _UNATTRIBUTABLE_POSIX = (
     "a descendant that left the previous host's session: orphans are reparented "
@@ -613,12 +618,18 @@ def _attributable_descendants(
     ignore_pids: frozenset[int],
     owners: Mapping[int, tuple[float, str]],
     context: str,
+    console_in_use_is_evidence: bool = False,
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     """Live descendants the process inventory can attribute to a stale host.
 
     Used when no containment can be read. Windows keeps a dead parent's PID
     in its children's records, so every live direct child of the host or of
-    a recorded owned process is found. POSIX reparents orphans, so the host's
+    a recorded owned process is found. ``console_in_use_is_evidence`` (the
+    explicit recovery past a lost containment) also refuses a live console
+    host among them: it outlives its console's last attached process by no
+    more than a moment (measured), and independent owners always start with
+    their own console, so a live one means a process still attached to the
+    previous host's console. POSIX reparents orphans, so the host's
     own session is checked too: a session id equal to the host PID can only
     have been created by the host, and Linux never reuses a PID that is
     still in use as a session id. A live process whose parent, birth time or
@@ -665,7 +676,10 @@ def _attributable_descendants(
                 and created + CREATE_TIME_TOLERANCE_SECONDS >= holder
             ):
                 continue  # A child of the process that now reuses the PID.
-            role = _independent_role(pid, float(created), name, owners, children)
+            in_use = console_in_use_is_evidence and name.lower() in _CONSOLE_HOSTS
+            role = (
+                None if in_use else _independent_role(pid, float(created), name, owners, children)
+            )
             if role is not None:
                 independent.append({"pid": pid, "name": name, "role": role})
                 continue
@@ -676,10 +690,13 @@ def _attributable_descendants(
                     "process_create_time": created,
                     "parent_pid": root["pid"],
                     "parent_role": root["role"],
+                    **({"role": "console_host_in_use"} if in_use else {}),
                 }
             )
     scope = "direct children of the host and of every recorded owned process"
     if os.name == "nt":
+        if console_in_use_is_evidence:
+            scope += ", including a console host that keeps the host's own console in use"
         return scope, descendants, independent
     host = roots[0]
     if host["pid"] in current_birth:
@@ -900,12 +917,16 @@ def verify_stale_cleanup(
                 if has_containment
                 else "for a record without containment evidence"
             ),
+            console_in_use_is_evidence=unavailable is not None,
         )
     if descendants:
         listed = ", ".join(f"PID {item['pid']} ({item['name']})" for item in descendants)
+        message = f"processes started by the previous host are still running: {listed}"
+        if any(item.get("role") == "console_host_in_use" for item in descendants):
+            message += f"; {_CONSOLE_IN_USE}"
         raise HostAdmissionError(
             "admission_cleanup_unverified",
-            f"processes started by the previous host are still running: {listed}",
+            message,
             {"descendants": descendants},
         )
     lease = solver_lease_evidence(runtime)

@@ -1172,8 +1172,39 @@ print(json.dumps({{
 """
 
 
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _console_hosts_of(pid: int) -> list[psutil.Process]:
+    """Live console hosts serving the console that process ``pid`` created."""
+    return [
+        process
+        for process in psutil.process_iter(["ppid", "name"])
+        if process.info["ppid"] == pid and (process.info["name"] or "").lower() == "conhost.exe"
+    ]
+
+
+def _wait_until_gone(processes: list[psutil.Process]) -> None:
+    for process in processes:
+        try:
+            process.wait(timeout=10)
+        except psutil.NoSuchProcess:
+            pass
+
+
+def _wait_for_exit(pid: int) -> None:
+    deadline = time.monotonic() + 10
+    while psutil.pid_exists(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+
 def _dead_host_behind_a_lost_job() -> dict:
-    """A Windows host that exits holding the only job handle, orphan alive."""
+    """A Windows host that exits holding the only job handle, orphan alive.
+
+    The host starts with its own hidden console, as an MCP client starts
+    it, so the fixture does not depend on whether pytest has a console. The
+    orphan inherits that console and so keeps it in use.
+    """
     # The venv launcher terminates its own descendants when it exits, which
     # would take the orphan with it; the base interpreter leaves it alone.
     parent = subprocess.Popen(  # noqa: S603 - fixed interpreter argv
@@ -1181,12 +1212,11 @@ def _dead_host_behind_a_lost_job() -> dict:
         stdout=subprocess.PIPE,
         text=True,
         cwd=str(REPO_ROOT),
+        creationflags=_NO_WINDOW,
     )
     report = json.loads(parent.stdout.readline())
     parent.wait(timeout=30)
-    deadline = time.monotonic() + 10
-    while psutil.pid_exists(report["pid"]) and time.monotonic() < deadline:
-        time.sleep(0.05)
+    _wait_for_exit(report["pid"])
     return report
 
 
@@ -1244,8 +1274,10 @@ def test_explicit_recovery_refuses_a_live_direct_child_after_job_loss(runtime):
             )
         assert error.value.reason_code == "admission_cleanup_unverified"
         assert str(report["orphan"]) in str(error.value)
-        [found] = error.value.details["descendants"]
-        assert (found["pid"], found["parent_pid"]) == (report["orphan"], report["pid"])
+        by_pid = {item["pid"]: item for item in error.value.details["descendants"]}
+        assert by_pid.pop(report["orphan"])["parent_pid"] == report["pid"]
+        # The orphan also keeps the host's own console, and its host, alive.
+        assert [item.get("role") for item in by_pid.values()] == ["console_host_in_use"]
         assert ha.lock_path_for(runtime).read_bytes() == payload
         assert not (runtime / "admission_recovered").exists()
         assert orphan.is_running() and orphan.create_time() == born  # left alone
@@ -1261,8 +1293,9 @@ def test_explicit_recovery_of_a_lost_job_record_needs_the_operator(runtime):
         payload = _write(ha.lock_path_for(runtime), _contained_record(report))
         digest = hashlib.sha256(payload).hexdigest()
         # The operator's own cleanup, before any confirmation.
+        consoles = _console_hosts_of(report["pid"])
         orphan.kill()
-        orphan.wait(timeout=10)
+        _wait_until_gone([orphan, *consoles])
         receipt = ha.recover_after_independent_confirmation(
             runtime, record_sha256=digest, confirmed_by="operator"
         )
@@ -1297,15 +1330,17 @@ import json, os, psutil, subprocess, sys
 sys.path.insert(0, {str(REPO_ROOT)!r})
 from comsol_mcp import host_containment
 base = getattr(sys, "_base_executable", sys.executable)
+grandchild_flags = sys.argv[1]  # 0 inherits the host's console
 identity = host_containment.host_containment_id(pid=os.getpid())
 handle = host_containment.adopt_host_containment(identity)
 intermediate = subprocess.Popen(
     [base, "-c",
      "import subprocess, sys; "
      "child = subprocess.Popen([sys.argv[1], '-c', 'import time; time.sleep(120)'], "
-     "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+     "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, "
+     "creationflags=int(sys.argv[2])); "
      "print(child.pid, flush=True)",
-     base],
+     base, grandchild_flags],
     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
 )
 grandchild = int(intermediate.stdout.readline())
@@ -1322,26 +1357,43 @@ print(json.dumps({{
 """
 
 
-@windows_parent_links
-def test_a_confirmation_never_claims_an_unattributable_descendant_is_gone(runtime):
-    # The boundary the confirmation may cover: a grandchild whose own parent
-    # exited first names a dead PID, so nothing attributes it to the host.
-    # The receipt must say that this was not machine-verified.
+def _dead_host_with_a_grandchild(grandchild_flags: int) -> dict:
+    """A host with its own hidden console that exits behind a lost job name.
+
+    Its intermediate child exits first, so the grandchild's parent link names
+    a dead process. ``grandchild_flags`` 0 keeps the grandchild on the host's
+    console; CREATE_NO_WINDOW gives it a console of its own.
+    """
     parent = subprocess.Popen(  # noqa: S603 - fixed interpreter argv
-        [getattr(sys, "_base_executable", sys.executable), "-c", _JOB_GRANDCHILD_SCRIPT],
+        [
+            getattr(sys, "_base_executable", sys.executable),
+            "-c",
+            _JOB_GRANDCHILD_SCRIPT,
+            str(grandchild_flags),
+        ],
         stdout=subprocess.PIPE,
         text=True,
         cwd=str(REPO_ROOT),
+        creationflags=_NO_WINDOW,
     )
     report = json.loads(parent.stdout.readline())
     parent.wait(timeout=30)
-    deadline = time.monotonic() + 10
-    while psutil.pid_exists(report["pid"]) and time.monotonic() < deadline:
-        time.sleep(0.05)
+    _wait_for_exit(report["pid"])
+    return report
+
+
+@windows_parent_links
+def test_a_confirmation_never_claims_an_unattributable_descendant_is_gone(runtime):
+    # The boundary the confirmation may cover: a grandchild whose own parent
+    # exited first names a dead PID and holds a console of its own, so nothing
+    # attributes it to the host. The receipt must say that this was not
+    # machine-verified.
+    report = _dead_host_with_a_grandchild(_NO_WINDOW)
     grandchild = psutil.Process(report["grandchild"])
     try:
         assert grandchild.ppid() == report["intermediate"]
         assert grandchild.ppid() != report["pid"]
+        _wait_until_gone(_console_hosts_of(report["pid"]))  # nothing keeps it in use
         payload = _write(ha.lock_path_for(runtime), _contained_record(report))
         receipt = ha.recover_after_independent_confirmation(
             runtime,
@@ -1358,6 +1410,46 @@ def test_a_confirmation_never_claims_an_unattributable_descendant_is_gone(runtim
         assert grandchild.is_running()  # nothing was terminated
     finally:
         grandchild.kill()
+
+
+@windows_parent_links
+def test_explicit_recovery_refuses_while_the_dead_hosts_console_is_in_use(runtime):
+    # The host had its own hidden console. Its grandchild cannot be attributed
+    # (its parent exited first), but it keeps that console in use, and a
+    # console host lives only while a process is attached: visible evidence.
+    report = _dead_host_with_a_grandchild(0)
+    grandchild = psutil.Process(report["grandchild"])
+    try:
+        consoles = _console_hosts_of(report["pid"])
+        assert len(consoles) == 1, "the host had its own console"
+        payload = _write(ha.lock_path_for(runtime), _contained_record(report))
+        digest = hashlib.sha256(payload).hexdigest()
+        with pytest.raises(ha.HostAdmissionError) as error:
+            ha.recover_after_independent_confirmation(
+                runtime, record_sha256=digest, confirmed_by="operator"
+            )
+        assert error.value.reason_code == "admission_cleanup_unverified"
+        assert "console is still in use" in str(error.value)
+        roles = {item["pid"]: item.get("role") for item in error.value.details["descendants"]}
+        assert roles == {consoles[0].pid: "console_host_in_use"}
+        assert ha.lock_path_for(runtime).read_bytes() == payload
+        assert not (runtime / "admission_recovered").exists()
+        assert grandchild.is_running()
+
+        # The operator stops what keeps the console in use; then it proceeds.
+        grandchild.kill()
+        _wait_until_gone([grandchild, *consoles])
+        receipt = ha.recover_after_independent_confirmation(
+            runtime, record_sha256=digest, confirmed_by="operator"
+        )
+        assert receipt["outcome"] == "recovered"
+        assert "console" in receipt["machine_verification"]["descendants"]["scope"]
+        assert receipt["terminated_processes"] == []
+    finally:
+        try:
+            grandchild.kill()
+        except psutil.Error:
+            pass
 
 
 def test_a_lost_job_name_names_the_operator_flow_and_only_it_is_confirmable(runtime, monkeypatch):

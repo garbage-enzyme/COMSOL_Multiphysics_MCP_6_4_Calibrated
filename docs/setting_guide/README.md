@@ -199,7 +199,8 @@ diagnostic names the operator flow: `python -m comsol_mcp.host_admission
 command. Run it only after confirming independently that nothing from the
 previous host is still running. `--show` also says whether `--recover` would
 proceed now and lists any process still attributable to the previous host,
-such as a child it started; stop those yourself first, because nothing is
+such as a child it started or the console host of a console it opened that
+is still in use; stop those yourself first, because nothing is
 stopped for you. `--recover` archives the record before removing it, refuses
 while anything from the previous host is still visible, and writes a receipt
 that keeps what the machine verified apart from what your confirmation covers.
