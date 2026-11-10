@@ -838,6 +838,20 @@ def test_distribution_inventory_rejects_development_kit_members(tmp_path):
     with pytest.raises(RuntimeError, match="forbidden members"):
         _distribution_inventory(agent_config)
 
+    # The shim's committed Cargo graph is the one permitted .lock member
+    # (the same policy as the repository-tree scan above): the sdist ships
+    # the optional binary's sources for locked rebuilds. Any other .lock
+    # member still refuses.
+    cargo = tmp_path / "cargo.whl"
+    with zipfile.ZipFile(cargo, "w") as archive:
+        archive.writestr("shim/Cargo.lock", "[[package]]\n")
+    assert _distribution_inventory(cargo)["member_count"] == 1
+    other_lock = tmp_path / "other-lock.whl"
+    with zipfile.ZipFile(other_lock, "w") as archive:
+        archive.writestr("tools/Cargo.lock", "[[package]]\n")
+    with pytest.raises(RuntimeError, match="forbidden members"):
+        _distribution_inventory(other_lock)
+
 
 def test_distribution_artifacts_require_one_wheel_and_one_sdist(tmp_path):
     wheel = tmp_path / "package-1-py3-none-any.whl"
