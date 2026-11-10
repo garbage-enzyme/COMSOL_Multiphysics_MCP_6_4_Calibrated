@@ -66,11 +66,11 @@ ZH_CN = {
     "Transport mode": "传输模式",
     "Python direct (default, fully compatible)": "Python 直连（默认，完全兼容）",
     "Rust shim (lower memory, experimental)": "Rust shim（低内存，实验性）",
-            "SHA-256": "SHA-256 校验",
-            "File not found.": "文件不存在。",
+    "SHA-256": "SHA-256 校验",
+    "File not found.": "文件不存在。",
     "SHA-256 mismatch. Check the published hash.": "SHA-256 不匹配。请核对已发布的哈希值。",
     "Switch transport": "切换传输方式",
-        "Confirm transport switch": "确认切换传输方式",
+    "Confirm transport switch": "确认切换传输方式",
     "Choose how agent clients connect to the COMSOL MCP server. "
     "Switching requires a dedicated confirmation and only takes "
     "effect after every agent session closes and restarts.": (
@@ -78,7 +78,7 @@ ZH_CN = {
         "切换需要单独确认，且仅在所有 agent 会话关闭并重启后生效。"
     ),
     "COMSOL/Java": "COMSOL/Java",
-                "About": "关于",
+    "About": "关于",
     "Changes take effect only after restarting Codex or the owning MCP client.": "改动仅在重启 Codex 或当前 MCP 客户端后生效。",
     "Save and Exit": "保存并退出",
     "Apply": "应用",
@@ -115,7 +115,7 @@ ZH_CN = {
     "English": "English",
     "简体中文": "简体中文",
     "繁體中文": "繁體中文",
-        "Language used by this Settings window.": "此设置窗口使用的语言。",
+    "Language used by this Settings window.": "此设置窗口使用的语言。",
     "Size of text and controls. Following system display settings is recommended. Other choices are previewed immediately and saved for the next opening.": "文字和控件的大小。建议跟随系统显示设置。其他选项会立即预览，并在下次打开时继续使用。",
     "Follow system display settings": "跟随系统显示设置",
     "Experimental Linux: offline tools only. COMSOL execution is disabled. Semantic search is not accepted.": "Linux 为实验性支持，仅提供离线工具。COMSOL 执行已禁用。语义搜索尚未通过验收。",
@@ -274,11 +274,11 @@ ZH_TW = {
     "Transport mode": "傳輸模式",
     "Python direct (default, fully compatible)": "Python 直連（預設，完全相容）",
     "Rust shim (lower memory, experimental)": "Rust shim（低記憶體，實驗性）",
-            "SHA-256": "SHA-256 校驗",
-            "File not found.": "檔案不存在。",
+    "SHA-256": "SHA-256 校驗",
+    "File not found.": "檔案不存在。",
     "SHA-256 mismatch. Check the published hash.": "SHA-256 不匹配。請核對已發布的雜湊值。",
     "Switch transport": "切換傳輸方式",
-        "Confirm transport switch": "確認切換傳輸方式",
+    "Confirm transport switch": "確認切換傳輸方式",
     "Choose how agent clients connect to the COMSOL MCP server. "
     "Switching requires a dedicated confirmation and only takes "
     "effect after every agent session closes and restarts.": (
@@ -286,7 +286,7 @@ ZH_TW = {
         "切換需要單獨確認，且僅在所有 agent 連線關閉並重新啟動後生效。"
     ),
     "COMSOL/Java": "COMSOL/Java",
-                "About": "關於",
+    "About": "關於",
     "Changes take effect only after restarting Codex or the owning MCP client.": "變更僅在重新啟動 Codex 或目前的 MCP 用戶端後生效。",
     "Save and Exit": "儲存並結束",
     "Apply": "套用",
@@ -323,7 +323,7 @@ ZH_TW = {
     "English": "English",
     "简体中文": "简体中文",
     "繁體中文": "繁體中文",
-        "Language used by this Settings window.": "此設定視窗使用的語言。",
+    "Language used by this Settings window.": "此設定視窗使用的語言。",
     "Size of text and controls. Following system display settings is recommended. Other choices are previewed immediately and saved for the next opening.": "文字和控制項的大小。建議跟隨系統顯示設定。其他選項會立即預覽，並在下次開啟時繼續使用。",
     "Follow system display settings": "跟隨系統顯示設定",
     "Experimental Linux: offline tools only. COMSOL execution is disabled. Semantic search is not accepted.": "Linux 為實驗性支援，僅提供離線工具。COMSOL 執行已停用。語意搜尋尚未通過驗收。",

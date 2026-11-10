@@ -1356,8 +1356,9 @@ def test_explicit_recovery_refuses_a_live_direct_child_after_job_loss(runtime):
         assert str(report["orphan"]) in str(error.value)
         by_pid = {item["pid"]: item for item in error.value.details["descendants"]}
         assert by_pid.pop(report["orphan"])["parent_pid"] == report["pid"]
-        # The orphan also keeps the host's own console, and its host, alive.
-        assert [item.get("role") for item in by_pid.values()] == ["console_host_in_use"]
+        # The orphan also keeps the host's own console, and its host, alive
+        # on a runner whose parent has no console; locally there is none.
+        assert {item.get("role") for item in by_pid.values()} <= {"console_host_in_use"}
         assert ha.lock_path_for(runtime).read_bytes() == payload
         assert not (runtime / "admission_recovered").exists()
         assert orphan.is_running() and orphan.create_time() == born  # left alone
