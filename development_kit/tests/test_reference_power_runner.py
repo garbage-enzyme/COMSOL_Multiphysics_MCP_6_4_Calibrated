@@ -463,11 +463,21 @@ def test_coordinator_refuses_collision_before_starting_worker(tmp_path, ascii_tm
             time.sleep(0.01)
         assert ready == "ready"
         assert blocker.poll() is None
-        scanner_status = runner_module._lightweight_solver_status()
-        assert any(
-            item["pid"] == blocker.pid and item["kind"] == "python-mph-client-script"
-            for item in scanner_status["external_solver_processes"]
-        )
+        # A just-started process's command line can be transiently unreadable
+        # on a loaded runner; the scan itself is the product under test, so
+        # retry it briefly instead of racing the classifier.
+        found = False
+        scanner_status = None
+        deadline = time.monotonic() + 5.0
+        while not found and time.monotonic() < deadline:
+            scanner_status = runner_module._lightweight_solver_status()
+            found = any(
+                item["pid"] == blocker.pid and item["kind"] == "python-mph-client-script"
+                for item in scanner_status["external_solver_processes"]
+            )
+            if not found:
+                time.sleep(0.05)
+        assert found, scanner_status
         completed = subprocess.run(
             [
                 sys.executable,

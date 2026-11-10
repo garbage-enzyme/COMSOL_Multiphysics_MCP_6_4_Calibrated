@@ -671,6 +671,19 @@ def test_observer_and_its_ancestors_are_not_cleanup_debt(runtime, cleanup_proces
     assert automatic.value.reason_code == "admission_state_uncertain"
     record = json.loads(ha.lock_path_for(runtime).read_bytes())
     lineage = frozenset({child_pid, *(kid.pid for kid in psutil.Process(child_pid).children())})
+    # A console-less parent (the hosted CI runner model) gives the dead host
+    # its own console host, kept alive only by the exempted orphan's
+    # attachment. It serves the exempted process, so it is exempted with it;
+    # locally the host shares the observer's console and has none.
+    lineage |= (
+        frozenset(
+            kid.pid
+            for kid in psutil.Process(record["pid"]).children()
+            if (kid.name() or "").lower() in {"conhost.exe", "openconsole.exe"}
+        )
+        if psutil.pid_exists(record["pid"])
+        else frozenset()
+    )
     evidence = ha.verify_stale_cleanup(
         record, runtime, ignore_pids=lineage, for_explicit_recovery=True
     )

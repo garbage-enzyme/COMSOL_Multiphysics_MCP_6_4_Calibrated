@@ -570,7 +570,16 @@ import development_kit.benchmarks.semantic_benchmark
 import psutil
 for name in ('chromadb', 'torch', 'sentence_transformers', 'mph'):
     assert name not in sys.modules, name
-assert psutil.Process().children(recursive=True) == []
+# A console-less parent (the hosted CI runner model) makes the OS allocate
+# a dedicated console host for this console-subprocess python. That is an
+# operating-system artifact, not a side effect of the imports under test:
+# only the console host is tolerated, every other child still fails.
+_CONSOLE_HOSTS = {'conhost.exe', 'openconsole.exe'}
+children = [
+    child for child in psutil.Process().children(recursive=True)
+    if child.name().lower() not in _CONSOLE_HOSTS
+]
+assert children == [], children
 assert process_launch_events == [], process_launch_events
 print(json.dumps({'ok': True, 'children': 0, 'launches': process_launch_events}))
 """
