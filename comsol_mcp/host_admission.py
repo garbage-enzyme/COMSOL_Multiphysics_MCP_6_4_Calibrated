@@ -24,13 +24,15 @@ Rules (shared with ``shim/src/admission.rs``):
   verified durable job worker, and the solver lease shows no live
   non-job owner and no live recorded COMSOL server. Missing evidence is
   ``uncertain`` and refuses admission; it is never treated as absence.
-* A stale record whose containment cannot be read cannot prove its
-  descendants are gone: a POSIX record without a containment identity, or a
-  Windows record whose job name no longer opens (the object dies with its
-  last handle, not its last member). Automatic recovery, takeover and
-  dependent startup are refused with ``admission_state_uncertain``; the
-  record is kept, nothing is stopped, and the diagnostic names the explicit
-  operator recovery flow (``--show`` / ``--recover``).
+* A stale record whose containment cannot be read or is absent cannot
+  prove its descendants are gone: a record without a containment identity
+  (only 1.0.0 development builds wrote those), or a Windows record whose
+  job name no longer opens (the object dies with its last handle, not its
+  last member). Automatic recovery, takeover and dependent startup are
+  refused with ``admission_state_uncertain`` on every platform (caller
+  decision 2026-11-10); the record is kept, nothing is stopped, and the
+  diagnostic names the explicit operator recovery flow (``--show`` /
+  ``--recover``).
 * The operator's confirmation covers only that gap. Explicit recovery still
   refuses every descendant the process inventory can attribute to the
   previous host (parent links; on POSIX also its own session), and any other
@@ -70,8 +72,8 @@ OPERATOR_RECOVERY_HINT = (
     "recovery command"
 )
 LEGACY_RECORD_UNKNOWN_MESSAGE = (
-    "the stale admission record has no containment identity; a reparented "
-    "descendant of the previous host cannot be ruled out on this platform, so "
+    "the stale admission record has no containment identity; a descendant of "
+    "the previous host that outlived its own parent cannot be ruled out, so "
     + OPERATOR_RECOVERY_HINT
 )
 READABLE_VERSIONS = ("1.0.0", HOST_ADMISSION_VERSION)
@@ -765,20 +767,21 @@ def verify_stale_cleanup(
 ) -> dict[str, Any]:
     """Prove that a stale host left nothing running. Raises on any gap.
 
-    A record with a containment identity is judged by kernel membership.
-    Without one, Windows keeps a dead parent's PID in its children's
-    records, so every live direct child of the stale host or of a recorded
-    owned process is found. POSIX reparents orphans, so a containment-less
-    record there cannot rule out a surviving descendant: it is always
-    ``admission_state_uncertain`` (caller decision 2026-11-10), as is a
-    Windows record whose job name no longer opens.
+    A record with a readable containment identity is judged by kernel
+    membership. A record without one is ``admission_state_uncertain`` on
+    every platform (caller decision 2026-11-10: only 1.0.0 development
+    builds wrote those), as is a Windows record whose job name no longer
+    opens.
 
     ``for_explicit_recovery`` (after independent operator confirmation)
     proceeds past exactly those two gaps, and only after checking every
-    descendant the inventory can still attribute to the host; any such
-    descendant still refuses, and every other unreadable observation stays
-    UNKNOWN. The evidence then names what was not machine-verified.
-    ``ignore_pids`` exempts the observing process and its ancestors.
+    descendant the inventory can still attribute to the host (parent links
+    of the host and its recorded processes; on POSIX also the host's own
+    session; on Windows a console host keeping the host's own console in
+    use); any such descendant still refuses, and every other unreadable
+    observation stays UNKNOWN. The evidence then names what was not
+    machine-verified. ``ignore_pids`` exempts the observing process and its
+    ancestors.
     """
     runtime = Path(runtime_dir)
     owner = _identity_fields(lock)
@@ -837,8 +840,9 @@ def verify_stale_cleanup(
 
     containment = lock.get("containment")
     has_containment = isinstance(containment, dict) and bool(containment.get("kind"))
-    if os.name != "nt" and not has_containment and not for_explicit_recovery:
-        # Missing evidence, not a finding: the owned-process checks above have
+    if not has_containment and not for_explicit_recovery:
+        # Caller decision 2026-11-10: identical on every platform. Missing
+        # evidence, not a finding: the owned-process checks above have
         # already refused any positive evidence.
         raise HostAdmissionError(
             "admission_state_uncertain",
@@ -882,7 +886,7 @@ def verify_stale_cleanup(
                 "admission_state_uncertain",
                 f"the previous host's containment cannot be read: {exc}",
             ) from exc
-    elif os.name != "nt":
+    else:
         unavailable = "the record has no containment identity"
     if members is not None:
         # Kernel-authoritative membership: every descendant the host kept, at

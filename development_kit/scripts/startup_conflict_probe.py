@@ -661,27 +661,43 @@ class Probe:
             )
 
         def stale(runtime: Path) -> dict[str, Any]:
-            # POSIX: a containment-less record is UNKNOWN now; the contained
-            # variant below proves valid identities still recover.
+            # POSIX: a contained dead host verifies by kernel membership and
+            # recovers. Windows: a dead host's job name is gone with its only
+            # handle and a containment-less record is UNKNOWN (caller
+            # decision 2026-11-10: identical on both platforms).
             if os.name != "nt":
                 report = self._contained_dead_host()
                 sp.write_record(runtime, self._record_of(report))
                 return {"expect_admission": True, "dead_pid": report["pid"]}
             dead = sp.dead_identity(self.python)
-            sp.write_record(runtime, sp.admission_record(dead))
-            return {"expect_admission": True, "dead_pid": dead["pid"]}
+            return {"lock_bytes": sp.write_record(runtime, sp.admission_record(dead))}
 
-        self._both_entry_points(
-            "stale_owner_recovered_after_verified_cleanup",
-            stale,
-            lambda observed, fixture: (
-                observed["admitted"]
-                and (observed["recovered_from"] or {}).get("pid") == fixture["dead_pid"]
-                and "cleanup" in (observed["recovered_from"] or {})
-                and observed["exit_code"] == 0
-                and observed["lock_released"]
-            ),
-        )
+        if os.name != "nt":
+            self._both_entry_points(
+                "stale_owner_recovered_after_verified_cleanup",
+                stale,
+                lambda observed, fixture: (
+                    observed["admitted"]
+                    and (observed["recovered_from"] or {}).get("pid") == fixture["dead_pid"]
+                    and "cleanup" in (observed["recovered_from"] or {})
+                    and observed["exit_code"] == 0
+                    and observed["lock_released"]
+                ),
+            )
+        else:
+            self._both_entry_points(
+                "legacy_stale_record_is_unknown_and_kept",
+                stale,
+                lambda observed, _f: (
+                    observed["exit_code"] == 2
+                    and observed["reason_code"] == "admission_state_uncertain"
+                    and "no containment identity" in observed["stderr_tail"]
+                    and "the record was kept" in observed["stderr_tail"]
+                    and "comsol_mcp.host_admission --show" in observed["stderr_tail"]
+                    and observed["lock_bytes_unchanged"]
+                    and not observed["forbidden_worker_started"]
+                ),
+            )
 
         def reused(runtime: Path) -> dict[str, Any]:
             helper = sp.sleeper(self.python)
@@ -693,19 +709,37 @@ class Probe:
                 record["pid"] = identity["pid"]
                 record["process_create_time"] = identity["process_create_time"]
                 sp.write_record(runtime, record)
-            else:
-                sp.write_record(runtime, sp.admission_record(identity))
-            return {"expect_admission": True, "reused_pid": helper.pid, "release": [helper.kill]}
+                return {
+                    "expect_admission": True,
+                    "reused_pid": helper.pid,
+                    "release": [helper.kill],
+                }
+            payload = sp.write_record(runtime, sp.admission_record(identity))
+            return {"lock_bytes": payload, "reused_pid": helper.pid, "release": [helper.kill]}
 
-        self._both_entry_points(
-            "reused_pid_is_stale",
-            reused,
-            lambda observed, fixture: (
-                observed["admitted"]
-                and (observed["recovered_from"] or {}).get("pid") == fixture["reused_pid"]
-                and observed["exit_code"] == 0
-            ),
-        )
+        if os.name != "nt":
+            self._both_entry_points(
+                "reused_pid_is_stale",
+                reused,
+                lambda observed, fixture: (
+                    observed["admitted"]
+                    and (observed["recovered_from"] or {}).get("pid") == fixture["reused_pid"]
+                    and observed["exit_code"] == 0
+                ),
+            )
+        else:
+            # The reuse is still classified stale (not a live owner), but the
+            # containment-less record never recovers automatically.
+            self._both_entry_points(
+                "reused_pid_is_stale_and_unknown",
+                reused,
+                lambda observed, _f: (
+                    observed["exit_code"] == 2
+                    and observed["reason_code"] == "admission_state_uncertain"
+                    and "no containment identity" in observed["stderr_tail"]
+                    and observed["lock_bytes_unchanged"]
+                ),
+            )
 
         def live_worker(runtime: Path) -> dict[str, Any]:
             helper = sp.sleeper(self.python)
@@ -773,34 +807,22 @@ class Probe:
                 "release": [release],
             }
 
-        if os.name == "nt":
-            # A containment-less record keeps its parent-link walk on Windows.
-            self._both_entry_points(
-                "live_descendant_of_stale_owner_is_unverified_cleanup",
-                orphan,
-                lambda observed, fixture: (
-                    observed["exit_code"] == 2
-                    and observed["reason_code"] == "admission_cleanup_unverified"
-                    and str(fixture["orphan_pid"]) in observed["stderr_tail"]
-                    and observed["lock_bytes_unchanged"]
-                ),
-            )
-        else:
-            # Caller decision 2026-11-10: on POSIX such a record is UNKNOWN —
-            # refused, kept, with the explicit-recovery diagnostic.
-            self._both_entry_points(
-                "legacy_record_with_live_descendant_is_unknown_and_kept",
-                orphan,
-                lambda observed, fixture: (
-                    observed["exit_code"] == 2
-                    and observed["reason_code"] == "admission_state_uncertain"
-                    and psutil.pid_exists(fixture["orphan_pid"])
-                    and "no containment identity" in observed["stderr_tail"]
-                    and "the record was kept" in observed["stderr_tail"]
-                    and "comsol_mcp.host_admission --show" in observed["stderr_tail"]
-                    and observed["lock_bytes_unchanged"]
-                ),
-            )
+        # Caller decision 2026-11-10, identical on both platforms: a
+        # containment-less record is UNKNOWN — refused, kept, with the
+        # explicit-recovery diagnostic, and nothing is stopped.
+        self._both_entry_points(
+            "legacy_record_with_live_descendant_is_unknown_and_kept",
+            orphan,
+            lambda observed, fixture: (
+                observed["exit_code"] == 2
+                and observed["reason_code"] == "admission_state_uncertain"
+                and psutil.pid_exists(fixture["orphan_pid"])
+                and "no containment identity" in observed["stderr_tail"]
+                and "the record was kept" in observed["stderr_tail"]
+                and "comsol_mcp.host_admission --show" in observed["stderr_tail"]
+                and observed["lock_bytes_unchanged"]
+            ),
+        )
 
         def live_lease(runtime: Path) -> dict[str, Any]:
             helper = sp.sleeper(self.python)
@@ -827,9 +849,16 @@ class Probe:
 
         # Incomplete inventory: the Python entry point with an injected
         # inventory failure must refuse instead of recovering a stale record.
+        # On POSIX the record is contained, so recovery would succeed without
+        # the injection and the refusal proves the fail-closed inventory; on
+        # Windows a dead host has no readable containment, so the record is
+        # refused regardless and the row keeps the same observable.
         directory = self.directory("case07-incomplete-inventory-python")
         runtime = directory / "runtime"
-        payload = sp.write_record(runtime, sp.admission_record(sp.dead_identity(self.python)))
+        if os.name != "nt":
+            payload = sp.write_record(runtime, self._record_of(self._contained_dead_host()))
+        else:
+            payload = sp.write_record(runtime, sp.admission_record(sp.dead_identity(self.python)))
         settings = self.settings(directory / "settings.json", "python", runtime)
         wrapper = directory / "inject_inventory_failure.py"
         wrapper.write_text(

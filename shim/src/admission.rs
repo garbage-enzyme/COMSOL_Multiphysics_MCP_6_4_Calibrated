@@ -77,8 +77,8 @@ nothing from the previous host remains, then run 'python -m comsol_mcp.host_admi
 
 fn legacy_record_unknown_message() -> String {
     format!(
-        "the stale admission record has no containment identity; a reparented \
-descendant of the previous host cannot be ruled out on this platform, so \
+        "the stale admission record has no containment identity; a descendant of \
+the previous host that outlived its own parent cannot be ruled out, so \
 {OPERATOR_RECOVERY_HINT}"
     )
 }
@@ -1120,11 +1120,7 @@ fn verify_stale_cleanup_inner(
         .and_then(Value::as_object)
         .and_then(|map| map.get("kind"))
         .and_then(Value::as_str);
-    let scope = if containment_kind.is_some() {
-        "kernel membership of the recorded host containment"
-    } else {
-        "direct children of the host and of every recorded owned process"
-    };
+    let scope = "kernel membership of the recorded host containment";
     if containment_kind.is_some() {
         // Kernel-authoritative membership: every descendant the host kept,
         // at any depth, regardless of parent links.
@@ -1148,64 +1144,12 @@ fn verify_stale_cleanup_inner(
             };
             independent.push(json!({"pid": row.pid, "name": row.name, "role": role}));
         }
-    } else if cfg!(windows) {
-        // Legacy record: parent links, and an unreadable parent is refused.
-        for row in &rows {
-            // The Windows snapshot always lists the kernel idle (0) and
-            // system (4) processes; they are nobody's children.
-            if row.pid <= 4 {
-                continue;
-            }
-            if row.ppid == 0 && !ignore_pids.contains(&row.pid) {
-                return refusal(
-                    "admission_state_uncertain",
-                    format!(
-                        "process {} ({}) has an unreadable parent; ancestry cannot be \
-                     established for a record without containment evidence",
-                        row.pid, row.name
-                    ),
-                );
-            }
-        }
-        for row in &rows {
-            for (root_pid, root_created, root_role) in &roots {
-                if row.ppid != *root_pid || row.pid == *root_pid {
-                    continue;
-                }
-                let created = match procinfo::probe(row.pid) {
-                    Probe::Alive(created) => created,
-                    Probe::Absent => continue, // Exited since the snapshot.
-                    Probe::Unknown => {
-                        return refusal(
-                            "admission_state_uncertain",
-                            format!(
-                                "process {} ({}) has an unreadable creation time; it cannot \
-                         be ordered against the previous host",
-                                row.pid, row.name
-                            ),
-                        );
-                    }
-                };
-                if created + CREATE_TIME_TOLERANCE_SECONDS < *root_created {
-                    continue; // Born before the recorded process: not its child.
-                }
-                if let Probe::Alive(holder) = procinfo::probe(*root_pid)
-                    && (holder - root_created).abs() > CREATE_TIME_TOLERANCE_SECONDS
-                    && created + CREATE_TIME_TOLERANCE_SECONDS >= holder
-                {
-                    continue; // A child of the process that now reuses the PID.
-                }
-                if let Some(role) = independent_role(row, created, &owners, &rows) {
-                    independent.push(json!({"pid": row.pid, "name": row.name, "role": role}));
-                    continue;
-                }
-                descendants.push((row.pid, row.name.clone(), *root_pid, root_role.clone()));
-            }
-        }
     } else {
-        // Caller decision 2026-11-10: missing containment evidence is never
-        // clean where orphans are reparented. Positive-evidence checks have
-        // already run above; nothing is removed.
+        // Caller decision 2026-11-10: identical on every platform. A record
+        // without a containment identity (only 1.0.0 development builds
+        // wrote those) cannot prove its descendants are gone, and missing
+        // evidence is never clean. Positive-evidence checks (owned
+        // processes) have already run above; nothing is removed.
         let _ = (&rows, &roots);
         return refusal("admission_state_uncertain", legacy_record_unknown_message());
     }
@@ -1662,15 +1606,23 @@ mod tests {
         let _ = fs::remove_dir_all(&directory);
     }
 
-    #[cfg(not(windows))]
     #[test]
-    fn a_containment_less_stale_record_is_unknown_on_posix() {
+    fn a_containment_less_stale_record_is_unknown_on_every_platform() {
+        // Caller decision 2026-11-10: the refusal is identical on Windows,
+        // where a legacy record previously walked parent links, and on POSIX.
         let directory = scratch("legacy-unknown");
         let lock = record(4242, 1.0);
         let error = verify_stale_cleanup(&lock, &directory).unwrap_err();
         assert_eq!(error.code, "admission_state_uncertain");
         assert!(error.message.contains("no containment identity"));
         assert!(error.message.contains("the record was kept"));
+        assert!(
+            error
+                .message
+                .contains("python -m comsol_mcp.host_admission --show"),
+            "{}",
+            error.message
+        );
         let _ = fs::remove_dir_all(&directory);
     }
 

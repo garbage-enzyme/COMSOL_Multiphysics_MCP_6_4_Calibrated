@@ -165,7 +165,7 @@ English (en)
 | `gui.scale` | `"system"` | 可选 `"system"`、`"100"`、`"125"`、`"150"` 或 `"200"`。界面把数字显示为百分比。 |
 
 一个运行目录只能有一个宿主。如果上一个宿主已经不在，但留下的记录无法证明已经清理干净
-（Linux 和 macOS 上指没有包含身份的记录；Windows 上指宿主退出后其作业名不再能打开的
+（指没有包含身份的记录，或 Windows 上宿主退出后其作业名不再能打开的
 记录），新宿主会以 `admission_state_uncertain`
 拒绝启动，保留这条记录，也不终止任何进程。诊断信息会给出操作流程：
 `python -m comsol_mcp.host_admission --show <运行目录>` 显示记录身份和精确的 `--recover`

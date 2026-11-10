@@ -178,21 +178,50 @@ def test_matching_birth_with_a_different_signature_is_uncertain(runtime, cleanup
     assert error.value.reason_code == "admission_state_uncertain"
 
 
+def _legacy_record_is_unknown_and_needs_the_operator(runtime, owner: dict) -> bytes:
+    """A containment-less record never recovers automatically (both platforms)."""
+    payload = _write(ha.lock_path_for(runtime), _record(owner))
+    with pytest.raises(ha.HostAdmissionError) as error:
+        ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+    assert error.value.reason_code == "admission_state_uncertain"
+    assert "no containment identity" in str(error.value)
+    assert str(error.value).endswith(ha.OPERATOR_RECOVERY_HINT)
+    assert ha.lock_path_for(runtime).read_bytes() == payload
+    return payload
+
+
+def _explicit_recovery_receipt(runtime, payload: bytes) -> dict:
+    return ha.recover_after_independent_confirmation(
+        runtime, record_sha256=hashlib.sha256(payload).hexdigest(), confirmed_by="operator"
+    )
+
+
 def test_stale_owner_with_verified_cleanup_is_recovered_with_evidence(runtime):
     if os.name != "nt":
         previous = _contained_dead_host()
         _write(ha.lock_path_for(runtime), _contained_record(previous))
         stale = previous
+        claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+        recovered = claim.document["recovered_from"]
+        assert recovered["pid"] == stale["pid"]
+        assert recovered["cleanup"]["descendants"]["live"] == []
+        assert recovered["cleanup"]["solver_lease"] == {"state": "absent"}
+        assert recovered["cleanup"]["listeners"]["method"] == "owned_process_absence"
+        assert ha.release(claim) is True
     else:
+        # Windows: a dead host's job name is gone and a containment-less
+        # record is UNKNOWN; recovery goes through the explicit flow only.
         stale = _dead_identity()
-        _write(ha.lock_path_for(runtime), _record(stale))
-    claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
-    recovered = claim.document["recovered_from"]
-    assert recovered["pid"] == stale["pid"]
-    assert recovered["cleanup"]["descendants"]["live"] == []
-    assert recovered["cleanup"]["solver_lease"] == {"state": "absent"}
-    assert recovered["cleanup"]["listeners"]["method"] == "owned_process_absence"
-    assert ha.release(claim) is True
+        payload = _legacy_record_is_unknown_and_needs_the_operator(runtime, stale)
+        receipt = _explicit_recovery_receipt(runtime, payload)
+        assert receipt["outcome"] == "recovered"
+        assert receipt["automatic_verification"]["state"] == "unknown"
+        machine = receipt["machine_verification"]
+        assert machine["descendants"]["live"] == []
+        assert machine["listeners"]["method"] == "not_machine_verified"
+        claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+        assert claim.document["recovered_from"] is None  # the record is gone
+        assert ha.release(claim) is True
 
 
 def test_reused_pid_is_stale_and_its_new_children_are_not_counted(runtime, cleanup_processes):
@@ -204,13 +233,16 @@ def test_reused_pid_is_stale_and_its_new_children_are_not_counted(runtime, clean
         record["pid"] = reused["pid"]
         record["process_create_time"] = reused["process_create_time"]
         _write(ha.lock_path_for(runtime), record)
+        claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+        assert (
+            claim.document["recovered_from"]["reason"]
+            == "the PID now belongs to a different process"
+        )
+        ha.release(claim)
     else:
-        _write(ha.lock_path_for(runtime), _record(reused))
-    claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
-    assert (
-        claim.document["recovered_from"]["reason"] == "the PID now belongs to a different process"
-    )
-    ha.release(claim)
+        # The reuse classification still runs (stale, not a live owner), but a
+        # containment-less record never recovers automatically.
+        _legacy_record_is_unknown_and_needs_the_operator(runtime, reused)
 
 
 def test_live_recorded_worker_blocks_recovery(runtime, cleanup_processes):
@@ -270,11 +302,14 @@ def _orphan_with_live_child() -> tuple[dict, int]:
 def test_live_direct_child_of_a_stale_owner_blocks_recovery(runtime, cleanup_processes):
     owner, child_pid = _orphan_with_live_child()
     cleanup_processes.append(child_pid)
-    _write(ha.lock_path_for(runtime), _record(owner))
+    payload = _legacy_record_is_unknown_and_needs_the_operator(runtime, owner)
+    # The confirmation may cover the missing containment, never a child the
+    # inventory still attributes to the host.
     with pytest.raises(ha.HostAdmissionError) as error:
-        ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+        _explicit_recovery_receipt(runtime, payload)
     assert error.value.reason_code == "admission_cleanup_unverified"
     assert [item["pid"] for item in error.value.details["descendants"]] == [child_pid]
+    assert ha.lock_path_for(runtime).read_bytes() == payload
 
 
 @windows_parent_links
@@ -293,13 +328,13 @@ def test_verified_durable_job_worker_does_not_block_recovery(runtime, cleanup_pr
         ),
         encoding="utf-8",
     )
-    _write(ha.lock_path_for(runtime), _record(owner))
-    claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
-    independent = claim.document["recovered_from"]["cleanup"]["descendants"]["independent_owners"]
+    payload = _legacy_record_is_unknown_and_needs_the_operator(runtime, owner)
+    receipt = _explicit_recovery_receipt(runtime, payload)
+    assert receipt["outcome"] == "recovered"
+    independent = receipt["machine_verification"]["descendants"]["independent_owners"]
     owned = [item for item in independent if item["role"] != "console_host"]
     assert len(owned) == 1
     assert owned[0]["role"] in {"durable_job_worker", "durable_job_worker_launcher"}
-    ha.release(claim)
 
 
 @windows_parent_links
@@ -318,10 +353,11 @@ def test_terminal_job_state_does_not_excuse_a_live_child(runtime, cleanup_proces
         ),
         encoding="utf-8",
     )
-    _write(ha.lock_path_for(runtime), _record(owner))
+    payload = _legacy_record_is_unknown_and_needs_the_operator(runtime, owner)
     with pytest.raises(ha.HostAdmissionError) as error:
-        ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+        _explicit_recovery_receipt(runtime, payload)
     assert error.value.reason_code == "admission_cleanup_unverified"
+    assert ha.lock_path_for(runtime).read_bytes() == payload
 
 
 def test_stale_reclaim_preserves_a_replacement_and_refuses(runtime):
@@ -331,10 +367,22 @@ def test_stale_reclaim_preserves_a_replacement_and_refuses(runtime):
     else:
         _write(lock, _record(_dead_identity()))
     replacement = ha.document_bytes(_record(_identity(os.getpid())))
-    original = ha.verify_stale_cleanup
+
+    def stub_evidence() -> dict:
+        # No Windows record verifies automatically any more, so the
+        # replacement race is entered with a stubbed verification result.
+        return {
+            "owner": {"pid": 1, "process_create_time": 1.0},
+            "owned_processes": [],
+            "descendants": {"live": [], "independent_owners": [], "scope": "stub"},
+            "solver_lease": {"state": "absent"},
+            "listeners": {"method": "stub", "note": "stub"},
+        }
+
+    original = ha.verify_stale_cleanup if os.name != "nt" else None
 
     def verify_then_replace(record, runtime_dir):
-        evidence = original(record, runtime_dir)
+        evidence = original(record, runtime_dir) if original is not None else stub_evidence()
         lock.write_bytes(replacement)
         return evidence
 
@@ -417,13 +465,15 @@ def test_stale_lease_with_a_live_recorded_server_blocks_recovery(runtime, cleanu
     )
     if os.name != "nt":
         # The lease evidence is positive: reach it through a record that can
-        # be judged (a containment-less record is UNKNOWN first on POSIX).
+        # be judged (a containment-less record is UNKNOWN first).
         previous = _contained_dead_host()
         _write(ha.lock_path_for(runtime), _contained_record(previous))
+        with pytest.raises(ha.HostAdmissionError) as error:
+            ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
     else:
-        _write(ha.lock_path_for(runtime), _record(_dead_identity()))
-    with pytest.raises(ha.HostAdmissionError) as error:
-        ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+        payload = _legacy_record_is_unknown_and_needs_the_operator(runtime, _dead_identity())
+        with pytest.raises(ha.HostAdmissionError) as error:
+            _explicit_recovery_receipt(runtime, payload)
     assert error.value.reason_code == "admission_cleanup_unverified"
     assert error.value.details["server_pid"] == server.pid
 
@@ -450,12 +500,14 @@ def test_status_reports_owner_and_cleanup_assessment(runtime, cleanup_processes)
     assert ha.status(runtime)["state"] == "absent"
     owner, child_pid = _orphan_with_live_child()
     cleanup_processes.append(child_pid)
-    _write(ha.lock_path_for(runtime), _record(owner))
+    payload = _write(ha.lock_path_for(runtime), _record(owner))
     report = ha.status(runtime, assess_cleanup=True)
     assert report["state"] == "stale"
     assert report["transport_mode"] == "shim"
     assert report["cleanup"]["state"] == "unverified"
-    assert report["cleanup"]["reason_code"] == "admission_cleanup_unverified"
+    assert report["cleanup"]["reason_code"] == "admission_state_uncertain"
+    assert "no containment identity" in report["cleanup"]["reason"]
+    assert ha.lock_path_for(runtime).read_bytes() == payload
 
 
 def test_worker_flag_without_binding_evidence_is_refused(runtime):
@@ -571,14 +623,14 @@ def test_launcher_of_a_bound_worker_is_independent(runtime, cleanup_processes):
         ),
         encoding="utf-8",
     )
-    _write(ha.lock_path_for(runtime), _record(owner))
-    claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+    payload = _legacy_record_is_unknown_and_needs_the_operator(runtime, owner)
+    receipt = _explicit_recovery_receipt(runtime, payload)
+    assert receipt["outcome"] == "recovered"
     roles = {
         item["role"]
-        for item in claim.document["recovered_from"]["cleanup"]["descendants"]["independent_owners"]
+        for item in receipt["machine_verification"]["descendants"]["independent_owners"]
     }
     assert roles & {"durable_job_worker", "durable_job_worker_launcher"}
-    ha.release(claim)
 
 
 @windows_parent_links
@@ -599,28 +651,39 @@ def test_recorded_job_helpers_are_independent(runtime, cleanup_processes, helper
             json.dumps({"status": "cancelling", "cancel": {"coordinator": identity}}),
             encoding="utf-8",
         )
-    _write(ha.lock_path_for(runtime), _record(owner))
-    claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
+    payload = _legacy_record_is_unknown_and_needs_the_operator(runtime, owner)
+    receipt = _explicit_recovery_receipt(runtime, payload)
+    assert receipt["outcome"] == "recovered"
     roles = {
         item["role"]
-        for item in claim.document["recovered_from"]["cleanup"]["descendants"]["independent_owners"]
+        for item in receipt["machine_verification"]["descendants"]["independent_owners"]
     }
     assert helper in roles
-    ha.release(claim)
 
 
 @windows_parent_links
 def test_observer_and_its_ancestors_are_not_cleanup_debt(runtime, cleanup_processes):
     owner, child_pid = _orphan_with_live_child()
     cleanup_processes.append(child_pid)
-    _write(ha.lock_path_for(runtime), _record(owner))
+    payload = _write(ha.lock_path_for(runtime), _record(owner))
+    with pytest.raises(ha.HostAdmissionError) as automatic:
+        ha.verify_stale_cleanup(json.loads(ha.lock_path_for(runtime).read_bytes()), runtime)
+    assert automatic.value.reason_code == "admission_state_uncertain"
+    record = json.loads(ha.lock_path_for(runtime).read_bytes())
     lineage = frozenset({child_pid, *(kid.pid for kid in psutil.Process(child_pid).children())})
     evidence = ha.verify_stale_cleanup(
-        json.loads(ha.lock_path_for(runtime).read_bytes()), runtime, ignore_pids=lineage
+        record, runtime, ignore_pids=lineage, for_explicit_recovery=True
     )
     assert evidence["descendants"]["live"] == []
-    with pytest.raises(ha.HostAdmissionError):
-        ha.verify_stale_cleanup(json.loads(ha.lock_path_for(runtime).read_bytes()), runtime)
+    assert "unavailable" in evidence["descendants"]
+    with pytest.raises(ha.HostAdmissionError) as debt:
+        ha.verify_stale_cleanup(
+            json.loads(ha.lock_path_for(runtime).read_bytes()),
+            runtime,
+            for_explicit_recovery=True,
+        )
+    assert debt.value.reason_code == "admission_cleanup_unverified"
+    assert ha.lock_path_for(runtime).read_bytes() == payload
 
 
 def _orphan_chain_with_listener(scripts: Path, mark: Path) -> tuple[dict, int]:
@@ -748,16 +811,23 @@ def test_kernel_containment_passes_when_no_member_remains(runtime):
 @windows_parent_links
 def test_legacy_record_with_an_unreadable_parent_is_unknown(runtime, monkeypatch):
     dead = _dead_identity()
-    _write(ha.lock_path_for(runtime), _record(dead))
+    payload = _write(ha.lock_path_for(runtime), _record(dead))
 
     def broken_inventory(*_args, **_kwargs):
         return [(424242, None, 1000.0, "python.exe")]
 
     monkeypatch.setattr(ha, "_process_inventory", broken_inventory)
-    with pytest.raises(ha.HostAdmissionError) as error:
+    # The automatic path refuses at the containment gate before any walk.
+    with pytest.raises(ha.HostAdmissionError) as automatic:
         ha.verify_stale_cleanup(_record(dead), runtime)
+    assert automatic.value.reason_code == "admission_state_uncertain"
+    assert "no containment identity" in str(automatic.value)
+    # The explicit path still refuses unreadable evidence as UNKNOWN.
+    with pytest.raises(ha.HostAdmissionError) as error:
+        ha.verify_stale_cleanup(_record(dead), runtime, for_explicit_recovery=True)
     assert error.value.reason_code == "admission_state_uncertain"
     assert "unreadable parent" in str(error.value)
+    assert ha.lock_path_for(runtime).read_bytes() == payload
 
 
 @windows_parent_links
@@ -1088,19 +1158,16 @@ def test_recovery_archives_and_removes_a_confirmed_stale_record(runtime):
     assert body["schema_version"] == ha.HOST_ADMISSION_RECOVERY_VERSION == "1.1.0"
     assert body["operator_confirmation"]["confirmed_by"] == "operator"
     machine = receipt["machine_verification"]
-    if os.name == "nt":
-        # Parent links verify a Windows legacy record by machine: the
-        # confirmation stands in for nothing.
-        assert receipt["automatic_verification"]["state"] == "verified"
-        assert receipt["operator_confirmation"]["covers"] == []
-        assert machine["listeners"]["method"] == "owned_process_absence"
-    else:
-        assert receipt["automatic_verification"]["state"] == "unknown"
-        covered = [item["evidence"] for item in receipt["operator_confirmation"]["covers"]]
-        assert covered == ["descendants", "listeners"]
-        assert machine["descendants"]["unavailable"] == "the record has no containment identity"
+    # Identical on every platform: the confirmation covers the missing
+    # containment; nothing about descendants or listeners is machine-verified.
+    assert receipt["automatic_verification"]["state"] == "unknown"
+    covered = [item["evidence"] for item in receipt["operator_confirmation"]["covers"]]
+    assert covered == ["descendants", "listeners"]
+    assert machine["descendants"]["unavailable"] == "the record has no containment identity"
+    assert machine["descendants"]["scope"].startswith("direct children of the host")
+    if os.name != "nt":
         assert "own session" in machine["descendants"]["scope"]
-        assert machine["listeners"]["method"] == "not_machine_verified"
+    assert machine["listeners"]["method"] == "not_machine_verified"
 
     # A host may start again once the record was explicitly recovered.
     claim = ha.acquire(runtime, transport_mode="python", settings=SETTINGS)
