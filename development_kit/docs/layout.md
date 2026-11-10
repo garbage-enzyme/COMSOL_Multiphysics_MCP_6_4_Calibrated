@@ -271,6 +271,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/tests/test_discovery_manifest.py` — The tests cover discovery-manifest capture determinism, freshness bindings, tamper refusal, pagination coverage, hash-seed independence, and byte equality with the real stdio server.
 - `development_kit/tests/test_derived_geometry.py` — The tests cover typed derived-geometry edits without COMSOL.
 - `development_kit/tests/test_durable_job_control_plane.py` — The tests cover durable submission, reconciliation, status, cancellation, and resume behavior.
+- `development_kit/tests/test_durable_io_cross_platform.py` — The tests drive the platform-specific durable I/O branches (the POSIX no-follow parent walk, the POSIX quarantine-and-verify deletion, the Windows opened-identity deletion, the non-native fsync and directory-publication arms) on both platforms through a delegating os proxy with scripted syscalls, so each single-platform coverage gate sees the real branch decisions without weakening any policy.
 - `development_kit/tests/test_durable_primitives.py` — The tests cover versioned canonical bytes, bounded hashing, atomic writes, and row recovery.
 - `development_kit/tests/test_dependency_license_gate.py` — The tests cover deterministic dependency-license receipts and fail-closed review behavior.
 - `development_kit/tests/test_dependency_drift_report.py` — The tests cover dependency scopes, PEP 503 names, project-range exclusions, exact dependency pairs, bootstrap tools, and complete lock drift.
