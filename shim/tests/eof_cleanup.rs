@@ -19,7 +19,7 @@
 //! automatic recovery after host death is a POSIX-session property only;
 //! the checks assert what each platform can prove.
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -201,10 +201,15 @@ fn fixture(mode: &str, arguments: &[String]) -> i32 {
 // Harness
 // ---------------------------------------------------------------------------
 
+/// The shim's stderr is drained live from session start: the fixture
+/// worker inherits that pipe, so a post-exit drain would block until every
+/// writer dies and skew the case timeline. Marker lines (WORKER-PID,
+/// ORPHAN-PID, DYING) are recorded as they arrive.
 struct Session {
     proc: Child,
     stdout: BufReader<std::process::ChildStdout>,
-    stderr: Option<std::process::ChildStderr>,
+    markers: std::sync::Arc<std::sync::Mutex<Vec<(String, u32)>>>,
+    stderr_text: std::sync::Arc<std::sync::Mutex<String>>,
 }
 
 fn sha256_file(path: &Path) -> String {
@@ -281,12 +286,43 @@ fn spawn_shim(home: &Path, worker_mode: &str) -> Session {
     }
     let mut proc = command.spawn().expect("shim spawns");
     let stdout = BufReader::new(proc.stdout.take().expect("shim stdout"));
-    let stderr = proc.stderr.take();
+    let markers: std::sync::Arc<std::sync::Mutex<Vec<(String, u32)>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let stderr_text: std::sync::Arc<std::sync::Mutex<String>> =
+        std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    if let Some(pipe) = proc.stderr.take() {
+        let sink_markers = std::sync::Arc::clone(&markers);
+        let sink_text = std::sync::Arc::clone(&stderr_text);
+        std::thread::spawn(move || {
+            let reader = BufReader::new(pipe);
+            for line in reader.lines().map_while(Result::ok) {
+                if let Some((name, pid)) = marker_of(&line) {
+                    sink_markers.lock().unwrap().push((name, pid));
+                }
+                let mut text = sink_text.lock().unwrap();
+                text.push_str(&line);
+                text.push('\n');
+            }
+        });
+    }
     Session {
         proc,
         stdout,
-        stderr,
+        markers,
+        stderr_text,
     }
+}
+
+/// ``WORKER-PID 123`` / ``ORPHAN-PID 456`` -> (name, pid).
+fn marker_of(line: &str) -> Option<(String, u32)> {
+    let (name, rest) = line.split_once(' ')?;
+    if !name.ends_with("-PID") {
+        return None;
+    }
+    Some((
+        name.trim_end_matches("-PID").to_owned(),
+        rest.trim().parse().ok()?,
+    ))
 }
 
 impl Session {
@@ -311,7 +347,7 @@ impl Session {
     /// the EOF decision, not a teardown the harness triggered).
     fn wait_exit(&mut self, timeout: Duration) -> (i32, String) {
         let code = self.wait_for_exit_code(timeout);
-        (code, self.drain_stderr(timeout))
+        (code, self.stderr_snapshot())
     }
 
     /// Wait for exit after closing the client transport (the ordinary
@@ -319,7 +355,37 @@ impl Session {
     fn finish(&mut self, timeout: Duration) -> (i32, String) {
         self.proc.stdin = None;
         let code = self.wait_for_exit_code(timeout);
-        (code, self.drain_stderr(timeout))
+        (code, self.stderr_snapshot())
+    }
+
+    /// Wait for a fixture marker to appear on stderr.
+    fn wait_marker(&self, name: &str, timeout: Duration) -> Option<u32> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(pid) = self.marker_pid(name) {
+                return Some(pid);
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn marker_pid(&self, name: &str) -> Option<u32> {
+        self.markers
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(marker, _)| marker == name)
+            .map(|(_, pid)| *pid)
+    }
+
+    /// A short settle lets the live drain thread consume what the exiting
+    /// process already wrote; it never waits for inherited writers.
+    fn stderr_snapshot(&self) -> String {
+        std::thread::sleep(Duration::from_millis(150));
+        self.stderr_text.lock().unwrap().clone()
     }
 
     fn wait_for_exit_code(&mut self, timeout: Duration) -> i32 {
@@ -342,23 +408,6 @@ impl Session {
                 }
             }
         }
-    }
-
-    /// Stderr is inherited by the fixture worker, so it may stay open a
-    /// moment after the shim exits; drain it on a bounded thread.
-    fn drain_stderr(&mut self, timeout: Duration) -> String {
-        let pipe = match self.stderr.take() {
-            Some(pipe) => pipe,
-            None => return String::new(),
-        };
-        let (sender, receiver) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let mut text = String::new();
-            let mut pipe = pipe;
-            let _ = pipe.read_to_string(&mut text);
-            let _ = sender.send(text);
-        });
-        receiver.recv_timeout(timeout).unwrap_or_default()
     }
 }
 
@@ -399,13 +448,6 @@ fn wait_pid_gone(pid: u32, timeout: Duration) {
     }
 }
 
-fn stderr_pid(stderr: &str, marker: &str) -> Option<u32> {
-    stderr.lines().find_map(|line| {
-        let rest = line.strip_prefix(marker)?;
-        rest.trim().parse::<u32>().ok()
-    })
-}
-
 // ---------------------------------------------------------------------------
 // Controls
 // ---------------------------------------------------------------------------
@@ -444,8 +486,9 @@ fn eof_with_live_worker_keeps_the_record() -> Result<(), String> {
     if !lock_path(&home).exists() {
         return Err("the record was released while the worker was still alive".into());
     }
-    let worker_pid =
-        stderr_pid(&stderr, "WORKER-PID").ok_or("the fixture worker pid was not observed")?;
+    let worker_pid = first
+        .wait_marker("WORKER", Duration::from_secs(10))
+        .ok_or("the fixture worker pid was not observed")?;
     if cfg!(unix) && !pid_alive(worker_pid) {
         return Err("control premise broken: the worker died early".into());
     }
@@ -515,7 +558,9 @@ fn worker_orphan_descendant_keeps_the_record() -> Result<(), String> {
     if !lock_path(&home).exists() {
         return Err("the record was released while a descendant was still running".into());
     }
-    let orphan_pid = stderr_pid(&stderr, "ORPHAN-PID").ok_or("the orphan pid was not observed")?;
+    let orphan_pid = first
+        .wait_marker("ORPHAN", Duration::from_secs(10))
+        .ok_or("the orphan pid was not observed")?;
     if cfg!(unix) && !pid_alive(orphan_pid) {
         return Err("control premise broken: the orphan died before the check".into());
     }
