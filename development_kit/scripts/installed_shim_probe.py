@@ -41,8 +41,38 @@ async def _probe_session(shim: str, manifest: str, environment: dict[str, str]) 
     import psutil
     from mcp import Client, StdioServerParameters
 
+    def leaf_python_children(parent: "psutil.Process") -> list:
+        """Leaf python processes under one parent.
+
+        A venv ``python.exe`` is a redirector that spawns the real
+        interpreter as its own child: the worker is the leaf, and the
+        redirector is its parent, not a second worker.
+        """
+        pythons = []
+        for child in parent.children(recursive=True):
+            try:
+                if "python" in (child.name() or "").lower():
+                    pythons.append(child)
+            except psutil.NoSuchProcess, psutil.AccessDenied:
+                continue
+        pids = {process.pid for process in pythons}
+        leaves = []
+        for process in pythons:
+            try:
+                child_pids = {kid.pid for kid in process.children()}
+            except psutil.NoSuchProcess, psutil.AccessDenied:
+                child_pids = set()
+            if not (child_pids & pids):
+                leaves.append(process)
+        return sorted(leaves, key=lambda process: process.pid)
+
     observations: dict[str, Any] = {}
-    parameters = StdioServerParameters(command=shim, args=[], env=environment, cwd=str(ROOT))
+    # The session (shim and its worker) runs in the isolated workdir, not
+    # the worktree: ``python -m`` puts the cwd first on sys.path, so a
+    # worktree cwd shadows the installed package and fakes a source-tree
+    # classification.
+    workdir = Path(environment["COMSOL_MCP_PROBE_WORKDIR"])
+    parameters = StdioServerParameters(command=shim, args=[], env=environment, cwd=str(workdir))
     async with Client(parameters, read_timeout_seconds=60.0) as client:
         # Find the shim process tree.
         shim_pid = None
@@ -65,11 +95,7 @@ async def _probe_session(shim: str, manifest: str, environment: dict[str, str]) 
         if shim_pid is not None:
             try:
                 parent = psutil.Process(shim_pid)
-                py_before = [
-                    c
-                    for c in parent.children(recursive=True)
-                    if "python" in (c.name() or "").lower()
-                ]
+                py_before = leaf_python_children(parent)
                 observations["python_free_discovery"] = len(py_before) == 0
             except psutil.NoSuchProcess:
                 observations["python_free_discovery"] = False
@@ -92,11 +118,7 @@ async def _probe_session(shim: str, manifest: str, environment: dict[str, str]) 
             await asyncio.sleep(0.5)
             try:
                 parent = psutil.Process(shim_pid)
-                py_after = [
-                    c
-                    for c in parent.children(recursive=True)
-                    if "python" in (c.name() or "").lower()
-                ]
+                py_after = leaf_python_children(parent)
                 observations["worker_pids_after_first"] = [c.pid for c in py_after]
                 # Exactly one worker, and it did not exist before the call.
                 observations["worker_spawned_once"] = len(py_after) == 1 and len(py_before) == 0
@@ -110,11 +132,7 @@ async def _probe_session(shim: str, manifest: str, environment: dict[str, str]) 
             await asyncio.sleep(0.5)
             try:
                 parent = psutil.Process(shim_pid)
-                py_warm = [
-                    c
-                    for c in parent.children(recursive=True)
-                    if "python" in (c.name() or "").lower()
-                ]
+                py_warm = leaf_python_children(parent)
                 observations["worker_pids_after_warm"] = [c.pid for c in py_warm]
             except psutil.NoSuchProcess:
                 observations["worker_pids_after_warm"] = None
@@ -146,17 +164,18 @@ def main() -> int:
         base = {k: v for k, v in os.environ.items() if not k.startswith("COMSOL_MCP_")}
         base.pop("PYTHONPATH", None)
 
-        # Generate the discovery manifest under the same environment.
+        # The manifest must also come from the installed interpreter, so it
+        # reflects the installed package rather than a worktree import.
         generate = subprocess.run(
             [
-                sys.executable,
+                str(args.python),
                 "-m",
                 "comsol_mcp.discovery_manifest",
                 "generate",
                 "--output",
                 str(manifest_path),
             ],
-            cwd=str(ROOT),
+            cwd=str(workdir),
             env={
                 **base,
                 "COMSOL_MCP_SETTINGS_PATH": str(settings),
@@ -183,6 +202,7 @@ def main() -> int:
         environment["COMSOL_MCP_SETTINGS_PATH"] = str(settings)
         environment["COMSOL_MCP_PROFILE"] = "core"
         environment["PYTHONIOENCODING"] = "utf-8"
+        environment["COMSOL_MCP_PROBE_WORKDIR"] = str(workdir)
 
         result = asyncio.run(_probe_session(str(args.shim), str(manifest_path), environment))
 
