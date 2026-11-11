@@ -29,3 +29,9 @@ lto = true
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
+
+# G-EOF-01 controls: the same exe plays the fixture workers, so the
+# default test harness (which owns argv) must stay off this target.
+[[test]]
+name = "eof_cleanup"
+harness = false

@@ -8,8 +8,11 @@
 //!   every further request, notification, and client response verbatim;
 //! - forward worker stdout verbatim, inherit worker stderr;
 //! - contain the worker tree (Windows Job Object, kill on shim death);
-//! - on worker exit while the client is connected, answer the pending
-//!   request with an unknown-result error and close the transport;
+//! - on worker stdout closing while the client is connected, answer the
+//!   pending request with an unknown-result error and close the transport,
+//!   releasing the admission record only after the worker's observed death
+//!   AND an empty recorded containment (G-EOF-01: pipe EOF is not process
+//!   exit, and an observed exit alone says nothing about descendants);
 //! - refuse automatic respawn after a worker failure (reconnect instead).
 //!
 //! The shim never acquires solver leases and never fabricates live state.
@@ -278,9 +281,14 @@ impl Manifest {
     }
 }
 
+/// The worker process, shared between the main loop and the reader
+/// thread: either may be the one that observes its death (G-EOF-01).
+type ChildSlot = Arc<Mutex<Option<std::process::Child>>>;
+
 struct Worker {
     stdin: std::process::ChildStdin,
-    child: std::process::Child,
+    child: ChildSlot,
+    worker_pid: u32,
     pending_id: Arc<Mutex<Option<Value>>>,
     client_gone: Arc<AtomicBool>,
     #[cfg(windows)]
@@ -330,6 +338,64 @@ fn read_crlf_line<R: BufRead>(reader: &mut R) -> LineRead {
     }
 }
 
+/// Wait for the worker's observed death within `grace`. Never kills: on
+/// stdout EOF the worker may simply be alive with a closed pipe, and an
+/// unobserved exit keeps the admission record (G-EOF-01).
+fn await_worker_exit(child: &mut std::process::Child, grace: Duration) -> bool {
+    let deadline = std::time::Instant::now() + grace;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => return true,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                eprintln!("comsol-mcp-shim: the worker is still alive after closing its stdout");
+                return false;
+            }
+            Err(problem) => {
+                eprintln!("comsol-mcp-shim: the worker's exit cannot be observed: {problem}");
+                return false;
+            }
+        }
+    }
+}
+
+/// G-EOF-01: exact descendant evidence for every release decision. The
+/// recorded containment must list no live member but this host; an
+/// unreadable identity is UNKNOWN and fails closed. Pipe EOF, a deliberate
+/// shutdown, or an unchanged record prove nothing here.
+fn containment_clean(identity: &Value) -> bool {
+    match containment::members(identity) {
+        Ok(members) => {
+            let others: Vec<u32> = members
+                .into_iter()
+                .filter(|pid| *pid != std::process::id())
+                .collect();
+            if others.is_empty() {
+                return true;
+            }
+            let listed = others
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            eprintln!(
+                "comsol-mcp-shim: processes from this host are still running ({listed}); \
+                 the admission record is kept for verified recovery"
+            );
+            false
+        }
+        Err(problem) => {
+            eprintln!(
+                "comsol-mcp-shim: this host's containment cannot be read ({problem}); \
+                 the admission record is kept for verified recovery"
+            );
+            false
+        }
+    }
+}
+
 fn trim_line(line: &str) -> &str {
     line.trim_end_matches(['\r', '\n'])
 }
@@ -343,6 +409,7 @@ fn spawn_worker(
     terminator: &str,
     era: &ClientEra,
     worker_token: &str,
+    containment: Value,
     crash_release: std::sync::Arc<std::sync::Mutex<Option<admission::ReleaseTicket>>>,
 ) -> Result<Worker, String> {
     let spec = std::env::var(ENV_CHILD).unwrap_or_else(|_| "[]".to_owned());
@@ -382,6 +449,8 @@ fn spawn_worker(
         .stdout
         .take()
         .ok_or_else(|| "worker stdout was not piped".to_owned())?;
+    let worker_pid = child.id();
+    let child_slot: ChildSlot = Arc::new(Mutex::new(Some(child)));
     let (handshake_tx, handshake_rx): (_, Receiver<String>) = channel();
     let writer = out.clone();
     let term = terminator.to_owned();
@@ -389,6 +458,7 @@ fn spawn_worker(
     let client_gone = Arc::new(AtomicBool::new(false));
     let reader_pending = Arc::clone(&pending_id);
     let reader_gone = Arc::clone(&client_gone);
+    let reader_child = Arc::clone(&child_slot);
     let reader = std::thread::spawn(move || {
         let mut reader = std::io::BufReader::new(stdout);
         let mut first = true;
@@ -403,8 +473,9 @@ fn spawn_worker(
         if reader_gone.load(Ordering::SeqCst) {
             return; // The client already left; the cleanup path owns the worker.
         }
-        // Worker exit while the client is connected: the pending result is
-        // unknown. Answer it, then close the transport. Never respawn.
+        // Worker stdout closing while the client is connected: the pending
+        // result is unknown. Answer it, then close the transport. Never
+        // respawn.
         let pending = reader_pending.lock().unwrap().take();
         if let Some(id) = pending {
             let body = json!({
@@ -417,21 +488,43 @@ fn spawn_worker(
             });
             write_line(&writer, &body.to_string(), &term);
         }
-        eprintln!("comsol-mcp-shim: worker exited while the client was connected");
-        // The shim is closing deliberately; the worker is gone and the
-        // client must reconnect. Keeping the claim here would leave the
-        // domain unusable for the next session (measured: the G3 worker
-        // crash case blocked every later session in the same runtime).
-        if let Some(ticket) = crash_release.lock().unwrap().take()
-            && !ticket.release()
-        {
-            eprintln!("comsol-mcp-shim: the admission record changed; it was left in place");
+        eprintln!("comsol-mcp-shim: worker stdout closed while the client was connected");
+        // G-EOF-01: pipe EOF is not process exit. The record is released
+        // only after the worker's death is observed AND the recorded
+        // containment lists no live member but this host. Any other
+        // outcome keeps the record for verified recovery; keeping it here
+        // is what lets the next session recover the domain safely (the
+        // G3 crash case releases because its worker is observed dead with
+        // no descendants).
+        let mut verified = false;
+        if let Some(mut child) = reader_child.lock().unwrap().take() {
+            verified = await_worker_exit(&mut child, WORKER_EXIT_GRACE);
+            // A held handle can keep a dead member listed (Windows jobs);
+            // the membership read below must see the kernel's truth.
+            drop(child);
+        }
+        if verified {
+            verified = containment_clean(&containment);
+        }
+        if verified {
+            if let Some(ticket) = crash_release.lock().unwrap().take()
+                && !ticket.release()
+            {
+                eprintln!("comsol-mcp-shim: the admission record changed; it was left in place");
+            }
+        } else {
+            eprintln!(
+                "comsol-mcp-shim: worker cleanup is unverified; the admission record is \
+                 kept for verified recovery"
+            );
         }
         std::process::exit(CRASH_EXIT_CODE);
     });
-    let mut stdin = child
-        .stdin
-        .take()
+    let mut stdin = child_slot
+        .lock()
+        .unwrap()
+        .as_mut()
+        .and_then(|child| child.stdin.take())
         .ok_or_else(|| "worker stdin was not piped".to_owned())?;
     let bring_up = match era {
         ClientEra::Handshake(version) => json!({
@@ -476,7 +569,8 @@ fn spawn_worker(
     }
     Ok(Worker {
         stdin,
-        child,
+        child: child_slot,
+        worker_pid,
         pending_id,
         client_gone,
         #[cfg(windows)]
@@ -756,11 +850,15 @@ fn run() -> i32 {
                         &terminator,
                         &bring_up_era,
                         &worker_token,
+                        admission
+                            .as_ref()
+                            .expect("admission was acquired before the worker")
+                            .containment(),
                         std::sync::Arc::clone(&crash_release),
                     ) {
                         Ok(spawned) => {
                             if let Some(claim) = admission.as_mut()
-                                && let Err(problem) = claim.record_worker(spawned.child.id())
+                                && let Err(problem) = claim.record_worker(spawned.worker_pid)
                             {
                                 // Stale recovery still finds the worker through
                                 // its parent link; the record is extra evidence.
@@ -811,27 +909,45 @@ fn run() -> i32 {
             }
         }
     }
-    // The admission record is released only after the worker's exit is
-    // observed. An unverified exit keeps the record, so the next host must
-    // verify cleanup (the recorded worker is absent) before recovery.
+    // G-EOF-01: the admission record is released only after the worker's
+    // death is observed AND the recorded containment lists no live member
+    // but this host. A deliberate shutdown alone proves nothing: an orphan
+    // descendant keeps the record, and the next host verifies cleanup
+    // before recovery.
     let mut worker_exit_verified = true;
     if let Some(mut live) = worker.take() {
         live.client_gone.store(true, Ordering::SeqCst);
         let _ = live.stdin.flush();
         drop(live.stdin);
-        let deadline = std::time::Instant::now() + WORKER_EXIT_GRACE;
-        loop {
-            match live.child.try_wait() {
-                Ok(Some(_status)) => break,
-                Ok(None) if std::time::Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(50))
+        match live.child.lock().unwrap().take() {
+            Some(mut child) => {
+                let deadline = std::time::Instant::now() + WORKER_EXIT_GRACE;
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(_status)) => break,
+                        Ok(None) if std::time::Instant::now() < deadline => {
+                            std::thread::sleep(Duration::from_millis(50))
+                        }
+                        _ => {
+                            let _ = child.kill();
+                            worker_exit_verified = child.wait().is_ok();
+                            eprintln!(
+                                "comsol-mcp-shim: worker did not exit within the grace period"
+                            );
+                            break;
+                        }
+                    }
                 }
-                _ => {
-                    let _ = live.child.kill();
-                    worker_exit_verified = live.child.wait().is_ok();
-                    eprintln!("comsol-mcp-shim: worker did not exit within the grace period");
-                    break;
-                }
+                // A held handle can keep a dead member listed (Windows
+                // jobs); the membership read below must see the kernel's
+                // truth.
+                drop(child);
+            }
+            None => {
+                // The reader thread's EOF path owns the death watch and
+                // its own release decision; this path must not race it
+                // with a weaker one.
+                worker_exit_verified = false;
             }
         }
     }
@@ -839,10 +955,13 @@ fn run() -> i32 {
     let _ = writer_thread.join();
 
     if let Some(claim) = admission.as_ref() {
+        if worker_exit_verified {
+            worker_exit_verified = containment_clean(&claim.containment());
+        }
         if !worker_exit_verified {
             eprintln!(
-                "comsol-mcp-shim: worker exit is unverified; the admission record is kept \
-                 for verified recovery"
+                "comsol-mcp-shim: worker cleanup is unverified; the admission record is \
+                 kept for verified recovery"
             );
         } else if !claim.release() {
             eprintln!("comsol-mcp-shim: the admission record changed; it was left in place");

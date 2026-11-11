@@ -1424,6 +1424,16 @@ impl Claim {
             payload: self.payload.clone(),
         }
     }
+
+    /// The containment identity this host recorded (G-EOF-01: every
+    /// release decision must re-read its live members; pipe EOF and an
+    /// observed worker exit prove nothing about deeper descendants).
+    pub fn containment(&self) -> Value {
+        self.document
+            .get("containment")
+            .cloned()
+            .unwrap_or(Value::Null)
+    }
 }
 
 /// An owned copy of one claim's exact release identity.
