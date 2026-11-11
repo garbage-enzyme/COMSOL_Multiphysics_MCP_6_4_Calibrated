@@ -343,6 +343,7 @@ fn spawn_worker(
     terminator: &str,
     era: &ClientEra,
     worker_token: &str,
+    crash_release: std::sync::Arc<std::sync::Mutex<Option<admission::ReleaseTicket>>>,
 ) -> Result<Worker, String> {
     let spec = std::env::var(ENV_CHILD).unwrap_or_else(|_| "[]".to_owned());
     let argv: Vec<String> = serde_json::from_str(&spec).map_err(|e| format!("{ENV_CHILD}: {e}"))?;
@@ -417,6 +418,15 @@ fn spawn_worker(
             write_line(&writer, &body.to_string(), &term);
         }
         eprintln!("comsol-mcp-shim: worker exited while the client was connected");
+        // The shim is closing deliberately; the worker is gone and the
+        // client must reconnect. Keeping the claim here would leave the
+        // domain unusable for the next session (measured: the G3 worker
+        // crash case blocked every later session in the same runtime).
+        if let Some(ticket) = crash_release.lock().unwrap().take()
+            && !ticket.release()
+        {
+            eprintln!("comsol-mcp-shim: the admission record changed; it was left in place");
+        }
         std::process::exit(CRASH_EXIT_CODE);
     });
     let mut stdin = child
@@ -614,6 +624,11 @@ fn run() -> i32 {
     }
 
     let mut worker: Option<Worker> = None;
+    // Filled after record_worker rewrites the record; the reader thread's
+    // crash exit releases through it, so its bytes must match the record's
+    // CURRENT content.
+    let crash_release: std::sync::Arc<std::sync::Mutex<Option<admission::ReleaseTicket>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
     let mut era: Option<ClientEra> = None;
     let mut stdin = std::io::BufReader::new(std::io::stdin());
     loop {
@@ -736,7 +751,13 @@ fn run() -> i32 {
                     let bring_up_era = era
                         .clone()
                         .unwrap_or(ClientEra::Handshake(latest_handshake.clone()));
-                    match spawn_worker(&out, &terminator, &bring_up_era, &worker_token) {
+                    match spawn_worker(
+                        &out,
+                        &terminator,
+                        &bring_up_era,
+                        &worker_token,
+                        std::sync::Arc::clone(&crash_release),
+                    ) {
                         Ok(spawned) => {
                             if let Some(claim) = admission.as_mut()
                                 && let Err(problem) = claim.record_worker(spawned.child.id())
@@ -747,6 +768,10 @@ fn run() -> i32 {
                                     "comsol-mcp-shim: worker identity not recorded: {problem}"
                                 );
                             }
+                            // The ticket must match the record's CURRENT bytes:
+                            // record_worker rewrote them above.
+                            *crash_release.lock().unwrap() =
+                                Some(admission.as_ref().unwrap().release_ticket());
                             worker = Some(spawned);
                         }
                         Err(problem) => {

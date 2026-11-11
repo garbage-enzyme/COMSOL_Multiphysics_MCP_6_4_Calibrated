@@ -1415,6 +1415,27 @@ impl Claim {
     pub fn release(&self) -> bool {
         unlink_if_content(&self.path, &self.payload).unwrap_or(false)
     }
+
+    /// A shareable exact-content release for threads that cannot borrow
+    /// the claim. Releasing the ticket is releasing the claim.
+    pub fn release_ticket(&self) -> ReleaseTicket {
+        ReleaseTicket {
+            path: self.path.clone(),
+            payload: self.payload.clone(),
+        }
+    }
+}
+
+/// An owned copy of one claim's exact release identity.
+pub struct ReleaseTicket {
+    path: std::path::PathBuf,
+    payload: Vec<u8>,
+}
+
+impl ReleaseTicket {
+    pub fn release(&self) -> bool {
+        unlink_if_content(&self.path, &self.payload).unwrap_or(false)
+    }
 }
 
 #[cfg(test)]
