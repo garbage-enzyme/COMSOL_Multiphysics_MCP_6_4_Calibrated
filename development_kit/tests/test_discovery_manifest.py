@@ -30,12 +30,13 @@ from comsol_mcp.settings import SETTINGS_PATH_ENV
 ROOT = Path(__file__).parents[2]
 
 
-def _settings_document(*, paginated: bool) -> str:
+def _settings_document(*, paginated: bool, runtime_dir: str) -> str:
     return json.dumps(
         {
             "schema_name": "comsol_mcp.settings",
             "schema_version": "1.3.0",
             "profile": {"name": "core"},
+            "runtime": {"directory": runtime_dir},
             "discovery": {"pagination_enabled": paginated},
         }
     )
@@ -43,8 +44,15 @@ def _settings_document(*, paginated: bool) -> str:
 
 @pytest.fixture(scope="module")
 def manifest_settings(tmp_path_factory) -> Path:
-    path = tmp_path_factory.mktemp("discovery") / "settings.json"
-    path.write_text(_settings_document(paginated=False), encoding="utf-8")
+    directory = tmp_path_factory.mktemp("discovery")
+    # An isolated runtime domain: every server this module spawns admits
+    # here and never contends with parallel workers on the default domain
+    # (a busy domain refuses startup and the differential reads an empty
+    # line).
+    runtime = directory / "runtime"
+    runtime.mkdir()
+    path = directory / "settings.json"
+    path.write_text(_settings_document(paginated=False, runtime_dir=str(runtime)), encoding="utf-8")
     return path
 
 
@@ -220,14 +228,22 @@ def test_pagination_mode_comes_from_settings_not_environment(tmp_path, monkeypat
     monkeypatch.setenv("COMSOL_MCP_ENABLE_DISCOVERY_PAGINATION", "true")
     assert current_selection()["pagination_enabled"] is False
     settings = tmp_path / "paginated.json"
-    settings.write_text(_settings_document(paginated=True), encoding="utf-8")
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(exist_ok=True)
+    settings.write_text(
+        _settings_document(paginated=True, runtime_dir=str(runtime)), encoding="utf-8"
+    )
     monkeypatch.setenv(SETTINGS_PATH_ENV, str(settings))
     assert current_selection()["pagination_enabled"] is True
 
 
 def test_paginated_manifest_pages_cover_every_tool(tmp_path, monkeypatch) -> None:
     settings = tmp_path / "paginated.json"
-    settings.write_text(_settings_document(paginated=True), encoding="utf-8")
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(exist_ok=True)
+    settings.write_text(
+        _settings_document(paginated=True, runtime_dir=str(runtime)), encoding="utf-8"
+    )
     monkeypatch.setenv(SETTINGS_PATH_ENV, str(settings))
     manifest = build_manifest()
     for era, version in (("handshake", "2025-11-25"), ("modern", "2026-07-28")):

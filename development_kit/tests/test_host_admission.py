@@ -808,8 +808,15 @@ def test_kernel_containment_passes_when_no_member_remains(runtime):
     try:
         dead = _dead_identity()
         record = _record(dead, containment=identity)
-        # The only members are this process (the observer) and its console.
-        evidence = ha.verify_stale_cleanup(record, runtime, ignore_pids=ha.observer_lineage())
+        # The members are this process (the observer) and, on a console-less
+        # runner, the console host the OS allocated for it: the observer's
+        # own children are serving infrastructure, never cleanup debt.
+        import psutil as _ps
+
+        own_children = frozenset(kid.pid for kid in _ps.Process().children())
+        evidence = ha.verify_stale_cleanup(
+            record, runtime, ignore_pids=ha.observer_lineage() | own_children
+        )
         assert evidence["descendants"]["live"] == []
         assert evidence["descendants"]["scope"].startswith("kernel membership")
     finally:
