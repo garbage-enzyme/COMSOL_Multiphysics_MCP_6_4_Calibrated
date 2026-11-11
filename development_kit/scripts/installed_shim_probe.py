@@ -5,7 +5,7 @@ manifest and the Python module server as the lazy worker. Verifies:
 
 - static discovery (initialize + tools/list) is served without Python;
 - the worker spawns exactly once on the first forwarded call;
-- capabilities deployment identity matches the running source;
+- capabilities deployment identity is the INSTALLED site package;
 - a warm forwarded call reuses the retained worker;
 - clean disconnect exits 0 with no leftover process.
 
@@ -97,13 +97,27 @@ async def _probe_session(shim: str, manifest: str, environment: dict[str, str]) 
                     for c in parent.children(recursive=True)
                     if "python" in (c.name() or "").lower()
                 ]
-                observations["worker_spawned_once"] = len(py_after) >= 1
+                observations["worker_pids_after_first"] = [c.pid for c in py_after]
+                # Exactly one worker, and it did not exist before the call.
+                observations["worker_spawned_once"] = len(py_after) == 1 and len(py_before) == 0
             except psutil.NoSuchProcess:
                 observations["worker_spawned_once"] = False
 
-        # Warm call: retained worker.
+        # Warm call: retained worker - still exactly one, no extra spawn.
         warm = await client.call_tool("capabilities", {})
         observations["warm_call_ok"] = not getattr(warm, "is_error", getattr(warm, "isError", True))
+        if shim_pid is not None:
+            await asyncio.sleep(0.5)
+            try:
+                parent = psutil.Process(shim_pid)
+                py_warm = [
+                    c
+                    for c in parent.children(recursive=True)
+                    if "python" in (c.name() or "").lower()
+                ]
+                observations["worker_pids_after_warm"] = [c.pid for c in py_warm]
+            except psutil.NoSuchProcess:
+                observations["worker_pids_after_warm"] = None
 
     # After disconnect: shim must be gone.
     if shim_pid is not None:
@@ -177,10 +191,16 @@ def main() -> int:
         "python_free_discovery": result.get("python_free_discovery") is True,
         "tool_count_positive": bool(result.get("tool_count")),
         "first_call_ok": result.get("first_call_ok") is True,
-        "deployment_source_valid": result.get("deployment_source")
-        in {"installed_site_package", "source_tree"},
+        # Batch I: the probe must prove the INSTALLED state. A source-tree
+        # classification here means the probe ran the wrong interpreter.
+        "deployment_source_is_installed": result.get("deployment_source")
+        == "installed_site_package",
         "worker_spawned_once": result.get("worker_spawned_once") is True,
         "warm_call_ok": result.get("warm_call_ok") is True,
+        "worker_retained_exactly_one": result.get("worker_pids_after_warm")
+        == result.get("worker_pids_after_first")
+        and isinstance(result.get("worker_pids_after_warm"), list)
+        and len(result["worker_pids_after_warm"]) == 1,
         "shim_exited_cleanly": result.get("shim_exited_cleanly") is True,
     }
     payload = {
