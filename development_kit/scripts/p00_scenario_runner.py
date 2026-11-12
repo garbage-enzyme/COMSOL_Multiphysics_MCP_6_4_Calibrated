@@ -458,12 +458,13 @@ async def run_server_scenario(
         run_dir.mkdir(parents=True, exist_ok=True)
         base_env = dict(os.environ)
         base_env.update(variant.env)
-        base_env["COMSOL_MCP_SETTINGS_PATH"] = str(settings_path)
         if args.sessions == 1:
+            env = dict(base_env)
+            env["COMSOL_MCP_SETTINGS_PATH"] = str(settings_path)
             results = [
                 await drive_session(
                     command,
-                    base_env,
+                    env,
                     run_id,
                     writer,
                     run_dir / "server-stderr.log",
@@ -471,10 +472,26 @@ async def run_server_scenario(
                 )
             ]
         else:
+            # Host admission (settings 1.4.0) allows one host per runtime
+            # domain: concurrent sessions need per-session domains. The
+            # measured workload (per-host idle) is unchanged.
+            def session_env(index: int) -> dict[str, str]:
+                session_settings = run_dir / f"settings-s{index}.json"
+                document = settings_document(variant, root)
+                document["runtime"]["directory"] = str(
+                    Path(document["runtime"]["directory"]) / f"s{index}"
+                )
+                session_settings.write_text(
+                    json.dumps(document, indent=1), encoding="utf-8"
+                )
+                env = dict(base_env)
+                env["COMSOL_MCP_SETTINGS_PATH"] = str(session_settings)
+                return env
+
             tasks = [
                 drive_session(
                     command,
-                    base_env,
+                    session_env(index),
                     f"{run_id}-s{index}",
                     writer,
                     run_dir / f"server-stderr-s{index}.log",
