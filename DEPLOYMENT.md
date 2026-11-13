@@ -451,6 +451,21 @@ Facts and limits:
 - Windows: hard-killing the shim terminates the whole worker tree (Job
   Object). Linux relies on the graceful stdin-close path. Parent death
   alone is not a containment claim there.
+- Child-interpreter contract: point `COMSOL_MCP_SHIM_CHILD` at a real
+  interpreter executable. On Windows, a venv `python.exe` is a launcher
+  that keeps a second stdout writer alive; if the underlying interpreter
+  dies mid-stream, the session can wedge (no EOF, no data). If a launcher
+  topology is unavoidable, arm the watchdog with
+  `COMSOL_MCP_SHIM_WATCHDOG_IDLE=<seconds>` (for example 300). It closes
+  the session as unknown only while a request is pending, the worker has
+  been silent for the whole window, AND a process that was alive when the
+  request was forwarded has since exited — a healthy quiet call never
+  trips it. Keep the window above your longest expected silent call.
+- Message-size gate: no supported workflow may return a single protocol
+  message larger than 1 MB through the shim. Adding such a workflow
+  requires shipping the buffered worker-read fix in the same release; the
+  byte-wise reader delivers large single lines at roughly 10 KB/s, so a
+  4 MB line takes five to seven minutes.
 - Verified toolchain: Rust 1.99.1 (windows-gnu and linux-gnu). The
   theoretical minimum is 1.85 (edition 2024). Testing did not cover any
   older toolchain.

@@ -13,6 +13,12 @@
 //!   releasing the admission record only after the worker's observed death
 //!   AND an empty recorded containment (G-EOF-01: pipe EOF is not process
 //!   exit, and an observed exit alone says nothing about descendants);
+//! - optional watchdog (`COMSOL_MCP_SHIM_WATCHDOG_IDLE` seconds, default
+//!   off): close as unknown only while one request is pending, the worker
+//!   has been silent for the whole window, AND a containment member that
+//!   was alive when that request was forwarded has since exited (decision
+//!   2: silence alone never fires, so a healthy quiet call is safe; the
+//!   close follows the same verified-cleanup contract as the EOF close);
 //! - refuse automatic respawn after a worker failure (reconnect instead).
 //!
 //! The shim never acquires solver leases and never fabricates live state.
@@ -52,6 +58,9 @@ const ENV_CHILD: &str = "COMSOL_MCP_SHIM_CHILD";
 const SHIM_HANDSHAKE_ID: &str = "shim-handshake";
 const CRASH_EXIT_CODE: i32 = 3;
 const SLOW_READER_EXIT_CODE: i32 = 4;
+const WATCHDOG_EXIT_CODE: i32 = 5;
+const ENV_WATCHDOG_IDLE: &str = "COMSOL_MCP_SHIM_WATCHDOG_IDLE";
+const WATCHDOG_POLL: Duration = Duration::from_millis(250);
 
 /// The protocol era the external client negotiated with the shim.
 #[derive(Clone)]
@@ -285,11 +294,61 @@ impl Manifest {
 /// thread: either may be the one that observes its death (G-EOF-01).
 type ChildSlot = Arc<Mutex<Option<std::process::Child>>>;
 
+/// Decision-2 watchdog bookkeeping, shared by the main loop (the
+/// forward-time containment snapshot), the reader (activity timestamps and
+/// the fired check), and the watchdog thread itself. Only constructed when
+/// the watchdog is enabled, so the default path pays nothing.
+struct WatchShared {
+    /// The admission containment identity; membership censuses read it.
+    identity: Value,
+    /// The configured quiet window (constant for the session).
+    idle: Duration,
+    /// Set under the pending-id lock when the watchdog takes the close;
+    /// the reader then stops forwarding so the close answers exactly once.
+    fired: AtomicBool,
+    last_line: Mutex<std::time::Instant>,
+    forwarded: Mutex<Option<Forwarded>>,
+}
+
+/// The request the main loop last forwarded to the worker.
+#[derive(Clone)]
+struct Forwarded {
+    id: Value,
+    at: std::time::Instant,
+    /// Live containment members (this host excluded) at forward time, or
+    /// `None` when the census was unreadable — firing then stays off for
+    /// that request rather than proceeding without evidence.
+    members: Option<Vec<u32>>,
+}
+
+/// Decision-2 evidence rule: firing requires a containment member that was
+/// alive when the request was forwarded to be gone now. Silence alone, a
+/// spawned helper, or an unreadable census never satisfies it, so a healthy
+/// quiet call cannot be closed by the watchdog.
+fn member_since_forward_died(forward_members: &[u32], current: &[u32]) -> bool {
+    forward_members.iter().any(|pid| !current.contains(pid))
+}
+
+/// Parse the watchdog idle window (whole seconds; `0`, empty, or absent
+/// disables it). Anything else is a configuration error that refuses
+/// startup instead of silently arming or disarming the watchdog.
+fn parse_watchdog_idle(text: &str) -> Result<Duration, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed == "0" {
+        return Ok(Duration::ZERO);
+    }
+    let seconds: u64 = trimmed.parse().map_err(|_| {
+        format!("{ENV_WATCHDOG_IDLE} must be a whole number of seconds (0 disables it)")
+    })?;
+    Ok(Duration::from_secs(seconds))
+}
+
 struct Worker {
     stdin: std::process::ChildStdin,
     child: ChildSlot,
     worker_pid: u32,
     pending_id: Arc<Mutex<Option<Value>>>,
+    watch: Option<Arc<WatchShared>>,
     client_gone: Arc<AtomicBool>,
     #[cfg(windows)]
     _job: JobHandle,
@@ -410,6 +469,7 @@ fn spawn_worker(
     era: &ClientEra,
     worker_token: &str,
     containment: Value,
+    watchdog_idle: Duration,
     crash_release: std::sync::Arc<std::sync::Mutex<Option<admission::ReleaseTicket>>>,
 ) -> Result<Worker, String> {
     let spec = std::env::var(ENV_CHILD).unwrap_or_else(|_| "[]".to_owned());
@@ -456,19 +516,64 @@ fn spawn_worker(
     let term = terminator.to_owned();
     let pending_id: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
     let client_gone = Arc::new(AtomicBool::new(false));
+    let watch: Option<Arc<WatchShared>> = if watchdog_idle.is_zero() {
+        None
+    } else {
+        Some(Arc::new(WatchShared {
+            identity: containment.clone(),
+            idle: watchdog_idle,
+            fired: AtomicBool::new(false),
+            last_line: Mutex::new(std::time::Instant::now()),
+            forwarded: Mutex::new(None),
+        }))
+    };
     let reader_pending = Arc::clone(&pending_id);
     let reader_gone = Arc::clone(&client_gone);
     let reader_child = Arc::clone(&child_slot);
+    let reader_watch = watch.clone();
+    let reader_release = std::sync::Arc::clone(&crash_release);
     let reader = std::thread::spawn(move || {
         let mut reader = std::io::BufReader::new(stdout);
         let mut first = true;
         while let LineRead::Line(line) = read_crlf_line(&mut reader) {
+            if let Some(shared) = reader_watch.as_ref() {
+                // Decision-2 quiet clock: any complete line, even a
+                // notification, proves the worker transport is alive.
+                *shared.last_line.lock().unwrap() = std::time::Instant::now();
+            }
             if first {
                 first = false;
                 let _ = handshake_tx.send(trim_line(&line).to_owned());
                 continue;
             }
-            write_line(&writer, trim_line(&line), &term);
+            let payload = trim_line(&line);
+            // G-DUP-01: a worker line that IS the response to the pending
+            // request retires that request, so a later worker exit cannot
+            // answer the same id twice. Only a response (id, no method)
+            // retires it; worker-initiated requests and notifications
+            // never do, even when ids collide.
+            let mut guard = reader_pending.lock().unwrap();
+            if reader_watch
+                .as_ref()
+                .is_some_and(|shared| shared.fired.load(Ordering::SeqCst))
+            {
+                // The watchdog already took the close under this lock; a
+                // late worker line must not race its single answer.
+                return;
+            }
+            let retire = match guard.as_ref() {
+                Some(pending) => serde_json::from_str::<Value>(payload)
+                    .ok()
+                    .filter(|message| message.get("method").is_none())
+                    .and_then(|message| message.get("id").cloned())
+                    .is_some_and(|id| &id == pending),
+                None => false,
+            };
+            if retire {
+                *guard = None;
+            }
+            drop(guard);
+            write_line(&writer, payload, &term);
         }
         if reader_gone.load(Ordering::SeqCst) {
             return; // The client already left; the cleanup path owns the worker.
@@ -507,7 +612,7 @@ fn spawn_worker(
             verified = containment_clean(&containment);
         }
         if verified {
-            if let Some(ticket) = crash_release.lock().unwrap().take()
+            if let Some(ticket) = reader_release.lock().unwrap().take()
                 && !ticket.release()
             {
                 eprintln!("comsol-mcp-shim: the admission record changed; it was left in place");
@@ -520,6 +625,26 @@ fn spawn_worker(
         }
         std::process::exit(CRASH_EXIT_CODE);
     });
+    if let Some(shared) = watch.as_ref() {
+        let watchdog_out = out.clone();
+        let watchdog_term = terminator.to_owned();
+        let watchdog_pending = Arc::clone(&pending_id);
+        let watchdog_child = Arc::clone(&child_slot);
+        let watchdog_release = std::sync::Arc::clone(&crash_release);
+        let watchdog_gone = Arc::clone(&client_gone);
+        let watchdog_shared = Arc::clone(shared);
+        std::thread::spawn(move || {
+            watchdog_loop(
+                watchdog_shared,
+                watchdog_pending,
+                watchdog_child,
+                watchdog_release,
+                watchdog_gone,
+                watchdog_out,
+                watchdog_term,
+            )
+        });
+    }
     let mut stdin = child_slot
         .lock()
         .unwrap()
@@ -572,11 +697,130 @@ fn spawn_worker(
         child: child_slot,
         worker_pid,
         pending_id,
+        watch,
         client_gone,
         #[cfg(windows)]
         _job: job,
         _reader: reader,
     })
+}
+
+/// Decision-2 watchdog: the half-open launcher wedge produces neither EOF
+/// nor data nor queue pressure, so nothing else in the transport can end
+/// it. This loop closes the session as unknown, but ONLY on evidence a
+/// healthy quiet call cannot produce: the request is still pending, the
+/// worker has been silent for the whole configured window, and a
+/// containment member alive at forward time has since exited. The close
+/// then follows the exact G-EOF-01 contract — answer once (the fired flag
+/// plus the pending lock keep the reader from answering too), release only
+/// on the worker's observed death AND an empty containment, keep the
+/// record otherwise, and exit `WATCHDOG_EXIT_CODE`.
+fn watchdog_loop(
+    shared: Arc<WatchShared>,
+    pending_id: Arc<Mutex<Option<Value>>>,
+    child: ChildSlot,
+    crash_release: std::sync::Arc<std::sync::Mutex<Option<admission::ReleaseTicket>>>,
+    client_gone: Arc<AtomicBool>,
+    out: OutSink,
+    term: String,
+) {
+    let idle = shared.idle;
+    loop {
+        std::thread::sleep(WATCHDOG_POLL);
+        // The deliberate close drains the writer queue by dropping every
+        // sender; this thread holds one, so it must stand down (and never
+        // fire) once the client transport is gone.
+        if client_gone.load(Ordering::SeqCst) {
+            return;
+        }
+        let forwarded_now = { shared.forwarded.lock().unwrap().clone() };
+        let Some(forward) = forwarded_now else {
+            continue;
+        };
+        let still_pending = pending_id.lock().unwrap().as_ref() == Some(&forward.id);
+        if !still_pending {
+            continue;
+        }
+        let last_line = *shared.last_line.lock().unwrap();
+        let quiet_for = std::time::Instant::now()
+            .checked_duration_since(last_line.max(forward.at))
+            .unwrap_or_default();
+        if quiet_for < idle {
+            continue;
+        }
+        let Some(snapshot) = forward.members.as_deref() else {
+            continue; // No forward-time census: firing would be guesswork.
+        };
+        let listing = match containment::members(&shared.identity) {
+            Ok(listing) => listing,
+            Err(_) => continue, // Unreadable now: no census, no death evidence, no firing.
+        };
+        let current: Vec<u32> = listing
+            .into_iter()
+            .filter(|pid| *pid != std::process::id())
+            .collect();
+        if !member_since_forward_died(snapshot, &current) {
+            continue;
+        }
+        // Fire. Take the pending id under its own lock so a reader that
+        // concurrently retires it wins instead (the reply was delivered;
+        // nothing fires), and the fired flag makes a late reader line
+        // yield the close instead of racing a second answer.
+        let id = {
+            let mut slot = pending_id.lock().unwrap();
+            match slot.as_ref() {
+                Some(current_id) if current_id == &forward.id => {
+                    shared.fired.store(true, Ordering::SeqCst);
+                    slot.take().expect("the slot was just checked")
+                }
+                _ => continue,
+            }
+        };
+        let gone: Vec<String> = snapshot
+            .iter()
+            .filter(|pid| !current.contains(pid))
+            .map(u32::to_string)
+            .collect();
+        eprintln!(
+            "comsol-mcp-shim: watchdog closing after {quiet_for:?} of worker silence; \
+             containment processes {gone:?} that were live at forward time have exited"
+        );
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": -32603,
+                "message": "worker silent past the watchdog window after a worker-tree \
+                            exit; result unknown; reconnect required",
+            },
+        });
+        write_line(&out, &body.to_string(), &term);
+        // Give the writer thread a beat to flush the single answer before
+        // the process exits; the verification below is what gates the
+        // record, this only sequences the flush ahead of it.
+        std::thread::sleep(Duration::from_millis(50));
+        let mut verified = false;
+        if let Some(mut held) = child.lock().unwrap().take() {
+            verified = await_worker_exit(&mut held, WORKER_EXIT_GRACE);
+            drop(held);
+        }
+        if verified {
+            verified = containment_clean(&shared.identity);
+        }
+        if verified {
+            if let Some(ticket) = crash_release.lock().unwrap().take()
+                && !ticket.release()
+            {
+                eprintln!("comsol-mcp-shim: the admission record changed; it was left in place");
+            }
+        } else {
+            eprintln!(
+                "comsol-mcp-shim: watchdog close is unverified; the admission record is \
+                 kept for verified recovery"
+            );
+        }
+        std::process::exit(WATCHDOG_EXIT_CODE);
+    }
 }
 
 #[cfg(windows)]
@@ -634,6 +878,24 @@ fn run() -> i32 {
         eprintln!("For the version, run: comsol-mcp-shim --version");
         return 0;
     }
+    // Decision-2 watchdog window. Parsed before admission so a malformed
+    // value refuses startup rather than silently disarming protection the
+    // deployer configured.
+    let watchdog_idle = match std::env::var(ENV_WATCHDOG_IDLE) {
+        Err(std::env::VarError::NotPresent) => Duration::ZERO,
+        Err(problem) => {
+            eprintln!("comsol-mcp-shim: refusing to start: {ENV_WATCHDOG_IDLE}: {problem}");
+            return 2;
+        }
+        Ok(text) => match parse_watchdog_idle(&text) {
+            Ok(idle) => idle,
+            Err(problem) => {
+                eprintln!("comsol-mcp-shim: refusing to start: {problem}");
+                return 2;
+            }
+        },
+    };
+
     let (out, writer_thread) = OutSink::spawn();
     let manifest_option = std::env::var(ENV_MANIFEST).ok();
     let manifest = match manifest_option.as_deref() {
@@ -854,6 +1116,7 @@ fn run() -> i32 {
                             .as_ref()
                             .expect("admission was acquired before the worker")
                             .containment(),
+                        watchdog_idle,
                         std::sync::Arc::clone(&crash_release),
                     ) {
                         Ok(spawned) => {
@@ -887,8 +1150,26 @@ fn run() -> i32 {
                 let Some(live) = worker.as_mut() else {
                     unreachable!("worker was just spawned");
                 };
-                if has_id {
-                    *live.pending_id.lock().unwrap() = id.clone();
+                if let Some(request_id) = id.as_ref() {
+                    *live.pending_id.lock().unwrap() = Some(request_id.clone());
+                    if let Some(shared) = live.watch.as_ref() {
+                        // Decision-2 evidence baseline: which containment
+                        // members are alive NOW, before this request reaches
+                        // the worker. Firing later requires one of them to
+                        // have exited, which a healthy quiet call never
+                        // produces.
+                        let members = containment::members(&shared.identity).ok().map(|listing| {
+                            listing
+                                .into_iter()
+                                .filter(|pid| *pid != std::process::id())
+                                .collect::<Vec<u32>>()
+                        });
+                        *shared.forwarded.lock().unwrap() = Some(Forwarded {
+                            id: request_id.clone(),
+                            at: std::time::Instant::now(),
+                            members,
+                        });
+                    }
                 }
                 if live
                     .stdin
@@ -1146,5 +1427,30 @@ mod tests {
         // A second send into an empty queue succeeds immediately.
         sink.enqueue_with_deadline("second\n".to_owned(), Duration::from_millis(1));
         assert_eq!(_receiver.try_recv().ok(), Some("second\n".to_owned()));
+    }
+
+    /// Decision-2 window parsing: absent/empty/`0` disable; whole seconds
+    /// arm; anything else is a configuration error that refuses startup.
+    #[test]
+    fn watchdog_idle_env_values_parse() {
+        assert!(parse_watchdog_idle("").unwrap().is_zero());
+        assert!(parse_watchdog_idle("0").unwrap().is_zero());
+        assert_eq!(parse_watchdog_idle(" 7 ").unwrap(), Duration::from_secs(7));
+        assert!(parse_watchdog_idle("-3").is_err());
+        assert!(parse_watchdog_idle("1.5").is_err());
+        assert!(parse_watchdog_idle("soon").is_err());
+    }
+
+    /// Decision-2 evidence rule: firing requires a member that was alive at
+    /// forward time to be gone. Nobody dying, a merely-spawned helper, or
+    /// an empty baseline never satisfies it.
+    #[test]
+    fn firing_requires_a_forward_time_member_to_be_gone() {
+        let snapshot = [10u32, 11, 12];
+        assert!(member_since_forward_died(&snapshot, &[10, 12]));
+        assert!(member_since_forward_died(&snapshot, &[13]));
+        assert!(!member_since_forward_died(&snapshot, &[10, 11, 12]));
+        assert!(!member_since_forward_died(&snapshot, &[10, 11, 12, 13]));
+        assert!(!member_since_forward_died(&[], &[10]));
     }
 }

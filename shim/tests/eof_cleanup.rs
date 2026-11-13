@@ -8,11 +8,19 @@
 //!   worker keeps the record and refuses the next session (the old defect
 //!   released the record while the worker lived, so a second session could
 //!   start immediately).
+//! - `reply_then_die_answers_exactly_once` (G-DUP-01): a worker reply is
+//!   delivered exactly once; the crash close never answers the same id again.
 //! - `worker_orphan_descendant_keeps_the_record`: an observed worker exit
 //!   with a surviving descendant keeps the record (an observed exit alone
 //!   proves nothing about deeper descendants).
 //! - `verified_crash_releases_the_record`: observed death with an empty
 //!   containment releases the record (the G3 regression).
+//! - watchdog controls (decision 2): the half-open wedge (worker exits,
+//!   a descendant keeps its stdout open: no EOF, no data) closes exactly
+//!   once via the watchdog; a healthy quiet call that outlives the window
+//!   never fires; the watchdog is off unless
+//!   `COMSOL_MCP_SHIM_WATCHDOG_IDLE` is set; and with the watchdog armed,
+//!   a true EOF still owns the close (exit 3, one unknown answer).
 //!
 //! Platform note: on Windows a dead host's registry job dies with its last
 //! handle (WIN-CONTAIN-01), so a kept record stays operator-recoverable and
@@ -42,6 +50,26 @@ fn main() {
         (
             "eof_with_live_worker_keeps_the_record",
             eof_with_live_worker_keeps_the_record,
+        ),
+        (
+            "reply_then_die_answers_exactly_once",
+            reply_then_die_answers_exactly_once,
+        ),
+        (
+            "watchdog_closes_the_half_open_pending_request",
+            watchdog_closes_the_half_open_pending_request,
+        ),
+        (
+            "watchdog_leaves_a_healthy_quiet_call_alone",
+            watchdog_leaves_a_healthy_quiet_call_alone,
+        ),
+        (
+            "watchdog_is_disabled_by_default",
+            watchdog_is_disabled_by_default,
+        ),
+        (
+            "watchdog_defers_to_the_eof_close",
+            watchdog_defers_to_the_eof_close,
         ),
         (
             "worker_orphan_descendant_keeps_the_record",
@@ -98,6 +126,29 @@ fn spawn_orphan(seconds: u64) -> u32 {
         command.creation_flags(CREATE_NO_WINDOW);
     }
     command.spawn().expect("orphan spawns").id()
+}
+
+/// The half-open wedge descendant: unlike `spawn_orphan`, this one KEEPS
+/// the worker's stdout write end open (stdout stays inherited). The worker
+/// then exits without answering, so the shim sees neither EOF nor data —
+/// the exact shape a venv launcher leaves when the underlying interpreter
+/// dies mid-stream.
+#[allow(clippy::zombie_processes)]
+fn spawn_holder(seconds: u64) -> u32 {
+    let mut command = Command::new(std::env::current_exe().expect("own exe"));
+    command
+        .arg("--fixture=holder")
+        .arg(seconds.to_string())
+        .stdin(Stdio::null());
+    // stdout and stderr deliberately stay inherited: the holder must hold
+    // the worker's stdout pipe open for the whole control.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command.spawn().expect("holder spawns").id()
 }
 
 /// Read stdin lines until EOF. `on_call` reacts to one forwarded
@@ -186,10 +237,33 @@ fn fixture(mode: &str, arguments: &[String]) -> i32 {
             eprintln!("DYING");
             std::process::exit(0);
         }),
+        // G-DUP-01: answers the forwarded call, then dies. The reply was
+        // already delivered, so the crash close must not answer the same
+        // id a second time.
+        "reply-die-worker" => worker_loop(|message| {
+            let reply =
+                json!({"jsonrpc": "2.0", "id": message["id"], "result": {"answered": true}});
+            send_reply(&reply);
+            eprintln!("DYING");
+            std::process::exit(0);
+        }),
         // The generic echo worker for recovery and clean-close sessions.
         "echo" => worker_loop(|_| {}),
+        // Decision-2 wedge shape: a descendant keeps this worker's stdout
+        // open while the worker exits WITHOUT answering — no EOF, no data.
+        "silent-holder-worker" => worker_loop(|_| {
+            let holder = spawn_holder(30);
+            eprintln!("HOLDER-PID {holder}");
+            std::process::exit(0);
+        }),
+        // A healthy slow call: silent for seconds, then the plain reply.
+        "quiet-worker" => worker_loop(|_| {
+            std::thread::sleep(Duration::from_secs(3));
+        }),
         // The orphan descendant itself.
         "orphan" => orphan_sleeper(arguments),
+        // The half-open holder descendant: alive, silent, holding stdout.
+        "holder" => orphan_sleeper(arguments),
         other => {
             eprintln!("unknown fixture mode: {other}");
             2
@@ -251,6 +325,10 @@ fn write_settings(home: &Path) -> PathBuf {
 }
 
 fn spawn_shim(home: &Path, worker_mode: &str) -> Session {
+    spawn_shim_with_env(home, worker_mode, &[])
+}
+
+fn spawn_shim_with_env(home: &Path, worker_mode: &str, extra: &[(&str, &str)]) -> Session {
     let settings = write_settings(home);
     let mut environment: Vec<(String, String)> = std::env::vars()
         .filter(|(key, _)| !key.starts_with("COMSOL_MCP_"))
@@ -271,6 +349,9 @@ fn spawn_shim(home: &Path, worker_mode: &str) -> Session {
         "COMSOL_MCP_SHIM_CHILD".to_owned(),
         serde_json::to_string(&child_spec).expect("child spec"),
     ));
+    for (key, value) in extra {
+        environment.push(((*key).to_owned(), (*value).to_owned()));
+    }
     let mut command = Command::new(SHIM);
     command
         .env_clear()
@@ -531,6 +612,64 @@ fn eof_with_live_worker_keeps_the_record() -> Result<(), String> {
     Ok(())
 }
 
+/// G-DUP-01 control: the worker answers the pending request and then
+/// dies. The client must receive EXACTLY ONE response for that id (the
+/// reply); the crash close must not send a second unknown-result answer
+/// for the already-answered id. The record is released after the
+/// verified-clean crash (worker dead, no descendants).
+fn reply_then_die_answers_exactly_once() -> Result<(), String> {
+    let home = case_dir("reply-die");
+    let mut first = spawn_shim(&home, "reply-die-worker");
+    let hello = initialize(&mut first, 1);
+    if hello.get("id") != Some(&json!(1)) {
+        return Err(format!("worker bring-up failed: {hello}"));
+    }
+    first.send(&json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "anything", "arguments": {}}
+    }));
+    let reply = first.read();
+    if reply.get("id") != Some(&json!(2)) || reply.pointer("/result/answered") != Some(&json!(true))
+    {
+        return Err(format!("the worker reply did not arrive: {reply}"));
+    }
+    // The client stays connected while the shim makes its own close
+    // decision. Read everything the shim still sends until its stdout
+    // closes: a duplicate answer for id 2 would appear here.
+    let mut tail = Vec::new();
+    let mut buffer = [0u8; 4096];
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let empty = first
+            .stdout
+            .fill_buf()
+            .map(|slice| slice.is_empty())
+            .unwrap_or(true);
+        if empty || Instant::now() > deadline {
+            break;
+        }
+        let read = std::io::Read::read(&mut first.stdout, &mut buffer).unwrap_or(0);
+        if read == 0 {
+            break;
+        }
+        tail.extend_from_slice(&buffer[..read]);
+    }
+    let (code, stderr) = first.wait_exit(Duration::from_secs(WORKER_EXIT_GRACE_SECS + 25));
+    let tail_text = String::from_utf8_lossy(&tail).into_owned();
+    if code != 3 {
+        return Err(format!("expected crash exit 3, got {code}: {stderr}"));
+    }
+    if !tail_text.trim().is_empty() {
+        return Err(format!(
+            "unexpected extra output after the reply: {tail_text}"
+        ));
+    }
+    if lock_path(&home).exists() {
+        return Err("a verified-clean reply-then-die crash kept the record".into());
+    }
+    Ok(())
+}
+
 /// Orphan-descendant control: the worker exits (stdout closes with its
 /// death), but it leaves a descendant running. The observed exit alone must
 /// not release the record.
@@ -645,6 +784,198 @@ fn verified_crash_releases_the_record() -> Result<(), String> {
     }
     if lock_path(&home).exists() {
         return Err("the closing session did not release its record".into());
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Watchdog controls (decision 2)
+// ---------------------------------------------------------------------------
+
+/// Decision-2 wedge control: the worker exits without answering while a
+/// descendant KEEPS its stdout open — no EOF, no data, no queue pressure,
+/// the half-open launcher shape. With the idle window elapsed the shim must
+/// answer the pending request exactly once (a watchdog unknown), close with
+/// exit 5, and keep the record: the surviving holder makes cleanup
+/// unverified, exactly like any other unproven close.
+fn watchdog_closes_the_half_open_pending_request() -> Result<(), String> {
+    let home = case_dir("wdg-wedge");
+    let mut first = spawn_shim_with_env(
+        &home,
+        "silent-holder-worker",
+        &[("COMSOL_MCP_SHIM_WATCHDOG_IDLE", "1")],
+    );
+    let hello = initialize(&mut first, 1);
+    if hello.get("id") != Some(&json!(1)) {
+        return Err(format!("worker bring-up failed: {hello}"));
+    }
+    first.send(&json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "anything", "arguments": {}}
+    }));
+    let answer = first.read();
+    let message = answer
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if answer.get("id") != Some(&json!(2)) || !message.contains("watchdog") {
+        return Err(format!("the watchdog answer did not arrive: {answer}"));
+    }
+    // Exactly one answer (G-DUP-01 discipline): the next read must be the
+    // transport close, not a second response for the same id.
+    let mut extra = String::new();
+    let read = first.stdout.read_line(&mut extra).unwrap_or(0);
+    if read > 0 && !extra.trim().is_empty() {
+        return Err(format!(
+            "unexpected output after the watchdog answer: {extra}"
+        ));
+    }
+    let (code, stderr) = first.wait_exit(Duration::from_secs(WORKER_EXIT_GRACE_SECS + 25));
+    if code != 5 {
+        return Err(format!("expected watchdog exit 5, got {code}: {stderr}"));
+    }
+    if !stderr.contains("watchdog") {
+        return Err(format!(
+            "the close was not attributed to the watchdog: {stderr}"
+        ));
+    }
+    if !lock_path(&home).exists() {
+        return Err("the watchdog released the record while the holder lived".into());
+    }
+    let _holder = first
+        .wait_marker("HOLDER", Duration::from_secs(10))
+        .ok_or("the holder pid was not observed")?;
+    Ok(())
+}
+
+/// Decision-2 healthy-call control: the worker stays silent well past the
+/// armed window but keeps every forward-time containment member alive. The
+/// watchdog must NOT fire — the reply arrives intact after the silent
+/// stretch, and the session closes cleanly.
+fn watchdog_leaves_a_healthy_quiet_call_alone() -> Result<(), String> {
+    let home = case_dir("wdg-healthy");
+    let mut session = spawn_shim_with_env(
+        &home,
+        "quiet-worker",
+        &[("COMSOL_MCP_SHIM_WATCHDOG_IDLE", "1")],
+    );
+    let hello = initialize(&mut session, 1);
+    if hello.get("id") != Some(&json!(1)) {
+        return Err(format!("worker bring-up failed: {hello}"));
+    }
+    let started = Instant::now();
+    session.send(&json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "anything", "arguments": {}}
+    }));
+    let reply = session.read();
+    if reply.get("id") != Some(&json!(2))
+        || reply.get("error").is_some()
+        || reply.pointer("/result/ok") != Some(&json!(true))
+    {
+        return Err(format!(
+            "the quiet worker's reply was not delivered intact: {reply}"
+        ));
+    }
+    if started.elapsed() < Duration::from_secs(3) {
+        return Err(format!(
+            "control premise broken: the reply came before the quiet stretch ({:?})",
+            started.elapsed()
+        ));
+    }
+    let (code, stderr) = session.finish(Duration::from_secs(20));
+    if code != 0 {
+        return Err(format!("expected clean close 0, got {code}: {stderr}"));
+    }
+    if lock_path(&home).exists() {
+        return Err("the clean close kept the record".into());
+    }
+    Ok(())
+}
+
+/// Default-off control: the same silent stretch with the watchdog env
+/// absent never closes early. The window only exists when configured.
+fn watchdog_is_disabled_by_default() -> Result<(), String> {
+    let home = case_dir("wdg-off");
+    let mut session = spawn_shim(&home, "quiet-worker");
+    let hello = initialize(&mut session, 1);
+    if hello.get("id") != Some(&json!(1)) {
+        return Err(format!("worker bring-up failed: {hello}"));
+    }
+    session.send(&json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "anything", "arguments": {}}
+    }));
+    let reply = session.read();
+    if reply.get("id") != Some(&json!(2)) || reply.get("error").is_some() {
+        return Err(format!(
+            "the quiet worker's reply was not delivered intact: {reply}"
+        ));
+    }
+    let (code, stderr) = session.finish(Duration::from_secs(20));
+    if code != 0 {
+        return Err(format!("expected clean close 0, got {code}: {stderr}"));
+    }
+    if lock_path(&home).exists() {
+        return Err("the clean close kept the record".into());
+    }
+    Ok(())
+}
+
+/// EOF-precedence control with the watchdog armed: when the worker's stdout
+/// truly closes, the EOF close owns the outcome — exit 3, one unknown
+/// answer, record released, domain reusable — and the armed watchdog
+/// neither converts nor duplicates it.
+fn watchdog_defers_to_the_eof_close() -> Result<(), String> {
+    let home = case_dir("wdg-eof");
+    let mut first = spawn_shim_with_env(
+        &home,
+        "die-worker",
+        &[("COMSOL_MCP_SHIM_WATCHDOG_IDLE", "1")],
+    );
+    let hello = initialize(&mut first, 1);
+    if hello.get("id") != Some(&json!(1)) {
+        return Err(format!("worker bring-up failed: {hello}"));
+    }
+    first.send(&json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "anything", "arguments": {}}
+    }));
+    let pending = first.read();
+    let message = pending
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if pending.get("id") != Some(&json!(2))
+        || !message.contains("worker exited")
+        || message.contains("watchdog")
+    {
+        return Err(format!("the EOF close did not own the answer: {pending}"));
+    }
+    let mut extra = String::new();
+    let read = first.stdout.read_line(&mut extra).unwrap_or(0);
+    if read > 0 && !extra.trim().is_empty() {
+        return Err(format!(
+            "unexpected output after the unknown answer: {extra}"
+        ));
+    }
+    let (code, stderr) = first.wait_exit(Duration::from_secs(WORKER_EXIT_GRACE_SECS + 25));
+    if code != 3 {
+        return Err(format!("expected crash exit 3, got {code}: {stderr}"));
+    }
+    if lock_path(&home).exists() {
+        return Err("a verified-clean crash kept the record".into());
+    }
+    let mut second = spawn_shim(&home, "echo");
+    let hello = initialize(&mut second, 1);
+    if hello.get("id") != Some(&json!(1)) {
+        return Err(format!(
+            "next session failed on the released domain: {hello}"
+        ));
+    }
+    let (second_code, second_stderr) = second.finish(Duration::from_secs(20));
+    if second_code != 0 {
+        return Err(format!("next session exit {second_code}: {second_stderr}"));
     }
     Ok(())
 }

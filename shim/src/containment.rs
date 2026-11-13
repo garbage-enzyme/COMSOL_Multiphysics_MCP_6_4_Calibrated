@@ -261,6 +261,14 @@ mod imp {
             let fields: Vec<&str> = tail.split_whitespace().collect();
             // state(0) ppid(1) pgrp(2) session(3)
             if fields.len() > 3 && fields[3].parse::<u32>().ok() == Some(session) {
+                // A zombie has already exited; its session columns are
+                // bookkeeping until someone reaps the slot, not liveness.
+                // Counting it would mask exactly the death the watchdog
+                // needs as firing evidence (an unreaped direct child
+                // otherwise stays "in the session" forever).
+                if fields.first() == Some(&"Z") {
+                    continue;
+                }
                 pids.push(pid);
             }
         }
