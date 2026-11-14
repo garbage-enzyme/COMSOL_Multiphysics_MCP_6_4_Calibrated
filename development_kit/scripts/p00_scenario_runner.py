@@ -307,18 +307,35 @@ def preflight(
     return machine
 
 
-async def wait_for_server_tree(timeout_s: float = 20.0) -> int | None:
-    """Find the comsol-mcp child tree root spawned by this process."""
+async def wait_for_server_tree(settings_path: str, timeout_s: float = 20.0) -> int | None:
+    """Find THIS session's comsol-mcp child tree root.
+
+    Every session runs with its own settings file (host admission allows
+    one host per runtime domain), so the settings path in the candidate's
+    environment is the per-session discriminator. Matching only by name
+    or cmdline — the old behavior — returned the first server anywhere in
+    the runner's tree, so concurrent sessions all recorded the same PID
+    and the aggregate double-counted one tree (found independently in
+    the jk17ind review; their evidence-only p00_bound.py used this
+    settings-path selection first).
+    """
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         for proc in descendants(os.getpid()):
             try:
                 cmdline = " ".join(proc.cmdline() or []).lower()
                 name = (proc.name() or "").lower()
+                if (
+                    "comsol-mcp" not in name
+                    and "comsol-mcp" not in cmdline
+                    and "comsol_mcp.server" not in cmdline
+                ):
+                    continue
+                if proc.environ().get("COMSOL_MCP_SETTINGS_PATH") != settings_path:
+                    continue
             except psutil.NoSuchProcess, psutil.AccessDenied:
                 continue
-            if "comsol-mcp" in name or "comsol-mcp" in cmdline or "comsol_mcp.server" in cmdline:
-                return proc.pid
+            return proc.pid
         await asyncio.sleep(0.2)
     return None
 
@@ -372,7 +389,7 @@ async def drive_session(
     errlog = open(errlog_path, "ab")
     params = StdioServerParameters(command=command, args=server_args or [], env=env, errlog=errlog)
     async with stdio_client(params) as (reader, writer_transport):
-        server_pid = await wait_for_server_tree()
+        server_pid = await wait_for_server_tree(env["COMSOL_MCP_SETTINGS_PATH"])
         latencies["server_tree_root_pid"] = server_pid
         if server_pid is None:
             return {"run_id": run_id, "error": "server_tree_not_found", "stages": stages}
