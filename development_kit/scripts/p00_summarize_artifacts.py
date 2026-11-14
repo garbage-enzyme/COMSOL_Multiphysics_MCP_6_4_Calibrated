@@ -274,6 +274,17 @@ def main() -> int:
             "discovery_only_session_private_commit_mb_max": 10,
             "four_client_aggregate_idle_private_commit_mb_max": 600,
             "static_initialize_latency_s_max": 0.05,
+            "static_initialize_latency_boundary": (
+                "WARM static initialize only: a manifest-served initialize "
+                "against a running shim (wire + lookup). Caller decision "
+                "2026-11-15 after the jk17ind review measured the inclusive "
+                "first-request envelope at 53.2-54.3 ms (roughly two thirds "
+                "OS process-startup tail, one third the synchronous "
+                "host-admission contract, initialize handling itself "
+                "sub-millisecond). First-request/post-spawn latency stays a "
+                "reported context number and is never selected against this "
+                "gate; warm readings are reported without cherry-picking."
+            ),
             "first_call_latency_regression_s_max": 0.5,
             "basis": (
                 "prod-like-blas1 measured idle (mean %.1f MB per host); "
