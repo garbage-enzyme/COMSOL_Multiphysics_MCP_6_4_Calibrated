@@ -15,10 +15,13 @@
 //!   exit, and an observed exit alone says nothing about descendants);
 //! - optional watchdog (`COMSOL_MCP_SHIM_WATCHDOG_IDLE` seconds, default
 //!   off): close as unknown only while one request is pending, the worker
-//!   has been silent for the whole window, AND a containment member that
-//!   was alive when that request was forwarded has since exited (decision
-//!   2: silence alone never fires, so a healthy quiet call is safe; the
-//!   close follows the same verified-cleanup contract as the EOF close);
+//!   has been silent for the whole window, AND the worker-reported
+//!   executing interpreter (bound by PID plus creation time through
+//!   `COMSOL_MCP_SHIM_WORKER_IDENTITY_FILE`) is verifiably gone from the
+//!   OS (decision 2: silence alone never fires, and no other process's
+//!   exit can either, so a healthy quiet call is safe; a worker that does
+//!   not report its identity simply stays unprotected; the close follows
+//!   the same verified-cleanup contract as the EOF close);
 //! - refuse automatic respawn after a worker failure (reconnect instead).
 //!
 //! The shim never acquires solver leases and never fabricates live state.
@@ -60,7 +63,10 @@ const CRASH_EXIT_CODE: i32 = 3;
 const SLOW_READER_EXIT_CODE: i32 = 4;
 const WATCHDOG_EXIT_CODE: i32 = 5;
 const ENV_WATCHDOG_IDLE: &str = "COMSOL_MCP_SHIM_WATCHDOG_IDLE";
+const ENV_WORKER_IDENTITY: &str = "COMSOL_MCP_SHIM_WORKER_IDENTITY_FILE";
 const WATCHDOG_POLL: Duration = Duration::from_millis(250);
+const WORKER_IDENTITY_WAIT: Duration = Duration::from_secs(2);
+const WORKER_IDENTITY_POLL: Duration = Duration::from_millis(100);
 
 /// The protocol era the external client negotiated with the shim.
 #[derive(Clone)]
@@ -294,15 +300,21 @@ impl Manifest {
 /// thread: either may be the one that observes its death (G-EOF-01).
 type ChildSlot = Arc<Mutex<Option<std::process::Child>>>;
 
-/// Decision-2 watchdog bookkeeping, shared by the main loop (the
-/// forward-time containment snapshot), the reader (activity timestamps and
-/// the fired check), and the watchdog thread itself. Only constructed when
-/// the watchdog is enabled, so the default path pays nothing.
+/// Decision-2 watchdog bookkeeping, shared by the main loop (the forwarded
+/// request), the reader (activity timestamps and the fired check), and the
+/// watchdog thread itself. Only constructed when the watchdog is enabled,
+/// so the default path pays nothing.
 struct WatchShared {
-    /// The admission containment identity; membership censuses read it.
-    identity: Value,
+    /// The admission containment identity; the close cascade re-reads its
+    /// live members for the verified-release decision (G-EOF-01). Firing
+    /// never consults it — only the bound interpreter identity does.
+    containment: Value,
     /// The configured quiet window (constant for the session).
     idle: Duration,
+    /// The EXECUTING INTERPRETER the worker reported, bound to its OS
+    /// identity (PID plus creation time). `None` until the handshake
+    /// resolves it; a session that never resolves it stays unarmed.
+    interpreter: Mutex<Option<(u32, f64)>>,
     /// Set under the pending-id lock when the watchdog takes the close;
     /// the reader then stops forwarding so the close answers exactly once.
     fired: AtomicBool,
@@ -315,18 +327,33 @@ struct WatchShared {
 struct Forwarded {
     id: Value,
     at: std::time::Instant,
-    /// Live containment members (this host excluded) at forward time, or
-    /// `None` when the census was unreadable — firing then stays off for
-    /// that request rather than proceeding without evidence.
-    members: Option<Vec<u32>>,
 }
 
-/// Decision-2 evidence rule: firing requires a containment member that was
-/// alive when the request was forwarded to be gone now. Silence alone, a
-/// spawned helper, or an unreadable census never satisfies it, so a healthy
-/// quiet call cannot be closed by the watchdog.
-fn member_since_forward_died(forward_members: &[u32], current: &[u32]) -> bool {
-    forward_members.iter().any(|pid| !current.contains(pid))
+/// Decision-2 evidence source: read the PID the worker reported through
+/// the identity file and bind it to the OS birth identity (PID + creation
+/// time). Only the reported interpreter's own verifiable death may fire
+/// the watchdog; helpers, job runners, and any other process turnover are
+/// invisible to it. A missing, malformed, or unprobeable report disarms.
+fn resolve_worker_identity(path: &std::path::Path) -> Option<(u32, f64)> {
+    let deadline = std::time::Instant::now() + WORKER_IDENTITY_WAIT;
+    let text = loop {
+        match std::fs::read_to_string(path) {
+            Ok(text) => break text,
+            Err(problem) if problem.kind() == std::io::ErrorKind::NotFound => {
+                if std::time::Instant::now() < deadline {
+                    std::thread::sleep(WORKER_IDENTITY_POLL);
+                } else {
+                    return None;
+                }
+            }
+            Err(_) => return None,
+        }
+    };
+    let pid = text.split_whitespace().next()?.parse::<u32>().ok()?;
+    match procinfo::probe(pid) {
+        procinfo::Probe::Alive(birth) => Some((pid, birth)),
+        _ => None,
+    }
 }
 
 /// Parse the watchdog idle window (whole seconds; `0`, empty, or absent
@@ -477,6 +504,11 @@ fn spawn_worker(
     let (program, args) = argv
         .split_first()
         .ok_or_else(|| format!("{ENV_CHILD} is empty"))?;
+    let identity_path = std::env::temp_dir().join(format!(
+        "comsol-mcp-shim-worker-{}-{}.pid",
+        std::process::id(),
+        &worker_token[..16]
+    ));
     let mut command = Command::new(program);
     command
         .args(args)
@@ -489,6 +521,10 @@ fn spawn_worker(
             std::process::id().to_string(),
         )
         .env(admission::ENV_WORKER_TOKEN, worker_token)
+        // Decision-2 identity contract: the worker reports its EXECUTING
+        // interpreter's PID to this file at startup; the watchdog binds that
+        // PID's OS birth identity and fires only on its verifiable death.
+        .env(ENV_WORKER_IDENTITY, &identity_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
@@ -520,8 +556,9 @@ fn spawn_worker(
         None
     } else {
         Some(Arc::new(WatchShared {
-            identity: containment.clone(),
+            containment: containment.clone(),
             idle: watchdog_idle,
+            interpreter: Mutex::new(None),
             fired: AtomicBool::new(false),
             last_line: Mutex::new(std::time::Instant::now()),
             forwarded: Mutex::new(None),
@@ -625,26 +662,6 @@ fn spawn_worker(
         }
         std::process::exit(CRASH_EXIT_CODE);
     });
-    if let Some(shared) = watch.as_ref() {
-        let watchdog_out = out.clone();
-        let watchdog_term = terminator.to_owned();
-        let watchdog_pending = Arc::clone(&pending_id);
-        let watchdog_child = Arc::clone(&child_slot);
-        let watchdog_release = std::sync::Arc::clone(&crash_release);
-        let watchdog_gone = Arc::clone(&client_gone);
-        let watchdog_shared = Arc::clone(shared);
-        std::thread::spawn(move || {
-            watchdog_loop(
-                watchdog_shared,
-                watchdog_pending,
-                watchdog_child,
-                watchdog_release,
-                watchdog_gone,
-                watchdog_out,
-                watchdog_term,
-            )
-        });
-    }
     let mut stdin = child_slot
         .lock()
         .unwrap()
@@ -692,6 +709,48 @@ fn spawn_worker(
             .and_then(|_| stdin.flush())
             .map_err(|e| format!("worker initialized notification: {e}"))?;
     }
+    if let Some(shared) = watch.as_ref() {
+        // Decision-2 arm decision, AFTER the worker ran: only a worker that
+        // reported its executing interpreter is protected. Anything else
+        // disarms for the session (with an attribution line) rather than
+        // guessing at which process matters.
+        let interpreter = resolve_worker_identity(&identity_path);
+        let _ = std::fs::remove_file(&identity_path);
+        *shared.interpreter.lock().unwrap() = interpreter;
+        match interpreter {
+            Some((pid, _birth)) => {
+                eprintln!(
+                    "comsol-mcp-shim: watchdog armed on the worker-reported \
+                     interpreter PID {pid}"
+                );
+                let watchdog_out = out.clone();
+                let watchdog_term = terminator.to_owned();
+                let watchdog_pending = Arc::clone(&pending_id);
+                let watchdog_child = Arc::clone(&child_slot);
+                let watchdog_release = std::sync::Arc::clone(&crash_release);
+                let watchdog_gone = Arc::clone(&client_gone);
+                let watchdog_shared = Arc::clone(shared);
+                std::thread::spawn(move || {
+                    watchdog_loop(
+                        watchdog_shared,
+                        watchdog_pending,
+                        watchdog_child,
+                        watchdog_release,
+                        watchdog_gone,
+                        watchdog_out,
+                        watchdog_term,
+                    )
+                });
+            }
+            None => {
+                eprintln!(
+                    "comsol-mcp-shim: the worker did not report its interpreter identity \
+                     through {ENV_WORKER_IDENTITY}; the watchdog stays disarmed for this \
+                     session (workers that do not report are not protected)"
+                );
+            }
+        }
+    }
     Ok(Worker {
         stdin,
         child: child_slot,
@@ -709,11 +768,12 @@ fn spawn_worker(
 /// nor data nor queue pressure, so nothing else in the transport can end
 /// it. This loop closes the session as unknown, but ONLY on evidence a
 /// healthy quiet call cannot produce: the request is still pending, the
-/// worker has been silent for the whole configured window, and a
-/// containment member alive at forward time has since exited. The close
-/// then follows the exact G-EOF-01 contract — answer once (the fired flag
-/// plus the pending lock keep the reader from answering too), release only
-/// on the worker's observed death AND an empty containment, keep the
+/// worker has been silent for the whole configured window, AND the worker-
+/// reported EXECUTING INTERPRETER (bound by PID plus creation time) is
+/// verifiably gone from the OS. Other process turnover never fires it. The
+/// close then follows the exact G-EOF-01 contract — answer once (the fired
+/// flag plus the pending lock keep the reader from answering too), release
+/// only on the worker's observed death AND an empty containment, keep the
 /// record otherwise, and exit `WATCHDOG_EXIT_CODE`.
 fn watchdog_loop(
     shared: Arc<WatchShared>,
@@ -748,19 +808,22 @@ fn watchdog_loop(
         if quiet_for < idle {
             continue;
         }
-        let Some(snapshot) = forward.members.as_deref() else {
-            continue; // No forward-time census: firing would be guesswork.
+        // Decision-2 evidence: the EXECUTING INTERPRETER the worker reported,
+        // bound to its OS birth identity, must be verifiably gone. Any other
+        // process turnover — helpers, job runners, launcher exit — is
+        // invisible here, so it can never close a healthy quiet call.
+        let Some((pid, birth)) = *shared.interpreter.lock().unwrap() else {
+            continue; // No bound identity: the watchdog never fires.
         };
-        let listing = match containment::members(&shared.identity) {
-            Ok(listing) => listing,
-            Err(_) => continue, // Unreadable now: no census, no death evidence, no firing.
-        };
-        let current: Vec<u32> = listing
-            .into_iter()
-            .filter(|pid| *pid != std::process::id())
-            .collect();
-        if !member_since_forward_died(snapshot, &current) {
-            continue;
+        match procinfo::probe(pid) {
+            // Unverifiable liveness is not death; never fire on Unknown.
+            procinfo::Probe::Unknown => continue,
+            procinfo::Probe::Alive(observed) if (observed - birth).abs() < 1e-6 => {
+                continue; // The reported interpreter still runs.
+            }
+            // Absent, or the PID now belongs to a different birth: the
+            // reported interpreter is verifiably gone.
+            procinfo::Probe::Absent | procinfo::Probe::Alive(_) => {}
         }
         // Fire. Take the pending id under its own lock so a reader that
         // concurrently retires it wins instead (the reply was delivered;
@@ -776,22 +839,17 @@ fn watchdog_loop(
                 _ => continue,
             }
         };
-        let gone: Vec<String> = snapshot
-            .iter()
-            .filter(|pid| !current.contains(pid))
-            .map(u32::to_string)
-            .collect();
         eprintln!(
             "comsol-mcp-shim: watchdog closing after {quiet_for:?} of worker silence; \
-             containment processes {gone:?} that were live at forward time have exited"
+             the worker-reported interpreter process {pid} is verifiably gone"
         );
         let body = json!({
             "jsonrpc": "2.0",
             "id": id,
             "error": {
                 "code": -32603,
-                "message": "worker silent past the watchdog window after a worker-tree \
-                            exit; result unknown; reconnect required",
+                "message": "worker silent past the watchdog window after its interpreter \
+                            exited; result unknown; reconnect required",
             },
         });
         write_line(&out, &body.to_string(), &term);
@@ -805,7 +863,7 @@ fn watchdog_loop(
             drop(held);
         }
         if verified {
-            verified = containment_clean(&shared.identity);
+            verified = containment_clean(&shared.containment);
         }
         if verified {
             if let Some(ticket) = crash_release.lock().unwrap().take()
@@ -1153,21 +1211,9 @@ fn run() -> i32 {
                 if let Some(request_id) = id.as_ref() {
                     *live.pending_id.lock().unwrap() = Some(request_id.clone());
                     if let Some(shared) = live.watch.as_ref() {
-                        // Decision-2 evidence baseline: which containment
-                        // members are alive NOW, before this request reaches
-                        // the worker. Firing later requires one of them to
-                        // have exited, which a healthy quiet call never
-                        // produces.
-                        let members = containment::members(&shared.identity).ok().map(|listing| {
-                            listing
-                                .into_iter()
-                                .filter(|pid| *pid != std::process::id())
-                                .collect::<Vec<u32>>()
-                        });
                         *shared.forwarded.lock().unwrap() = Some(Forwarded {
                             id: request_id.clone(),
                             at: std::time::Instant::now(),
-                            members,
                         });
                     }
                 }
@@ -1441,16 +1487,31 @@ mod tests {
         assert!(parse_watchdog_idle("soon").is_err());
     }
 
-    /// Decision-2 evidence rule: firing requires a member that was alive at
-    /// forward time to be gone. Nobody dying, a merely-spawned helper, or
-    /// an empty baseline never satisfies it.
+    /// Decision-2 identity binding: the reported PID resolves to this
+    /// process with its OS birth identity; garbage disarms; a missing
+    /// report waits the bounded window and then disarms.
     #[test]
-    fn firing_requires_a_forward_time_member_to_be_gone() {
-        let snapshot = [10u32, 11, 12];
-        assert!(member_since_forward_died(&snapshot, &[10, 12]));
-        assert!(member_since_forward_died(&snapshot, &[13]));
-        assert!(!member_since_forward_died(&snapshot, &[10, 11, 12]));
-        assert!(!member_since_forward_died(&snapshot, &[10, 11, 12, 13]));
-        assert!(!member_since_forward_died(&[], &[10]));
+    fn worker_identity_resolves_this_process_and_rejects_garbage() {
+        let dir = std::env::temp_dir().join(format!("wdg-identity-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let mine = dir.join("mine.pid");
+        std::fs::write(&mine, format!("{}\n", std::process::id())).expect("write report");
+        let (pid, birth) = resolve_worker_identity(&mine).expect("own pid resolves");
+        assert_eq!(pid, std::process::id());
+        assert!(matches!(
+            procinfo::probe(pid),
+            procinfo::Probe::Alive(created) if (created - birth).abs() < 1e-6
+        ));
+        let junk = dir.join("junk.pid");
+        std::fs::write(&junk, "not-a-pid\n").expect("write junk");
+        assert!(resolve_worker_identity(&junk).is_none());
+        let missing = dir.join("missing.pid");
+        let started = std::time::Instant::now();
+        assert!(resolve_worker_identity(&missing).is_none());
+        assert!(
+            started.elapsed() >= WORKER_IDENTITY_WAIT,
+            "a missing report must consume the bounded wait, not hang"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -456,11 +456,18 @@ Facts and limits:
   that keeps a second stdout writer alive; if the underlying interpreter
   dies mid-stream, the session can wedge (no EOF, no data). If a launcher
   topology is unavoidable, arm the watchdog with
-  `COMSOL_MCP_SHIM_WATCHDOG_IDLE=<seconds>` (for example 300). It closes
-  the session as unknown only while a request is pending, the worker has
-  been silent for the whole window, AND a process that was alive when the
-  request was forwarded has since exited — a healthy quiet call never
-  trips it. Keep the window above your longest expected silent call.
+  `COMSOL_MCP_SHIM_WATCHDOG_IDLE=<seconds>` (for example 300). The
+  watchdog binds the worker's EXECUTING interpreter through
+  `COMSOL_MCP_SHIM_WORKER_IDENTITY_FILE` (the shim names the file; the
+  shipped Python worker writes its interpreter's PID there at startup)
+  and closes the session as unknown only while a request is pending, the
+  worker has been silent for the whole window, AND that reported
+  interpreter — matched by PID and creation time — is verifiably gone
+  from the OS. No other process's exit (a helper finishing, a job runner,
+  even the launcher itself) can trigger it, so it cannot close a healthy
+  quiet call. Workers that do not report their interpreter identity are
+  not protected: the watchdog disarms for that session with a stderr
+  note. Keep the window above your longest expected silent call.
 - Message-size gate: no supported workflow may return a single protocol
   message larger than 1 MB through the shim. Adding such a workflow
   requires shipping the buffered worker-read fix in the same release; the

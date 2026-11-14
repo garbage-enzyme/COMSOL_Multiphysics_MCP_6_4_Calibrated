@@ -300,6 +300,23 @@ def _startup_transport_gate() -> "tuple[Any, Any] | None":
     return claim, snapshot
 
 
+def _report_worker_identity() -> None:
+    """0.8.2 shim watchdog contract: when the shim asks (it sets
+    ``COMSOL_MCP_SHIM_WORKER_IDENTITY_FILE``), report this executing
+    interpreter's PID so the watchdog can bind the interpreter's OS
+    identity (PID plus creation time) and close only on ITS verifiably
+    observed death. Workers that do not report are simply not protected;
+    every other behavior is unchanged."""
+    path = os.environ.get("COMSOL_MCP_SHIM_WORKER_IDENTITY_FILE")
+    if not path:
+        return
+    try:
+        with open(path, "w", encoding="ascii") as handle:
+            handle.write(f"{os.getpid()}\n")
+    except OSError:
+        logger.debug("worker identity report failed", exc_info=True)
+
+
 def main() -> None:
     """Run the MCP server.
 
@@ -313,6 +330,7 @@ def main() -> None:
     shim-contained worker runs only after its launch binding verifies.
     """
     logging.basicConfig(level=logging.INFO)
+    _report_worker_identity()
 
     gate = _startup_transport_gate()
     claim = gate[0] if gate is not None else None
