@@ -69,7 +69,7 @@ VALID_BINARY = {
         "D:/shim/comsol-mcp-shim.exe" if os.name == "nt" else "/opt/shim/comsol-mcp-shim"
     ),
     "sha256": "a" * 64,
-    "version": "0.8.2-dev",
+    "version": "0.8.2",
     "platform": PLATFORM,
 }
 

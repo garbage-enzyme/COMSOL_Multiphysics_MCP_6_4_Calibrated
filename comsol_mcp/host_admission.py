@@ -92,7 +92,7 @@ WORKER_TOKEN_ENV = "COMSOL_MCP_SHIM_WORKER_TOKEN"  # noqa: S105 - a variable nam
 
 # The shim binary this package accepts. ``shim/Cargo.toml`` carries the
 # same value; a development-kit test pins the two together.
-EXPECTED_SHIM_VERSION = "0.8.2-dev"
+EXPECTED_SHIM_VERSION = "0.8.2"
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _JOB_TERMINAL_STATES = frozenset({"completed", "failed", "interrupted", "cancelled"})

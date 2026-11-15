@@ -2,7 +2,7 @@
 name = "comsol-mcp-shim"
 # Tracks the COMSOL MCP release line. The release batch bumps this together
 # with comsol_mcp.__version__ in one commit; dev builds carry -dev suffixes.
-version = "0.8.2-dev"
+version = "0.8.2"
 edition = "2024"
 # rust-version is the frozen, verified toolchain only. The theoretical
 # lower bound is 1.85 (the release that introduced edition 2024), but no

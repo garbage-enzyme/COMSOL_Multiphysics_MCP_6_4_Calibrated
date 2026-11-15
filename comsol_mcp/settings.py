@@ -361,7 +361,7 @@ def _parse_shim_version(value: Any) -> str | None:
         or _SHIM_VERSION_PATTERN.fullmatch(value) is None
     ):
         raise SettingsError(
-            "settings.shim_binary.version must be a release version such as 0.8.2-dev",
+            "settings.shim_binary.version must be a release version such as 0.8.2",
             reason_code="settings_value_invalid",
         )
     return value

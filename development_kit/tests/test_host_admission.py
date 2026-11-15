@@ -516,7 +516,7 @@ def test_worker_flag_without_binding_evidence_is_refused(runtime):
         "shim_binary": {
             "path": "D:/x.exe",
             "sha256": "a" * 64,
-            "version": "0.8.2-dev",
+            "version": "0.8.2",
             "platform": "x86_64-pc-windows-msvc",
         },
     }
@@ -536,7 +536,7 @@ def test_worker_binding_refuses_without_an_admitted_shim(runtime):
         "shim_binary": {
             "path": "D:/x.exe",
             "sha256": "a" * 64,
-            "version": "0.8.2-dev",
+            "version": "0.8.2",
             "platform": "x86_64-pc-windows-msvc",
         },
     }
@@ -559,7 +559,7 @@ def test_worker_binding_refuses_a_parent_that_is_not_the_recorded_host(runtime):
         "shim_binary": {
             "path": str(binary),
             "sha256": ha._sha256_file(binary),
-            "version": "0.8.2-dev",
+            "version": "0.8.2",
             "platform": "x86_64-pc-windows-msvc",
         },
     }
@@ -571,7 +571,7 @@ def test_worker_binding_refuses_a_parent_that_is_not_the_recorded_host(runtime):
             host,
             executable=str(binary),
             shim={
-                "version": "0.8.2-dev",
+                "version": "0.8.2",
                 "platform": "x86_64-pc-windows-msvc",
                 "executable_sha256": settings["shim_binary"]["sha256"],
                 "worker_token_sha256": __import__("hashlib").sha256(token.encode()).hexdigest(),
