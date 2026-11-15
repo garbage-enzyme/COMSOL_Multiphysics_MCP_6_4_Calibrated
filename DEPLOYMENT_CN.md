@@ -368,6 +368,13 @@ Rust shim 是一个可选的、单独分发的启动器。它从生成的清单�
   重连即可；shim 绝不自动重生或重放。
 - Windows：强杀 shim 会终止整个 worker 树（Job Object）。Linux 依赖
   优雅的 stdin 关闭路径；父进程死亡本身不构成遏制声明。
+- Linux 运行时文件系统要求：准入/所有权锁与运行时恢复状态必须位于
+  已验证的原生文件系统通道（ext4）。两条入口——Python 服务器与
+  shim——都会在创建任何文件之前，依据 /proc/self/mounts 的真实挂载
+  证据，拒绝在不支持的文件系统上启动；证据不可得时同样拒绝而非
+  默默放行。WSL 的 Windows 挂载（如 /mnt/*，9p/DrvFs）不受支持：会
+  破坏 POSIX 隔离释放协议。请使用原生路径，例如
+  `$HOME/comsol_mcp_runtime`。Windows 原生路径不受影响。
 - 子解释器约束：`COMSOL_MCP_SHIM_CHILD` 必须指向真正的解释器可执行
   文件。Windows 上 venv 的 `python.exe` 是启动器，会保留第二个 stdout
   写端；若底层解释器在传输中途死亡，会话可能卡死（无 EOF、无数据）。

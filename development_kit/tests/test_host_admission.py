@@ -1763,3 +1763,61 @@ def test_explicit_recovery_still_refuses_positive_evidence_after_job_loss(runtim
                 process.kill()
             except psutil.Error:
                 pass
+
+
+class TestRuntimeFilesystemBoundary:
+    """Caller decision 2026-11-15: Linux runtime state needs the verified
+    native filesystem lane (ext4). The check runs before any admission
+    mutation on every direct-Python entry path; the Rust shim enforces the
+    identical rule at its own admission entry. Windows is unchanged."""
+
+    def test_windows_no_op(self):
+        if os.name != "nt":
+            pytest.skip("the boundary is a no-op on Windows by design")
+        ha.verify_runtime_filesystem("D:/not/even/required/to/exist")
+
+    def test_mount_point_escapes_decode(self):
+        assert ha._unescape_mount_point("/mnt/my\040drive").as_posix() == "/mnt/my drive"
+        assert ha._unescape_mount_point("/plain/path").as_posix() == "/plain/path"
+
+    def test_outcome_follows_mount_evidence(self, tmp_path):
+        if not sys.platform.startswith("linux"):
+            pytest.skip("mount-evidence outcome is a Linux property")
+        fstype = ha.runtime_filesystem_type(tmp_path)
+        if fstype in ha.SUPPORTED_RUNTIME_FILESYSTEMS:
+            ha.verify_runtime_filesystem(tmp_path)
+        else:
+            with pytest.raises(ha.HostAdmissionError) as error:
+                ha.verify_runtime_filesystem(tmp_path)
+            assert error.value.reason_code == "runtime_filesystem_unsupported"
+            assert fstype in str(error.value)
+
+    def test_9p_runtime_refused_before_any_mutation(self):
+        if not sys.platform.startswith("linux"):
+            pytest.skip("WSL 9p topology required")
+        probe = Path("/mnt/d")
+        try:
+            probe.resolve(strict=True)
+        except OSError:
+            pytest.skip("no /mnt/d mount on this host")
+        if " 9p " not in Path("/proc/self/mounts").read_text(encoding="utf-8"):
+            pytest.skip("/mnt/d is not a 9p mount on this host")
+        with pytest.raises(ha.HostAdmissionError) as error:
+            ha.verify_runtime_filesystem(probe)
+        assert error.value.reason_code == "runtime_filesystem_unsupported"
+        # The acquire() entry refuses BEFORE creating the runtime directory.
+        target = probe / f"comsol-mcp-py-fs-boundary-{os.getpid()}"
+        import shutil
+
+        shutil.rmtree(target, ignore_errors=True)
+        try:
+            with pytest.raises(ha.HostAdmissionError) as acquire_error:
+                ha.acquire(
+                    str(target),
+                    transport_mode="python",
+                    settings=SETTINGS,
+                )
+            assert acquire_error.value.reason_code == "runtime_filesystem_unsupported"
+            assert not target.exists(), "the refusal mutated the runtime directory"
+        finally:
+            shutil.rmtree(target, ignore_errors=True)

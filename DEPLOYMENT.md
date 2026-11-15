@@ -451,6 +451,16 @@ Facts and limits:
 - Windows: hard-killing the shim terminates the whole worker tree (Job
   Object). Linux relies on the graceful stdin-close path. Parent death
   alone is not a containment claim there.
+- Linux runtime filesystem requirement: admission and ownership locks
+  and runtime recovery state must live on the verified native
+  filesystem lane (ext4). Both entry paths — the Python server and the
+  shim — refuse to start, before creating anything, when the configured
+  runtime directory sits on another filesystem; the decision uses mount
+  evidence from /proc/self/mounts, and unverifiable evidence refuses
+  rather than passing. WSL Windows mounts such as /mnt/* (9p/DrvFs) are
+  unsupported: they break the POSIX quarantine release protocol. Use a
+  native path, for example `$HOME/comsol_mcp_runtime`. Windows-native
+  paths are unaffected.
 - Child-interpreter contract: point `COMSOL_MCP_SHIM_CHILD` at a real
   interpreter executable. On Windows, a venv `python.exe` is a launcher
   that keeps a second stdout writer alive; if the underlying interpreter

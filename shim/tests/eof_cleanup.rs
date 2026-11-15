@@ -72,6 +72,10 @@ fn main() {
             watchdog_disarms_when_the_worker_does_not_report_identity,
         ),
         (
+            "non_native_runtime_is_refused_before_mutation",
+            non_native_runtime_is_refused_before_mutation,
+        ),
+        (
             "watchdog_leaves_a_healthy_quiet_call_alone",
             watchdog_leaves_a_healthy_quiet_call_alone,
         ),
@@ -1199,6 +1203,98 @@ fn watchdog_defers_to_the_eof_close() -> Result<(), String> {
     let (second_code, second_stderr) = second.finish(Duration::from_secs(20));
     if second_code != 0 {
         return Err(format!("next session exit {second_code}: {second_stderr}"));
+    }
+    Ok(())
+}
+
+/// Caller decision 2026-11-15: runtime state on a non-native filesystem is
+/// refused BEFORE any mutation. On a WSL 9p mount the shim must exit 2
+/// with the actionable support refusal, must NOT create the runtime
+/// directory at all, and must spawn no worker. POSIX-only control (the
+/// check is a no-op on Windows by design); vacuous where no 9p mount
+/// exists.
+fn non_native_runtime_is_refused_before_mutation() -> Result<(), String> {
+    if cfg!(windows) {
+        return Ok(());
+    }
+    let probe = Path::new("/mnt/d");
+    let mounts = std::fs::read_to_string("/proc/self/mounts").unwrap_or_default();
+    if std::fs::canonicalize(probe).is_err() || !mounts.contains(" 9p ") {
+        return Ok(()); // no WSL 9p mount on this host
+    }
+    let home = case_dir("fs-boundary");
+    let runtime = probe.join(format!("comsol-mcp-fs-boundary-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&runtime);
+    let settings = json!({
+        "schema_name": "comsol_mcp.settings",
+        "schema_version": "1.4.0",
+        "transport": "shim",
+        "shim_binary": {
+            "path": SHIM,
+            "sha256": sha256_file(Path::new(SHIM)),
+            "version": env!("CARGO_PKG_VERSION"),
+            "platform": env!("COMSOL_MCP_SHIM_TARGET"),
+        },
+        "runtime": {"directory": runtime.to_string_lossy()},
+    });
+    let settings_path = home.join("settings-9p.json");
+    std::fs::write(
+        &settings_path,
+        serde_json::to_string(&settings).expect("settings"),
+    )
+    .expect("write settings");
+    let child_spec = json!([
+        std::env::current_exe().expect("own exe").to_string_lossy(),
+        "--fixture=echo"
+    ]);
+    let mut command = Command::new(SHIM);
+    command
+        .env_clear()
+        .env("COMSOL_MCP_SETTINGS_PATH", &settings_path)
+        .env("COMSOL_MCP_RUNTIME_DIR", &runtime)
+        .env(
+            "COMSOL_MCP_SHIM_CHILD",
+            serde_json::to_string(&child_spec).expect("spec"),
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut proc = command.spawn().expect("shim spawns");
+    proc.stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n")
+        .expect("write initialize");
+    let output = proc.wait_with_output().expect("shim exits");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    if !output.status.code().is_some_and(|code| code == 2) {
+        return Err(format!(
+            "expected refusal exit 2 on a 9p runtime, got {:?}: {stderr}",
+            output.status.code()
+        ));
+    }
+    if !stderr.contains("verified native lane") {
+        return Err(format!(
+            "the refusal was not the support boundary: {stderr}"
+        ));
+    }
+    if runtime.exists() {
+        return Err(format!(
+            "the refusal mutated the unsupported runtime directory {}",
+            runtime.display()
+        ));
+    }
+    if !output.stdout.is_empty() {
+        return Err(format!(
+            "the refusing shim answered before refusing: {:?}",
+            output.stdout
+        ));
     }
     Ok(())
 }

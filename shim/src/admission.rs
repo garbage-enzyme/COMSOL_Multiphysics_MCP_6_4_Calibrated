@@ -202,6 +202,144 @@ pub fn is_concrete_runtime_path(value: &str) -> bool {
         && Path::new(value).is_absolute()
 }
 
+// Caller decision 2026-11-15: Linux runtime state (admission and ownership
+// locks, recovery records) is supported on the verified native lane only,
+// currently ext4. WSL Windows mounts (/mnt/*, 9p/DrvFs) break the POSIX
+// quarantine release protocol and are unsupported. Windows behavior is
+// unchanged: its containment and release paths were verified on
+// Windows-native paths.
+#[cfg(not(windows))]
+const SUPPORTED_RUNTIME_FILESYSTEMS: [&str; 1] = ["ext4"];
+
+/// Decode the octal escapes /proc/mounts uses for special characters.
+#[cfg(not(windows))]
+fn unescape_mount_point(text: &str) -> PathBuf {
+    let bytes = text.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'\\'
+            && index + 3 < bytes.len()
+            && bytes[index + 1..=index + 3]
+                .iter()
+                .all(|b| (b'0'..=b'7').contains(b))
+        {
+            let code = u32::from_str_radix(
+                std::str::from_utf8(&bytes[index + 1..=index + 3]).unwrap_or("400"),
+                8,
+            )
+            .unwrap_or(0o400);
+            out.push(code as u8);
+            index += 4;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    PathBuf::from(String::from_utf8_lossy(&out).into_owned())
+}
+
+/// Component-wise mount containment (the moral equivalent of Python's
+/// `resolved.relative_to(mount)` succeeding).
+#[cfg(not(windows))]
+fn mount_covers(dir: &Path, mount: &Path) -> bool {
+    let dir_parts: Vec<_> = dir.components().collect();
+    let mount_parts: Vec<_> = mount.components().collect();
+    mount_parts.len() <= dir_parts.len()
+        && mount_parts
+            .iter()
+            .zip(dir_parts.iter())
+            .all(|(a, b)| a == b)
+}
+
+/// Filesystem type of the runtime directory, from mount evidence.
+///
+/// Resolves the nearest EXISTING ancestor so a not-yet-created runtime
+/// directory can be verified before anything is created on it, then finds
+/// the longest matching mount entry in /proc/self/mounts. Unavailable
+/// evidence is a refusal: the support check must fail closed, never
+/// silently pass.
+#[cfg(not(windows))]
+pub fn runtime_filesystem_type(runtime_dir: &Path) -> Result<String, Refusal> {
+    let mut probe = Some(runtime_dir);
+    let mut resolved: Option<PathBuf> = None;
+    while let Some(dir) = probe {
+        if let Ok(canonical) = std::fs::canonicalize(dir) {
+            resolved = Some(canonical);
+            break;
+        }
+        probe = dir.parent();
+    }
+    let resolved = resolved.ok_or_else(|| Refusal {
+        code: "runtime_directory_unresolvable",
+        message: format!(
+            "the runtime directory {} cannot be resolved to a filesystem for \
+             the support check; the verified native lane is ext4",
+            runtime_dir.display()
+        ),
+    })?;
+    let mounts = std::fs::read_to_string("/proc/self/mounts").map_err(|error| Refusal {
+        code: "runtime_filesystem_unverifiable",
+        message: format!("cannot read /proc/self/mounts to verify the runtime filesystem: {error}"),
+    })?;
+    let mut best: Option<(usize, String)> = None;
+    for line in mounts.lines() {
+        let mut fields = line.split_whitespace();
+        let (Some(_device), Some(mount_point), Some(fstype)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        let mount_point = unescape_mount_point(mount_point);
+        if !mount_covers(&resolved, &mount_point) {
+            continue;
+        }
+        let depth = mount_point.components().count();
+        if best.as_ref().is_none_or(|(known, _)| depth > *known) {
+            best = Some((depth, fstype.to_owned()));
+        }
+    }
+    let (_, fstype) = best.ok_or_else(|| Refusal {
+        code: "runtime_filesystem_unverifiable",
+        message: format!(
+            "no mount entry covers the runtime directory {}",
+            resolved.display()
+        ),
+    })?;
+    Ok(fstype)
+}
+
+/// Refuse runtime state outside the verified native filesystem lane,
+/// BEFORE any admission mutation (directory creation, lock writes, worker
+/// spawn). The direct-Python entry enforces the identical rule in
+/// `comsol_mcp.host_admission.acquire`. Windows is intentionally unchanged.
+pub fn verify_runtime_filesystem(runtime_dir: &Path) -> Result<(), Refusal> {
+    #[cfg(windows)]
+    {
+        let _ = runtime_dir;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let fstype = runtime_filesystem_type(runtime_dir)?;
+        if SUPPORTED_RUNTIME_FILESYSTEMS.contains(&fstype.as_str()) {
+            Ok(())
+        } else {
+            refusal(
+                "runtime_filesystem_unsupported",
+                format!(
+                    "runtime directory {} is on filesystem '{fstype}'; Linux runtime \
+                     state requires the verified native lane (ext4). WSL Windows mounts \
+                     such as /mnt/* (9p/DrvFs) are unsupported for admission and \
+                     ownership locks. Use a native path, for example \
+                     $HOME/comsol_mcp_runtime",
+                    runtime_dir.display()
+                ),
+            )
+        }
+    }
+}
+
 fn is_release_version(value: &str) -> bool {
     let (core, suffix) = match value.split_once('-') {
         Some((core, suffix)) => (core, Some(suffix)),
@@ -1256,6 +1394,9 @@ fn own_command_signature() -> String {
 /// Acquire host admission for this startup's ownership domain.
 pub fn acquire(startup: &Startup, worker_token_sha256: &str) -> Result<Claim, Refusal> {
     let runtime = &startup.runtime_dir;
+    // Support boundary first: a refusal must leave no runtime state behind
+    // (no directory creation, no lock write, no worker spawn).
+    verify_runtime_filesystem(runtime)?;
     fs::create_dir_all(runtime).map_err(|error| Refusal {
         code: "admission_unpublishable",
         message: format!("cannot create {}: {error}", runtime.display()),
@@ -1451,6 +1592,58 @@ impl ReleaseTicket {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mount_point_escapes_decode() {
+        #[cfg(not(windows))]
+        {
+            assert_eq!(
+                unescape_mount_point("/mnt/my\\040drive"),
+                PathBuf::from("/mnt/my drive")
+            );
+            assert_eq!(
+                unescape_mount_point("/plain/path"),
+                PathBuf::from("/plain/path")
+            );
+        }
+    }
+
+    #[test]
+    fn mount_cover_is_component_wise() {
+        #[cfg(not(windows))]
+        {
+            assert!(mount_covers(Path::new("/home/a/b"), Path::new("/home")));
+            assert!(mount_covers(Path::new("/home"), Path::new("/")));
+            assert!(!mount_covers(Path::new("/homeother"), Path::new("/home")));
+            assert!(!mount_covers(Path::new("/home"), Path::new("/home/a")));
+        }
+    }
+
+    #[test]
+    fn support_boundary_is_mount_evidence_driven() {
+        // Windows: a no-op by design. Linux: the outcome must match the
+        // mount evidence for THIS crate's directory (ext4 lane succeeds,
+        // anything else refuses with the support code), so the test stays
+        // deterministic wherever the checkout lives.
+        #[cfg(windows)]
+        {
+            assert!(verify_runtime_filesystem(Path::new("D:/anywhere")).is_ok());
+        }
+        #[cfg(not(windows))]
+        {
+            let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+            match runtime_filesystem_type(here) {
+                Ok(fstype) if fstype == "ext4" => {
+                    assert!(verify_runtime_filesystem(here).is_ok());
+                }
+                Ok(_) => {
+                    let refusal = verify_runtime_filesystem(here).unwrap_err();
+                    assert_eq!(refusal.code, "runtime_filesystem_unsupported");
+                }
+                Err(problem) => panic!("mount evidence unavailable: {problem:?}"),
+            }
+        }
+    }
 
     fn scratch(label: &str) -> PathBuf {
         let directory = std::env::temp_dir().join(format!(

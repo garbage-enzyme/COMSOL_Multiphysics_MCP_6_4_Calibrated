@@ -153,6 +153,111 @@ def lock_path_for(runtime_dir: str | Path) -> Path:
     return Path(runtime_dir) / HOST_ADMISSION_FILE
 
 
+# Caller decision 2026-11-15: Linux runtime state (admission and ownership
+# locks, recovery records) is supported on the verified native lane only,
+# currently ext4. WSL Windows mounts (/mnt/*, 9p/DrvFs) break the quarantine
+# release protocol and are unsupported. Windows behavior is unchanged: its
+# containment and release paths were verified on Windows-native paths.
+SUPPORTED_RUNTIME_FILESYSTEMS = ("ext4",)
+
+
+def _unescape_mount_point(text: str) -> Path:
+    """Decode the octal escapes /proc/mounts uses for special characters."""
+    result: list[str] = []
+    index = 0
+    while index < len(text):
+        if (
+            text[index] == "\\"
+            and index + 4 <= len(text)
+            and all(digit in "01234567" for digit in text[index + 1 : index + 4])
+        ):
+            result.append(chr(int(text[index + 1 : index + 4], 8)))
+            index += 4
+        else:
+            result.append(text[index])
+            index += 1
+    return Path("".join(result))
+
+
+def runtime_filesystem_type(runtime_dir: str | Path) -> str:
+    """Filesystem type of the runtime directory, from mount evidence.
+
+    Resolves the nearest EXISTING ancestor so a not-yet-created runtime
+    directory can be verified before anything is created on it, then finds
+    the longest matching mount entry in /proc/self/mounts. Unavailable
+    evidence raises (the support check must fail closed, never silently
+    pass) instead of guessing.
+    """
+    probe = Path(runtime_dir)
+    resolved: Path | None = None
+    while True:
+        try:
+            resolved = probe.resolve(strict=True)
+            break
+        except OSError:
+            parent = probe.parent
+            if parent == probe:
+                resolved = None
+                break
+            probe = parent
+    if resolved is None:
+        raise HostAdmissionError(
+            "runtime_directory_unresolvable",
+            f"the runtime directory {runtime_dir} cannot be resolved to a "
+            "filesystem for the support check; the verified native lane is "
+            + "/".join(SUPPORTED_RUNTIME_FILESYSTEMS),
+        )
+    try:
+        mounts = Path("/proc/self/mounts").read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HostAdmissionError(
+            "runtime_filesystem_unverifiable",
+            f"cannot read /proc/self/mounts to verify the runtime filesystem: {exc}",
+        ) from exc
+    best: tuple[int, str] | None = None
+    for line in mounts.splitlines():
+        fields = line.split()
+        if len(fields) < 3:
+            continue
+        mount_point = _unescape_mount_point(fields[1])
+        try:
+            resolved.relative_to(mount_point)
+        except ValueError:
+            continue
+        depth = len(mount_point.parts)
+        if best is None or depth > best[0]:
+            best = (depth, fields[2])
+    if best is None:
+        raise HostAdmissionError(
+            "runtime_filesystem_unverifiable",
+            f"no mount entry covers the runtime directory {resolved}",
+        )
+    return best[1]
+
+
+def verify_runtime_filesystem(runtime_dir: str | Path) -> None:
+    """Refuse runtime state outside the verified native filesystem lane.
+
+    Runs before any admission mutation (directory creation, lock writes,
+    worker spawn) on every direct-Python entry path through ``acquire``;
+    the Rust shim enforces the identical rule at its own admission entry.
+    Windows is intentionally unchanged.
+    """
+    if os.name == "nt":
+        return
+    fstype = runtime_filesystem_type(runtime_dir)
+    if fstype not in SUPPORTED_RUNTIME_FILESYSTEMS:
+        raise HostAdmissionError(
+            "runtime_filesystem_unsupported",
+            f"runtime directory {runtime_dir} is on filesystem '{fstype}'; "
+            "Linux runtime state requires the verified native lane ("
+            + "/".join(SUPPORTED_RUNTIME_FILESYSTEMS)
+            + "). WSL Windows mounts such as /mnt/* (9p/DrvFs) are unsupported "
+            "for admission and ownership locks. Use a native path, for example "
+            "$HOME/comsol_mcp_runtime",
+        )
+
+
 def command_signature(cmdline: list[str]) -> str:
     """SHA-256 of the argument vector joined by NUL bytes (contract §3)."""
     return hashlib.sha256("\0".join(cmdline).encode("utf-8", errors="replace")).hexdigest()
@@ -983,6 +1088,9 @@ def acquire(
     """
     if transport_mode not in TRANSPORT_MODES:
         raise ValueError(f"unknown transport mode {transport_mode!r}")
+    # Support boundary first, before the directory creation below mutates
+    # anything: a refusal must leave no runtime state behind.
+    verify_runtime_filesystem(runtime_dir)
     runtime = Path(runtime_dir)
     runtime.mkdir(parents=True, exist_ok=True)
     path = runtime / HOST_ADMISSION_FILE
