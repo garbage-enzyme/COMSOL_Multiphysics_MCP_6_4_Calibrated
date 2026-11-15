@@ -62,6 +62,24 @@ DESKTOP_NAMES = {"comsolui.exe", "comsol.exe"}
 GENEROUS_CAP = 64 * 1024 * 1024
 RESULTS: dict = {"schema": "comsol_mcp.p10.native_regression/2", "granularity": CLUSTER_BYTES}
 
+# Subprocess keepalive client for the shared server (see _run): MPh 1.3.1's
+# mph.start server exits when its last client disconnects, but the
+# shared-session manager disconnects after every refused attach — without a
+# keepalive, one transient preflight refusal kills the server and strands
+# the retry lane. MPh 1.4.0 servers already outlive a disconnect.
+_KEEPER: subprocess.Popen | None = None
+
+
+def _stop_keeper() -> None:
+    global _KEEPER
+    if _KEEPER is not None:
+        _KEEPER.terminate()
+        try:
+            _KEEPER.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            _KEEPER.kill()
+        _KEEPER = None
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -216,6 +234,7 @@ def main() -> int:
             print(RESULTS["traceback"], file=sys.stderr)
             return 1
     finally:
+        _stop_keeper()
         if desktop is not None:
             RESULTS["desktop_close"] = _close_launched_desktop(desktop)
         _finish(args.output)
@@ -277,9 +296,46 @@ def _run(work, runtime, discovery_dir, snapshots, volume_root, args) -> int:
 
     target_dir = {"path": discovery_dir}
 
+    # Keepalive: mph enforces one Client per process, so a second connection
+    # to the same server runs in a subprocess and holds the server open
+    # across the manager's post-refusal disconnects (MPh 1.3.1 behavior;
+    # 1.4.0 servers survive on their own).
+    global _KEEPER
+    _KEEPER = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys, time, mph; keeper = mph.Client(); "
+            "keeper.connect(int(sys.argv[1]), 'localhost'); time.sleep(3600)",
+            str(port),
+        ],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    RESULTS["server_keepalive_pid"] = _KEEPER.pid
+    # Give the keeper a moment to establish its session before any attach
+    # refusal could disconnect the primary client.
+    keeper_deadline = time.time() + 30
+    while time.time() < keeper_deadline:
+        if _KEEPER.poll() is not None:
+            RESULTS["error"] = "the server keepalive client exited early"
+            return 1
+        keeper_connected = any(
+            connection.status == psutil.CONN_ESTABLISHED
+            for process in psutil.process_iter(["name"])
+            if "mphserver" in (process.info.get("name") or "").lower()
+            for connection in process.net_connections(kind="inet")
+        )
+        if keeper_connected:
+            break
+        time.sleep(1.0)
+
     def reconnecting_client(host, port_):
         # The manager disconnects its client after a refused attach; a
-        # retry reconnects the same client to the same server.
+        # retry reconnects the same client to the same server (kept alive
+        # by the subprocess above under MPh 1.3.1).
         if getattr(client, "port", None) is None:
             client.connect(port_, host)
         return client
