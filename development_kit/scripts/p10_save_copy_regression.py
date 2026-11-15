@@ -175,6 +175,15 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--work", required=True, type=Path)
     parser.add_argument("--launch-desktop", action="store_true")
+    parser.add_argument(
+        "--cores",
+        type=int,
+        default=2,
+        help="Core count forwarded to mph.start; must match the caller's "
+        "selected regression core budget (n19ind review item 3; the "
+        "previous hardcoded cores=4 ran outside the caller's 2-core "
+        "selection).",
+    )
     args = parser.parse_args()
     work = args.work
     work.mkdir(parents=True, exist_ok=True)
@@ -213,7 +222,12 @@ def main() -> int:
 
 
 def _run(work, runtime, discovery_dir, snapshots, volume_root, args) -> int:
-    client = mph.start(cores=4, version="6.4")
+    cores = args.cores
+    if cores < 1:
+        RESULTS["error"] = f"invalid core count {cores}"
+        return 1
+    RESULTS["mph_start_cores"] = cores
+    client = mph.start(cores=cores, version="6.4")
     RESULTS["server_before"] = _server_processes()
     model = _build_model(client)
     reference = work / "reference.mph"
