@@ -305,8 +305,8 @@ def _run(work, runtime, discovery_dir, snapshots, volume_root, args) -> int:
         [
             sys.executable,
             "-c",
-            "import sys, time, mph; keeper = mph.Client(); "
-            "keeper.connect(int(sys.argv[1]), 'localhost'); time.sleep(3600)",
+            "import sys, time, mph; keeper = mph.Client(port=int(sys.argv[1])); "
+            "time.sleep(3600)",
             str(port),
         ],
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -318,23 +318,45 @@ def _run(work, runtime, discovery_dir, snapshots, volume_root, args) -> int:
     # Wait until the KEEPER ITSELF holds an established connection to the
     # server (r20ind observation): matching any established server socket
     # could be the primary client's own session and proves nothing about
-    # retry liveness. Expiry refuses instead of continuing unprotected.
+    # retry liveness. On Windows a venv python.exe is a launcher: the real
+    # interpreter holding the socket is the keeper's DESCENDANT, so the
+    # check walks the keeper's process tree for a connection to the exact
+    # server port. Expiry refuses instead of continuing unprotected.
+    def _keeper_tree_connected() -> bool:
+        try:
+            members = [psutil.Process(_KEEPER.pid)]
+            frontier = [_KEEPER.pid]
+            seen = {_KEEPER.pid}
+            while frontier:
+                nxt = []
+                for process in psutil.process_iter(["ppid"]):
+                    if process.info["ppid"] in frontier and process.pid not in seen:
+                        seen.add(process.pid)
+                        members.append(psutil.Process(process.pid))
+                        nxt.append(process.pid)
+                frontier = nxt
+            for member in members:
+                try:
+                    for connection in member.net_connections(kind="inet"):
+                        if (
+                            connection.status == psutil.CONN_ESTABLISHED
+                            and connection.raddr
+                            and connection.raddr.port == port
+                        ):
+                            return True
+                except psutil.Error:
+                    continue
+        except psutil.Error:
+            return False
+        return False
+
     keeper_connected = False
     keeper_deadline = time.time() + 30
     while time.time() < keeper_deadline:
         if _KEEPER.poll() is not None:
             RESULTS["error"] = "the server keepalive client exited early"
             return 1
-        keeper_connections = set()
-        try:
-            keeper_connections = {
-                connection.laddr
-                for connection in psutil.Process(_KEEPER.pid).net_connections(kind="inet")
-                if connection.status == psutil.CONN_ESTABLISHED and connection.raddr
-            }
-        except psutil.Error:
-            keeper_connections = set()
-        if keeper_connections:
+        if _keeper_tree_connected():
             keeper_connected = True
             break
         time.sleep(1.0)
@@ -354,11 +376,42 @@ def _run(work, runtime, discovery_dir, snapshots, volume_root, args) -> int:
             client.connect(port_, host)
         return client
 
+    def _keeper_tree_pids() -> set[int]:
+        if _KEEPER is None:
+            return set()
+        tree = {_KEEPER.pid}
+        frontier = [_KEEPER.pid]
+        while frontier:
+            nxt = []
+            for process in psutil.process_iter(["ppid"]):
+                if process.info["ppid"] in frontier and process.pid not in tree:
+                    tree.add(process.pid)
+                    nxt.append(process.pid)
+            frontier = nxt
+        return tree
+
+    def _snapshot_excluding_keeper():
+        # The preflight treats ANY other live mph client as an attach
+        # collision. The keeper is driver-owned infrastructure for exactly
+        # this server — the same standing the driver's own primary client
+        # has (its cmdline never matches the mph-client signature either).
+        # The documented exclude_pids parameter is the honest way to keep
+        # the keeper out of the inventory; the excluded PIDs are recorded
+        # in the receipt for audit.
+        excluded = _keeper_tree_pids()
+        RESULTS["server_keepalive_excluded_pids"] = sorted(excluded)
+        from comsol_mcp.shared_session.process_probe import (
+            collect_shared_preflight_snapshot,
+        )
+
+        return collect_shared_preflight_snapshot(exclude_pids=excluded)
+
     manager = SharedSessionManager(
         client_factory=reconnecting_client,
         bounded_save_copy_provider=lambda cap: prepare_bounded_writer(cap, volume_root=volume_root),
         snapshot_target_factory=lambda tag: target_dir["path"] / f"{tag}-{time.time_ns()}.mph",
         manifest_writer=lambda path, value: path.write_text(json.dumps(value), encoding="utf-8"),
+        snapshot_provider=_snapshot_excluding_keeper,
     )
     attached = None
     last_error = None
