@@ -214,11 +214,21 @@ def containment_members(identity: dict[str, Any]) -> set[int]:
             try:
                 with open(f"/proc/{entry}/stat", encoding="ascii") as handle:
                     stat = handle.read()
+            except FileNotFoundError:
+                # The process exited between listdir and open: absence is
+                # exactly what a liveness census wants, never UNKNOWN.
+                continue
             except OSError as exc:
                 raise UnknownContainment(f"/proc/{entry}/stat is unreadable: {exc}") from exc
             tail = stat.rsplit(")", 1)[1].split()
             # After the comm field: state(0) ppid(1) pgrp(2) session(3).
             if len(tail) > 3 and tail[3] == str(session):
+                # A zombie has already exited; its session columns are
+                # bookkeeping until someone reaps the slot, not liveness
+                # (same rule the Rust shim census applies). Counting it
+                # would keep a dead host "alive" in the census forever.
+                if tail[0] == "Z":
+                    continue
                 members.add(int(entry))
         return members
     raise UnknownContainment("the record carries no supported containment identity")

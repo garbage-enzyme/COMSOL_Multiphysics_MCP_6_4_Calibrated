@@ -147,7 +147,7 @@ def _scenario_constructs_every_tab_and_field() -> None:
             for child in row.winfo_children()
             if child.winfo_class() == "TLabel"
         }
-        assert "alpha8.1  |  0.8.1" in header_labels
+        assert "alpha8.1  |  0.8.2" in header_labels
         # The schema identity is read-only information on the About tab
         # (batch I*): it has no editable variable, but it must be displayed.
         assert set(app.variables) == {
