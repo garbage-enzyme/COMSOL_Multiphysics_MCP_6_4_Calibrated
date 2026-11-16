@@ -315,22 +315,36 @@ def _run(work, runtime, discovery_dir, snapshots, volume_root, args) -> int:
         stderr=subprocess.DEVNULL,
     )
     RESULTS["server_keepalive_pid"] = _KEEPER.pid
-    # Give the keeper a moment to establish its session before any attach
-    # refusal could disconnect the primary client.
+    # Wait until the KEEPER ITSELF holds an established connection to the
+    # server (r20ind observation): matching any established server socket
+    # could be the primary client's own session and proves nothing about
+    # retry liveness. Expiry refuses instead of continuing unprotected.
+    keeper_connected = False
     keeper_deadline = time.time() + 30
     while time.time() < keeper_deadline:
         if _KEEPER.poll() is not None:
             RESULTS["error"] = "the server keepalive client exited early"
             return 1
-        keeper_connected = any(
-            connection.status == psutil.CONN_ESTABLISHED
-            for process in psutil.process_iter(["name"])
-            if "mphserver" in (process.info.get("name") or "").lower()
-            for connection in process.net_connections(kind="inet")
-        )
-        if keeper_connected:
+        keeper_connections = set()
+        try:
+            keeper_connections = {
+                connection.laddr
+                for connection in psutil.Process(_KEEPER.pid).net_connections(kind="inet")
+                if connection.status == psutil.CONN_ESTABLISHED and connection.raddr
+            }
+        except psutil.Error:
+            keeper_connections = set()
+        if keeper_connections:
+            keeper_connected = True
             break
         time.sleep(1.0)
+    if not keeper_connected:
+        RESULTS["error"] = (
+            "the server keepalive client did not establish its session within 30s; "
+            "refusing to continue without retry liveness"
+        )
+        return 1
+    RESULTS["server_keepalive_connected"] = True
 
     def reconnecting_client(host, port_):
         # The manager disconnects its client after a refused attach; a

@@ -1821,3 +1821,121 @@ class TestRuntimeFilesystemBoundary:
             assert not target.exists(), "the refusal mutated the runtime directory"
         finally:
             shutil.rmtree(target, ignore_errors=True)
+
+
+class TestRecoveryFilesystemBoundary:
+    """r20ind blocker regression: the EXPLICIT recovery entry must refuse on
+    an unsupported runtime filesystem BEFORE any archive write, quarantine
+    rename, unlink or receipt mutation — operator confirmation covers
+    missing process evidence, never the filesystem boundary. Read-only
+    inspection (--show / recovery_preview) stays available everywhere."""
+
+    def _ninep_runtime(self) -> Path | None:
+        if not sys.platform.startswith("linux"):
+            return None
+        probe = Path("/mnt/d")
+        try:
+            probe.resolve(strict=True)
+        except OSError:
+            return None
+        if " 9p " not in Path("/proc/self/mounts").read_text(encoding="utf-8"):
+            return None
+        target = probe / f"comsol-mcp-recovery-boundary-{os.getpid()}"
+        import shutil
+
+        shutil.rmtree(target, ignore_errors=True)
+        target.mkdir(parents=True)
+        return target
+
+    def _stale_record(self, runtime: Path) -> bytes:
+        # A containment-less dead-host record: on ext4 this exact record
+        # recovers through the operator-confirmed flow (the standing
+        # recovery tests prove that); on 9p the boundary must refuse first.
+        payload = json.dumps(
+            _record(
+                {
+                    "pid": 999999999,
+                    "process_create_time": 0.0,
+                    "command_signature": "0" * 64,
+                }
+            ),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        path = ha.lock_path_for(runtime)
+        path.write_bytes(payload + b"\n")
+        return path.read_bytes()
+
+    def test_explicit_recovery_refuses_9p_without_any_mutation(self):
+        runtime = self._ninep_runtime()
+        if runtime is None:
+            pytest.skip("WSL 9p topology required")
+        import shutil
+
+        try:
+            raw = self._stale_record(runtime)
+            before = sorted(p.name for p in runtime.iterdir())
+            with pytest.raises(ha.HostAdmissionError) as error:
+                ha.recover_after_independent_confirmation(
+                    runtime,
+                    record_sha256=hashlib.sha256(raw).hexdigest(),
+                    confirmed_by="operator",
+                )
+            assert error.value.reason_code == "runtime_filesystem_unsupported"
+            # The refusal must leave record bytes and directory contents
+            # exactly as inspected: no archive, no .unlink-* quarantine,
+            # no removed lock.
+            assert ha.lock_path_for(runtime).read_bytes() == raw
+            after = sorted(p.name for p in runtime.iterdir())
+            assert after == before, f"directory mutated: {set(after) ^ set(before)}"
+            assert not any(name.startswith(".unlink-") for name in after)
+        finally:
+            shutil.rmtree(runtime, ignore_errors=True)
+
+    def test_public_recover_cli_refuses_9p_with_actionable_stderr(self):
+        runtime = self._ninep_runtime()
+        if runtime is None:
+            pytest.skip("WSL 9p topology required")
+        import shutil
+
+        try:
+            raw = self._stale_record(runtime)
+            before = sorted(p.name for p in runtime.iterdir())
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "comsol_mcp.host_admission",
+                    "--recover",
+                    str(runtime),
+                    hashlib.sha256(raw).hexdigest(),
+                    "--confirmed-by",
+                    "operator",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=str(REPO_ROOT),
+            )
+            assert completed.returncode == 2
+            assert "[runtime_filesystem_unsupported]" in completed.stderr
+            assert "ext4" in completed.stderr
+            assert ha.lock_path_for(runtime).read_bytes() == raw
+            after = sorted(p.name for p in runtime.iterdir())
+            assert after == before
+        finally:
+            shutil.rmtree(runtime, ignore_errors=True)
+
+    def test_recovery_preview_stays_read_only_on_9p(self):
+        runtime = self._ninep_runtime()
+        if runtime is None:
+            pytest.skip("WSL 9p topology required")
+        import shutil
+
+        try:
+            raw = self._stale_record(runtime)
+            preview = ha.recovery_preview(runtime)
+            assert preview is not None
+            assert ha.lock_path_for(runtime).read_bytes() == raw
+        finally:
+            shutil.rmtree(runtime, ignore_errors=True)

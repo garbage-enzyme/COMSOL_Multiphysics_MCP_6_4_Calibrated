@@ -1574,6 +1574,14 @@ def recover_after_independent_confirmation(
             "explicit recovery needs --confirmed-by naming who confirmed that nothing "
             "from the previous host remains",
         )
+    # Caller decision 2026-11-15 (r20ind enforcement): the support boundary
+    # guards EVERY mutation entry, not only acquire(). Operator confirmation
+    # covers missing process evidence; it never waives the filesystem
+    # boundary. Refuse BEFORE the archive write, the quarantine rename, the
+    # unlink or any receipt mutation below, leaving the record bytes and the
+    # runtime directory exactly as the operator inspected them. Read-only
+    # inspection (--show) stays available on any filesystem.
+    verify_runtime_filesystem(runtime_dir)
     runtime = Path(runtime_dir)
     path = lock_path_for(runtime)
     raw = _read_bytes(path, reason="admission_lock_unreadable")
