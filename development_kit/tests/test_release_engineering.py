@@ -692,12 +692,16 @@ def test_repository_root_is_release_focused_and_free_of_generated_artifacts():
     }
 
     forbidden_suffixes = {".class", ".lock", ".mph", ".pyc", ".recovery", ".status"}
+    # A committed Cargo lock file is the reproducible dependency graph of the
+    # optional Rust binary crate, not a runtime lock artifact. This exact path
+    # is the only permitted `.lock` file.
+    permitted_lock_files = {"shim/Cargo.lock"}
     for mode, path_text in entries:
         path = Path(path_text)
         assert mode != "160000", f"orphaned gitlink: {path_text}"
         assert path.name != ".DS_Store"
         assert "__pycache__" not in path.parts
-        assert path.suffix not in forbidden_suffixes
+        assert path.suffix not in forbidden_suffixes or path_text in permitted_lock_files
         assert path.name not in {"server_err.txt", "server_log.txt"}
 
 
@@ -833,6 +837,20 @@ def test_distribution_inventory_rejects_development_kit_members(tmp_path):
         archive.writestr(".claude/settings.local.json", "{}\n")
     with pytest.raises(RuntimeError, match="forbidden members"):
         _distribution_inventory(agent_config)
+
+    # The shim's committed Cargo graph is the one permitted .lock member
+    # (the same policy as the repository-tree scan above): the sdist ships
+    # the optional binary's sources for locked rebuilds. Any other .lock
+    # member still refuses.
+    cargo = tmp_path / "cargo.whl"
+    with zipfile.ZipFile(cargo, "w") as archive:
+        archive.writestr("shim/Cargo.lock", "[[package]]\n")
+    assert _distribution_inventory(cargo)["member_count"] == 1
+    other_lock = tmp_path / "other-lock.whl"
+    with zipfile.ZipFile(other_lock, "w") as archive:
+        archive.writestr("tools/Cargo.lock", "[[package]]\n")
+    with pytest.raises(RuntimeError, match="forbidden members"):
+        _distribution_inventory(other_lock)
 
 
 def test_distribution_artifacts_require_one_wheel_and_one_sdist(tmp_path):

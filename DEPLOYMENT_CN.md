@@ -348,3 +348,49 @@ D:\path\to\python-env\python.exe -m pip install . --no-deps
 
 重启准确的 MCP host，并使用 `capabilities.deployment_identity` 验证安装包和
 profile 确实是目标修订。
+
+## 10. 可选 Rust shim（实验性，0.8.2）
+
+Rust shim 是一个可选的、单独分发的启动器。它从生成的清单应答静态发现
+（initialize、tools/list、ping、server/discover），不启动 Python；在第一个
+需要转发的请求上恰好拉起一个 Python worker。工具链、目标三元组和许可证
+见 `development_kit/release/shim_platform_matrix.json`。
+
+事实与限制：
+
+- Python wheel 保持平台无关，绝不包含 shim 二进制。shim 是显式选用的
+  启动命令；现有安装不会被自动改变。
+- 不会自动下载。按平台获取二进制，对照已发布的构建清单记录并校验
+  SHA-256 后再使用。
+- 清单或二进制与已安装包身份不符时，shim 拒绝启动。移除 shim 命令并
+  直接以 Python 入口启动，普通服务器行为不变。
+- worker 在请求未完成时退出：客户端收到"结果未知"错误，传输关闭。
+  重连即可；shim 绝不自动重生或重放。
+- Windows：强杀 shim 会终止整个 worker 树（Job Object）。Linux 依赖
+  优雅的 stdin 关闭路径；父进程死亡本身不构成遏制声明。
+- Linux 运行时文件系统要求：准入/所有权锁与运行时恢复状态必须位于
+  已验证的原生文件系统通道（ext4）。两条入口——Python 服务器与
+  shim——都会在创建任何文件之前，依据 /proc/self/mounts 的真实挂载
+  证据，拒绝在不支持的文件系统上启动；证据不可得时同样拒绝而非
+  默默放行。WSL 的 Windows 挂载（如 /mnt/*，9p/DrvFs）不受支持：会
+  破坏 POSIX 隔离释放协议。请使用原生路径，例如
+  `$HOME/comsol_mcp_runtime`。Windows 原生路径不受影响。
+- 子解释器约束：`COMSOL_MCP_SHIM_CHILD` 必须指向真正的解释器可执行
+  文件。Windows 上 venv 的 `python.exe` 是启动器，会保留第二个 stdout
+  写端；若底层解释器在传输中途死亡，会话可能卡死（无 EOF、无数据）。
+  如无法避开启动器拓扑，请设置 `COMSOL_MCP_SHIM_WATCHDOG_IDLE=<秒>`
+  （例如 300）启用看门狗。看门狗通过
+  `COMSOL_MCP_SHIM_WORKER_IDENTITY_FILE` 绑定 worker 正在执行的解释器
+  （shim 指定该文件；随附的 Python worker 启动时把自己的解释器 PID
+  写入该文件），且仅当某个请求仍在等待、worker 在整个窗口内保持
+  静默、且该被报告的解释器（按 PID 与创建时间匹配）在操作系统中已
+  可证实消失时，才以"结果未知"关闭会话。任何其他进程的退出（辅助
+  进程结束、作业进程、乃至启动器本身）都不会触发它，因此它不会
+  关闭健康的静默调用。不报告解释器身份的 worker 不受保护：看门狗
+  会在该会话内解除戒备并在 stderr 记录说明。窗口应大于最长的预期
+  静默调用。
+- 消息大小上限：任何受支持的工作流都不得通过 shim 返回单条大于
+  1 MB 的协议消息。新增此类工作流必须在同一版本落地缓冲读取修复；
+  按字节读取器对大单行的吞吐约为 10 KB/s，4 MB 单行需要五到七分钟。
+- 已验证工具链：Rust 1.99.1（windows-gnu 与 linux-gnu）。理论下限为
+  1.85（edition 2024）；更早的工具链未测试。

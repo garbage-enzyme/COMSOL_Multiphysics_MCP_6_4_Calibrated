@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from comsol_mcp.settings import GUI_LANGUAGES, GUI_SCALES, normalize_settings_document
 from comsol_mcp.tools.profiles import PROFILE_NAMES
@@ -79,17 +79,19 @@ class FieldDescriptor:
 
 
 FIELDS = (
+    # Batch I*: schema identity rendered on the About tab (beside the
+    # package version). The auto-field loop skips the "about" tab.
     FieldDescriptor(
         "schema_name",
-        "general",
+        "about",
         "readonly",
-        help_id="Internal settings format name. You do not need to change it.",
+        help_id="Settings schema identity.",
     ),
     FieldDescriptor(
         "schema_version",
-        "general",
+        "about",
         "readonly",
-        help_id="Settings format version used when this file is saved.",
+        help_id="Settings schema version.",
     ),
     FieldDescriptor(
         "gui.language",
@@ -308,12 +310,95 @@ FIELDS = (
         True,
         help_id="Optional name that identifies who owns the COMSOL session.",
     ),
+    # Transport selector: tracked for validation and save, but the tab
+    # builds custom widgets (radio pair, identity fields, confirm button).
+    # The auto-field loop in app.py skips this tab.
+    FieldDescriptor(
+        "transport",
+        "transport",
+        "choice",
+        False,
+        choices=("python", "shim"),
+        help_id=(
+            "One transport value. 'python' keeps the direct Python entry "
+            "point. 'shim' opts into the Rust launcher."
+        ),
+    ),
+    FieldDescriptor(
+        "shim_binary.path",
+        "transport",
+        "text",
+        True,
+        help_id="Absolute path to the shim binary. Required when transport is 'shim'.",
+    ),
+    FieldDescriptor(
+        "shim_binary.sha256",
+        "transport",
+        "text",
+        True,
+        help_id="Expected SHA-256 of the shim binary. Required when transport is 'shim'.",
+    ),
+    FieldDescriptor(
+        "shim_binary.version",
+        "transport",
+        "text",
+        True,
+        help_id="Version the verified shim binary reports. Set by the switch confirmation.",
+    ),
+    FieldDescriptor(
+        "shim_binary.platform",
+        "transport",
+        "text",
+        True,
+        help_id="Target triple the verified shim binary reports. Set by the switch confirmation.",
+    ),
 )
 FIELD_BY_KEY = {field.key: field for field in FIELDS}
+# Keys whose widgets the transport tab builds by hand.
+# Keys whose widgets are built by hand on custom tabs (transport, about).
+# The auto-field loop skips these; validation still tracks them.
+CUSTOM_TAB_KEYS = {
+    "transport",
+    "shim_binary.path",
+    "shim_binary.sha256",
+    "shim_binary.version",
+    "shim_binary.platform",
+}
+
+# Human-readable field titles (batch I*). The key appears in grey at the
+# start of the help text, not as the label. Titles are i18n-translated.
+FIELD_TITLES = {
+    "gui.language": "Language",
+    "gui.scale": "Display Size",
+    "profile.name": "Tool Profile",
+    "shared_server.enabled": "Collaborative Editing",
+    "discovery.pagination_enabled": "Progressive Tool Catalog",
+    "model_manager.enabled": "Model Manager",
+    "model_manager.upload_enabled": "Model Manager Upload",
+    "runtime.directory": "Working Files Folder",
+    "runtime.jobs_directory": "Resumable Jobs Folder",
+    "paths.model_read_roots": "Model Read Folders",
+    "paths.artifact_write_root": "Results Output Folder",
+    "comsol.installation_root": "COMSOL Installation Folder",
+    "java.java_home": "Java Runtime Folder",
+    "java.jdk_home": "JDK Folder",
+    "evidence_integrity.checks.outcome_contract_validation": "Outcome Contract Validation",
+    "evidence_integrity.checks.artifact_chain_verification": "Artifact Chain Verification",
+    "evidence_integrity.checks.summary_claim_verification": "Summary Claim Verification",
+    "evidence_integrity.checks.producer_driver_compatibility": "Producer Driver Compatibility",
+    "lexical_docs.enabled": "Keyword Manual Search",
+    "manuals.root": "Manuals Folder",
+    "lexical_docs.index_path": "Search Index File",
+    "semantic_docs.enabled": "Semantic Manual Search",
+    "semantic_docs.root": "Semantic Index Folder",
+    "semantic_docs.model_path": "Semantic Model Folder",
+    "ownership.owner": "Solver Owner Name",
+}
 TAB_IDS = (
     "general",
     "profile",
     "runtime",
+    "transport",
     "comsol_java",
     "evidence",
     "docs",
@@ -482,6 +567,12 @@ class SettingsFormModel:
         self.document = deepcopy(self.canonical)
         self.baseline = deepcopy(self.canonical)
         self.validate()
+
+    def adopt_saved(self, document: Mapping[str, Any]) -> None:
+        """Adopt a document another save path just published as the baseline."""
+        self.document = deepcopy(dict(document))
+        self.validate()
+        self.mark_saved()
 
 
 __all__ = [

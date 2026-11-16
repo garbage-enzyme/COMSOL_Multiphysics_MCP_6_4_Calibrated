@@ -8,12 +8,15 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 
 from comsol_mcp.operation_arbiter import get_operation_status
+from comsol_mcp.shared_session.bounded_save import prepare_bounded_writer
 from comsol_mcp.shared_session.contracts import normalize_shared_server_feature_gate
 from comsol_mcp.shared_session.lifecycle import SharedSessionManager
 from comsol_mcp.shared_session.preflight import classify_shared_server_preflight
 from comsol_mcp.shared_session.process_probe import collect_shared_preflight_snapshot
 
-shared_session_manager = SharedSessionManager()
+shared_session_manager = SharedSessionManager(
+    bounded_save_copy_provider=prepare_bounded_writer,
+)
 PREFLIGHT_SETTLING_SECONDS = 0.25
 
 

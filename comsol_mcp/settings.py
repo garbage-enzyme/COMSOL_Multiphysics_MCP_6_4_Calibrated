@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,8 +15,8 @@ from comsol_mcp.durable import canonical_sha256_v1, read_file_bytes_bounded
 
 SETTINGS_PATH_ENV = "COMSOL_MCP_SETTINGS_PATH"
 SETTINGS_SCHEMA = "comsol_mcp.settings"
-SETTINGS_VERSION = "1.3.0"
-SETTINGS_READABLE_VERSIONS = ("1.0.0", "1.1.0", "1.2.0", SETTINGS_VERSION)
+SETTINGS_VERSION = "1.4.0"
+SETTINGS_READABLE_VERSIONS = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", SETTINGS_VERSION)
 MAX_SETTINGS_BYTES = 64 * 1024
 LOCALAPPDATA_ENV = "LOCALAPPDATA"
 PROGRAMDATA_ENV = "PROGRAMDATA"
@@ -98,6 +100,11 @@ _DEFAULT_SETTINGS: dict[str, Any] = {
     "ownership": {"owner": None},
     "java": {"java_home": None, "jdk_home": None},
     "comsol": {"installation_root": None},
+    # One transport value, never two enabled booleans. "python" keeps the
+    # direct Python entry point; "shim" opts into the Rust launcher and
+    # requires a validated binary identity in the shim_binary section.
+    "transport": "python",
+    "shim_binary": {"path": None, "sha256": None, "version": None, "platform": None},
     "gui": {"language": "zh-cn", "scale": "system"},
 }
 
@@ -295,6 +302,103 @@ def _parse_gui_scale(value: Any) -> str:
     return normalized
 
 
+TRANSPORT_MODES = ("python", "shim")
+
+
+def _parse_transport(value: Any) -> str:
+    normalized = value.strip().casefold() if isinstance(value, str) else None
+    if normalized not in TRANSPORT_MODES:
+        raise SettingsError(
+            f"settings.transport must be one of {list(TRANSPORT_MODES)}",
+            reason_code="settings_value_invalid",
+        )
+    return normalized
+
+
+def _parse_shim_path(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise SettingsError(
+            "settings.shim_binary.path must be a non-empty absolute path",
+            reason_code="settings_value_invalid",
+        )
+    from pathlib import Path
+
+    if not Path(value).is_absolute():
+        raise SettingsError(
+            "settings.shim_binary.path must be an absolute path",
+            reason_code="settings_value_invalid",
+        )
+    return value
+
+
+def _parse_shim_sha256(value: Any) -> str | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or not all(character in "0123456789abcdef" for character in value.casefold())
+    ):
+        raise SettingsError(
+            "settings.shim_binary.sha256 must be 64 lowercase hex characters",
+            reason_code="settings_value_invalid",
+        )
+    return value.casefold()
+
+
+_SHIM_VERSION_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]+)?")
+_SHIM_PLATFORM_PATTERN = re.compile(r"[a-z0-9_]+(?:-[a-z0-9_]+){2,3}")
+
+
+def _parse_shim_version(value: Any) -> str | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or len(value) > 64
+        or _SHIM_VERSION_PATTERN.fullmatch(value) is None
+    ):
+        raise SettingsError(
+            "settings.shim_binary.version must be a release version such as 0.8.2",
+            reason_code="settings_value_invalid",
+        )
+    return value
+
+
+def _parse_shim_platform(value: Any) -> str | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or len(value) > 64
+        or _SHIM_PLATFORM_PATTERN.fullmatch(value) is None
+    ):
+        raise SettingsError(
+            "settings.shim_binary.platform must be a target triple such as x86_64-pc-windows-msvc",
+            reason_code="settings_value_invalid",
+        )
+    return value
+
+
+def is_concrete_runtime_path(value: Any) -> bool:
+    """Return whether a raw runtime path needs no expansion to compare.
+
+    Shim transport resolves its ownership domain without Python. Both
+    entry points therefore need one literal absolute ASCII path: no
+    environment reference, no home-directory shorthand, no surrounding
+    whitespace, and no control characters.
+    """
+    if not isinstance(value, str) or not value or value != value.strip():
+        return False
+    if any(ord(character) < 32 for character in value) or not value.isascii():
+        return False
+    if "%" in value or value.startswith("~"):
+        return False
+    return Path(value).is_absolute()
+
+
 def _migrate_legacy_document(document: Any) -> Any:
     """Return one pure current-shape view of a readable legacy document."""
     if not isinstance(document, dict):
@@ -304,6 +408,7 @@ def _migrate_legacy_document(document: Any) -> Any:
     profile = migrated.get("profile")
     raw_profile = profile.get("name") if isinstance(profile, dict) else None
     normalized_profile = raw_profile.strip().casefold() if isinstance(raw_profile, str) else None
+
     def migration_group(name: str) -> dict:
         value = migrated.get(name)
         if isinstance(value, dict):
@@ -793,6 +898,63 @@ def _normalize(
         errors=errors,
     )
 
+    shim_binary = _object(
+        top["shim_binary"],
+        location="settings.shim_binary",
+        defaults=defaults["shim_binary"],
+        errors=errors,
+    )
+    shim_path = _read_value(
+        shim_binary["path"],
+        location="settings.shim_binary.path",
+        default=defaults["shim_binary"]["path"],
+        parser=_parse_shim_path,
+        errors=errors,
+    )
+    shim_sha256 = _read_value(
+        shim_binary["sha256"],
+        location="settings.shim_binary.sha256",
+        default=defaults["shim_binary"]["sha256"],
+        parser=_parse_shim_sha256,
+        errors=errors,
+    )
+    shim_version = _read_value(
+        shim_binary["version"],
+        location="settings.shim_binary.version",
+        default=defaults["shim_binary"]["version"],
+        parser=_parse_shim_version,
+        errors=errors,
+    )
+    shim_platform = _read_value(
+        shim_binary["platform"],
+        location="settings.shim_binary.platform",
+        default=defaults["shim_binary"]["platform"],
+        parser=_parse_shim_platform,
+        errors=errors,
+    )
+    transport = _read_value(
+        top["transport"],
+        location="settings.transport",
+        default=defaults["transport"],
+        parser=_parse_transport,
+        errors=errors,
+    )
+    if transport == "shim" and (
+        shim_path is None or shim_sha256 is None or shim_version is None or shim_platform is None
+    ):
+        raise SettingsError(
+            "settings.transport 'shim' requires settings.shim_binary.path, "
+            "settings.shim_binary.sha256, settings.shim_binary.version and "
+            "settings.shim_binary.platform to be set",
+            reason_code="transport_setting_invalid",
+        )
+    if transport == "shim" and not is_concrete_runtime_path(runtime["directory"]):
+        raise SettingsError(
+            "settings.transport 'shim' requires settings.runtime.directory to be "
+            "one literal absolute ASCII path without environment references",
+            reason_code="transport_setting_invalid",
+        )
+
     return {
         "schema_name": schema_name,
         "schema_version": schema_version,
@@ -822,6 +984,13 @@ def _normalize(
         "ownership": {"owner": owner},
         "java": {"java_home": java_home, "jdk_home": jdk_home},
         "comsol": {"installation_root": installation_root},
+        "transport": transport,
+        "shim_binary": {
+            "path": shim_path,
+            "sha256": shim_sha256,
+            "version": shim_version,
+            "platform": shim_platform,
+        },
         "gui": {"language": language, "scale": scale},
     }
 
@@ -1004,86 +1173,143 @@ def _report_error(error: Exception, *, location: str = "settings") -> dict[str, 
     }
 
 
+def _defaults_with_errors(
+    environment: Mapping[str, str],
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    try:
+        return default_settings_document(environ=environment), []
+    except (OSError, RuntimeError, SettingsError) as exc:
+        return deepcopy(_DEFAULT_SETTINGS), [_report_error(exc)]
+
+
+def _fallback_report(error: Exception, environment: Mapping[str, str]) -> dict[str, Any]:
+    defaults, default_errors = _defaults_with_errors(environment)
+    return {"settings": defaults, "errors": [_report_error(error), *default_errors]}
+
+
+def settings_report_from_bytes(
+    raw: bytes,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Validate one exact settings byte snapshot without reading the filesystem."""
+    environment = os.environ if environ is None else environ
+    if not raw or len(raw) > MAX_SETTINGS_BYTES:
+        return _fallback_report(
+            SettingsError(
+                f"settings.json must contain 1..{MAX_SETTINGS_BYTES} bytes",
+                reason_code="settings_size_invalid",
+            ),
+            environment,
+        )
+    try:
+        document = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
+    except UnicodeDecodeError:
+        return _fallback_report(
+            SettingsError("settings.json must be UTF-8", reason_code="settings_encoding_invalid"),
+            environment,
+        )
+    except json.JSONDecodeError, _DuplicateJsonKey:
+        return _fallback_report(
+            SettingsError(
+                "settings.json contains invalid or duplicate JSON",
+                reason_code="settings_json_invalid",
+            ),
+            environment,
+        )
+    except RecursionError as exc:
+        return _fallback_report(exc, environment)
+    try:
+        return normalize_settings_document(document, environ=environment)
+    except RecursionError as exc:
+        return _fallback_report(exc, environment)
+
+
 def load_settings_report(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     """Load settings and return safe defaults plus bounded validation errors."""
     environment = os.environ if environ is None else environ
-
-    def defaults_with_errors() -> tuple[dict[str, Any], list[dict[str, str]]]:
-        try:
-            return default_settings_document(environ=environment), []
-        except (OSError, RuntimeError, SettingsError) as exc:
-            return deepcopy(_DEFAULT_SETTINGS), [_report_error(exc)]
-
     try:
         path = default_settings_path(environ)
         raw = read_file_bytes_bounded(path, max_bytes=MAX_SETTINGS_BYTES)
     except ValueError as exc:
         if "reading limit" in str(exc):
-            error = SettingsError(
-                f"settings.json must contain 1..{MAX_SETTINGS_BYTES} bytes",
-                reason_code="settings_size_invalid",
+            return _fallback_report(
+                SettingsError(
+                    f"settings.json must contain 1..{MAX_SETTINGS_BYTES} bytes",
+                    reason_code="settings_size_invalid",
+                ),
+                environment,
             )
-            defaults, default_errors = defaults_with_errors()
-            return {
-                "settings": defaults,
-                "errors": [_report_error(error), *default_errors],
-            }
-        defaults, default_errors = defaults_with_errors()
-        return {
-            "settings": defaults,
-            "errors": [_report_error(exc), *default_errors],
-        }
+        return _fallback_report(exc, environment)
     except (OSError, RuntimeError, SettingsError) as exc:
-        defaults, default_errors = defaults_with_errors()
-        return {
-            "settings": defaults,
-            "errors": [_report_error(exc), *default_errors],
-        }
-    if not raw:
-        error = SettingsError(
-            f"settings.json must contain 1..{MAX_SETTINGS_BYTES} bytes",
-            reason_code="settings_size_invalid",
-        )
-        defaults, default_errors = defaults_with_errors()
-        return {
-            "settings": defaults,
-            "errors": [_report_error(error), *default_errors],
-        }
+        return _fallback_report(exc, environment)
+    return settings_report_from_bytes(raw, environment)
+
+
+@dataclass(frozen=True)
+class SettingsSnapshot:
+    """One settings read: its location, exact bytes, digest and validation.
+
+    Startup validation, ownership-domain resolution and host admission all
+    quote this one snapshot, so a file change in between is detectable by
+    comparing digests instead of being silently mixed across reads.
+    """
+
+    location: SettingsLocation
+    raw: bytes | None
+    sha256: str | None
+    report: dict[str, Any]
+
+    @property
+    def path(self) -> Path:
+        return self.location.path
+
+    @property
+    def settings(self) -> dict[str, Any]:
+        return self.report["settings"]
+
+    @property
+    def errors(self) -> list[dict[str, str]]:
+        return self.report["errors"]
+
+    def identity(self) -> dict[str, Any]:
+        return {"path": str(self.location.path), "sha256": self.sha256}
+
+
+def read_settings_digest(path: Path) -> str | None:
+    """Return the SHA-256 of one settings file, or None when it is absent."""
     try:
-        document = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
-    except UnicodeDecodeError:
-        error = SettingsError(
-            "settings.json must be UTF-8", reason_code="settings_encoding_invalid"
-        )
-        defaults, default_errors = defaults_with_errors()
-        return {
-            "settings": defaults,
-            "errors": [_report_error(error), *default_errors],
-        }
-    except json.JSONDecodeError, _DuplicateJsonKey:
-        error = SettingsError(
-            "settings.json contains invalid or duplicate JSON",
-            reason_code="settings_json_invalid",
-        )
-        defaults, default_errors = defaults_with_errors()
-        return {
-            "settings": defaults,
-            "errors": [_report_error(error), *default_errors],
-        }
-    except RecursionError as exc:
-        defaults, default_errors = defaults_with_errors()
-        return {
-            "settings": defaults,
-            "errors": [_report_error(exc), *default_errors],
-        }
+        raw = read_file_bytes_bounded(path, max_bytes=MAX_SETTINGS_BYTES)
+    except FileNotFoundError:
+        return None
+    return hashlib.sha256(raw).hexdigest()
+
+
+def load_settings_snapshot(environ: Mapping[str, str] | None = None) -> SettingsSnapshot:
+    """Read the effective settings file once and validate those exact bytes.
+
+    Raises SettingsError when the location cannot be resolved or the file
+    exists but cannot be read; callers that need fail-closed startup treat
+    that as unverifiable configuration.
+    """
+    environment = os.environ if environ is None else environ
+    location = resolve_settings_location(environ)
     try:
-        return normalize_settings_document(document, environ=environment)
-    except RecursionError as exc:
-        defaults, default_errors = defaults_with_errors()
-        return {
-            "settings": defaults,
-            "errors": [_report_error(exc), *default_errors],
-        }
+        raw = read_file_bytes_bounded(location.path, max_bytes=MAX_SETTINGS_BYTES)
+    except FileNotFoundError:
+        report = load_settings_report(environ)
+        return SettingsSnapshot(location=location, raw=None, sha256=None, report=report)
+    except (OSError, ValueError) as exc:
+        raise SettingsError(
+            f"settings file {location.path} cannot be read: {exc}",
+            reason_code="settings_unreadable",
+        ) from exc
+    report = settings_report_from_bytes(raw, environment)
+    return SettingsSnapshot(
+        location=location,
+        raw=raw,
+        sha256=hashlib.sha256(raw).hexdigest(),
+        report=report,
+    )
 
 
 def normalize_settings_document(
@@ -1159,10 +1385,19 @@ def settings_status(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     return result
 
 
-def settings_environment(environ: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Return effective legacy-shaped values with project settings as defaults."""
+def settings_environment(
+    environ: Mapping[str, str] | None = None,
+    *,
+    settings: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    """Return effective legacy-shaped values with project settings as defaults.
+
+    ``settings`` lets a caller that already validated one snapshot resolve
+    from those exact values instead of reading the file again.
+    """
     base = dict(os.environ if environ is None else environ)
-    settings = load_settings(environ)
+    if settings is None:
+        settings = load_settings(environ)
 
     def set_default(name: str, value: str | None) -> None:
         if value is not None and name not in base:
@@ -1253,4 +1488,9 @@ __all__ = [
     "settings_environment",
     "settings_fingerprint",
     "settings_status",
+    "SettingsSnapshot",
+    "is_concrete_runtime_path",
+    "load_settings_snapshot",
+    "read_settings_digest",
+    "settings_report_from_bytes",
 ]

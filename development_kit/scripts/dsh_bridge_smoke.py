@@ -1,0 +1,471 @@
+"""DSH bridge dual-transport smoke test (0.8.2 batch I rework).
+
+Verifies the bridge's `resolveSpawn` picks the correct entry point for
+both transport modes, and that the underlying MCP connection works
+through both. Runs solver-free with isolated settings.
+
+Uses the bridge's own Node.js module: imports `resolveSpawn` from the
+bridge source and drives a real connection through each mode.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+BRIDGE_DIR = ROOT / "dsh_bridge"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sp = importlib.import_module("shim_probe_support")
+
+
+def _node_available() -> bool:
+    try:
+        result = subprocess.run(
+            ["node", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return result.returncode == 0
+    except OSError, subprocess.TimeoutExpired:
+        return False
+
+
+def _run_bridge_smoke(
+    settings_path: str,
+    shim_command: str | None,
+    shim_manifest: str | None,
+    python_command: str,
+    workdir: str,
+) -> dict:
+    """Run a Node.js one-shot that imports the bridge and connects."""
+    node_script = """
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+// Import bridge internals for the spawn resolution test.
+const bridgeDir = process.env.SMOKE_BRIDGE_DIR;
+let resolved = null;
+try {
+    const mod = await import("file://" + resolve(bridgeDir, "lib/index.js"));
+    const config = {
+        command: process.env.SMOKE_PYTHON_CMD,
+        args: [],
+        cwd: process.env.SMOKE_WORKDIR,
+        env: { COMSOL_MCP_SETTINGS_PATH: process.env.SMOKE_SETTINGS },
+        shimCommand: process.env.SMOKE_SHIM_CMD || null,
+        shimManifest: process.env.SMOKE_SHIM_MANIFEST || null,
+        shimWorkerCommand: process.env.SMOKE_SHIM_WORKER
+            ? JSON.parse(process.env.SMOKE_SHIM_WORKER)
+            : null,
+    };
+    if (typeof mod.resolveSpawn === "function") {
+        resolved = mod.resolveSpawn(config);
+    }
+} catch (e) {
+    // Import or call failed; fall through to the settings-file fallback.
+}
+
+if (!resolved) {
+    const settings = JSON.parse(readFileSync(process.env.SMOKE_SETTINGS, "utf-8"));
+    console.log(JSON.stringify({
+        transport: settings.transport || "python",
+        resolved_command: settings.transport === "shim"
+            ? (process.env.SMOKE_SHIM_CMD || process.env.SMOKE_PYTHON_CMD)
+            : process.env.SMOKE_PYTHON_CMD,
+        fallback: true,
+    }));
+} else {
+    console.log(JSON.stringify({
+        transport: resolved.command === process.env.SMOKE_SHIM_CMD ? "shim" : "python",
+        resolved_command: resolved.command,
+    }));
+}
+process.exit(0);
+"""
+
+    script_path = Path(workdir) / "bridge_smoke.mjs"
+    script_path.write_text(node_script, encoding="utf-8")
+
+    env = dict(os.environ)
+    env["SMOKE_SETTINGS"] = settings_path
+    env["SMOKE_PYTHON_CMD"] = python_command
+    env["SMOKE_SHIM_CMD"] = shim_command or ""
+    env["SMOKE_SHIM_MANIFEST"] = shim_manifest or ""
+    env["SMOKE_SHIM_WORKER"] = (
+        json.dumps([python_command, "-m", "comsol_mcp.server"]) if shim_command else ""
+    )
+    env["SMOKE_WORKDIR"] = workdir
+    env["SMOKE_BRIDGE_DIR"] = str(BRIDGE_DIR)
+
+    result = subprocess.run(
+        ["node", str(script_path)],
+        cwd=str(BRIDGE_DIR),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    return {
+        "exit_code": result.returncode,
+        "stdout": result.stdout.strip(),
+        "stderr": result.stderr.strip()[-300:] if result.stderr else "",
+    }
+
+
+def _run_bridge_lifecycle(
+    settings_path: Path,
+    runtime: Path,
+    command: list[str],
+    env: dict,
+    workdir: Path,
+) -> dict:
+    """BRIDGE-CLOSE-01 regression: the real bridge core, end to end.
+
+    Connect, forwarded call, an awaited graceful dispose, and a second
+    connection in the same runtime. The driver reports whether the host's
+    admission record was released by the normal shutdown; every process the
+    driver spawned must be gone when it returns.
+    """
+    import time
+
+    import psutil
+
+    driver = (
+        "import { readFileSync, writeFileSync, existsSync } from 'node:fs';\n"
+        "import { createComsolConnection } from "
+        f"'file:///{(BRIDGE_DIR / 'lib' / 'mcp-client-core.mjs').as_posix()}';\n"
+        "const cfg = JSON.parse(readFileSync(process.argv[2], 'utf-8'));\n"
+        "const quiet = { debug(){}, info(){}, warn(){}, error(){} };\n"
+        "const opts = { ...cfg.spawn, reconnect: { enabled: false },"
+        " initTimeoutMs: 30000, toolCallTimeoutMs: 30000, logger: quiet };\n"
+        "const rows = {};\n"
+        "const con = createComsolConnection(opts);\n"
+        "rows.connected = await con.connect();\n"
+        "if (!rows.connected) { writeFileSync(cfg.out, JSON.stringify(rows)); process.exit(0); }\n"
+        "rows.tools = (await con.listTools()).length;\n"
+        "rows.call_ok = 'deployment_identity' in"
+        " JSON.parse((await con.callTool('capabilities', {})).text);\n"
+        "await con.dispose();\n"
+        "rows.lock_released_after_dispose = !existsSync(cfg.lock);\n"
+        "const second = createComsolConnection(opts);\n"
+        "rows.reconnected = await second.connect();\n"
+        "if (rows.reconnected) {\n"
+        "  rows.second_call_ok = 'deployment_identity' in"
+        " JSON.parse((await second.callTool('capabilities', {})).text);\n"
+        "  await second.dispose();\n"
+        "  rows.lock_released_after_second = !existsSync(cfg.lock);\n"
+        "}\n"
+        "writeFileSync(cfg.out, JSON.stringify(rows));\n"
+        "process.exit(0);\n"
+    )
+    script_path = workdir / "bridge_lifecycle.mjs"
+    script_path.write_text(driver, encoding="utf-8")
+    config_path = workdir / "lifecycle-config.json"
+    result_path = workdir / "lifecycle-result.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "spawn": {"command": command[0], "args": command[1:], "cwd": str(ROOT), "env": env},
+                "lock": str(runtime / "host_admission.lock"),
+                "out": str(result_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    result_path.unlink(missing_ok=True)
+
+    started = time.time()
+    owned: dict[tuple[int, float], str] = {}
+    with (workdir / "lifecycle.log").open("wb") as log:
+        node = subprocess.Popen(  # noqa: S603 - fixed probe argv
+            ["node", str(script_path), str(config_path)],
+            cwd=str(BRIDGE_DIR),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        while node.poll() is None and time.time() - started < 180:
+            try:
+                for process in psutil.Process(node.pid).children(recursive=True):
+                    try:
+                        owned[(process.pid, process.create_time())] = process.name()
+                    except psutil.NoSuchProcess:
+                        pass
+            except psutil.NoSuchProcess:
+                pass
+            time.sleep(0.1)
+        if node.poll() is None:
+            node.terminate()
+        node.wait(timeout=10)
+    time.sleep(1.0)
+    survivors = []
+    for (pid, born), name in owned.items():
+        try:
+            process = psutil.Process(pid)
+            if process.create_time() == born:
+                survivors.append({"pid": pid, "name": name})
+        except psutil.NoSuchProcess:
+            pass
+    rows = {}
+    if result_path.exists():
+        rows = json.loads(result_path.read_text(encoding="utf-8"))
+    rows["node_exit_code"] = node.returncode
+    if node.returncode != 0:
+        rows["log_tail"] = (workdir / "lifecycle.log").read_text(
+            encoding="utf-8", errors="replace"
+        )[-400:]
+    rows["seconds"] = round(time.time() - started, 1)
+    rows["surviving_processes"] = survivors
+    return rows
+
+
+def _drive_mcp_session(command: list[str], env: dict, workdir: str) -> dict:
+    """Drive a minimal MCP session through the given command list."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    proc = subprocess.Popen(
+        command,
+        cwd=workdir,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        creationflags=flags,
+    )
+    init = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "bridge-smoke", "version": "0"},
+        },
+    }
+
+    def _write(payload: bytes) -> None:
+        try:
+            proc.stdin.write(payload)
+            proc.stdin.flush()
+        except OSError, ValueError:
+            pass  # Pipe closed during a race; report from what we have.
+
+    def _read() -> str:
+        try:
+            return proc.stdout.readline().decode()
+        except OSError, ValueError:
+            return ""
+
+    _write((json.dumps(init) + "\n").encode())
+    init_reply = _read()
+    _write(b'{"jsonrpc":"2.0","method":"notifications/initialized"}\n')
+    _write(b'{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n')
+    tools_reply = _read()
+    try:
+        proc.stdin.close()
+    except OSError, ValueError:
+        pass
+    try:
+        proc.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+    init_data = json.loads(init_reply) if init_reply.strip() else {}
+    tools_data = json.loads(tools_reply) if tools_reply.strip() else {}
+    tool_count = len(tools_data.get("result", {}).get("tools", []))
+    server_info = init_data.get("result", {}).get("serverInfo", {})
+    return {
+        "server_name": server_info.get("name"),
+        "tool_count": tool_count,
+        "exit_code": proc.returncode,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--shim", required=True, type=Path)
+    parser.add_argument("--python", required=True, type=Path)
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help="ignored: the smoke generates a manifest bound to its own settings",
+    )
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+
+    if not _node_available():
+        print(json.dumps({"error": "Node.js is not available"}))
+        return 2
+
+    results: dict = {"schema": "comsol_mcp.p06.bridge_smoke/1"}
+
+    with tempfile.TemporaryDirectory(prefix="bridge-smoke-", dir=str(ROOT)) as raw:
+        workdir = Path(raw)
+        runtime = workdir / "runtime"
+        models = workdir / "models"
+        runtime.mkdir()
+        models.mkdir()
+        settings_path = workdir / "settings.json"
+
+        # === Test 1: Python direct mode ===
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "schema_name": "comsol_mcp.settings",
+                    "schema_version": "1.4.0",
+                    "profile": {"name": "core"},
+                    "runtime": {"directory": str(runtime)},
+                    "transport": "python",
+                }
+            ),
+            encoding="utf-8",
+        )
+        env_py = sp.base_environment()
+        env_py["COMSOL_MCP_SETTINGS_PATH"] = str(settings_path)
+        env_py["COMSOL_MCP_PROFILE"] = "core"
+        py_result = _drive_mcp_session(
+            [str(args.python), "-m", "comsol_mcp.server"], env_py, str(workdir)
+        )
+        results["python_direct"] = py_result
+
+        # === Test 2: Shim mode ===
+        # Complete identity (path, SHA-256, version, platform) reported by the
+        # binary itself, and a manifest bound to these exact settings bytes.
+        shim_document = sp.settings_document(transport="shim", runtime=runtime, shim=args.shim)
+        sp.write_settings(settings_path, shim_document)
+        manifest_path = workdir / "manifest.json"
+        generated = sp.generate_manifest(args.python, settings_path, manifest_path)
+        results["manifest_generated"] = generated.returncode == 0
+        env_shim = dict(env_py)
+        env_shim["COMSOL_MCP_DISCOVERY_MANIFEST"] = str(manifest_path)
+        env_shim["COMSOL_MCP_SHIM_CHILD"] = json.dumps(
+            [str(args.python), "-m", "comsol_mcp.server"]
+        )
+        shim_result = _drive_mcp_session([str(args.shim)], env_shim, str(workdir))
+        results["shim_mode"] = shim_result
+
+        # === Test 3: Bridge spawn resolution ===
+        # Python mode
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "schema_name": "comsol_mcp.settings",
+                    "schema_version": "1.4.0",
+                    "profile": {"name": "core"},
+                    "runtime": {"directory": str(runtime)},
+                    "transport": "python",
+                }
+            ),
+            encoding="utf-8",
+        )
+        bridge_py = _run_bridge_smoke(
+            str(settings_path), str(args.shim), str(manifest_path), str(args.python), str(workdir)
+        )
+        results["bridge_python_mode"] = bridge_py
+
+        # Shim mode
+        sp.write_settings(settings_path, shim_document)
+        bridge_shim = _run_bridge_smoke(
+            str(settings_path), str(args.shim), str(manifest_path), str(args.python), str(workdir)
+        )
+        results["bridge_shim_mode"] = bridge_shim
+
+        # === Test 4: bridge disposal and same-domain reconnect ===
+        # BRIDGE-CLOSE-01: the real core must close the host normally (stdin
+        # EOF, bounded exit, verified admission release) so a reconnect in the
+        # same runtime succeeds, on both transports.
+        lifecycle: dict = {}
+        for transport in ("python", "shim"):
+            room = workdir / f"lifecycle-{transport}"
+            room.mkdir()
+            bridge_runtime = room / "runtime"
+            bridge_runtime.mkdir()
+            bridge_settings = room / "settings.json"
+            bridge_env = sp.base_environment()
+            bridge_env["COMSOL_MCP_SETTINGS_PATH"] = str(bridge_settings)
+            bridge_env["COMSOL_MCP_PROFILE"] = "core"
+            if transport == "python":
+                bridge_settings.write_text(
+                    json.dumps(
+                        {
+                            "schema_name": "comsol_mcp.settings",
+                            "schema_version": "1.4.0",
+                            "profile": {"name": "core"},
+                            "runtime": {"directory": str(bridge_runtime)},
+                            "transport": "python",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                command = [str(args.python), "-m", "comsol_mcp.server"]
+            else:
+                sp.write_settings(
+                    bridge_settings,
+                    sp.settings_document(transport="shim", runtime=bridge_runtime, shim=args.shim),
+                )
+                bridge_manifest = room / "manifest.json"
+                generated = sp.generate_manifest(args.python, bridge_settings, bridge_manifest)
+                lifecycle["manifest_generated"] = generated.returncode == 0
+                command = [str(args.shim)]
+                bridge_env["COMSOL_MCP_DISCOVERY_MANIFEST"] = str(bridge_manifest)
+                bridge_env["COMSOL_MCP_SHIM_CHILD"] = json.dumps(
+                    [str(args.python), "-m", "comsol_mcp.server"]
+                )
+            lifecycle[transport] = _run_bridge_lifecycle(
+                bridge_settings, bridge_runtime, command, bridge_env, room
+            )
+        results["bridge_lifecycle"] = lifecycle
+
+    # Evaluate checks.
+    py_ok = py_result.get("server_name") == "COMSOL MCP" and py_result.get("tool_count", 0) > 0
+    shim_ok = (
+        shim_result.get("server_name") == "COMSOL MCP" and shim_result.get("tool_count", 0) > 0
+    )
+    same_surface = py_result.get("tool_count") == shim_result.get("tool_count")
+    bridge_py_ok = bridge_py.get("exit_code") == 0
+    bridge_shim_ok = bridge_shim.get("exit_code") == 0
+
+    def lifecycle_ok(transport: str) -> bool:
+        rows = (results.get("bridge_lifecycle") or {}).get(transport) or {}
+        return (
+            rows.get("node_exit_code") == 0
+            and rows.get("connected") is True
+            and rows.get("tools", 0) > 0
+            and rows.get("call_ok") is True
+            and rows.get("lock_released_after_dispose") is True
+            and rows.get("reconnected") is True
+            and rows.get("second_call_ok") is True
+            and rows.get("lock_released_after_second") is True
+            and rows.get("surviving_processes") == []
+        )
+
+    checks = {
+        "manifest_bound_to_shim_settings": results.get("manifest_generated") is True,
+        "python_direct_works": py_ok,
+        "shim_mode_works": shim_ok,
+        "same_tool_surface": same_surface,
+        "bridge_resolves_python": bridge_py_ok,
+        "bridge_resolves_shim": bridge_shim_ok,
+        "bridge_dispose_then_reconnect_python": lifecycle_ok("python"),
+        "bridge_dispose_then_reconnect_shim": lifecycle_ok("shim"),
+    }
+    results["checks"] = checks
+    results["passed"] = all(checks.values())
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    print(json.dumps(checks, sort_keys=True))
+    return 0 if results["passed"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

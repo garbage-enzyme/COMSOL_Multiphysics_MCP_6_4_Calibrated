@@ -45,6 +45,11 @@ _FORBIDDEN_PARTS = {
 }
 _FORBIDDEN_SUFFIXES = {".class", ".lock", ".mph", ".pyc", ".recovery", ".status"}
 _FORBIDDEN_NAMES = {".env", "credentials", "credentials.json", "id_rsa", "secrets.json"}
+#: The single permitted ``.lock`` member, mirroring the repository-tree
+#: policy pinned in test_release_engineering.py: the shim's committed Cargo
+#: graph is the reproducible dependency pin set of the optional binary the
+#: sdist ships for locked rebuilds, not a runtime lock artifact. Exact path.
+_PERMITTED_LOCK_MEMBERS = frozenset({"shim/Cargo.lock"})
 
 
 def _run(
@@ -338,7 +343,10 @@ def _distribution_inventory(path: Path) -> dict:
         lowered_parts = {part.casefold() for part in pure.parts}
         if (
             lowered_parts & _FORBIDDEN_PARTS
-            or pure.suffix.casefold() in _FORBIDDEN_SUFFIXES
+            or (
+                pure.suffix.casefold() in _FORBIDDEN_SUFFIXES
+                and name not in _PERMITTED_LOCK_MEMBERS
+            )
             or pure.name.casefold() in _FORBIDDEN_NAMES
         ):
             offenders.append(name)

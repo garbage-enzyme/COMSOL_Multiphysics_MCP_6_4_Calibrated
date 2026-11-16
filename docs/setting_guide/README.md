@@ -180,9 +180,30 @@ the GUI before save and by backend validation when JSON is edited directly.
 | Key | Default | Meaning and accepted values |
 | --- | --- | --- |
 | `schema_name` | `"comsol_mcp.settings"` | Read-only schema identity. Must match exactly. |
-| `schema_version` | `"1.3.0"` | New writes use `1.3.0`. `1.0.0`, `1.1.0`, and `1.2.0` are read and migrated in memory. |
+| `schema_version` | `"1.4.0"` | New writes use `1.4.0`. `1.0.0`, `1.1.0`, `1.2.0`, and `1.3.0` are read and migrated in memory. |
+| `transport` | `"python"` | `"python"` or `"shim"`. One value, never two enabled booleans. `"shim"` requires `shim_binary.path`, `shim_binary.sha256`, `shim_binary.version` and `shim_binary.platform` to identify the exact binary. |
+| `shim_binary.path` | `null` | Absolute path to the shim binary. Required when `transport` is `"shim"`. |
+| `shim_binary.sha256` | `null` | Expected SHA-256 of the shim binary. Required when `transport` is `"shim"`. |
+| `shim_binary.version` | `null` | Version the shim binary reports for `--version`. Required when `transport` is `"shim"`; the switch confirmation fills it after verification. |
+| `shim_binary.platform` | `null` | Target triple the shim binary reports for `--version`, for example `x86_64-pc-windows-msvc`. Required when `transport` is `"shim"`. |
 | `gui.language` | `"zh-cn"` | `"en"`, `"zh-cn"`, or `"zh-tw"`. |
 | `gui.scale` | `"system"` | `"system"`, `"100"`, `"125"`, `"150"`, or `"200"`. The GUI displays the numeric choices as percentages. |
+
+One host serves one runtime directory. When the previous host is gone but
+left a record it cannot prove clean — a record without a containment
+identity, or a Windows record whose Job name no longer opens after the
+host exited — a new host refuses to start with
+`admission_state_uncertain`, keeps the record and stops nothing. The
+diagnostic names the operator flow: `python -m comsol_mcp.host_admission
+--show <runtime-dir>` prints the record's identity and the exact `--recover`
+command. Run it only after confirming independently that nothing from the
+previous host is still running. `--show` also says whether `--recover` would
+proceed now and lists any process still attributable to the previous host,
+such as a child it started or the console host of a console it opened that
+is still in use; stop those yourself first, because nothing is
+stopped for you. `--recover` archives the record before removing it, refuses
+while anything from the previous host is still visible, and writes a receipt
+that keeps what the machine verified apart from what your confirmation covers.
 
 ### Tool Profile
 

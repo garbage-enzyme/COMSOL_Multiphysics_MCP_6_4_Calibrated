@@ -425,3 +425,64 @@ D:\path\to\python-env\python.exe -m pip install . --no-deps
 
 Restart the exact MCP host and use `capabilities.deployment_identity` to verify
 that the installed package and profile are the intended revision.
+
+## 10. Optional Rust shim (experimental, 0.8.2)
+
+The Rust shim is an optional, separately distributed launcher. It answers
+static discovery (initialize, tools/list, ping, server/discover) from a
+generated manifest without starting Python, and spawns exactly one Python
+worker on the first forwarded request. Read the platform matrix at
+`development_kit/release/shim_platform_matrix.json` for toolchains,
+triples, and licenses.
+
+Facts and limits:
+
+- The Python wheel stays platform-independent and never contains a shim
+  binary. The shim is an opt-in launch command. Nothing about an existing
+  installation changes by itself.
+- No auto-download happens. Obtain the binary for your platform, record its
+  SHA-256 against the published build manifest, and verify it before use.
+- If the manifest or binary does not match the installed package identity,
+  the shim refuses to start. Remove the shim command and launch the Python
+  entry point directly. The ordinary server behavior then stays the same.
+- If the worker exits while a request is pending, the client receives an
+  error that the result is unknown, and the transport closes. Reconnect.
+  The shim never respawns or replays automatically.
+- Windows: hard-killing the shim terminates the whole worker tree (Job
+  Object). Linux relies on the graceful stdin-close path. Parent death
+  alone is not a containment claim there.
+- Linux runtime filesystem requirement: admission and ownership locks
+  and runtime recovery state must live on the verified native
+  filesystem lane (ext4). Both entry paths — the Python server and the
+  shim — refuse to start, before creating anything, when the configured
+  runtime directory sits on another filesystem; the decision uses mount
+  evidence from /proc/self/mounts, and unverifiable evidence refuses
+  rather than passing. WSL Windows mounts such as /mnt/* (9p/DrvFs) are
+  unsupported: they break the POSIX quarantine release protocol. Use a
+  native path, for example `$HOME/comsol_mcp_runtime`. Windows-native
+  paths are unaffected.
+- Child-interpreter contract: point `COMSOL_MCP_SHIM_CHILD` at a real
+  interpreter executable. On Windows, a venv `python.exe` is a launcher
+  that keeps a second stdout writer alive; if the underlying interpreter
+  dies mid-stream, the session can wedge (no EOF, no data). If a launcher
+  topology is unavoidable, arm the watchdog with
+  `COMSOL_MCP_SHIM_WATCHDOG_IDLE=<seconds>` (for example 300). The
+  watchdog binds the worker's EXECUTING interpreter through
+  `COMSOL_MCP_SHIM_WORKER_IDENTITY_FILE` (the shim names the file; the
+  shipped Python worker writes its interpreter's PID there at startup)
+  and closes the session as unknown only while a request is pending, the
+  worker has been silent for the whole window, AND that reported
+  interpreter — matched by PID and creation time — is verifiably gone
+  from the OS. No other process's exit (a helper finishing, a job runner,
+  even the launcher itself) can trigger it, so it cannot close a healthy
+  quiet call. Workers that do not report their interpreter identity are
+  not protected: the watchdog disarms for that session with a stderr
+  note. Keep the window above your longest expected silent call.
+- Message-size gate: no supported workflow may return a single protocol
+  message larger than 1 MB through the shim. Adding such a workflow
+  requires shipping the buffered worker-read fix in the same release; the
+  byte-wise reader delivers large single lines at roughly 10 KB/s, so a
+  4 MB line takes five to seven minutes.
+- Verified toolchain: Rust 1.99.1 (windows-gnu and linux-gnu). The
+  theoretical minimum is 1.85 (edition 2024). Testing did not cover any
+  older toolchain.

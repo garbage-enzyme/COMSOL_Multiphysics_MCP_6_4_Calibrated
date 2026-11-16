@@ -12,14 +12,15 @@ from comsol_mcp.server import create_server
 from comsol_mcp.tools.catalog import TOOL_SPECS
 from development_kit.tests.platform_fixtures import platform_test_root
 
-RELEASED_SETTINGS_VERSION = "1.3.0"
+RELEASED_SETTINGS_VERSION = "1.4.0"
 RELEASED_SETTINGS_READABLE_VERSIONS = (
     "1.0.0",
     "1.1.0",
     "1.2.0",
+    "1.3.0",
     RELEASED_SETTINGS_VERSION,
 )
-RELEASED_PACKAGE_VERSION = "0.8.1"
+RELEASED_PACKAGE_VERSION = "0.8.2"
 
 
 def test_alpha6_settings_schema_and_defaults_are_current_and_backward_readable(tmp_path):

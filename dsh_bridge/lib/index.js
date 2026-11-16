@@ -13,6 +13,7 @@
 //   state file (or a future job_list tool).
 
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createComsolConnection, extractText } from "./mcp-client-core.mjs";
 import { createJobMirror, createStateStore, parseJson, extractState, extractAttempt, extractOwnerIdentity, ownerFromIdentity, mirrorDedupeKey } from "./job-mirror.mjs";
@@ -27,6 +28,16 @@ const DEFAULTS = {
 	args: [],
 	cwd: "D:\\comsol_runtime",
 	env: { COMSOL_MCP_SETTINGS_PATH: "D:\\comsol_runtime\\settings.json" },
+	// When the settings file selects transport "shim", the bridge launches the
+	// shim binary instead of the Python entry point. Both speak the same MCP
+	// stdio protocol, so the bridge code is transport-agnostic. The only
+	// difference is the spawn command and extra environment variables the
+	// shim needs (manifest path, worker command). The shim adds about 2 MB
+	// private commit over the Python-only path because it proxies the same
+	// worker process.
+	shimCommand: null,
+	shimManifest: null,
+	shimWorkerCommand: null,
 	pollIntervalMs: 15000,
 	tailLines: 20,
 	outputLimitBytes: 262144,
@@ -40,6 +51,39 @@ const DEFAULTS = {
 	rehydrateMaxAttempts: 5,
 	rehydrateRetryDelayMs: 2000,
 };
+
+// Read the transport mode from the effective settings file. Returns
+// "python" (default) or "shim". Returns "python" on any read or parse
+// failure: a broken settings file must not silently change transport.
+function readTransportMode(settingsPath) {
+	try {
+		const raw = readFileSync(settingsPath, "utf-8");
+		const parsed = JSON.parse(raw);
+		return parsed.transport === "shim" ? "shim" : "python";
+	} catch {
+		return "python";
+	}
+}
+
+// Resolve the spawn command and environment for the configured transport.
+// When the settings select "shim" and a shimCommand is available, the
+// bridge spawns the shim binary with its required environment. Otherwise
+// it spawns the Python entry point directly. Both paths serve the same
+// MCP stdio protocol; the bridge code is identical for both.
+function resolveSpawn(config) {
+	const settingsPath = config.env.COMSOL_MCP_SETTINGS_PATH;
+	if (!settingsPath) return { command: config.command, args: config.args, env: config.env };
+	const mode = readTransportMode(settingsPath);
+	if (mode === "shim" && config.shimCommand) {
+		const env = { ...config.env };
+		if (config.shimManifest) env.COMSOL_MCP_DISCOVERY_MANIFEST = config.shimManifest;
+		if (config.shimWorkerCommand) {
+			env.COMSOL_MCP_SHIM_CHILD = JSON.stringify(config.shimWorkerCommand);
+		}
+		return { command: config.shimCommand, args: config.args ?? [], env };
+	}
+	return { command: config.command, args: config.args, env: config.env };
+}
 
 export function normalizeConfig(config) {
 	const c = config ?? {};
@@ -106,8 +150,14 @@ export async function apply(ctx, config) {
 	let disposedPlugin = false;
 	let rehydrateTimer = null;
 
+	// Resolve the transport-aware spawn before creating the connection.
+	// This picks the shim binary or the Python entry point based on the
+	// settings file's transport field, and adjusts the environment for
+	// shim mode. The MCP protocol surface is identical for both.
+	const spawnConfig = resolveSpawn(cfg);
 	const connection = createComsolConnection({
 		...cfg,
+		...spawnConfig,
 		logger,
 		onTools: syncGeneration,
 	});

@@ -52,12 +52,23 @@ from comsol_mcp.contracts.shape_support import (
     SHAPE_SUPPORT_POLICY_SCHEMA_NAME,
     SHAPE_SUPPORT_POLICY_SCHEMA_VERSION,
 )
+from comsol_mcp.discovery_manifest import MANIFEST_SCHEMA_NAME, MANIFEST_SCHEMA_VERSION
 from comsol_mcp.durable import canonical_sha256_v1
+from comsol_mcp.host_admission import (
+    HOST_ADMISSION_RECOVERY_SCHEMA,
+    HOST_ADMISSION_RECOVERY_VERSION,
+    HOST_ADMISSION_SCHEMA,
+    HOST_ADMISSION_VERSION,
+)
 from comsol_mcp.settings_gui_handshake import HANDSHAKE_SCHEMA, HANDSHAKE_VERSION
+from comsol_mcp.shared_session.bounded_save import (
+    PENDING_CLEANUP_SCHEMA,
+    PENDING_CLEANUP_VERSION,
+)
 
 OPERATION_LOCK_SCHEMA, OPERATION_LOCK_VERSION = "comsol_mcp.operation_lock", "1.0.0"
 PATH_POLICY_SCHEMA, PATH_POLICY_VERSION = "comsol_mcp.path_policy", "1.1.0"
-SETTINGS_SCHEMA, SETTINGS_VERSION = "comsol_mcp.settings", "1.3.0"
+SETTINGS_SCHEMA, SETTINGS_VERSION = "comsol_mcp.settings", "1.4.0"
 CLEANUP_OUTCOME_SCHEMA, CLEANUP_OUTCOME_VERSION = "comsol_mcp.cleanup_outcome", "1.0.0"
 SHARED_MODEL_LOCK_SCHEMA, SHARED_MODEL_LOCK_VERSION = (
     "comsol_mcp.shared_model_lock",
@@ -340,6 +351,11 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="durable_artifact",
         ),
         _entry("comsol_mcp.build_identity", "1.0.0", "comsol_mcp.build_identity"),
+        _entry(
+            MANIFEST_SCHEMA_NAME,
+            MANIFEST_SCHEMA_VERSION,
+            "comsol_mcp.discovery_manifest",
+        ),
         _entry(
             CLEANUP_OUTCOME_SCHEMA,
             CLEANUP_OUTCOME_VERSION,
@@ -793,6 +809,24 @@ def _entries() -> list[dict[str, Any]]:
             artifact_kind="durable_artifact",
         ),
         _entry(
+            HOST_ADMISSION_SCHEMA,
+            HOST_ADMISSION_VERSION,
+            "comsol_mcp.host_admission",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            HOST_ADMISSION_RECOVERY_SCHEMA,
+            HOST_ADMISSION_RECOVERY_VERSION,
+            "comsol_mcp.host_admission",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
+            PENDING_CLEANUP_SCHEMA,
+            PENDING_CLEANUP_VERSION,
+            "comsol_mcp.shared_session.bounded_save",
+            artifact_kind="durable_artifact",
+        ),
+        _entry(
             STRUCTURE_ADAPTER_MANIFEST_SCHEMA_NAME,
             STRUCTURE_ADAPTER_MANIFEST_SCHEMA_VERSION,
             "comsol_mcp.adapter.structure",
@@ -873,7 +907,7 @@ def _entries() -> list[dict[str, Any]]:
             SETTINGS_VERSION,
             "comsol_mcp.settings",
             artifact_kind="configuration",
-            readable_versions=("1.0.0", "1.1.0", "1.2.0", SETTINGS_VERSION),
+            readable_versions=("1.0.0", "1.1.0", "1.2.0", "1.3.0", SETTINGS_VERSION),
         ),
         _entry(
             HANDSHAKE_SCHEMA,

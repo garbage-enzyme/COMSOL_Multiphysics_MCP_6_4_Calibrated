@@ -5,29 +5,143 @@ msgstr "Project-Id-Version: comsol-mcp alpha8.1\nMIME-Version: 1.0\nContent-Type
 msgid "COMSOL MCP Settings"
 msgstr "COMSOL MCP 設定"
 
-msgid "General"
-msgstr "一般"
+msgid "Interface and Language"
+msgstr "介面和語言"
 
-msgid "Profile"
-msgstr "工具設定檔"
+msgid "Feature Settings"
+msgstr "功能設定"
 
-msgid "Runtime"
-msgstr "執行路徑"
+msgid "Independent Feature Extensions"
+msgstr "獨立功能擴展"
 
-msgid "COMSOL/Java"
-msgstr "COMSOL/Java"
+msgid "Read/Write Directories"
+msgstr "讀寫目錄"
 
-msgid "Evidence"
-msgstr "證據"
+msgid "MCP Connection"
+msgstr "MCP 連線方式"
 
-msgid "Docs"
-msgstr "文件"
+msgid "Verification and Safety"
+msgstr "驗證與安全"
 
-msgid "Owner"
-msgstr "擁有者"
+msgid "Manual Auto-Retrieval"
+msgstr "手冊自動檢索"
+
+msgid "Solver Ownership"
+msgstr "模擬器所有權"
 
 msgid "About"
 msgstr "關於"
+
+msgid "Transport mode"
+msgstr "傳輸模式"
+
+msgid "Python direct (default, fully compatible)"
+msgstr "Python 直連（預設，完全相容）"
+
+msgid "Rust shim (lower memory, experimental)"
+msgstr "Rust shim（低記憶體，實驗性）"
+
+msgid "Standalone program (required for Rust shim mode)"
+msgstr "獨立程式（Rust shim 模式必需）"
+
+msgid "Standalone program path"
+msgstr "獨立程式路徑"
+
+msgid "Settings schema identity."
+msgstr "設定檔使用的格式標識。"
+
+msgid "Settings schema version."
+msgstr "設定檔使用的格式版本。"
+
+msgid "SHA-256"
+msgstr "SHA-256 校驗"
+
+msgid "Check program"
+msgstr "校驗程式"
+
+msgid "Enter the standalone program path first."
+msgstr "請先輸入獨立程式路徑。"
+
+msgid "File not found."
+msgstr "檔案不存在。"
+
+msgid "SHA-256 mismatch. Check the published hash."
+msgstr "SHA-256 不匹配。請核對已發布的雜湊值。"
+
+msgid "Switch transport"
+msgstr "切換傳輸方式"
+
+msgid "The standalone program path must be absolute."
+msgstr "獨立程式路徑必須是絕對路徑。"
+
+msgid "The file cannot be read."
+msgstr "無法讀取該檔案。"
+
+msgid "Enter the published SHA-256 first."
+msgstr "請先輸入已發布的 SHA-256。"
+
+msgid "The program did not run to report its version."
+msgstr "該程式未能執行以回報版本。"
+
+msgid "Unrecognized program: it is not a shim binary."
+msgstr "無法識別的程式：它不是 shim 獨立程式。"
+
+msgid "Version mismatch: this program is {found}, the package expects {expected}."
+msgstr "版本不匹配：該程式為 {found}，本套件需要 {expected}。"
+
+msgid "Platform mismatch: this program targets {found}; this computer needs {expected}."
+msgstr "平台不匹配：該程式面向 {found}；本機需要 {expected}。"
+
+msgid "Verified. SHA-256, version and platform match. Version: {version} ({platform})"
+msgstr "校驗通過。SHA-256、版本和平台皆匹配。版本：{version}（{platform}）"
+
+msgid "Current state"
+msgstr "目前狀態"
+
+msgid "Configured mode: {mode}"
+msgstr "已設定的模式：{mode}"
+
+msgid "Verified active host: {mode} (a restart is required for the configured mode)"
+msgstr "已驗證的執行中主機：{mode}（需重新啟動後已設定的模式才生效）"
+
+msgid "Verified active host: none"
+msgstr "已驗證的執行中主機：無"
+
+msgid "Active host: UNKNOWN ({parts})"
+msgstr "執行中主機：未知（{parts}）"
+
+msgid "Verified active hosts: {parts}"
+msgstr "已驗證的執行中主機：{parts}"
+
+msgid "Before switching, close every agent session that uses this server (including the one that opened this window). The button refuses while any server process is running or any state is UNKNOWN."
+msgstr "切換前，請關閉所有使用本伺服器的 agent 連線（包括幫你開啟本視窗的那個）。只要有伺服器程序在執行或任何狀態未知，按鈕都會拒絕切換。"
+
+msgid "Save or discard the other changes before switching transport."
+msgstr "切換傳輸方式前，請先儲存或放棄其他修改。"
+
+msgid "Refused: the standalone program must pass verification before switching to Rust shim mode."
+msgstr "已拒絕：切換到 Rust shim 模式前，獨立程式必須通過校驗。"
+
+msgid "Refused: server processes are still running ({found}). Close them and try again."
+msgstr "已拒絕：仍有伺服器程序在執行（{found}）。請關閉後重試。"
+
+msgid "Refused: the running state is UNKNOWN ({found}). Resolve it (or grant access) and try again."
+msgstr "已拒絕：執行狀態未知（{found}）。請先解決（或授予存取權限）後重試。"
+
+msgid "Refused: the change is not valid ({detail})."
+msgstr "已拒絕：該修改無效（{detail}）。"
+
+msgid "Saved: configured mode is now {mode}. It becomes active only after an agent client starts it; this window does not claim it is active."
+msgstr "已儲存：已設定的模式現在是 {mode}。只有在 agent 用戶端啟動它之後才會生效；本視窗不會聲稱它已在執行。"
+
+msgid "Confirm transport switch"
+msgstr "確認切換傳輸方式"
+
+msgid "Choose how agent clients connect to the COMSOL MCP server. Switching requires a dedicated confirmation and only takes effect after every agent session closes and restarts."
+msgstr "選擇 agent 用戶端連線 COMSOL MCP 伺服器的方式。切換需要單獨確認，且僅在所有 agent 連線關閉並重新啟動後生效。"
+
+msgid "COMSOL/Java"
+msgstr "COMSOL/Java"
 
 msgid "Changes take effect only after restarting Codex or the owning MCP client."
 msgstr "變更僅在重新啟動 Codex 或目前的 MCP 用戶端後生效。"
@@ -137,11 +251,86 @@ msgstr "简体中文"
 msgid "繁體中文"
 msgstr "繁體中文"
 
-msgid "Internal settings format name. You do not need to change it."
-msgstr "設定檔內部使用的格式名稱，不需要修改。"
+msgid "Settings schema"
+msgstr "設定格式名稱"
 
-msgid "Settings format version used when this file is saved."
-msgstr "儲存檔案時使用的設定格式版本。"
+msgid "Settings schema version"
+msgstr "設定格式版本"
+
+msgid "Language"
+msgstr "介面語言"
+
+msgid "Display Size"
+msgstr "介面大小"
+
+msgid "Tool Profile"
+msgstr "工具設定檔"
+
+msgid "Collaborative Editing"
+msgstr "協同編輯"
+
+msgid "Progressive Tool Catalog"
+msgstr "漸進式工具目錄"
+
+msgid "Model Manager"
+msgstr "模型管理器"
+
+msgid "Model Manager Upload"
+msgstr "模型管理器上傳"
+
+msgid "Working Files Folder"
+msgstr "工作檔案目錄"
+
+msgid "Resumable Jobs Folder"
+msgstr "可恢復作業目錄"
+
+msgid "Model Read Folders"
+msgstr "模型讀取目錄"
+
+msgid "Results Output Folder"
+msgstr "結果輸出目錄"
+
+msgid "COMSOL Installation Folder"
+msgstr "COMSOL 安裝目錄"
+
+msgid "Java Runtime Folder"
+msgstr "Java 執行時目錄"
+
+msgid "JDK Folder"
+msgstr "JDK 目錄"
+
+msgid "Outcome Contract Validation"
+msgstr "結果契約驗證"
+
+msgid "Artifact Chain Verification"
+msgstr "工件鏈驗證"
+
+msgid "Summary Claim Verification"
+msgstr "摘要聲明驗證"
+
+msgid "Producer Driver Compatibility"
+msgstr "生產者驅動相容性"
+
+msgid "Keyword Manual Search"
+msgstr "關鍵詞手冊搜尋"
+
+msgid "Manuals Folder"
+msgstr "手冊目錄"
+
+msgid "Search Index File"
+msgstr "搜尋索引檔案"
+
+msgid "Semantic Manual Search"
+msgstr "語義手冊搜尋"
+
+msgid "Semantic Index Folder"
+msgstr "語義索引目錄"
+
+msgid "Semantic Model Folder"
+msgstr "語義模型目錄"
+
+msgid "Solver Owner Name"
+msgstr "模擬器所有者名稱"
 
 msgid "Language used by this Settings window."
 msgstr "此設定視窗使用的語言。"
@@ -247,6 +436,21 @@ msgstr "存放本機語意搜尋模型的可選資料夾。\n範例：%LOCALAPPD
 
 msgid "Optional name that identifies who owns the COMSOL session."
 msgstr "用於說明誰在使用 COMSOL 工作階段的可選名稱。"
+
+msgid "One transport value. 'python' keeps the direct Python entry point. 'shim' opts into the Rust launcher."
+msgstr "傳輸方式單值。'python' 保持 Python 直連入口；'shim' 選用 Rust 啟動器。"
+
+msgid "Absolute path to the shim binary. Required when transport is 'shim'."
+msgstr "shim 二進位的絕對路徑。transport 為 'shim' 時必需。"
+
+msgid "Expected SHA-256 of the shim binary. Required when transport is 'shim'."
+msgstr "shim 二進位的預期 SHA-256。transport 為 'shim' 時必需。"
+
+msgid "Version the verified shim binary reports. Set by the switch confirmation."
+msgstr "已驗證的 shim 獨立程式回報的版本。由切換確認寫入。"
+
+msgid "Target triple the verified shim binary reports. Set by the switch confirmation."
+msgstr "已驗證的 shim 獨立程式回報的目標平台三元組。由切換確認寫入。"
 
 msgid "Enter a valid absolute path or clear this setting."
 msgstr "請輸入有效的絕對路徑，或清除此項。"

@@ -31,6 +31,7 @@ from .fonts import apply_locale_font
 from .i18n import Translator, language_option_labels, scale_option_labels
 from .manual_index import ManualIndexBuildTask
 from .model import (
+    CUSTOM_TAB_KEYS,
     FIELDS,
     TAB_IDS,
     FieldDescriptor,
@@ -69,13 +70,14 @@ def _platform_help_text(text: str, *, platform: str | None = None) -> str:
 
 
 TAB_TITLES = {
-    "general": "General",
-    "profile": "Profile",
-    "runtime": "Runtime",
+    "general": "Interface and Language",
+    "profile": "Feature Settings",
+    "runtime": "Read/Write Directories",
+    "transport": "MCP Connection",
     "comsol_java": "COMSOL/Java",
-    "evidence": "Evidence",
-    "docs": "Docs",
-    "ownership": "Owner",
+    "evidence": "Verification and Safety",
+    "docs": "Manual Auto-Retrieval",
+    "ownership": "Solver Ownership",
     "about": "About",
 }
 FIXED_LINKS = (
@@ -435,9 +437,36 @@ class SettingsApplication:
             self.tabs[tab_id] = tab
             self.notebook.add(tab, text=_(TAB_TITLES[tab_id]))
         docs_keys = {key for _title, keys in DOC_SECTIONS for key in keys}
+        # Batch I*: profile tab's independent feature toggles get a labelled
+        # frame ("Independent Feature Extensions"). Other fields render normally.
+        _FEATURE_KEYS = {
+            "shared_server.enabled",
+            "discovery.pagination_enabled",
+            "model_manager.enabled",
+            "model_manager.upload_enabled",
+        }
+        profile_parent = self.tabs["profile"].content
+        feature_frame = ttk.LabelFrame(
+            profile_parent,
+            text=_("Independent Feature Extensions"),
+            padding=8,
+        )
+        # Render the non-feature field (profile.name) first, then place the
+        # frame below it, then render feature fields inside the frame.
+        _feature_row = None  # Remember where to grid the frame.
         for field in FIELDS:
-            if field.key not in docs_keys:
-                self._add_field(self.tabs[field.tab].content, field)
+            if (
+                field.key not in docs_keys
+                and field.key not in CUSTOM_TAB_KEYS
+                and field.tab != "about"
+            ):
+                if field.key in _FEATURE_KEYS:
+                    if _feature_row is None:
+                        _feature_row = profile_parent.grid_size()[1]
+                        feature_frame.grid(row=_feature_row, column=0, sticky="ew", pady=(4, 8))
+                    self._add_field(feature_frame, field)
+                else:
+                    self._add_field(self.tabs[field.tab].content, field)
         docs_parent = self.tabs["docs"].content
         for title, keys in DOC_SECTIONS:
             row = docs_parent.grid_size()[1]
@@ -448,6 +477,7 @@ class SettingsApplication:
             ).grid(row=row, column=0, sticky="w", pady=(4, 12))
             for key in keys:
                 self._add_field(docs_parent, next(field for field in FIELDS if field.key == key))
+        self._build_transport(self.tabs["transport"].content)
         self._build_about(self.tabs["about"].content)
         try:
             self.notebook.select(min(self._selected_tab, len(TAB_IDS) - 1))
@@ -484,12 +514,19 @@ class SettingsApplication:
         )
 
     def _add_field(self, parent: ttk.Frame, field: FieldDescriptor) -> None:
+        from .model import FIELD_TITLES
+
+        _ = self.controller.text
         row = parent.grid_size()[1]
         frame = ttk.Frame(parent, padding=(0, 0, 0, 14))
         frame.grid(row=row, column=0, sticky="ew")
         parent.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
-        ttk.Label(frame, text=field.key, wraplength=330, justify="left").grid(
+        # Batch I*: use the human-readable title, not the key. The key
+        # appears in grey at the start of the help text (tooltip).
+        title = FIELD_TITLES.get(field.key)
+        label_text = _(title) if title else field.key
+        ttk.Label(frame, text=label_text, wraplength=330, justify="left").grid(
             row=0,
             column=0,
             sticky="nw",
@@ -603,9 +640,12 @@ class SettingsApplication:
                 command=self._start_manual_index_build,
             ).pack(anchor="w")
             content_row = 2
+        # Batch I*: prefix the help text with the settings key in grey,
+        # so users can see the raw key without it being the title.
+        raw_help = _platform_help_text(self.controller.text(help_id))
         help_label = ttk.Label(
             frame,
-            text=_platform_help_text(self.controller.text(help_id)),
+            text=f"({field.key})  {raw_help}",
             style="Help.TLabel",
             wraplength=620,
             justify="left",
@@ -676,11 +716,267 @@ class SettingsApplication:
         if current != value:
             self.controller.update(key, value)
 
+    def _build_transport(self, parent: ttk.Frame) -> None:
+        """Build the MCP Connection tab: mode selector, identity, active host."""
+        import subprocess as _sp
+
+        from . import transport as transport_checking
+
+        _ = self.controller.text
+        ttk.Label(parent, text=_("MCP Connection"), font="TkHeadingFont").pack(anchor="w")
+        ttk.Label(
+            parent,
+            text=_(
+                "Choose how agent clients connect to the COMSOL MCP server. "
+                "Switching requires a dedicated confirmation and only takes "
+                "effect after every agent session closes and restarts."
+            ),
+        ).pack(anchor="w", pady=(4, 12))
+
+        mode_frame = ttk.LabelFrame(parent, text=_("Transport mode"), padding=8)
+        mode_frame.pack(fill="x", pady=(0, 8))
+        self._transport_var = tk.StringVar(
+            value=str(get_value(self.controller.model.document, "transport") or "python")
+        )
+        ttk.Radiobutton(
+            mode_frame,
+            text=_("Python direct (default, fully compatible)"),
+            variable=self._transport_var,
+            value="python",
+        ).pack(anchor="w")
+        ttk.Radiobutton(
+            mode_frame,
+            text=_("Rust shim (lower memory, experimental)"),
+            variable=self._transport_var,
+            value="shim",
+        ).pack(anchor="w")
+
+        shim_frame = ttk.LabelFrame(
+            parent, text=_("Standalone program (required for Rust shim mode)"), padding=8
+        )
+        shim_frame.pack(fill="x", pady=(0, 8))
+        path_row = ttk.Frame(shim_frame)
+        path_row.pack(fill="x", pady=(0, 4))
+        ttk.Label(path_row, text=_("Standalone program path")).pack(side="left")
+        self._shim_path_var = tk.StringVar(
+            value=str(get_value(self.controller.model.document, "shim_binary.path") or "")
+        )
+        ttk.Entry(path_row, textvariable=self._shim_path_var, width=60).pack(
+            side="left", padx=(8, 0), fill="x", expand=True
+        )
+        hash_row = ttk.Frame(shim_frame)
+        hash_row.pack(fill="x", pady=(0, 4))
+        ttk.Label(hash_row, text=_("SHA-256")).pack(side="left")
+        self._shim_sha256_var = tk.StringVar(
+            value=str(get_value(self.controller.model.document, "shim_binary.sha256") or "")
+        )
+        ttk.Entry(hash_row, textvariable=self._shim_sha256_var, width=66).pack(
+            side="left", padx=(8, 0), fill="x", expand=True
+        )
+        self._shim_check_label = ttk.Label(shim_frame, text="", wraplength=520)
+        self._shim_check_label.pack(anchor="w")
+
+        def _render_check(result: transport_checking.BinaryCheck) -> None:
+            messages = {
+                "path_missing": _("Enter the standalone program path first."),
+                "path_relative": _("The standalone program path must be absolute."),
+                "file_not_found": _("File not found."),
+                "file_unreadable": _("The file cannot be read."),
+                "sha256_missing": _("Enter the published SHA-256 first."),
+                "sha256_mismatch": _("SHA-256 mismatch. Check the published hash."),
+                "not_runnable": _("The program did not run to report its version."),
+                "version_unrecognized": _("Unrecognized program: it is not a shim binary."),
+                "version_mismatch": _(
+                    "Version mismatch: this program is {found}, the package expects {expected}."
+                ),
+                "platform_mismatch": _(
+                    "Platform mismatch: this program targets {found}; this computer needs "
+                    "{expected}."
+                ),
+                "verified": _(
+                    "Verified. SHA-256, version and platform match. Version: {version} ({platform})"
+                ),
+            }
+            if result.ok:
+                text = messages["verified"].format(version=result.version, platform=result.platform)
+                color = "#070"
+            elif result.reason_code == "version_mismatch":
+                text = messages["version_mismatch"].format(
+                    found=result.version or "?", expected=result.detail or "?"
+                )
+                color = "#b00"
+            elif result.reason_code == "platform_mismatch":
+                text = messages["platform_mismatch"].format(
+                    found=result.platform or "?", expected=result.detail or "?"
+                )
+                color = "#b00"
+            else:
+                text = messages.get(result.reason_code, result.reason_code)
+                color = "#b00"
+            self._shim_check_label.config(text=text, foreground=color)
+
+        def _check_binary() -> None:
+            result = transport_checking.check_shim_binary(
+                self._shim_path_var.get(),
+                self._shim_sha256_var.get(),
+                runner=_sp.run,
+            )
+            _render_check(result)
+
+        ttk.Button(shim_frame, text=_("Check program"), command=_check_binary).pack(
+            anchor="w", pady=(4, 0)
+        )
+
+        status_frame = ttk.LabelFrame(parent, text=_("Current state"), padding=8)
+        status_frame.pack(fill="x", pady=(0, 8))
+        self._transport_mode_label = ttk.Label(status_frame, text="")
+        self._transport_mode_label.pack(anchor="w")
+        self._transport_active_label = ttk.Label(status_frame, text="")
+        self._transport_active_label.pack(anchor="w")
+
+        def _refresh_status() -> None:
+            document = self.controller.model.document
+            configured = str(get_value(document, "transport") or "python")
+            observation = transport_checking.observe_hosts(
+                transport_checking.configured_runtime_dir(document)
+            )
+            summary = transport_checking.describe_modes(configured, observation)
+            self._transport_mode_label.config(
+                text=_("Configured mode: {mode}").format(mode=summary["configured"])
+            )
+            if summary["pending_restart"]:
+                active = _(
+                    "Verified active host: {mode} (a restart is required for the configured mode)"
+                ).format(mode=summary["active_transport"])
+                color = "#b00"
+            elif summary["state"] == "none":
+                active = _("Verified active host: none")
+                color = "#070"
+            elif summary["state"] == "unknown":
+                parts = "; ".join(summary["unknowns"])
+                active = _("Active host: UNKNOWN ({parts})").format(parts=parts)
+                color = "#b00"
+            else:
+                parts = "; ".join(summary["hosts"])
+                active = _("Verified active hosts: {parts}").format(parts=parts)
+                color = "#b00"
+            self._transport_active_label.config(text=active, foreground=color)
+
+        _refresh_status()
+
+        switch_frame = ttk.LabelFrame(parent, text=_("Switch transport"), padding=8)
+        switch_frame.pack(fill="x", pady=(0, 8))
+        ttk.Label(
+            switch_frame,
+            text=_(
+                "Before switching, close every agent session that uses this "
+                "server (including the one that opened this window). The "
+                "button refuses while any server process is running or any "
+                "state is UNKNOWN."
+            ),
+        ).pack(anchor="w", pady=(0, 6))
+        self._switch_status = ttk.Label(switch_frame, text="", wraplength=520)
+        self._switch_status.pack(anchor="w")
+
+        def _confirm_switch() -> None:
+            # The dedicated switch saves only the transport selection; other
+            # pending edits must be saved or discarded first.
+            if self.controller.model.dirty:
+                self._switch_status.config(
+                    text=_("Save or discard the other changes before switching transport."),
+                    foreground="#b00",
+                )
+                return
+            # Re-check the binary now: the recorded identity must be verified,
+            # not merely non-empty, before shim mode can be saved.
+            binary: transport_checking.BinaryCheck | None = None
+            if self._transport_var.get() == "shim":
+                binary = transport_checking.check_shim_binary(
+                    self._shim_path_var.get(),
+                    self._shim_sha256_var.get(),
+                    runner=_sp.run,
+                )
+                if not binary.ok:
+                    _render_check(binary)
+                    self._switch_status.config(
+                        text=_(
+                            "Refused: the standalone program must pass verification "
+                            "before switching to Rust shim mode."
+                        ),
+                        foreground="#b00",
+                    )
+                    return
+            document = self.controller.model.document
+            runtime_dir = transport_checking.configured_runtime_dir(document)
+            observation = transport_checking.observe_hosts(runtime_dir)
+            if observation.hosts:
+                self._switch_status.config(
+                    text=_(
+                        "Refused: server processes are still running ({found}). "
+                        "Close them and try again."
+                    ).format(found="; ".join(observation.hosts)),
+                    foreground="#b00",
+                )
+                return
+            if observation.unknowns:
+                self._switch_status.config(
+                    text=_(
+                        "Refused: the running state is UNKNOWN ({found}). Resolve "
+                        "it (or grant access) and try again."
+                    ).format(found="; ".join(observation.unknowns)),
+                    foreground="#b00",
+                )
+                return
+            try:
+                planned = transport_checking.plan_switch(
+                    document, self._transport_var.get(), binary
+                )
+            except transport_checking.SwitchRefused as exc:
+                self._switch_status.config(
+                    text=_("Refused: the change is not valid ({detail}).").format(
+                        detail=exc.detail
+                    ),
+                    foreground="#b00",
+                )
+                return
+            # Publish the complete planned document through the same exact
+            # verified-bytes store as the general save: this dedicated confirm
+            # never rewrites the file by hand and never leaves it half-edited.
+            try:
+                self.controller.store.save(planned)
+            except Exception:  # noqa: BLE001 - the store reports its own failure
+                self._switch_status.config(
+                    text=_("Settings were not saved. Close conflicting editors and try again."),
+                    foreground="#b00",
+                )
+                return
+            self.controller.model.adopt_saved(planned)
+            self.controller.restart_pending = True
+            self._switch_status.config(
+                text=_(
+                    "Saved: configured mode is now {mode}. It becomes active only after "
+                    "an agent client starts it; this window does not claim it is active."
+                ).format(mode=self._transport_var.get()),
+                foreground="#070",
+            )
+            _refresh_status()
+
+        ttk.Button(switch_frame, text=_("Confirm transport switch"), command=_confirm_switch).pack(
+            anchor="w", pady=(4, 0)
+        )
+
     def _build_about(self, parent: ttk.Frame) -> None:
         _ = self.controller.text
         ttk.Label(parent, text=_("COMSOL MCP Settings"), font="TkHeadingFont").pack(anchor="w")
         ttk.Label(parent, text=f"{_('GUI release')}: {GUI_RELEASE}").pack(anchor="w", pady=(12, 0))
         ttk.Label(parent, text=f"{_('Installed package version')}: {__version__}").pack(anchor="w")
+        # Batch I*: schema identity moved here from the General tab.
+        from comsol_mcp.settings import SETTINGS_SCHEMA, SETTINGS_VERSION
+
+        ttk.Label(parent, text=f"{_('Settings schema')}: {SETTINGS_SCHEMA}").pack(anchor="w")
+        ttk.Label(parent, text=f"{_('Settings schema version')}: {SETTINGS_VERSION}").pack(
+            anchor="w"
+        )
         ttk.Label(parent, text=_("Desktop shortcut"), font="TkHeadingFont").pack(
             anchor="w",
             pady=(18, 6),

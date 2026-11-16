@@ -104,6 +104,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/docs/layout.md` — The file lists tracked repository files and explains their purposes and limits.
 - `development_kit/docs/legacy_phase_compatibility.md` — The file records the frozen compatibility allowlist for historical aliases.
 - `development_kit/docs/release_checklist.md` — The file gives the ordered dependency, package, licensed, install, and restart release checklist.
+- `development_kit/docs/runtime_control_contract.md` — The file freezes the accepted 0.8.1 runtime control contract: runtime directory, process identity, solver lease, operation and job locks, lock order, termination authority, schema identities, and open decisions. It changes no behavior.
 - `development_kit/docs/surrogate_dnn_capability_matrix.md` — The file records proven COMSOL 6.4 surrogate-training and DNN ClientAPI capabilities. It covers the exact creation hierarchy, training-lifecycle methods, split and seed controls, and frozen limitations.
 
 ## Release contracts and fixtures
@@ -140,6 +141,16 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/scripts/generate_release_lock.py` — The script generates the complete hashed Windows Python release lock.
 - `development_kit/scripts/installed_package_probe.py` — The script verifies installed discovery, schemas, profiles, and deployment identity without COMSOL startup.
 - `development_kit/scripts/installed_stdio_probe.py` — The script verifies the installed console entry point over real MCP stdio transport.
+- `development_kit/scripts/p00_scenario_runner.py` — The script measures cold-launch idle memory and latency of the installed server across settings and BLAS-thread variants. It writes staged per-process samples and run summaries to an external evidence root, refuses runs above the commit ceiling or beside solver processes, and never starts COMSOL.
+- `development_kit/scripts/shim_probe_support.py` — The module provides shared helpers for solver-free probes that launch the Python host or the shim: complete 1.4.0 transport settings with the binary's own identity, launched hosts with per-process logs, admission-record readers, and fixtures that model previous hosts.
+- `development_kit/scripts/startup_conflict_probe.py` — The probe drives the real Python entry point and the real shim through the ten startup-conflict scenarios and records every outcome as an observed oracle: exit code, refusal reason code, admission-record identity, process liveness, and a sentinel that marks any forbidden worker.
+- `development_kit/scripts/p10_save_copy_regression.py` — The native regression drives the real shared-session attach, adopt, lock and snapshot flow against a live COMSOL 6.4 Desktop session with the production capped-volume writer, proving the unaligned-tail and one-byte-under write-time refusals with zero bytes at the target, the exact-cap acceptance at the aligned bound with manifest hash, per-call volume-cleanup reports without residue, source immutability and server preservation.
+- `development_kit/scripts/ownership_gate_probe.py` — The probe runs the six-step transport ownership sequence in one isolated domain, including switch refusal while a host is live, verified process, listener, lease and record cleanup, one contained shim worker, overlapping-start refusal, and unverified-cleanup refusal.
+- `development_kit/scripts/transport_parity_probe.py` — The probe compares the capabilities result of the direct Python host and the shim under identical settings that differ only in the transport selection.
+- `development_kit/scripts/installed_shim_probe.py` — The probe drives one shim session through the MCP client and verifies Python-free discovery, one worker spawn, deployment identity, a warm call, and a clean exit.
+- `development_kit/scripts/dsh_bridge_smoke.py` — The smoke test checks that the DSH bridge resolves the configured transport and that both transports serve the same tool surface with settings and a discovery manifest bound to each other.
+- `development_kit/scripts/shim_independent_owner_probe.py` — The probe hard-kills a real shim and verifies that an ordinary worker child dies with the shim's job while an independent owner launched like a durable job worker survives.
+- `development_kit/scripts/p00_summarize_artifacts.py` — The script builds the P00 baseline, attribution, latency, and target-decision artifacts from one scenario-runner evidence root. It launches no process.
 - `development_kit/scripts/native_adjoint_licensed_gate.py` — This repository-only alpha7.1 gate applies the trusted native adjoint structure on an immutable derived model and emits separate path-redacted and private receipts.
 - `development_kit/scripts/native_gradient_licensed_gate.py` — This repository-only licensed runner computes one-variable or full-vector native adjoint derivatives. It freezes wavelength controls, validates generated solution/dataset identities, and emits bounded public/private receipts.
 - `development_kit/scripts/native_gradient_fd_licensed_gate.py` — This repository-only licensed runner performs fresh-model three-step central finite-difference validation for every native-gradient component with durable point rows and independent error checks.
@@ -252,13 +263,15 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/tests/test_clientapi_properties.py` — The tests cover constrained clientapi property access with mocks.
 - `development_kit/tests/test_control_plane_metrics.py` — The tests cover bounded control-plane latency, overload, and fairness evidence.
 - `development_kit/tests/test_control_plane_startup.py` — The tests cover solver-free cold discovery and startup budgets.
-- `development_kit/tests/conftest.py` — The module prepares the shared ASCII runtime parent for dependency-only tests.
+- `development_kit/tests/conftest.py` — The module prepares the shared ASCII runtime parent for dependency-only tests. On Windows it also adds `CREATE_NO_WINDOW` to every test-spawned child that does not set `creationflags`, so console-subsystem children of console-less parents open no window.
 - `development_kit/tests/mcp_test_support.py` — The module decodes public in-process MCP tool results consistently across the legacy SDK 1.x and conservative SDK 2.0 base.
 - `development_kit/tests/semantic_test_support.py` — The module provides sanitized subprocess environments for semantic isolation tests.
 - `development_kit/tests/test_compatibility_registry.py` — The module solver-free tests the compatibility/skill registry matrix, hashes, and cold discovery.
 - `development_kit/tests/test_deployment_identity.py` — The tests cover package version, build identity, and fresh-process deployment consistency.
+- `development_kit/tests/test_discovery_manifest.py` — The tests cover discovery-manifest capture determinism, freshness bindings, tamper refusal, pagination coverage, hash-seed independence, and byte equality with the real stdio server.
 - `development_kit/tests/test_derived_geometry.py` — The tests cover typed derived-geometry edits without COMSOL.
 - `development_kit/tests/test_durable_job_control_plane.py` — The tests cover durable submission, reconciliation, status, cancellation, and resume behavior.
+- `development_kit/tests/test_durable_io_cross_platform.py` — The tests drive the platform-specific durable I/O branches (the POSIX no-follow parent walk, the POSIX quarantine-and-verify deletion, the Windows opened-identity deletion, the non-native fsync and directory-publication arms) on both platforms through a delegating os proxy with scripted syscalls, so each single-platform coverage gate sees the real branch decisions without weakening any policy.
 - `development_kit/tests/test_durable_primitives.py` — The tests cover versioned canonical bytes, bounded hashing, atomic writes, and row recovery.
 - `development_kit/tests/test_dependency_license_gate.py` — The tests cover deterministic dependency-license receipts and fail-closed review behavior.
 - `development_kit/tests/test_dependency_drift_report.py` — The tests cover dependency scopes, PEP 503 names, project-range exclusions, exact dependency pairs, bootstrap tools, and complete lock drift.
@@ -313,7 +326,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/tests/test_operation_arbiter.py` — The tests cover durable serialization and responsive control-plane operation classes.
 - `development_kit/tests/test_native_cancel_probe.py` — The tests cover native cancellation discovery and allowlisting without COMSOL.
 - `development_kit/tests/test_namespace_compatibility.py` — The tests cover canonical package identity and the bounded legacy import interval.
-- `development_kit/tests/test_native_runtime.py` — The tests cover the native-runtime manifest, main-thread preload, and representative lazy native calls.
+- `development_kit/tests/test_native_runtime.py` — The tests cover the native-runtime manifest, main-thread preload, representative lazy native calls, and the default OpenBLAS thread bound with its explicit override.
 - `development_kit/tests/test_ownership.py` — The tests cover solver ownership, leases, and collision detection.
 - `development_kit/tests/test_parameters.py` — The tests cover parameter tools without a COMSOL client.
 - `development_kit/tests/test_path_policy.py` — The tests cover configured model-read and owned-artifact path containment.
@@ -371,6 +384,11 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/tests/test_semantic_worker_protocol.py` — The tests cover isolated semantic worker protocol and containment.
 - `development_kit/tests/test_server.py` — The tests cover server construction and capabilities without starting a transport.
 - `development_kit/tests/test_settings.py` — The tests cover grouped settings defaults, validation, and fallback errors.
+- `development_kit/tests/test_settings_transport.py` — The tests cover the settings transport field: defaults, shim identity requirements, degradation behavior, and version readability.
+- `development_kit/tests/test_bounded_save.py` — The tests cover the bounded Save Copy boundary matrix solver-free (fake volume): the write-time bound never exceeds the caller cap, sub-granularity caps are refused without a write, provider crash and refusal typing, exact-cap acceptance with manifest hash, write-time overflow refusals at and below the cap, mid-write crash cleanup, discard on every unconsumed path (target or manifest collision, failing target factory, refused precondition), the cleanup gate (reported residue or a raising teardown keeps the valid copy but returns `snapshot_cleanup_pending` with a durable recovery record), failure-atomic construction with rollback evidence, and the real admin-gated 512-byte-cluster VHD volume with residue-free teardown.
+- `development_kit/tests/test_host_admission.py` — The tests pin the host-admission contract: exact-record release, verified stale recovery, live descendant and solver-lease refusals, uncertain evidence, the containment rules on both platforms (a stale record whose containment cannot be read (POSIX containment-less, or a Windows job name lost with its last handle) is UNKNOWN and kept; a contained dead host recovers where readable; a live session member blocks; a session-leader-less group leader is refused), the explicit operator recovery matrix (a confirmation never overrides a live child the inventory still attributes to the host, other unreadable containment stays UNKNOWN, and the receipt keeps machine evidence apart from what the confirmation covers), the operator texts shared with the shim, and worker launch binding.
+- `development_kit/tests/test_process_launch.py` — The tests pin that breakaway is requested only after a verified shim worker enables it, that a refusing enclosing job falls back inside the job, and that other launch failures are not retried.
+- `development_kit/tests/test_detached_launch_windows.py` — The tests pin that detached job, watchdog and cancel launches use a hidden console instead of DETACHED_PROCESS, so neither the launched worker nor its console children ever open a terminal window.
 - `development_kit/tests/test_alpha6_settings_gui_contract.py` — The module locks the alpha6 settings schema, location, launcher, and packaging contracts.
 - `development_kit/tests/test_settings_gui_launcher.py` — The tests cover detached Settings GUI launch, handshake, profile discovery, and Tk import isolation.
 - `development_kit/tests/test_settings_gui_direct_entry.py` — The tests cover the installed Settings GUI exact-path, validate-only, and explicit shortcut command contract.
@@ -485,6 +503,11 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `comsol_mcp/surrogate/splits.py` — The module assigns whole leakage groups to disjoint train, validation, test, and scientific-holdout splits deterministically and detects declared leakage classes.
 - `comsol_mcp/compatibility_manifest.json` — The file declares exact licensed, dependency-only, and unknown runtime compatibility.
 - `comsol_mcp/deployment_manifest.json` — The file binds deployment identity to frozen tool and profile snapshots.
+- `comsol_mcp/discovery_manifest.py` — The module records the exact JSON-RPC discovery bytes for one startup configuration through the MCP SDK transport, binds them to package, interpreter, dependency, settings, and environment identities, and refuses stale or tampered manifests. It serves Python-free discovery in the planned Rust shim and never carries live state.
+- `comsol_mcp/shared_session/bounded_save.py` — The module provides the bounded Save Copy writer: the copy is written into a throwaway VHDX volume whose free space equals the caller cap, so the operating system refuses an oversized copy at write time and nothing reaches the final target until the copy-out hash verifies.
+- `comsol_mcp/host_admission.py` — The module owns the host-admission record shared with the shim: one host per runtime domain, exclusive publication, exact-record release, stale recovery only after verified cleanup, the UNKNOWN rule for records whose containment is absent or cannot be read (containment-less, or a Windows job name lost with its last handle) on every platform, with its explicit operator recovery flow (--show/--recover: sha-bound, named confirmation, archived before removal, every descendant still attributable through parent links or the host session refused, receipt separating machine evidence from the confirmation), and the shim worker launch binding check.
+- `comsol_mcp/host_containment.py` — The module gives each host a kernel-verifiable containment identity (a named no-limit job object on Windows, a session on POSIX) and lists its live members while the containment can be read; a Windows job name that no longer opens is reported as its own UNKNOWN case.
+- `comsol_mcp/process_launch.py` — The module launches independent owners (durable job workers, their watchdog and cancel coordinator, the standalone driver, and the settings window) so that only a verified shim worker asks to leave the shim's kill-on-close job object, with an in-job fallback when an enclosing job forbids breakaway.
 - `comsol_mcp/environment_identity.py` — The module reports redacted Python, platform, dependency, and optional-feature identity.
 - `comsol_mcp/operation_arbiter.py` — The module serializes COMSOL-bound calls with a durable exact-process lock.
 - `comsol_mcp/path_policy.py` — The module enforces configured model-read and owned ASCII artifact roots.
@@ -496,7 +519,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `comsol_mcp/shared_session/solver_owners.py` — The module enforces at most two independent one-core solver owners with verified-absence release and no cross-owner access.
 - `comsol_mcp/durable/operation_ledger.py` — The module journals Model Manager, owner, and local-session operations for append-only replay, duplicate suppression, and recovery.
 - `comsol_mcp/schema_registry.py` — The module registers named artifact schema producers and readable and writable versions.
-- `comsol_mcp/native_runtime.py` — The module classifies native-backed imports and preloads every main-process runtime before event-loop dispatch.
+- `comsol_mcp/native_runtime.py` — The module classifies native-backed imports and preloads every main-process runtime before event-loop dispatch. The preload bounds vendored OpenBLAS thread pools to one thread unless the caller exports `OPENBLAS_NUM_THREADS` first; P00 measured each unbounded pool at 32 MB private commit per thread at idle.
 - `comsol_mcp/server.py` — The module creates the profiled MCP server and console entry point.
 - `comsol_mcp/settings.py` — The module loads grouped project settings and reports bounded fallback errors.
 - `comsol_mcp/settings_gui_handshake.py` — The module implements the bounded path-free Settings GUI startup handshake.
@@ -693,6 +716,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `settings_gui/tests/__init__.py` — The file marks the independent repository-only Settings GUI test package.
 - `settings_gui/tests/conftest.py` — The file isolates GUI tests under a temporary ASCII ProgramData root.
 - `settings_gui/tests/test_app.py` — The module performs bounded real-Tk construction, invalid-style, language, and startup-version tests.
+- `settings_gui/tests/test_transport.py` — The tests cover the MCP Connection logic without Tk: binary verification before execution, UNKNOWN process observations, switch planning, and separate configured and active modes.
 - `settings_gui/tests/test_discovery.py` — The tests cover COMSOL registry, marker, Java ordering, and ambiguity behavior.
 - `settings_gui/tests/test_desktop_shortcut.py` — The tests cover exact shortcut creation, inspection, idempotency, collision protection, removal, and real Shell Link round trips.
 - `settings_gui/tests/test_fonts.py` — The tests cover deterministic English and CJK font selection.
@@ -735,6 +759,7 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `settings_gui/posix_ownership.py` — The module provides advisory settings ownership and baseline identity checks on POSIX.
 - `settings_gui/tests/test_xdg_shortcut.py` — The tests verify launcher quoting, actual argv, ownership, collision, and publication failure recovery.
 - `settings_gui/xdg_shortcut.py` — The module creates, verifies, restores, and removes exact owned XDG launchers without foreign-file overwrite.
+- `settings_gui/transport.py` — The module implements the MCP Connection tab logic: shim binary verification, host observation that keeps UNKNOWN evidence, the switch plan, and configured versus verified active mode.
 
 - `comsol_mcp/jobs/tasks_public_engine.py` — The module routes Tasks through registered public job guards and preserves cancellation attempt identity.
 - `development_kit/tests/tasks_stdio_fixture.py` — The private fixture persists fixed fake jobs and completes them only after a test-owned barrier.
@@ -751,3 +776,16 @@ The map excludes untracked generated files, caches, local runtime artifacts, lic
 - `development_kit/scripts/native_optimizer_gate_checks.py` — The repository-only helper checks numerical native gate receipts; it is excluded from runtime packages.
 - `development_kit/tests/test_tasks_owner_binding.py` — The tests cover binding Tasks to the normalized effective owner.
 - `development_kit/tests/test_native_measurement_gate.py` — The tests cover the explicit scientific-gate policy for native condition measurements.
+
+## Optional Rust shim (0.8.2)
+
+- `shim/Cargo.toml` — The file declares the optional `comsol-mcp-shim` binary crate. The crate stays out of the Python wheel and sdist; packaging and locked dependencies are decided by the packaging batch.
+- `shim/build.rs` — The build script records the compile target triple that the shim reports and verifies against settings.
+- `shim/Cargo.lock` — The file records the resolved dependency graph for reproducible shim builds.
+- `shim/src/main.rs` — The module implements the prototype MCP stdio shim: manifest-backed static discovery, one lazily spawned Python worker with a separate handshake, verbatim forwarding, bounded reads, and refusal of automatic respawn. It never acquires solver leases and never fabricates live state.
+- `shim/src/admission.rs` — The module validates one settings snapshot, binds the configured binary identity to the running image, and implements host admission without Python: exclusive records, exact-record release, verified stale recovery, and the worker launch token.
+- `shim/src/containment.rs` — The module mirrors the Python containment registry in Rust: a named job object on Windows or a session on POSIX, with kernel member listing for stale recovery.
+- `shim/src/procinfo.rs` — The module reads process birth identities, parent links, and process snapshots on Windows and Linux with the same values psutil reports.
+- `shim/src/winjob.rs` — The module assigns the shim worker to a Windows Job Object with kill-on-close semantics. Hard-killing the shim terminates the whole worker tree; graceful shutdown still closes the worker stdin first.
+- `shim/tests/eof_cleanup.rs` — The harness-free G-EOF-01 controls drive the real shim binary end to end with per-case worker fixtures: a live worker that closes its stdout, an orphan descendant, and a verified-clean crash. The same executable plays every fixture role.
+- `development_kit/release/shim_platform_matrix.json` — The file records the shim crate identity, frozen build toolchains and triples, distribution model, verified dependency licenses, and the release profile. It changes only with a reviewed packaging batch.

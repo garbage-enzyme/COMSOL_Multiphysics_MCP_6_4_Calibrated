@@ -5,29 +5,143 @@ msgstr "Project-Id-Version: comsol-mcp alpha8.1\nMIME-Version: 1.0\nContent-Type
 msgid "COMSOL MCP Settings"
 msgstr "COMSOL MCP Settings"
 
-msgid "General"
-msgstr "General"
+msgid "Interface and Language"
+msgstr "Interface and Language"
 
-msgid "Profile"
-msgstr "Profile"
+msgid "Feature Settings"
+msgstr "Feature Settings"
 
-msgid "Runtime"
-msgstr "Runtime"
+msgid "Independent Feature Extensions"
+msgstr "Independent Feature Extensions"
 
-msgid "COMSOL/Java"
-msgstr "COMSOL/Java"
+msgid "Read/Write Directories"
+msgstr "Read/Write Directories"
 
-msgid "Evidence"
-msgstr "Evidence"
+msgid "MCP Connection"
+msgstr "MCP Connection"
 
-msgid "Docs"
-msgstr "Docs"
+msgid "Verification and Safety"
+msgstr "Verification and Safety"
 
-msgid "Owner"
-msgstr "Owner"
+msgid "Manual Auto-Retrieval"
+msgstr "Manual Auto-Retrieval"
+
+msgid "Solver Ownership"
+msgstr "Solver Ownership"
 
 msgid "About"
 msgstr "About"
+
+msgid "Transport mode"
+msgstr "Transport mode"
+
+msgid "Python direct (default, fully compatible)"
+msgstr "Python direct (default, fully compatible)"
+
+msgid "Rust shim (lower memory, experimental)"
+msgstr "Rust shim (lower memory, experimental)"
+
+msgid "Standalone program (required for Rust shim mode)"
+msgstr "Standalone program (required for Rust shim mode)"
+
+msgid "Standalone program path"
+msgstr "Standalone program path"
+
+msgid "Settings schema identity."
+msgstr "Settings schema identity."
+
+msgid "Settings schema version."
+msgstr "Settings schema version."
+
+msgid "SHA-256"
+msgstr "SHA-256"
+
+msgid "Check program"
+msgstr "Check program"
+
+msgid "Enter the standalone program path first."
+msgstr "Enter the standalone program path first."
+
+msgid "File not found."
+msgstr "File not found."
+
+msgid "SHA-256 mismatch. Check the published hash."
+msgstr "SHA-256 mismatch. Check the published hash."
+
+msgid "Switch transport"
+msgstr "Switch transport"
+
+msgid "The standalone program path must be absolute."
+msgstr "The standalone program path must be absolute."
+
+msgid "The file cannot be read."
+msgstr "The file cannot be read."
+
+msgid "Enter the published SHA-256 first."
+msgstr "Enter the published SHA-256 first."
+
+msgid "The program did not run to report its version."
+msgstr "The program did not run to report its version."
+
+msgid "Unrecognized program: it is not a shim binary."
+msgstr "Unrecognized program: it is not a shim binary."
+
+msgid "Version mismatch: this program is {found}, the package expects {expected}."
+msgstr "Version mismatch: this program is {found}, the package expects {expected}."
+
+msgid "Platform mismatch: this program targets {found}; this computer needs {expected}."
+msgstr "Platform mismatch: this program targets {found}; this computer needs {expected}."
+
+msgid "Verified. SHA-256, version and platform match. Version: {version} ({platform})"
+msgstr "Verified. SHA-256, version and platform match. Version: {version} ({platform})"
+
+msgid "Current state"
+msgstr "Current state"
+
+msgid "Configured mode: {mode}"
+msgstr "Configured mode: {mode}"
+
+msgid "Verified active host: {mode} (a restart is required for the configured mode)"
+msgstr "Verified active host: {mode} (a restart is required for the configured mode)"
+
+msgid "Verified active host: none"
+msgstr "Verified active host: none"
+
+msgid "Active host: UNKNOWN ({parts})"
+msgstr "Active host: UNKNOWN ({parts})"
+
+msgid "Verified active hosts: {parts}"
+msgstr "Verified active hosts: {parts}"
+
+msgid "Before switching, close every agent session that uses this server (including the one that opened this window). The button refuses while any server process is running or any state is UNKNOWN."
+msgstr "Before switching, close every agent session that uses this server (including the one that opened this window). The button refuses while any server process is running or any state is UNKNOWN."
+
+msgid "Save or discard the other changes before switching transport."
+msgstr "Save or discard the other changes before switching transport."
+
+msgid "Refused: the standalone program must pass verification before switching to Rust shim mode."
+msgstr "Refused: the standalone program must pass verification before switching to Rust shim mode."
+
+msgid "Refused: server processes are still running ({found}). Close them and try again."
+msgstr "Refused: server processes are still running ({found}). Close them and try again."
+
+msgid "Refused: the running state is UNKNOWN ({found}). Resolve it (or grant access) and try again."
+msgstr "Refused: the running state is UNKNOWN ({found}). Resolve it (or grant access) and try again."
+
+msgid "Refused: the change is not valid ({detail})."
+msgstr "Refused: the change is not valid ({detail})."
+
+msgid "Saved: configured mode is now {mode}. It becomes active only after an agent client starts it; this window does not claim it is active."
+msgstr "Saved: configured mode is now {mode}. It becomes active only after an agent client starts it; this window does not claim it is active."
+
+msgid "Confirm transport switch"
+msgstr "Confirm transport switch"
+
+msgid "Choose how agent clients connect to the COMSOL MCP server. Switching requires a dedicated confirmation and only takes effect after every agent session closes and restarts."
+msgstr "Choose how agent clients connect to the COMSOL MCP server. Switching requires a dedicated confirmation and only takes effect after every agent session closes and restarts."
+
+msgid "COMSOL/Java"
+msgstr "COMSOL/Java"
 
 msgid "Changes take effect only after restarting Codex or the owning MCP client."
 msgstr "Changes take effect only after restarting Codex or the owning MCP client."
@@ -137,11 +251,86 @@ msgstr "简体中文"
 msgid "繁體中文"
 msgstr "繁體中文"
 
-msgid "Internal settings format name. You do not need to change it."
-msgstr "Internal settings format name. You do not need to change it."
+msgid "Settings schema"
+msgstr "Settings schema"
 
-msgid "Settings format version used when this file is saved."
-msgstr "Settings format version used when this file is saved."
+msgid "Settings schema version"
+msgstr "Settings schema version"
+
+msgid "Language"
+msgstr "Language"
+
+msgid "Display Size"
+msgstr "Display Size"
+
+msgid "Tool Profile"
+msgstr "Tool Profile"
+
+msgid "Collaborative Editing"
+msgstr "Collaborative Editing"
+
+msgid "Progressive Tool Catalog"
+msgstr "Progressive Tool Catalog"
+
+msgid "Model Manager"
+msgstr "Model Manager"
+
+msgid "Model Manager Upload"
+msgstr "Model Manager Upload"
+
+msgid "Working Files Folder"
+msgstr "Working Files Folder"
+
+msgid "Resumable Jobs Folder"
+msgstr "Resumable Jobs Folder"
+
+msgid "Model Read Folders"
+msgstr "Model Read Folders"
+
+msgid "Results Output Folder"
+msgstr "Results Output Folder"
+
+msgid "COMSOL Installation Folder"
+msgstr "COMSOL Installation Folder"
+
+msgid "Java Runtime Folder"
+msgstr "Java Runtime Folder"
+
+msgid "JDK Folder"
+msgstr "JDK Folder"
+
+msgid "Outcome Contract Validation"
+msgstr "Outcome Contract Validation"
+
+msgid "Artifact Chain Verification"
+msgstr "Artifact Chain Verification"
+
+msgid "Summary Claim Verification"
+msgstr "Summary Claim Verification"
+
+msgid "Producer Driver Compatibility"
+msgstr "Producer Driver Compatibility"
+
+msgid "Keyword Manual Search"
+msgstr "Keyword Manual Search"
+
+msgid "Manuals Folder"
+msgstr "Manuals Folder"
+
+msgid "Search Index File"
+msgstr "Search Index File"
+
+msgid "Semantic Manual Search"
+msgstr "Semantic Manual Search"
+
+msgid "Semantic Index Folder"
+msgstr "Semantic Index Folder"
+
+msgid "Semantic Model Folder"
+msgstr "Semantic Model Folder"
+
+msgid "Solver Owner Name"
+msgstr "Solver Owner Name"
 
 msgid "Language used by this Settings window."
 msgstr "Language used by this Settings window."
@@ -247,6 +436,21 @@ msgstr "Optional folder containing the local semantic-search model. \nExample: %
 
 msgid "Optional name that identifies who owns the COMSOL session."
 msgstr "Optional name that identifies who owns the COMSOL session."
+
+msgid "One transport value. 'python' keeps the direct Python entry point. 'shim' opts into the Rust launcher."
+msgstr "One transport value. 'python' keeps the direct Python entry point. 'shim' opts into the Rust launcher."
+
+msgid "Absolute path to the shim binary. Required when transport is 'shim'."
+msgstr "Absolute path to the shim binary. Required when transport is 'shim'."
+
+msgid "Expected SHA-256 of the shim binary. Required when transport is 'shim'."
+msgstr "Expected SHA-256 of the shim binary. Required when transport is 'shim'."
+
+msgid "Version the verified shim binary reports. Set by the switch confirmation."
+msgstr "Version the verified shim binary reports. Set by the switch confirmation."
+
+msgid "Target triple the verified shim binary reports. Set by the switch confirmation."
+msgstr "Target triple the verified shim binary reports. Set by the switch confirmation."
 
 msgid "Enter a valid absolute path or clear this setting."
 msgstr "Enter a valid absolute path or clear this setting."

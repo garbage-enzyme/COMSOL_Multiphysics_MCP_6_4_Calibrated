@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import dataclass
 from importlib import import_module
@@ -9,6 +10,14 @@ from importlib.metadata import version
 from typing import Any, Literal
 
 NativeRuntimeScope = Literal["mcp_main_process", "isolated_worker", "offline_cli"]
+
+# P00 (0.8.2) measured each vendored OpenBLAS runtime at 32 MB private commit
+# per thread before any workload runs. Two pools, each sized to the host core
+# count, committed about 1.53 GB while the server idled. The MCP host runs
+# only small-scale numerical helpers, so one BLAS thread per pool preserves
+# observable behavior and removes that idle cost. A caller that needs larger
+# pools exports OPENBLAS_NUM_THREADS before startup; that value wins.
+DEFAULT_OPENBLAS_THREAD_BOUND = "1"
 
 
 @dataclass(frozen=True)
@@ -132,9 +141,16 @@ NATIVE_RUNTIME_MANIFEST = (
 
 
 def preload_mcp_native_runtime() -> dict[str, str]:
-    """Load every main-process native runtime before MCP event-loop dispatch."""
+    """Load every main-process native runtime before MCP event-loop dispatch.
+
+    The preload also bounds the vendored OpenBLAS thread pools to one thread
+    unless the caller already set ``OPENBLAS_NUM_THREADS``. The bound must be
+    applied before the first NumPy or SciPy import; pools already sized by an
+    earlier import keep their existing threads.
+    """
     if threading.current_thread() is not threading.main_thread():
         raise RuntimeError("MCP native runtime preload must run on the main thread")
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", DEFAULT_OPENBLAS_THREAD_BOUND)
 
     preload_items = tuple(
         item for item in NATIVE_RUNTIME_MANIFEST if item.preload_before_event_loop

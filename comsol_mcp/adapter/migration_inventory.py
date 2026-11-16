@@ -376,6 +376,7 @@ DEFERRALS = (
     Deferral(
         modules=(
             "comsol_mcp/shared_session/lifecycle.py",
+            "comsol_mcp/shared_session/bounded_save.py",
             "comsol_mcp/tools/session.py",
             "comsol_mcp/jobs/worker.py",
             "comsol_mcp/jobs/validation_worker.py",

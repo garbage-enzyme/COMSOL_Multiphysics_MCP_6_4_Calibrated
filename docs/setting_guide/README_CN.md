@@ -155,9 +155,26 @@ English (en)
 | 设置项 | 默认值 | 作用和可填写内容 |
 | --- | --- | --- |
 | `schema_name` | `"comsol_mcp.settings"` | 设置格式名称，只读，必须完全一致。 |
-| `schema_version` | `"1.3.0"` | 新保存的文件使用 `1.3.0`。旧版 `1.0.0`、`1.1.0` 和 `1.2.0` 可以读取，并在内存中转换。 |
+| `schema_version` | `"1.4.0"` | 新保存的文件使用 `1.4.0`。旧版 `1.0.0`、`1.1.0`、`1.2.0` 和 `1.3.0` 可以读取，并在内存中转换。 |
+| `transport` | `"python"` | `"python"` 或 `"shim"`。单值，不是两个开关。`"shim"` 需要 `shim_binary.path`、`shim_binary.sha256`、`shim_binary.version` 和 `shim_binary.platform` 共同精确指认同一个二进制。 |
+| `shim_binary.path` | `null` | shim 二进制的绝对路径。`transport` 为 `"shim"` 时必需。 |
+| `shim_binary.sha256` | `null` | shim 二进制的预期 SHA-256。`transport` 为 `"shim"` 时必需。 |
+| `shim_binary.version` | `null` | shim 二进制 `--version` 报告的版本。`transport` 为 `"shim"` 时必需；由切换确认在校验通过后写入。 |
+| `shim_binary.platform` | `null` | shim 二进制 `--version` 报告的目标平台三元组，例如 `x86_64-pc-windows-msvc`。`transport` 为 `"shim"` 时必需。 |
 | `gui.language` | `"zh-cn"` | 只能是 `"en"`、`"zh-cn"` 或 `"zh-tw"`。 |
 | `gui.scale` | `"system"` | 可选 `"system"`、`"100"`、`"125"`、`"150"` 或 `"200"`。界面把数字显示为百分比。 |
+
+一个运行目录只能有一个宿主。如果上一个宿主已经不在，但留下的记录无法证明已经清理干净
+（指没有包含身份的记录，或 Windows 上宿主退出后其作业名不再能打开的
+记录），新宿主会以 `admission_state_uncertain`
+拒绝启动，保留这条记录，也不终止任何进程。诊断信息会给出操作流程：
+`python -m comsol_mcp.host_admission --show <运行目录>` 显示记录身份和精确的 `--recover`
+命令。只有在独立确认上一个宿主留下的进程都已结束后才运行它。`--show` 还会说明
+`--recover` 现在能否执行，并列出仍能归属到上一个宿主的进程（例如它启动的子进程，
+或仍在使用的、由它打开的控制台的控制台宿主）；
+请先自行结束这些进程，工具不会替你结束任何进程。`--recover` 会先归档记录再删除；
+只要还能看到上一个宿主留下的进程，就会拒绝执行；它写出的回执会把机器核验的内容
+和你的确认所覆盖的内容分开记录。
 
 ### 工具范围
 
